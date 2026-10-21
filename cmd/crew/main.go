@@ -48,6 +48,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"cleanup":   cmdCleanup,
 	"goal":      cmdGoal,
 	"gardener":  cmdGardener,
+	"install":   cmdInstall,
+	"doctor":    cmdDoctor,
 }
 
 func main() {

@@ -481,14 +481,14 @@ cmd_host_up() {
   local take=0
   while (($#)); do case $1 in --take) take=1; shift ;; *) die "usage: crew host up [--take]" ;; esac; done
   git -C "$CREW_HOME" remote get-url origin >/dev/null 2>&1 || die "the home has no origin to claim the lease through"
-  cmd_install
+  crew_go install
   say "Claiming the lease for $CREW_HOST"
   claim_lease "$take"
   note "crew runs on $CREW_HOST"
   clone_missing_projects
   set_units enable
   note "enabled ${CREW_UNITS[*]}"
-  (cmd_doctor) || true
+  crew_go doctor || true
 }
 
 cmd_host_down() {
@@ -904,293 +904,11 @@ unrouted_questions() {  # task-file -> prints the checksum to record once they'r
   echo "$sum"
 }
 
-# ---------------------------------------------------------------- install ---
-# crew install puts this machine's files in place: the agents in ~/.claude/agents/,
-# the fish files in ~/.config/fish/, and the systemd units (installed, not enabled).
-# Re-running it is safe. A file is replaced only when it differs, after a backup,
-# and by rename, so a running crew-guard hook never reads half a file. A file an
-# earlier install shipped and this one doesn't is backed up and removed. The
-# manifest of what was shipped, and the backups, live in INSTALL_STATE.
-
-INSTALL_STATE="$HOME/.local/share/agent-crew"
-# One run's bookkeeping, set up by cmd_install and used by the helpers below.
-INSTALL_BACKUP=""                       # this run's backup directory
-INSTALL_TMP=""                          # where render puts its copies
-INSTALL_OLD=()                          # the last run's manifest: "component<TAB>path" lines
-INSTALL_NEW=()                          # this run's manifest lines so far
-declare -A INSTALL_SHIPPED=()           # path -> 1 for every file this run shipped
-declare -A INSTALL_PRUNED=()            # component -> 1 once prune has run for it
-
+# Progress lines for the host commands.
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 
-# The version of crew's code in this home, which comes with each upgrade.
-# Whether Claude Code trusts DIR. Trust accepted in a folder covers the folders
-# below it, and inside a git repo Claude Code records it for the repo's top level
-# (the home, for lead/), so a folder above DIR counts too.
-trusted() {
-  local folder=$1
-  while :; do
-    jq -e --arg p "$folder" '.projects[$p].hasTrustDialogAccepted == true' "$HOME/.claude.json" >/dev/null 2>&1 && return 0
-    [[ $folder == / ]] && return 1
-    folder=$(dirname "$folder")
-  done
-}
-
 crew_version() { cat "$CREW_HOME/VERSION" 2>/dev/null || echo unknown; }
-
-backup() {  # file -> a copy in this run's backup dir, at its path under $HOME
-  local rel=${1#"$HOME"/}
-  mkdir -p "$INSTALL_BACKUP/$(dirname "$rel")"; cp -p "$1" "$INSTALL_BACKUP/$rel"
-  note "backed up ~/$rel → $INSTALL_BACKUP/"
-}
-
-put() {  # src dst — replace dst with src, backing up a dst that differs
-  local src=$1 dst=$2 mode=644 tmp
-  if [[ -x $src ]]; then mode=755; fi
-  mkdir -p "$(dirname "$dst")"
-  if [[ -f $dst ]] && cmp -s "$src" "$dst"; then chmod "$mode" "$dst"; return 0; fi
-  if [[ -f $dst ]]; then backup "$dst"; fi
-  tmp=$(mktemp "$dst.XXXXXX")
-  cp "$src" "$tmp"; chmod "$mode" "$tmp"; mv -f "$tmp" "$dst"
-}
-
-install_file() {  # component src dst — put, and record it in the manifest
-  put "$2" "$3"
-  INSTALL_NEW+=("$1"$'\t'"$3"); INSTALL_SHIPPED[$3]=1
-}
-
-# Removes the files the last install of a component shipped and this one didn't.
-# Run it after the component's install_file calls. It only touches files under
-# root, the component's directory. A component this run skips (--no-fish,
-# --no-systemd) is never pruned, so it loses nothing.
-prune() {  # component root
-  local comp=$1 root=$2 entry path
-  # write_manifest replaces this component's old lines with the new ones.
-  INSTALL_PRUNED[$comp]=1
-  for entry in "${INSTALL_OLD[@]}"; do
-    [[ ${entry%%$'\t'*} == "$comp" ]] || continue
-    path=${entry#*$'\t'}
-    [[ $path == "$root"/* && -f $path && -z ${INSTALL_SHIPPED[$path]:-} ]] || continue
-    if [[ $comp == systemd ]]; then systemctl --user disable --now "$(basename "$path")" >/dev/null 2>&1 || true; fi
-    backup "$path"; rm -f "$path"
-    note "removed ${path/#"$HOME"/\~} (no longer shipped)"
-  done
-}
-
-# The manifest has a "component<TAB>path" line for every file shipped: by this run,
-# or by the last run of a component this one skipped.
-write_manifest() {
-  local entry
-  mkdir -p "$INSTALL_STATE"
-  {
-    for entry in "${INSTALL_OLD[@]}"; do [[ -n ${INSTALL_PRUNED[${entry%%$'\t'*}]:-} ]] || printf '%s\n' "$entry"; done
-    for entry in "${INSTALL_NEW[@]}"; do printf '%s\n' "$entry"; done
-  } >"$INSTALL_STATE/manifest.tmp"
-  mv -f "$INSTALL_STATE/manifest.tmp" "$INSTALL_STATE/manifest"
-}
-
-# A copy of src with this machine's crew home put in, so install_file compares
-# what will actually be installed, and an unchanged re-run backs nothing up.
-render() {  # src sed-script -> path of the copy
-  local out; out="$INSTALL_TMP/$(basename "$1")"
-  sed "$2" "$1" >"$out"; echo "$out"
-}
-
-settings_merge() {  # jq-filter [jq args...] — applied to ~/.claude/settings.json, after a backup
-  local f="$HOME/.claude/settings.json" tmp
-  mkdir -p "$HOME/.claude"; [[ -f $f ]] || echo '{}' >"$f"
-  tmp=$(mktemp)
-  if jq "$@" "$f" >"$tmp"; then
-    if ! cmp -s "$tmp" "$f"; then backup "$f"; cat "$tmp" >"$f"; note "updated ~/.claude/settings.json"; fi
-  else
-    note "couldn't parse ~/.claude/settings.json; leaving it alone"
-  fi
-  rm -f "$tmp"
-}
-
-# The lead's settings for this machine, in the home but gitignored: it reads the
-# ledger and the project checkouts as extra directories, and leaves out the home's
-# CLAUDE.md, which is for developing crew. Rewritten only when it changes.
-write_lead_local_settings() {
-  local f="$CREW_HOME/lead/.claude/settings.local.json" tmp
-  tmp=$(mktemp)
-  jq -n --arg home "$CREW_HOME" --arg work "$WORK_ROOT" \
-    '{permissions: {additionalDirectories: [$home, $work]}, claudeMdExcludes: [$home + "/CLAUDE.md"]}' >"$tmp"
-  if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 0; fi
-  mkdir -p "$(dirname "$f")"; mv -f "$tmp" "$f"
-  note "wrote ${f/#"$HOME"/\~}"
-}
-
-confirm() {  # question -> yes, unless the user answers no
-  local a=""; read -r -p "  $1 [Y/n] " a || true
-  [[ -z $a || $a == [Yy]* ]]
-}
-
-cmd_install() {
-  local yes=0 fish=1 systemd=1 agents_md=ask
-  while (($#)); do
-    case $1 in
-      --yes|-y) yes=1; shift ;;
-      --no-fish) fish=0; shift ;;
-      --no-systemd) systemd=0; shift ;;
-      --skip-agents-md-setting) agents_md=skip; shift ;;
-      *) die "usage: crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]" ;;
-    esac
-  done
-  local f rel c v missing=() custom=0
-  INSTALL_BACKUP="$INSTALL_STATE/backups/$(date +%Y%m%d-%H%M%S)"
-  INSTALL_TMP=$(mktemp -d)
-  INSTALL_OLD=() INSTALL_NEW=() INSTALL_SHIPPED=() INSTALL_PRUNED=()
-  if [[ -f $INSTALL_STATE/manifest ]]; then mapfile -t INSTALL_OLD <"$INSTALL_STATE/manifest"; fi
-  # The fish and systemd files name ~/crew, the usual home. Only a home elsewhere
-  # needs its path written into them (render).
-  [[ $CREW_HOME == "$HOME/crew" ]] || custom=1
-
-  say "Checking dependencies"
-  for c in git gh jq flock claude fish; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
-  if ((${#missing[@]})); then
-    note "missing: ${missing[*]}"
-    note "on CachyOS: sudo pacman -S --needed git github-cli jq util-linux fish"
-    note "Claude Code: curl -fsSL https://claude.ai/install.sh | bash   (or 'claude update')"
-  fi
-  need jq
-  if command -v claude >/dev/null 2>&1; then
-    v=$(claude --version 2>/dev/null | awk '{print $1}')
-    if [[ $(printf '%s\n' 2.1.281 "$v" | sort -V | head -1) != 2.1.281 ]]; then
-      note "Claude Code $v is older than 2.1.281; run 'claude update' (AGENTS.md loading and agent view need it)"
-    else note "Claude Code $v"; fi
-  fi
-
-  say "Installing agent profiles → ~/.claude/agents/"
-  for f in "$CREW_HOME"/agents/*.md; do install_file agents "$f" "$HOME/.claude/agents/$(basename "$f")"; note "$(basename "$f" .md)"; done
-  prune agents "$HOME/.claude/agents"
-
-  # Hooks find crew-guard through CREW_HOME, and so do sessions that run crew.
-  say "Crew home: $CREW_HOME"
-  settings_merge '.env.CREW_HOME = $home' --arg home "$CREW_HOME"
-  mkdir -p "$WORK_ROOT"
-  write_lead_local_settings
-
-  if ((fish)); then
-    say "Installing fish integration → ~/.config/fish/"
-    while IFS= read -r -d '' f; do
-      rel=${f#"$CREW_HOME/fish/"}
-      if [[ $rel == conf.d/agent-crew.fish ]] && ((custom)); then
-        f=$(render "$f" "s#^set -q CREW_HOME; or set -gx CREW_HOME .*#set -q CREW_HOME; or set -gx CREW_HOME $CREW_HOME#")
-      fi
-      install_file fish "$f" "$HOME/.config/fish/$rel"
-    done < <(find "$CREW_HOME/fish" -type f -print0 | sort -z)
-    prune fish "$HOME/.config/fish"
-    note "open a new fish shell (or: source ~/.config/fish/conf.d/agent-crew.fish)"
-  fi
-
-  if ((systemd)); then
-    say "Installing the crew's systemd units → ~/.config/systemd/user/"
-    for f in "$CREW_HOME"/systemd/*; do
-      if [[ $f == *.service ]] && ((custom)); then
-        f=$(render "$f" "s#%h/crew#$CREW_HOME#g; s|^# Environment=CREW_HOME=.*|Environment=CREW_HOME=$CREW_HOME|")
-      fi
-      install_file systemd "$f" "$HOME/.config/systemd/user/$(basename "$f")"
-    done
-    prune systemd "$HOME/.config/systemd/user"
-    systemctl --user daemon-reload 2>/dev/null || true
-    local unit off=()
-    for unit in "${CREW_UNITS[@]}"; do
-      systemctl --user is-enabled --quiet "$unit" 2>/dev/null || off+=("$unit")
-    done
-    ((${#off[@]} == 0)) || note "off on this machine: ${off[*]}. crew host up turns them on, to run the crew here"
-  fi
-
-  write_manifest
-
-  # Asked once: not when the setting is on already, or when the user declined before.
-  if [[ $agents_md == ask && ! -f $INSTALL_STATE/agents-md-declined ]] \
-     && ! jq -e '.pluginConfigs["agents-md@builtin"].options.instructionFiles == "claude-md-and-agents-md"' \
-            "$HOME/.claude/settings.json" >/dev/null 2>&1; then
-    say "AGENTS.md loading"
-    note "Claude Code reads AGENTS.md automatically, but only when a repo has no CLAUDE.md."
-    if ((yes)) || confirm "In repos that have both, load CLAUDE.md and AGENTS.md together?"; then
-      settings_merge '.pluginConfigs["agents-md@builtin"].options.instructionFiles = "claude-md-and-agents-md"'
-    else
-      mkdir -p "$INSTALL_STATE"; touch "$INSTALL_STATE/agents-md-declined"
-      note "skipped, and won't ask again; see SETUP.md if you change your mind"
-    fi
-  fi
-  rm -rf "$INSTALL_TMP"
-
-  say "Done (crew $(crew_version))"
-}
-
-cmd_doctor() {
-  local ok=1 v
-  chk() { if eval "$2" >/dev/null 2>&1; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s%s\n' "$1" "${3:+ — $3}"; ok=0; fi; }
-  echo "crew $(crew_version) at $CREW_HOME"
-  echo "Dependencies"
-  local deps=(git gh jq flock claude) c
-  for c in "${deps[@]}"; do chk "$c installed" "command -v $c"; done
-  if command -v claude >/dev/null; then
-    v=$(claude --version 2>/dev/null | awk '{print $1}')
-    chk "claude $v >= 2.1.281" "[[ \$(printf '%s\n' 2.1.281 '$v' | sort -V | head -1) == 2.1.281 ]]" "run 'claude update'"
-  fi
-  chk "gh authenticated" "gh auth status" "run 'gh auth login'"
-  echo "Agents"
-  for c in lead implementer casual-observer plan-reviewer gardener goal-lead; do chk "$c" "[[ -f \$HOME/.claude/agents/$c.md ]]" "run crew install"; done
-  echo "Crew home"
-  chk "$CREW_HOME is a git repo" "git -C '$CREW_HOME' rev-parse"
-  chk "crew-guard executable" "[[ -x '$CREW_HOME/bin/crew-guard' ]]"
-  # The settings hook is what guards the subagents a lead or worker spawns. An edited
-  # settings file keeps its old contents on re-install, so it can be missing.
-  guard_hooked() {  # settings-file role
-    chk "$1 runs crew-guard" "jq -e '[.hooks.PreToolUse[]?.hooks[]?.command] | any(endswith(\"crew-guard\\\" $2\"))' '$CREW_HOME/$1'" \
-        "restore its hook: git -C $CREW_HOME diff $1"
-  }
-  guard_hooked lead/.claude/settings.json lead
-  guard_hooked config/worker-settings.json worker
-  # Without it, an agent's own edits to the ledger wait for crew's next commit.
-  for c in lead/.claude/settings.json config/worker-settings.json; do
-    chk "$c commits ledger edits (crew commit --hook)" \
-        "jq -e '[.hooks.PostToolUse[]?.hooks[]?.command] | any(endswith(\"bin/crew\\\" commit --hook\"))' '$CREW_HOME/$c'" \
-        "restore its hook: git -C $CREW_HOME diff $c"
-  done
-  chk "lead/.claude/settings.local.json written for this machine" "[[ -f '$CREW_HOME/lead/.claude/settings.local.json' ]]" "run crew install"
-  local pd p tool
-  for pd in "$CREW_HOME"/projects/*/; do
-    [[ -f $pd/project.env ]] || continue
-    p=$(basename "$pd")
-    # shellcheck source=/dev/null
-    tool=$(. "$pd/project.env" && echo "${WORKTREE_TOOL:-git}")
-    case $tool in
-      git) ;;
-      worktrunk) chk "$p: wt installed (WORKTREE_TOOL=worktrunk)" "command -v wt" "install Worktrunk: https://worktrunk.dev" ;;
-      *) chk "$p: WORKTREE_TOOL is git or worktrunk (got '$tool')" false "fix $pd/project.env" ;;
-    esac
-    chk "$p: cloned on this machine (local.env)" "(. '$pd/local.env' && [[ -d \$REPO ]])" "run 'crew project add' in your clone of it"
-    [[ -f $pd/worker-settings.json ]] && chk "$p: worker-settings.json is valid JSON" "jq -e . '$pd/worker-settings.json'" "fix it; dispatch refuses to start workers until then"
-  done
-  echo "Trust (workers start in worktrees under WORK_ROOT; the lead in the home's lead/)"
-  for c in "$WORK_ROOT" "$CREW_HOME/lead"; do
-    chk "$c trusted" "trusted '$c'" "cd $c && claude, accept, /exit"
-  done
-  # A unit runs crew with the PATH its service sets, not your shell's, so a tool
-  # your shell finds through its config (mise, nvm, ...) can be missing there.
-  echo "Enabled units"
-  local unit svc path
-  for unit in "${CREW_UNITS[@]}"; do
-    systemctl --user is-enabled --quiet "$unit" 2>/dev/null || continue
-    svc=${unit%.*}.service   # crew-tick.timer starts crew-tick.service
-    path=$(systemctl --user show "$svc" -p Environment --value 2>/dev/null | tr " " "\n" | sed -n "s/^PATH=//p")
-    for c in "${deps[@]}"; do
-      chk "$svc finds $c" "(PATH='$path'; command -v $c)" "add its directory to PATH: systemctl --user edit $svc"
-    done
-  done
-  echo "AGENTS.md loading"
-  local req_ok=$ok
-  chk "Project instructions = claude-md-and-agents-md (optional)" \
-      "jq -e '.pluginConfigs[\"agents-md@builtin\"].options.instructionFiles == \"claude-md-and-agents-md\"' \$HOME/.claude/settings.json" \
-      "only matters for repos that have both CLAUDE.md and AGENTS.md"
-  if ((req_ok)); then echo "Required checks passed."; else echo "Some required checks failed."; return 1; fi
-}
 
 # ------------------------------------------------------------------- main ---
 
@@ -1200,8 +918,6 @@ case $cmd in
   serve) cmd_serve "$@" ;;
   setup) cmd_setup "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
-  doctor) cmd_doctor ;;
-  install) cmd_install "$@" ;;
   tick) cmd_tick "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
 esac
