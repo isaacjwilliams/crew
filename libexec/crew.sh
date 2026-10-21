@@ -182,7 +182,6 @@ project_from_cwd() {
 # machine's REPO, never committed). Each project starts again from the shared
 # settings, so crew tick doesn't carry one project's overrides into the next.
 load_project() {
-  PROJECT=$1
   PDIR="$CREW_HOME/projects/$1"
   [[ -f "$PDIR/project.env" ]] || die "unknown project '$1' (run 'crew project add' in the repo)"
   # load_config resets every setting defaults.env has. These three it hasn't.
@@ -200,10 +199,6 @@ projects_in_scope() {  # [all]
   local p
   if [[ ${1:-} != all ]] && p=$(project_from_cwd 2>/dev/null); then echo "$p"; return; fi
   for p in "$CREW_HOME"/projects/*/; do [[ -f $p/project.env ]] && basename "$p"; done
-}
-
-current_project_or_die() {
-  project_from_cwd || die "this directory isn't in a repo registered with crew (run 'crew project add' there)"
 }
 
 # ------------------------------------------------------ front matter / md ---
@@ -709,25 +704,6 @@ gh_login() {
   echo "$GH_LOGIN"
 }
 
-# A worktree or checkout deleted by hand (rm -rf) stays registered with git, which
-# then refuses to make another at its path. Needs load_project.
-prune_worktrees() { git -C "$REPO" worktree prune; }
-
-# A read-only checkout of origin/DEFAULT_BRANCH for a session that reads the code
-# but never changes it (the gardener, a goal lead, the lead). Plain git, never
-# Worktrunk: nothing runs there, so it needs none of the repo's per-worktree
-# setup. Needs load_project.
-detached_checkout() {  # path
-  git -C "$REPO" fetch --quiet origin "$DEFAULT_BRANCH" 2>/dev/null || warn "$PROJECT: fetch failed; using local origin/$DEFAULT_BRANCH"
-  if [[ -d $1 ]]; then git -C "$1" checkout --quiet --detach "origin/$DEFAULT_BRANCH"
-  else
-    prune_worktrees
-    mkdir -p "$(dirname "$1")"; git -C "$REPO" worktree add --quiet --detach "$1" "origin/$DEFAULT_BRANCH"
-  fi
-}
-
-# ----------------------------------------------------------------- commands ---
-
 # One pass over every project, doing what needs no decision: sync with GitHub,
 # record new PR comments, send review rounds and restacks to idle workers, mark
 # tasks that wait on the user, and clean up merged ones. The crew-tick timer runs
@@ -875,52 +851,6 @@ tick_task() {  # file agents_json
   if [[ $st != needs-input ]] && ((waiting > 0)); then
     if crew_go set "$f" status needs-input >/dev/null; then echo "$id: waiting on you ($waiting open question(s))"; fi
   fi
-}
-
-cmd_gardener() {
-  need git; need claude
-  require_host
-  local projects=() p
-  case ${1:-} in
-    --all) mapfile -t projects < <(projects_in_scope all) ;;
-    "") projects=("$(current_project_or_die)") ;;
-    *) projects=("$1") ;;
-  esac
-  mkdir -p "$CREW_HOME/logs"
-  local wt head last base count range prompt logf rc failures=0
-  for p in "${projects[@]}"; do
-    ( load_project "$p"
-      wt="$WORK_ROOT/$p/_gardener"
-      detached_checkout "$wt"
-      head=$(git -C "$wt" rev-parse HEAD)
-      last=$(cat "$PDIR/gardener.last" 2>/dev/null || true)
-      if [[ $last == "$head" ]]; then echo "$p: nothing new since last run"; exit 0; fi
-      if [[ -n $last ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then base=$last
-      else base=$(git -C "$wt" rev-list -1 --before="$GARDENER_LOOKBACK" "$head" || true); fi
-      if [[ -n $base ]]; then range="$base..$head"; count=$(git -C "$wt" rev-list --count "$range")
-      else range="$head"; count=$(git -C "$wt" rev-list --count "$head"); fi
-      if [[ $count == 0 ]]; then echo "$head" >"$PDIR/gardener.last"; echo "$p: no commits in range"; exit 0; fi
-      prompt="Project: $p
-Proposals directory: $PDIR/proposals
-Tasks directory: $PDIR/tasks
-Proposal template: $CREW_HOME/templates/proposal.md
-Commit range to review: $range ($count commits on origin/$DEFAULT_BRANCH)
-Today's date: $(date +%F)
-Follow your process and write proposals only into the proposals directory."
-      logf="$CREW_HOME/logs/gardener-$p-$(date +%Y%m%d-%H%M).log"
-      echo "$p: reviewing $count commits ($range) — log: $logf"
-      rc=0
-      (cd "$wt" && cc -p --add-dir "$CREW_HOME" --agent gardener --permission-mode acceptEdits \
-         --permission-prompts none --max-turns "$GARDENER_MAX_TURNS" \
-         --settings "$CREW_HOME/config/readonly-settings.json" "$prompt") >"$logf" 2>&1 || rc=$?
-      tail -n 15 "$logf"
-      if ((rc == 0)); then
-        echo "$head" >"$PDIR/gardener.last"
-        lock; commit "gardener $p ($range)"
-      else warn "$p: gardener exited with $rc; see $logf"; exit 1; fi
-    ) || { warn "$p: gardener run failed"; failures=$((failures + 1)); }
-  done
-  ((failures == 0))
 }
 
 # ------------------------------------------------------------------- goals ---
@@ -1273,6 +1203,5 @@ case $cmd in
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
   tick) cmd_tick "$@" ;;
-  gardener) cmd_gardener "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
 esac

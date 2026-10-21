@@ -47,6 +47,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"restack":   cmdRestack,
 	"cleanup":   cmdCleanup,
 	"goal":      cmdGoal,
+	"gardener":  cmdGardener,
 }
 
 func main() {
