@@ -28,9 +28,6 @@ declare -A BRANCHES=()   # filled by load_branches
 
 die()  { echo "crew: $*" >&2; exit 1; }
 warn() { echo "crew: $*" >&2; }
-# A refusal that only has to wait, such as a dispatch held by a cap: exit 4, so crew
-# tick can try again later without reporting it as a failure.
-not_yet() { echo "crew: $*" >&2; exit 4; }
 now()  { date -Iseconds; }
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
 has_word() { [[ " $2 " == *" $1 "* ]]; }
@@ -314,17 +311,6 @@ lease_holder() { cat "$CREW_HOME/host" 2>/dev/null || true; }   # the machine th
 origin_holder() { git -C "$CREW_HOME" show '@{u}:host' 2>/dev/null || true; }
 
 lease_since() { git -C "$CREW_HOME" log -1 --format=%cr -- host 2>/dev/null || true; }
-
-# The last machine before this one that ran the crew. The host file names this
-# machine now, so it's found in the file's history: the newest other name.
-previous_holder() {
-  local c h
-  while IFS= read -r c; do
-    h=$(git -C "$CREW_HOME" show "$c:host" 2>/dev/null || true)
-    if [[ -n $h && $h != "$CREW_HOST" ]]; then echo "$h"; return 0; fi
-  done < <(git -C "$CREW_HOME" log --format=%H -- host 2>/dev/null)
-  echo "another machine"
-}
 
 # Fails unless this machine holds the lease: the host file names it, and no push
 # has found that origin moved it elsewhere.
@@ -712,23 +698,6 @@ parent_needs_restack() {  # file
   [[ -n $p ]] && has_word "$(fm_get "$p" status)" "$ACTIVE_STATES" && [[ -n $(restack_reason "$p") ]]
 }
 
-# base_sha is the newest commit of the parent's branch that the task's own branch
-# contains: where `git rebase --onto` has to cut. Once the parent is squash-merged
-# or rebased, the merge base of the two branches falls back to a commit before the
-# parent's work, so the recorded one is kept for as long as the task's branch still
-# contains it. Returns 0 if it changed. Call with the lock held.
-note_base_sha() {  # file parent-file
-  local old mb branch
-  old=$(fm_get "$1" base_sha); branch=refs/heads/$(fm_get "$1" branch)
-  mb=$(git -C "$REPO" merge-base "refs/remotes/origin/$(fm_get "$2" branch)" "$branch" 2>/dev/null) || return 1
-  [[ $mb != "$old" ]] || return 1
-  if [[ -n $old ]] && git -C "$REPO" merge-base --is-ancestor "$old" "$branch" 2>/dev/null \
-     && ! git -C "$REPO" merge-base --is-ancestor "$old" "$mb" 2>/dev/null; then
-    return 1
-  fi
-  fm_set "$1" base_sha "$mb"
-}
-
 # ----------------------------------------------------------- agent sessions ---
 
 # claude agents --json --all, or [] on failure. A live session whose transcript
@@ -777,17 +746,6 @@ job_listed() {  # agents_json job — whether claude agents on this machine know
 job_busy() {  # agents_json job
   [[ -n $2 ]] || return 1
   jq -e --arg id "$2" "$JQ_BUSY"' any(.[]; .id==$id and busy)' <<<"$1" >/dev/null 2>&1
-}
-
-# Workers are the jobs the task files record, not sessions with a crew- name: a
-# session Claude Code copies on resume gets a name of its own.
-running_workers() {  # agents_json
-  local f jobs=()
-  while IFS= read -r f; do
-    [[ -n $f ]] && jobs+=("$(fm_get "$f" worker_job)")
-  done < <(files_of tasks)
-  jq --args "$JQ_BUSY"' [.[] | select(.id as $id | $ARGS.positional | index($id)) | select(busy)] | length' \
-    "${jobs[@]}" <<<"$1"
 }
 
 # Stops a background job and waits up to 10 seconds for its process to close. Its
@@ -871,20 +829,6 @@ gh_login() {
   echo "$GH_LOGIN"
 }
 
-# A stack counts once: a task stacked on another in-flight task isn't counted.
-in_flight_count() {
-  local f n=0 p
-  load_branches
-  while IFS= read -r f; do
-    [[ -n $f ]] || continue
-    has_word "$(fm_get "$f" status)" "$ACTIVE_STATES" || continue
-    p=$(parent_of "$f")
-    if [[ -n $p ]] && has_word "$(fm_get "$p" status)" "$ACTIVE_STATES"; then continue; fi
-    n=$((n + 1))
-  done < <(files_of tasks)
-  echo "$n"
-}
-
 # A launch has worked once the job's own process reports the session it loaded.
 # A job's ID is the first 8 characters of its session ID. A process that has just
 # started can report a new session ID for a moment, before it loads the one it
@@ -904,38 +848,6 @@ wait_for_launch() {  # job -> prints the job's sessionId (empty if it never repo
   return 0
 }
 
-# Task worktrees are made and removed with plain `git worktree`, or with Worktrunk
-# (`wt`) when the project sets WORKTREE_TOOL=worktrunk, so the repo's wt hooks run
-# (per-worktree databases, services, dependency installs). crew never passes
-# --yes: hooks the user hasn't approved make wt fail rather than run. Hook output
-# goes to a log under $CREW_HOME/logs/ instead of the caller's terminal.
-worktree_create() {  # path branch startref(empty: check out the existing branch) logfile
-  local wt=$1 branch=$2 startref=$3 logf=$4
-  mkdir -p "$(dirname "$wt")"
-  prune_worktrees
-  case $WORKTREE_TOOL in
-    git)
-      if [[ -n $startref ]]; then git -C "$REPO" worktree add --quiet --no-track -b "$branch" "$wt" "$startref"
-      else git -C "$REPO" worktree add --quiet "$wt" "$branch"; fi ;;
-    worktrunk)
-      need wt
-      local args=(switch --no-cd --format json --config-set "worktree-path=$(jq -rn --arg p "$wt" '$p | tojson')")
-      [[ -n $startref ]] && args+=(--create --base "$startref")
-      mkdir -p "$(dirname "$logf")"
-      echo "== $(now) wt ${args[*]} $branch" >>"$logf"
-      echo "Creating $wt with Worktrunk (hook output: $logf)"
-      local out path
-      if ! out=$(wt -C "$REPO" "${args[@]}" "$branch" 2>>"$logf"); then
-        tail -n 15 "$logf" >&2
-        die "wt couldn't create the worktree (full output in $logf). If its hooks need approval, run 'wt config approvals add' in $REPO."
-      fi
-      path=$(jq -r '.path // empty' <<<"$out" 2>/dev/null || true)
-      [[ -n $path && $(realpath -m "$path") == $(realpath -m "$wt") ]] \
-        || die "wt left $branch at '${path:-unknown}' instead of $wt; does the branch already have a worktree? (wt list)" ;;
-    *) die "unknown WORKTREE_TOOL '$WORKTREE_TOOL' (use git or worktrunk)" ;;
-  esac
-}
-
 worktree_remove() {  # path force(0|1) logfile
   local wt=$1 force=$2 logf=$3 flags=()
   ((force)) && flags=(--force)
@@ -950,76 +862,6 @@ worktree_remove() {  # path force(0|1) logfile
         || { tail -n 15 "$logf" >&2; warn "full output in $logf"; return 1; } ;;
     *) die "unknown WORKTREE_TOOL '$WORKTREE_TOOL' (use git or worktrunk)" ;;
   esac
-}
-
-# Makes a task's worktree ready for a worker: creates it unless it exists, and
-# copies the WORKTREE_COPY files from the main checkout. A missing worktree checks
-# out the task's local branch. When there's none, it makes the branch from
-# origin/<branch>, where another machine pushed it, or else starts it from
-# origin/<base>. WORKTREE_FROM says which: local-branch, origin-branch or base, or
-# nothing for a worktree that existed. For base, NEW_BRANCH_FROM is the commit the
-# branch starts at.
-# An existing worktree whose path the task file doesn't record yet (dispatch
-# records it only after this succeeds) is left from a dispatch that failed while
-# creating it, where Worktrunk's setup hooks may not have finished, so it's
-# refused. Run it without the ledger lock: Worktrunk hooks can take minutes.
-# Needs load_project.
-setup_worktree() {  # file wt branch base -> sets WORKTREE_FROM NEW_BRANCH_FROM
-  local file=$1 wt=$2 branch=$3 base=$4 id startref="" c
-  id=$(basename "$file" .md)
-  WORKTREE_FROM="" NEW_BRANCH_FROM=""
-  if [[ -d $wt ]]; then
-    git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$wt exists but isn't a git worktree"
-    [[ $WORKTREE_TOOL != worktrunk || -n $(fm_get "$file" worktree) ]] \
-      || die "$wt is left over from a dispatch whose Worktrunk setup failed; remove it with 'wt -C $REPO remove $wt' and dispatch again"
-  else
-    if git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
-      WORKTREE_FROM=local-branch
-    elif git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-      WORKTREE_FROM=origin-branch; startref="origin/$branch"
-    else
-      WORKTREE_FROM=base; startref="origin/$base"
-      git -C "$REPO" rev-parse --verify --quiet "$startref" >/dev/null || startref=$base
-      NEW_BRANCH_FROM=$(git -C "$REPO" rev-parse --verify --quiet "$startref^{commit}" || true)
-    fi
-    worktree_create "$wt" "$branch" "$startref" "$CREW_HOME/logs/worktree-$PROJECT-$id.log"
-  fi
-  for c in $WORKTREE_COPY; do
-    if [[ -e $REPO/$c && ! -e $wt/$c ]]; then mkdir -p "$(dirname "$wt/$c")"; cp -a "$REPO/$c" "$wt/$c"; fi
-  done
-}
-
-# A task has been dispatched once crew records a worker or a worktree for it.
-task_dispatched() { [[ -n $(fm_get "$1" worker_job) || -n $(fm_get "$1" worktree) ]]; }
-
-# Makes sure a dispatched task's worktree is on this machine, at
-# $WORK_ROOT/<p>/<id>. After a failover the task file names another machine's
-# path, and the task's branch may be on origin only, or nowhere, if that machine
-# never pushed it: then the branch starts over from its base. Records the path
-# when it changes, and logs how a missing worktree came back. Run it without the
-# ledger lock. Needs load_project.
-ensure_worktree() {  # file
-  local file=$1 id wt branch base msg=""
-  id=$(basename "$file" .md); wt="$WORK_ROOT/$PROJECT/$id"
-  branch=$(fm_get "$file" branch)
-  base=$(fm_get "$file" base); base=${base:-$DEFAULT_BRANCH}
-  if [[ ! -d $wt ]]; then
-    git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "git fetch origin failed; using local refs"
-  fi
-  setup_worktree "$file" "$wt" "$branch" "$base"
-  case $WORKTREE_FROM in
-    local-branch) msg="recreated worktree on the local branch $branch" ;;
-    origin-branch) msg="recreated worktree from origin/$branch" ;;
-    base) msg="started over: $branch was never pushed from $(previous_holder)" ;;
-  esac
-  if [[ $(fm_get "$file" worktree) == "$wt" && -z $msg ]]; then return 0; fi
-  lock
-  fm_set "$file" worktree "$wt"
-  if [[ -n $NEW_BRANCH_FROM ]]; then fm_set "$file" base_sha "$NEW_BRANCH_FROM"; fi
-  if [[ -n $msg ]]; then append_log "$file" "$msg"; fi
-  touch_updated "$file"
-  commit "worktree $PROJECT/$id"
-  unlock
 }
 
 # A worktree or checkout deleted by hand (rm -rf) stays registered with git, which
@@ -1037,35 +879,6 @@ detached_checkout() {  # path
     prune_worktrees
     mkdir -p "$(dirname "$1")"; git -C "$REPO" worktree add --quiet --detach "$1" "origin/$DEFAULT_BRANCH"
   fi
-}
-
-# The settings workers run with: config/worker-settings.json, plus the project's
-# projects/<p>/worker-settings.json when it has one (for example, allow rules
-# or env for that project's test commands). The project file can only add:
-# objects are merged and arrays appended, but any value the base file sets wins,
-# so a project can't drop a deny rule.
-# Prints a path or a JSON string; `claude --settings` takes either. Also checks
-# WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its worktree exists.
-worker_settings() {
-  [[ $WORKER_AUTOCOMPACT_WINDOW =~ ^(auto|[0-9]+[kKmM]?)$ ]] \
-    || die "WORKER_AUTOCOMPACT_WINDOW must be auto or a token count like 400k, not '$WORKER_AUTOCOMPACT_WINDOW'"
-  local base="$CREW_HOME/config/worker-settings.json" extra="$PDIR/worker-settings.json"
-  [[ -f $extra ]] || { echo "$base"; return; }
-  jq -cs 'def add_only($a; $b):
-            if ($a | type) == "object" and ($b | type) == "object" then
-              reduce ($b | keys_unsorted[]) as $k ($a;
-                .[$k] = (if $a | has($k) then add_only($a[$k]; $b[$k]) else $b[$k] end))
-            elif ($a | type) == "array" and ($b | type) == "array" then $a + ($b - $a)
-            else $a end;
-          add_only(.[0]; .[1])' "$base" "$extra" 2>/dev/null \
-    || die "$extra isn't valid JSON"
-}
-
-launch_worker() {  # file wt prompt mode(fresh|resume) -> sets LAUNCH_JOB LAUNCH_SESSION
-  local settings=""
-  if [[ $4 == fresh ]]; then settings=$(worker_settings) || return 1; fi
-  launch_session "$1" worker "$2" "$3" "$4" --agent implementer --permission-mode "$WORKER_PERMISSION_MODE" \
-    --autocompact "$WORKER_AUTOCOMPACT_WINDOW" --settings "$settings"
 }
 
 # Starts a background session for a ledger file, or resumes the one it records as
@@ -1139,116 +952,6 @@ next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- a
     if [[ $n =~ ^[0-9]+$ ]] && ((10#$n > max)); then max=$((10#$n)); fi
   done < <(files_of "$1" "$2")
   echo $((max + 1))
-}
-
-cmd_followup() {
-  need jq; need claude
-  local arg="" fresh=0 note=""
-  while (($#)); do
-    case $1 in
-      --fresh) fresh=1; shift ;;
-      --note) note=$2; shift 2 ;;
-      *) arg=$1; shift ;;
-    esac
-  done
-  local file; file=$(resolve tasks "${arg:?usage: crew followup TASK [--fresh] [--note TEXT]}")
-  local id; id=$(basename "$file" .md)
-  load_project "$(task_project "$file")"
-  worker_settings >/dev/null
-  local wt job state aj
-  job=$(fm_get "$file" worker_job)
-  task_dispatched "$file" || die "$id has no worker yet; dispatch it first"
-  aj=$(agents_json)
-  state=$(job_state "$aj" "$job")
-  local rounds sent new_round=0
-  rounds=$(fm_get "$file" review_rounds); rounds=${rounds:-0}
-  sent=$(fm_get "$file" last_round_sent); sent=${sent:-0}
-  ((rounds > sent)) && new_round=1
-  if job_busy "$aj" "$job"; then
-    # A round sent any other way would go out again: only crew records last_round_sent.
-    ((new_round)) && die "worker $job is busy ($state). crew tick sends round $rounds once it's free"
-    die "worker $job is busy ($state). Wait for it, answer it in agent view (claude attach $job), or SendMessage $(fm_get "$file" worker_name) a note"
-  fi
-  ((new_round || ${#note})) || die "nothing new for $id: no new review round (run 'crew feedback $id') and no --note"
-  ((rounds <= MAX_REVIEW_ROUNDS)) || warn "round $rounds exceeds MAX_REVIEW_ROUNDS=$MAX_REVIEW_ROUNDS"
-  # The worktree may not be on this machine: the task moved here, say.
-  ensure_worktree "$file"
-  wt=$(fm_get "$file" worktree)
-
-  local prompt
-  prompt="New input for task $id (task file: $file)."
-  if ((new_round)); then
-    prompt+=" New review feedback is in Round $rounds under '## Review rounds'; follow your review-round workflow."
-    if [[ $REPLY_TO_THREADS == yes ]]; then
-      prompt+=" Reply to each comment in the round with \`crew reply\`."
-    else
-      prompt+=" Don't reply to the comments on the PR: this project has REPLY_TO_THREADS off."
-    fi
-  fi
-  [[ -n $note ]] && prompt+=" Note from the lead (also check Decisions in the task file): $note"
-
-  lock
-  relaunch launch_worker worker "$file" "$wt" "$prompt" "You are picking up task $id in project $PROJECT, which already has work on its branch.
-Task file: $file
-Worktree (your working directory): $wt
-Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting." "$fresh"
-  fm_set "$file" worker_job "$LAUNCH_JOB"
-  [[ -n $LAUNCH_SESSION ]] && fm_set "$file" worker_session "$LAUNCH_SESSION"
-  fm_set "$file" last_round_sent "$rounds"
-  if ((new_round)); then fm_set "$file" status addressing-feedback; else fm_set "$file" status working; fi
-  touch_updated "$file"
-  append_log "$file" "followup ($LAUNCH_MODE): worker $LAUNCH_JOB${note:+ — note: $note}"
-  commit "followup $PROJECT/$id"
-  echo "followup sent to $id → worker $LAUNCH_JOB ($LAUNCH_MODE)"
-}
-
-# Has a stacked task's worker rebase it after its parent moved or merged. crew only
-# works out where to cut and what to rebase onto; the worker does the rebase, the
-# push and the PR retarget, and records the new base when it has succeeded, so a
-# failed restack still shows as one that's needed. restack_sent records the commit
-# the last restack asked for, so the same restack isn't sent twice unless --again.
-cmd_restack() {
-  need git
-  local arg="" again=0
-  while (($#)); do case $1 in --again) again=1; shift ;; *) arg=$1; shift ;; esac; done
-  local file; file=$(resolve tasks "${arg:?usage: crew restack TASK [--again]}")
-  local id; id=$(basename "$file" .md)
-  load_project "$(task_project "$file")"
-  load_branches "$PROJECT"
-  local parent pid base branch newbase reason target old note
-  base=$(fm_get "$file" base); branch=$(fm_get "$file" branch)
-  parent=$(parent_of "$file")
-  [[ -n $parent ]] || die "$id isn't stacked: its base '$base' isn't another task's branch"
-  pid=$(basename "$parent" .md)
-  task_dispatched "$file" || die "$id has no branch yet; dispatch it first"
-  # On a machine the task moved to, its branch may be on origin only.
-  ensure_worktree "$file"
-  git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "git fetch failed; using local refs"
-  lock
-  if note_base_sha "$file" "$parent"; then commit "base_sha $PROJECT/$id"; fi
-  unlock
-  ! parent_needs_restack "$file" \
-    || die "$pid needs a restack itself ($(restack_reason "$parent")); restack it first, a stack goes bottom-up"
-  reason=$(restack_reason "$file")
-  [[ -n $reason ]] || { echo "$id already sits on $pid's latest commit; nothing to restack"; return 0; }
-  [[ $reason != *" abandoned" ]] || die "$pid is abandoned; give $id another base with 'crew set $id base <branch>' and tell its worker"
-  newbase=$(effective_base "$file")
-  target=$(restack_target "$file")
-  [[ -n $target ]] || die "origin/$newbase doesn't exist, so there's nothing to restack $id onto"
-  ((again)) || [[ $(fm_get "$file" restack_sent) != "$target" ]] \
-    || die "$id's worker was already asked to restack onto ${target:0:12}; check its Open questions and log, or send it again with --again"
-  old=$(fm_get "$file" base_sha)
-  [[ -n $old ]] || die "$id has no base_sha (it was dispatched before crew recorded one). Find the last commit of $pid's in $branch and run 'crew set $id base_sha <sha>'"
-  git -C "$REPO" merge-base --is-ancestor "$old" "refs/heads/$branch" 2>/dev/null \
-    || die "$branch no longer contains $pid's commits (base_sha ${old:0:12}), so it looks restacked already. If it is, record it with 'crew set $id base $newbase'"
-  note="Restack ($reason): rebase your branch with \`git fetch origin && git rebase --onto $target $old\`, then follow your restack workflow. $target is origin/$newbase now; $old is the last of $pid's commits in your branch."
-  if [[ $newbase != "$base" ]]; then
-    note+=" Your base is now $newbase: after pushing, run \`gh pr edit --base $newbase\` and \`crew set $id base $newbase\`."
-  fi
-  cmd_followup "$file" --note "$note"
-  lock
-  fm_set "$file" restack_sent "$target"
-  commit "restack $PROJECT/$id"
 }
 
 # One pass over every project, doing what needs no decision: sync with GitHub,
@@ -1366,7 +1069,7 @@ tick_task() {  # file agents_json
   job=$(fm_get "$f" worker_job)
   if moved_here "$f" "$aj"; then
     local err
-    if err=$( (cmd_followup "$f" --fresh --note "This task moved to $CREW_HOST; your earlier session is gone. Rebuild context from the task file and the branch.") 2>&1 >/dev/null ); then
+    if err=$(crew_go followup "$f" --fresh --note "This task moved to $CREW_HOST; your earlier session is gone. Rebuild context from the task file and the branch." 2>&1 >/dev/null); then
       echo "$id: its worker and worktree aren't on this machine; a fresh worker picks it up"
     else
       warn "$id: couldn't start a fresh worker for it here: $err"
@@ -1383,14 +1086,14 @@ tick_task() {  # file agents_json
     return 0
   fi
   if ((${rounds:-0} > ${sent:-0})); then
-    if (cmd_followup "$f") >/dev/null; then echo "$id: round $rounds sent to its worker"; fi
+    if crew_go followup "$f" >/dev/null; then echo "$id: round $rounds sent to its worker"; fi
     return 0
   fi
   reason=$(restack_reason "$f")
   if [[ $st == pr-open && -n $reason && $reason != *" abandoned" ]] && ! parent_needs_restack "$f"; then
     target=$(restack_target "$f")
     if [[ -n $target && $(fm_get "$f" restack_sent) != "$target" ]]; then
-      if (cmd_restack "$f") >/dev/null; then echo "$id: restack sent to its worker ($reason)"; fi
+      if crew_go restack "$f" >/dev/null; then echo "$id: restack sent to its worker ($reason)"; fi
       return 0
     fi
   fi
@@ -2033,8 +1736,6 @@ case $cmd in
   upgrade) cmd_upgrade "$@" ;;
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
-  followup) cmd_followup "$@" ;;
-  restack) cmd_restack "$@" ;;
   tick) cmd_tick "$@" ;;
   cleanup) cmd_cleanup "$@" ;;
   gardener) cmd_gardener "$@" ;;

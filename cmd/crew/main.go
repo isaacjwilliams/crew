@@ -43,6 +43,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"reply":     cmdReply,
 	"sync":      cmdSync,
 	"dispatch":  cmdDispatch,
+	"followup":  cmdFollowup,
+	"restack":   cmdRestack,
 }
 
 func main() {
