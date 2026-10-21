@@ -546,7 +546,7 @@ clone_missing_projects() {
       mkdir -p "$(dirname "$clone")"
       git clone -q "$remote" "$clone" || { warn "couldn't clone $remote for $p"; continue; }
     fi
-    (cmd_project_add "$clone" >/dev/null) || warn "couldn't register $clone for $p"
+    crew_go project add "$clone" >/dev/null || warn "couldn't register $clone for $p"
     note "$p: this machine's clone is $clone"
   done
 }
@@ -1131,66 +1131,6 @@ $prompt" fresh || die "could not start a session (see output above)"
 }
 
 # ----------------------------------------------------------------- commands ---
-
-# Registers a repo: project.env records what every machine shares (its remote and
-# default branch), and local.env this machine's clone. On a machine where the
-# project is registered already, it records only the clone.
-cmd_project_add() {
-  need git
-  local root slug dir def remote
-  root=$(repo_root "${1:-.}") || die "not inside a git repository"
-  remote=$(git -C "$root" remote get-url origin 2>/dev/null) || die "$root has no origin remote; crew works through origin"
-  slug=$(slug_for "$root")
-  dir="$CREW_HOME/projects/$slug"
-  lock
-  mkdir -p "$dir/tasks" "$dir/proposals" "$WORK_ROOT/$slug"
-  def=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  def=${def#origin/}
-  if [[ -z $def ]]; then
-    git -C "$root" remote set-head origin --auto >/dev/null 2>&1 || true
-    def=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
-    def=${def#origin/}
-  fi
-  [[ -n $def ]] || def=main
-  if [[ ! -f $dir/project.env ]]; then
-    cat >"$dir/project.env" <<EOF
-# crew project settings for $slug. Any key from config/defaults.env can be overridden here.
-REMOTE="$remote"
-DEFAULT_BRANCH="$def"
-# BRANCH_PREFIX="agent/"
-# WORKTREE_COPY=".env.local"
-# WORKTREE_TOOL="worktrunk"   # create/remove task worktrees with wt, so the repo's Worktrunk hooks run
-# PR_MODE="draft"
-# Extra worker settings for this project only (e.g. allow rules, env) go in
-# worker-settings.json next to this file; see SETUP.md.
-EOF
-    echo "Registered $slug ($remote, default branch $def)."
-  else
-    echo "$slug is already registered; left project.env as is."
-  fi
-  # Written every time: this clone is the one this machine uses from now on.
-  cat >"$dir/local.env" <<EOF
-# This machine's clone of $slug. Not committed: each machine has its own.
-REPO="$root"
-EOF
-  echo "This machine's clone: $root"
-  local exclude line
-  exclude="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
-  mkdir -p "$(dirname "$exclude")"; touch "$exclude"
-  for line in ".claude/worktrees/" ".claude/settings.local.json"; do
-    grep -qxF "$line" "$exclude" || echo "$line" >>"$exclude"
-  done
-  [[ -f $root/AGENTS.md ]] && echo "Found AGENTS.md: agents will load it automatically."
-  if [[ -f $root/CLAUDE.md || -f $root/.claude/CLAUDE.md ]]; then
-    if [[ -f $root/AGENTS.md ]]; then
-      echo "Note: this repo has both CLAUDE.md and AGENTS.md. Claude Code reads only CLAUDE.md by default;"
-      echo "      set Project instructions to claude-md-and-agents-md (see SETUP.md) to load both."
-    fi
-  elif [[ ! -f $root/AGENTS.md ]]; then
-    echo "Note: no AGENTS.md or CLAUDE.md found. Agents will have no project conventions to follow."
-  fi
-  commit "project add $slug"
-}
 
 next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- among its files
   local f n max=0
@@ -1816,32 +1756,6 @@ cmd_cleanup() {
   commit "cleanup"
 }
 
-cmd_observe() {
-  need claude
-  local arg="" base="" dir="" p
-  while (($#)); do case $1 in --base) base=$2; shift 2 ;; *) arg=$1; shift ;; esac; done
-  if [[ -n $arg && -d $arg ]]; then dir=$(realpath "$arg")
-  elif [[ -n $arg ]]; then
-    local f; f=$(resolve tasks "$arg"); dir=$(fm_get "$f" worktree)
-    [[ -n $dir ]] || die "task has no worktree"
-    [[ -d $dir ]] || { echo "nothing to observe: $(basename "$f" .md)'s worktree isn't on this machine"; return 0; }
-    if [[ -z $base ]]; then
-      base="origin/$(fm_get "$f" base)"
-      # A merged parent's branch may be gone from origin; base_sha still marks where this task's own commits start.
-      if ! git -C "$dir" rev-parse --verify --quiet "$base^{commit}" >/dev/null && [[ -n $(fm_get "$f" base_sha) ]]; then
-        base=$(fm_get "$f" base_sha)
-      fi
-    fi
-  else dir=$(pwd)
-  fi
-  if [[ -z $base ]]; then
-    if p=$(cd "$dir" && project_from_cwd 2>/dev/null); then load_project "$p"; base="origin/$DEFAULT_BRANCH"; else base="origin/HEAD"; fi
-  fi
-  (cd "$dir" && cc -p --agent casual-observer --permission-mode default --permission-prompts none \
-     --settings "$CREW_HOME/config/readonly-settings.json" \
-     "Review the change $base...HEAD in this repository.")
-}
-
 cmd_gardener() {
   need git; need claude
   require_host
@@ -2356,25 +2270,6 @@ cmd_install() {
   say "Done (crew $(crew_version))"
 }
 
-# The lead's reading copy of a project: a detached checkout of a freshly fetched
-# origin/DEFAULT_BRANCH, beside the task worktrees. Prints its path.
-cmd_checkout() {
-  [[ $# == 1 ]] || die "usage: crew checkout PROJECT"
-  load_project "$1"
-  local co="$WORK_ROOT/$PROJECT/_lead"
-  detached_checkout "$co"
-  echo "$co"
-}
-
-cmd_project() {
-  local sub=${1:-}
-  shift || true
-  case $sub in
-    add) cmd_project_add "$@" ;;
-    *) die "usage: crew project add [PATH]" ;;
-  esac
-}
-
 cmd_doctor() {
   local ok=1 v
   chk() { if eval "$2" >/dev/null 2>&1; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s%s\n' "$1" "${3:+ — $3}"; ok=0; fi; }
@@ -2449,8 +2344,6 @@ cmd_doctor() {
 
 cmd=$1; shift
 case $cmd in
-  project) cmd_project "$@" ;;
-  checkout) cmd_checkout "$@" ;;
   host) cmd_host "$@" ;;
   serve) cmd_serve "$@" ;;
   setup) cmd_setup "$@" ;;
@@ -2465,7 +2358,6 @@ case $cmd in
   sync) cmd_sync "$@" ;;
   tick) cmd_tick "$@" ;;
   cleanup) cmd_cleanup "$@" ;;
-  observe) cmd_observe "$@" ;;
   gardener) cmd_gardener "$@" ;;
   goal) cmd_goal "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;

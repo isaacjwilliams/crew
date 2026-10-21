@@ -36,6 +36,9 @@ var commands = map[string]func(*Crew, []string) error{
 	"ready":     cmdReady,
 	"promote":   cmdPromote,
 	"status":    cmdStatus,
+	"project":   cmdProject,
+	"checkout":  cmdCheckout,
+	"observe":   cmdObserve,
 }
 
 func main() {

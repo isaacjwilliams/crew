@@ -109,8 +109,10 @@ func (c *Crew) loadProject(name string) (*Project, error) {
 }
 
 // projectFromCwd is the registered project whose repo the current directory is in.
-func (c *Crew) projectFromCwd() (string, bool) {
-	root, ok := repoRoot(".")
+func (c *Crew) projectFromCwd() (string, bool) { return c.projectFromDir(".") }
+
+func (c *Crew) projectFromDir(dir string) (string, bool) {
+	root, ok := repoRoot(dir)
 	if !ok {
 		return "", false
 	}
