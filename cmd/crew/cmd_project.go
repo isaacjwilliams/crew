@@ -185,8 +185,8 @@ func (p *Project) detachedCheckout(path string) error {
 // with git, which then refuses to make another at its path.
 func (p *Project) pruneWorktrees() { gitOK(p.Repo(), "worktree", "prune") }
 
-// gitDo runs git in dir, its errors shown, and fails as a bash crew would have
-// under set -e: with git's exit code and nothing more to say.
+// gitDo runs git in dir with its errors shown. When git fails, crew exits with
+// git's exit code and adds nothing: git has said what went wrong.
 func gitDo(dir string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr

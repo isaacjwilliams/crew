@@ -13,6 +13,7 @@ import (
 // version is stamped in at build time: -ldflags "-X main.version=X.Y.Z".
 var version = "dev"
 
+// Every crew command but version and guard, which need no crew home.
 var commands = map[string]func(*Crew, []string) error{
 	"help":      cmdHelp,
 	"-h":        cmdHelp,
