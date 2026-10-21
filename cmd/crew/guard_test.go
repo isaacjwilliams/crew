@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func run(t *testing.T, dir string, name string, args ...string) {
+func runIn(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -30,9 +30,9 @@ func TestGuard(t *testing.T) {
 	for _, d := range []string{home + "/projects", home + "/bin", main, scratch, sb + "/elsewhere"} {
 		os.MkdirAll(d, 0o755)
 	}
-	run(t, main, "git", "init", "-q")
-	run(t, main, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
-	run(t, main, "git", "worktree", "add", "-q", "-b", "agent/x", wt)
+	runIn(t, main, "git", "init", "-q")
+	runIn(t, main, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+	runIn(t, main, "git", "worktree", "add", "-q", "-b", "agent/x", wt)
 	os.Symlink(filepath.Join(home, "bin"), filepath.Join(wt, "into-home"))
 	os.Symlink(filepath.Join(home, "projects"), filepath.Join(sb, "elsewhere", "ledger"))
 	os.Symlink("loop", filepath.Join(wt, "loop"))

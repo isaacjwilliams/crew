@@ -18,7 +18,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -123,7 +122,7 @@ func (g guard) check(input []byte) error {
 		if base == "" {
 			base = cwd
 		}
-		top := gitOutput(base, "rev-parse", "--show-toplevel")
+		top, _ := git(base, "rev-parse", "--show-toplevel")
 		if top == "" {
 			return errors.New("not inside a git worktree; workers only edit files in their own worktree.")
 		}
@@ -131,7 +130,7 @@ func (g guard) check(input []byte) error {
 		if err != nil {
 			return fmt.Errorf("can't work out where the worktree %s is (%v)", top, err)
 		}
-		if common := gitOutput(base, "rev-parse", "--path-format=absolute", "--git-common-dir"); common != "" {
+		if common, _ := git(base, "rev-parse", "--path-format=absolute", "--git-common-dir"); common != "" {
 			if main, err := canonical(filepath.Dir(common)); err == nil && main == topDir {
 				return fmt.Errorf("this session is running in the main checkout (%s), not a crew worktree. Workers must be started with 'crew dispatch'.", top)
 			}
@@ -145,16 +144,6 @@ func (g guard) check(input []byte) error {
 	default:
 		return fmt.Errorf("the gardener only writes proposals into the ledger (%s/projects).", home)
 	}
-}
-
-// gitOutput runs git in dir and returns its output without the trailing newline,
-// or nothing if it fails.
-func gitOutput(dir string, args ...string) string {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimRight(string(out), "\n")
 }
 
 // under reports whether path is root or inside it. Both must be canonical.
