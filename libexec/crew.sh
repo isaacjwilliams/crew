@@ -1202,91 +1202,6 @@ next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- a
   echo $((max + 1))
 }
 
-branch_taken() {  # branch project
-  git -C "$REPO" show-ref --verify --quiet "refs/heads/$1" && return 0
-  git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$1" && return 0
-  local f
-  while IFS= read -r f; do
-    [[ -n $f && $(fm_get "$f" branch) == "$1" ]] && return 0
-  done < <(files_of tasks "$2")
-  return 1
-}
-
-cmd_new() {
-  local title="" proj="" name="" on="" goal=""
-  while (($#)); do
-    case $1 in
-      --project) proj=$2; shift 2 ;;
-      --branch) name=$2; shift 2 ;;
-      --on) on=$2; shift 2 ;;
-      --goal) goal=$2; shift 2 ;;
-      *) title="${title:+$title }$1"; shift ;;
-    esac
-  done
-  [[ -n $title ]] || die 'usage: crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]'
-  # The branch name also names the task id, its worktree and (with Worktrunk)
-  # the per-worktree databases, so keep it short and filesystem-safe.
-  if [[ -n $name ]] && ! [[ $name =~ ^[a-z0-9]+(-[a-z0-9]+)*$ && ${#name} -le 40 ]]; then
-    die "--branch '$name': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)"
-  fi
-  [[ -n $proj ]] || proj=$(current_project_or_die)
-  load_project "$proj"
-  lock
-  local n s id file branch content base=$DEFAULT_BRANCH parent="" pst pfiles=() gfile="" gfiles=()
-  if [[ -n $goal ]]; then
-    mapfile -t gfiles < <(files_of goals "$proj")
-    gfile=$(resolve_in "$goal" "${gfiles[@]}") || die "--goal '$goal' doesn't match exactly one goal in $proj"
-    has_word "$(fm_get "$gfile" status)" "draft running" \
-      || die "goal $(basename "$gfile" .md) is '$(fm_get "$gfile" status)'; only a draft or running goal takes new tasks"
-  fi
-  if [[ -n $on ]]; then
-    mapfile -t pfiles < <(files_of tasks "$proj")
-    parent=$(resolve_in "$on" "${pfiles[@]}") || die "--on '$on' doesn't match exactly one task in $proj"
-    pst=$(fm_get "$parent" status)
-    ! has_word "$pst" "merged abandoned" || die "$(basename "$parent" .md) is '$pst', so it has no open branch to stack on"
-    base=$(fm_get "$parent" branch)
-  fi
-  n=$(next_number tasks "$proj")
-  if [[ -n $name ]]; then s=$name
-  else s=$(slugify "$title"); s=${s:0:40}; s=${s%-}; fi
-  [[ -n $s ]] || s="task-$n"
-  id=$(printf '%03d-%s' "$n" "$s")
-  branch="${BRANCH_PREFIX}${s}"
-  if branch_taken "$branch" "$proj"; then branch="${branch}-$n"; fi
-  git check-ref-format --branch "$branch" >/dev/null 2>&1 || die "'$branch' isn't a valid branch name; check BRANCH_PREFIX"
-  file="$PDIR/tasks/$id.md"
-  content=$(<"$CREW_HOME/templates/task.md")
-  content=${content//'{{ID}}'/$id}
-  content=${content//'{{TITLE}}'/${title//\"/\'}}
-  content=${content//'{{PROJECT}}'/$proj}
-  content=${content//'{{BASE}}'/$base}
-  content=${content//'{{BRANCH}}'/$branch}
-  content=${content//'{{PRE_PR_REVIEW}}'/$PRE_PR_REVIEW}
-  content=${content//'{{PR_MODE}}'/$PR_MODE}
-  content=${content//'{{NOW}}'/$(now)}
-  printf '%s\n' "$content" >"$file"
-  if [[ -n $parent ]]; then fm_set "$file" depends_on "$(basename "$parent" .md)"; fi
-  if [[ -n $gfile ]]; then fm_set "$file" goal "$(basename "$gfile" .md)"; fi
-  append_log "$file" "created${parent:+, stacked on $(basename "$parent" .md)}${gfile:+, for goal $(basename "$gfile" .md)}"
-  commit "new $proj/$id"
-  echo "$file"
-}
-
-cmd_ready() {
-  local file; file=$(resolve tasks "${1:?usage: crew ready TASK}")
-  local missing=() h
-  for h in "## Goal" "## Structure" "## Plan" "## Acceptance criteria"; do
-    [[ -n $(section_body "$file" "$h") ]] || missing+=("${h#\#\# }")
-  done
-  ((${#missing[@]} == 0)) || die "brief is incomplete, fill in: ${missing[*]}"
-  local st; st=$(fm_get "$file" status)
-  [[ $st == draft || $st == ready ]] || die "task is '$st', not draft"
-  lock
-  fm_set "$file" status ready; touch_updated "$file"; append_log "$file" "marked ready"
-  commit "ready $(basename "$file" .md)"
-  echo "ready: $(basename "$file" .md)"
-}
-
 # Refuses a dispatch the user hasn't readied, and holds back (not_yet) one whose
 # dependencies aren't merged, or that would exceed MAX_WORKERS / MAX_IN_FLIGHT. The task's parent, if it is
 # stacked, is the one dependency that needn't be merged: cmd_dispatch requires
@@ -2068,42 +1983,6 @@ Follow your process and write proposals only into the proposals directory."
   ((failures == 0))
 }
 
-cmd_promote() {
-  local pf; pf=$(resolve proposals "${1:?usage: crew promote PROPOSAL [--branch NAME]}"); shift
-  local branchargs=()
-  while (($#)); do
-    case $1 in
-      --branch) branchargs=(--branch "$2"); shift 2 ;;
-      *) die "usage: crew promote PROPOSAL [--branch NAME]" ;;
-    esac
-  done
-  local proj title taskfile tid tmp pst
-  pst=$(fm_get "$pf" status)
-  [[ $pst == open || $pst == deferred ]] || die "proposal is '$pst' (task: $(fm_get "$pf" task)); only open or deferred proposals can be promoted"
-  proj=$(fm_get "$pf" project); title=$(fm_get "$pf" title)
-  [[ -n $proj && -d $CREW_HOME/projects/$proj ]] || proj=$(basename "$(dirname "$(dirname "$pf")")")
-  taskfile=$(cmd_new "$title" --project "$proj" "${branchargs[@]}" | tail -n1)
-  tid=$(basename "$taskfile" .md)
-  tmp=$(mktemp)
-  {
-    echo "From gardener proposal \`$(basename "$pf")\` ($pf). Run normal intake: confirm the plan with the user."
-    echo
-    section_body "$pf" "## Proposal"
-    echo
-    echo "First step suggested by the gardener:"
-    section_body "$pf" "## First step"
-  } >"$tmp"
-  lock
-  # Replace the Context placeholder with the proposal summary.
-  local tmp2; tmp2=$(mktemp)
-  CF="$tmp" awk 'BEGIN{cf=ENVIRON["CF"]} $0=="## Context"{print; while((getline l<cf)>0) print l; skip=1; next} skip&&/^## /{skip=0; print ""} !skip{print}' "$taskfile" >"$tmp2" && cat "$tmp2" >"$taskfile"
-  rm -f "$tmp" "$tmp2"
-  fm_set "$pf" status accepted; fm_set "$pf" task "$tid"; touch_updated "$pf"
-  append_log "$pf" "promoted to task $tid"
-  commit "promote $(basename "$pf" .md) → $tid"
-  echo "$taskfile"
-}
-
 # ------------------------------------------------------------------- goals ---
 # A goal is a batch of items the user hands the crew to work through without them.
 # Its goal lead, a background session, writes and plan-reviews a brief for each item
@@ -2673,8 +2552,6 @@ case $cmd in
   upgrade) cmd_upgrade "$@" ;;
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
-  new) cmd_new "$@" ;;
-  ready) cmd_ready "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   feedback) cmd_feedback "$@" ;;
   followup) cmd_followup "$@" ;;
@@ -2686,7 +2563,6 @@ case $cmd in
   cleanup) cmd_cleanup "$@" ;;
   observe) cmd_observe "$@" ;;
   gardener) cmd_gardener "$@" ;;
-  promote) cmd_promote "$@" ;;
   goal) cmd_goal "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
 esac
