@@ -457,7 +457,8 @@ cmd_upgrade() {
   # The merge needed the lock (no ledger commits in the middle of it); installing
   # doesn't, and the push takes the lock itself if it has to rebase.
   unlock
-  cmd_install
+  # The new version's crew installs it, so a change to installing takes effect now.
+  "$CREW_HOME/bin/crew" install || die "couldn't install the new version; run crew install to try again"
   push_now || warn "couldn't push the upgrade to origin; crew tick pushes it later"
   systemctl --user restart crew-lead.service >/dev/null 2>&1 || warn "couldn't restart crew-lead.service"
   echo "crew upgraded to $(crew_version)"

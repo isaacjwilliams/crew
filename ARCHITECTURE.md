@@ -325,7 +325,7 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 ```
 crew upgrade   lock (the host only) → refuse a dirty home → git fetch upstream → git merge --no-edit upstream/<default>
                  a conflict (only the person's own edits to crew's files can conflict) → stop, merge left in progress
-               → crew install → push → systemctl --user restart crew-lead.service
+               → the new version's bin/crew install → push → systemctl --user restart crew-lead.service
 ```
 
 ## `crew` internals (`bin/crew`)
