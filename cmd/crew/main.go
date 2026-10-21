@@ -53,6 +53,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"host":      cmdHost,
 	"serve":     cmdServe,
 	"setup":     cmdSetup,
+	"upgrade":   cmdUpgrade,
 }
 
 func main() {

@@ -195,24 +195,33 @@ check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git -
 out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'
 
-# 11. A new version from the public repo, merged into a home that has a ledger.
+# 11. A new release from the public repo, merged into a home that has a ledger.
 up() { CREW_HOST=tower "$H/bin/crew" upgrade </dev/null 2>&1; }
+release() {  # VERSION: commit VERSION in the public repo and tag it as that release
+  echo "$1" >"$SB/public-tree/VERSION"; git -C "$SB/public-tree" commit -qam "crew $1"
+  git -C "$SB/public-tree" tag -a -m "crew $1" "v$1"; git -C "$SB/public-tree" push -q "$SB/public.git" main "v$1"
+}
 mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"; CREW_HOST=tower "$H/bin/crew" commit "a ledger note" >/dev/null
-echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; echo 9.9.9 >"$SB/public-tree/VERSION"; release_binary 9.9.9
-git -C "$SB/public-tree" commit -qam "v2" && git -C "$SB/public-tree" push -q "$SB/public.git" main
+old=$(cat "$H/VERSION")
+echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; release 9.9.9
 before=$(git -C "$H" rev-parse @)
 out=$(up)
-check "upgrade merges the public repo's new version into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
+check "upgrade refuses a release whose binary isn't up yet, and changes nothing" '[[ $out == *"couldn'"'"'t get crew 9.9.9'"'"'s binary, so nothing has changed"* && $(git -C "$H" rev-parse @) == "$before" && $(cat "$H/VERSION") == "$old" ]]'
+release_binary 9.9.9
+echo "unreleased" >>"$SB/public-tree/README.md"; git -C "$SB/public-tree" commit -qam "after 9.9.9" && git -C "$SB/public-tree" push -q "$SB/public.git" main
+out=$(up)
+check "upgrade merges the newest release into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
+check "a release, not whatever upstream's main has since" '! grep -q unreleased "$H/README.md"'
 check "the new version installs itself, with units that are on left unmentioned" '[[ $out == *"Done (crew 9.9.9)"* && $out != *"off on this machine"* ]]'
 check "and installs it: the changed agent is copied, the old one backed up" 'grep -q "# new in v2" "$HOME/.claude/agents/lead.md" && compgen -G "$HOME/.local/share/agent-crew/backups/*/.claude/agents/lead.md" >/dev/null && ! grep -q "# new in v2" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
 check "and pushes the merge to the private repo, and restarts the lead's server" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" rev-parse main) == $(git -C "$H" rev-parse @) ]] && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
+check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew-9.9.9 ]]'
 echo "an edit" >>"$H/README.md"
 out=$(up)
 check "upgrade refuses a home with uncommitted changes" '[[ $out == *"uncommitted changes"* ]]'
 git -C "$H" checkout -q -- README.md
 sed -i '1s/.*/# my own first line/' "$H/agents/gardener.md"; git -C "$H" commit -qam "my gardener"
-sed -i '1s/.*/# upstream first line/' "$SB/public-tree/agents/gardener.md"
-git -C "$SB/public-tree" commit -qam "v3" && git -C "$SB/public-tree" push -q "$SB/public.git" main
+sed -i '1s/.*/# upstream first line/' "$SB/public-tree/agents/gardener.md"; release 9.9.10; release_binary 9.9.10
 out=$(up)
 check "a conflict with an edit in the home stops with what to do, and leaves the merge to the person" '[[ $out == *"merge is left in progress"*"merge --abort"* ]] && git -C "$H" rev-parse -q --verify MERGE_HEAD >/dev/null'
 

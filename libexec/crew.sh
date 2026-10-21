@@ -319,34 +319,6 @@ stand_down() {
   echo "stood down: units disabled, crew sessions stopped, home reset to origin"
 }
 
-# Brings in a new version of crew from the public repo (upstream). The ledger and
-# the person's settings are paths the public repo never has, so the merge only
-# meets their own edits to crew's code. A conflict there is theirs to settle:
-# crew stops with the merge in progress and says how. Then the machine's files
-# are installed again, the merge pushed, and the lead's server restarted, so new
-# phone sessions run the new lead.
-cmd_upgrade() {
-  [[ $# == 0 ]] || die "usage: crew upgrade"
-  git -C "$CREW_HOME" remote get-url upstream >/dev/null 2>&1 || die "the home has no upstream (the public crew repo) to upgrade from"
-  lock
-  [[ -z $(git -C "$CREW_HOME" status --porcelain) ]] \
-    || die "the home has uncommitted changes; commit or discard them first (git -C $CREW_HOME status)"
-  git -C "$CREW_HOME" fetch -q upstream || die "couldn't fetch upstream"
-  local ref; ref=$(git -C "$CREW_HOME" symbolic-ref -q --short refs/remotes/upstream/HEAD || echo upstream/main)
-  if ! git -C "$CREW_HOME" merge -q --no-edit "$ref"; then
-    git -C "$CREW_HOME" status --short >&2
-    die "upstream's changes conflict with edits in your home. The merge is left in progress: resolve the files above, then 'git -C $CREW_HOME commit' and run crew upgrade again. Or undo it with 'git -C $CREW_HOME merge --abort'."
-  fi
-  # The merge needed the lock (no ledger commits in the middle of it); installing
-  # doesn't, and the push takes the lock itself if it has to rebase.
-  unlock
-  # The new version's crew installs it, so a change to installing takes effect now.
-  "$CREW_HOME/bin/crew" install || die "couldn't install the new version; run crew install to try again"
-  push_now || warn "couldn't push the upgrade to origin; crew tick pushes it later"
-  systemctl --user restart crew-lead.service >/dev/null 2>&1 || warn "couldn't restart crew-lead.service"
-  echo "crew upgraded to $(crew_version)"
-}
-
 # ------------------------------------------------------------- resolution ---
 
 files_of() {  # kind(tasks|proposals) [project]
@@ -354,51 +326,6 @@ files_of() {  # kind(tasks|proposals) [project]
   if [[ -n ${2:-} ]]; then d=("$CREW_HOME/projects/$2/$1"); else d=("$CREW_HOME"/projects/*/"$1"); fi
   local x
   for x in "${d[@]}"; do [[ -d $x ]] && find "$x" -maxdepth 1 -name '*.md' -type f; done | sort
-}
-
-resolve_in() {  # arg files... ; 0 found, 1 none, 2 ambiguous
-  local arg=$1; shift
-  local f id matches=()
-  if [[ $arg == \#* ]]; then
-    local n=${arg#\#} pr
-    for f; do pr=$(fm_get "$f" pr); [[ -n $pr && ${pr##*/} == "$n" ]] && matches+=("$f"); done
-  else
-    for f; do id=$(basename "$f" .md); [[ $id == "$arg" ]] && { echo "$f"; return 0; }; done
-    if [[ $arg =~ ^[0-9]+$ ]]; then
-      local p; p=$(printf '%03d' "$((10#$arg))")
-      for f; do id=$(basename "$f" .md); [[ $id == "$p"-* ]] && matches+=("$f"); done
-    else
-      for f; do id=$(basename "$f" .md); [[ $id == *"$arg"* ]] && matches+=("$f"); done
-    fi
-  fi
-  if ((${#matches[@]} == 1)); then echo "${matches[0]}"; return 0; fi
-  if ((${#matches[@]} > 1)); then
-    printf 'crew: "%s" is ambiguous:\n' "$arg" >&2
-    printf '  %s\n' "${matches[@]##*/}" >&2
-    return 2
-  fi
-  return 1
-}
-
-resolve() {  # kind arg
-  local kind=$1 arg=$2 cur rc files=()
-  if [[ -f $arg ]]; then realpath "$arg"; return 0; fi
-  cur=$(project_from_cwd 2>/dev/null || true)
-  if [[ -n $cur ]]; then
-    mapfile -t files < <(files_of "$kind" "$cur")
-    if ((${#files[@]})); then
-      rc=0; resolve_in "$arg" "${files[@]}" || rc=$?
-      ((rc == 0)) && return 0
-      ((rc == 2)) && exit 1
-    fi
-  fi
-  mapfile -t files < <(files_of "$kind")
-  if ((${#files[@]})); then
-    rc=0; resolve_in "$arg" "${files[@]}" || rc=$?
-    ((rc == 0)) && return 0
-    ((rc == 2)) && exit 1
-  fi
-  die "no ${kind%s} matches '$arg'"
 }
 
 # A task is stacked when its `base` is another task's branch; that task is its
@@ -738,13 +665,8 @@ unrouted_questions() {  # task-file -> prints the checksum to record once they'r
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 
-crew_version() { cat "$CREW_HOME/VERSION" 2>/dev/null || echo unknown; }
-
-# ------------------------------------------------------------------- main ---
-
 cmd=$1; shift
 case $cmd in
-  upgrade) cmd_upgrade "$@" ;;
   tick) cmd_tick "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
 esac
