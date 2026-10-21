@@ -2656,6 +2656,18 @@ say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 
 # The version of crew's code in this home, which comes with each upgrade.
+# Whether Claude Code trusts DIR. Trust accepted in a folder covers the folders
+# below it, and inside a git repo Claude Code records it for the repo's top level
+# (the home, for lead/), so a folder above DIR counts too.
+trusted() {
+  local folder=$1
+  while :; do
+    jq -e --arg p "$folder" '.projects[$p].hasTrustDialogAccepted == true' "$HOME/.claude.json" >/dev/null 2>&1 && return 0
+    [[ $folder == / ]] && return 1
+    folder=$(dirname "$folder")
+  done
+}
+
 crew_version() { cat "$CREW_HOME/VERSION" 2>/dev/null || echo unknown; }
 
 backup() {  # file -> a copy in this run's backup dir, at its path under $HOME
@@ -2908,7 +2920,7 @@ cmd_doctor() {
   done
   echo "Trust (workers start in worktrees under WORK_ROOT; the lead in the home's lead/)"
   for c in "$WORK_ROOT" "$CREW_HOME/lead"; do
-    chk "$c trusted" "jq -e --arg p '$c' '.projects[\$p].hasTrustDialogAccepted == true' \$HOME/.claude.json" "cd $c && claude, accept, /exit"
+    chk "$c trusted" "trusted '$c'" "cd $c && claude, accept, /exit"
   done
   # A unit runs crew with the PATH its service sets, not your shell's, so a tool
   # your shell finds through its config (mise, nvm, ...) can be missing there.

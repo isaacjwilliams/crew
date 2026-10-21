@@ -26,9 +26,9 @@ check "crew doctor finds the guard hook in the settings" '[[ $doctor_out == *"ok
 check "crew doctor finds the commit hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json commits ledger edits"* && $doctor_out == *"ok   config/worker-settings.json commits ledger edits"* ]]'
 check "crew doctor finds the lead's settings for this machine" '[[ $doctor_out == *"ok   lead/.claude/settings.local.json written for this machine"* ]]'
 check "crew doctor flags an untrusted lead directory" '[[ $doctor_out == *"FAIL $H/lead trusted"* ]]'
-jq -n --arg p "$H/lead" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
+jq -n --arg p "$H" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
-check "crew doctor finds the lead directory trusted" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
+check "crew doctor finds the lead directory trusted through the home, where Claude Code records it" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
 
 # 2. An unchanged re-run backs nothing up.
 backups() { find "$HOME/.local/share/agent-crew/backups" -type f 2>/dev/null | wc -l; }
