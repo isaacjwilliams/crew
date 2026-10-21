@@ -1141,106 +1141,6 @@ next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- a
   echo $((max + 1))
 }
 
-# Refuses a dispatch the user hasn't readied, and holds back (not_yet) one whose
-# dependencies aren't merged, or that would exceed MAX_WORKERS / MAX_IN_FLIGHT. The task's parent, if it is
-# stacked, is the one dependency that needn't be merged: cmd_dispatch requires
-# its branch on origin instead. Call with the lock held.
-dispatch_checks() {  # file force
-  local file=$1 force=$2 id st dep deps depfile depst parent pst="" pfiles=()
-  id=$(basename "$file" .md)
-  st=$(fm_get "$file" status)
-  [[ $st == ready || $force == 1 ]] || die "$id is '$st'; run 'crew ready $id' first"
-  load_branches "$PROJECT"
-  parent=$(parent_of "$file")
-  [[ -z $parent ]] || pst=$(fm_get "$parent" status)
-  [[ $pst != abandoned ]] || die "$id is stacked on $(basename "$parent" .md), which is abandoned; give it another base with 'crew set $id base <branch>'"
-  deps=$(fm_get "$file" depends_on); deps=${deps//,/ }; deps=${deps//[\[\]]/}
-  mapfile -t pfiles < <(files_of tasks "$PROJECT")
-  for dep in $deps; do
-    depfile=$(resolve_in "$dep" "${pfiles[@]}") || die "$id depends on '$dep', which doesn't match exactly one task in $PROJECT"
-    [[ $depfile != "$parent" ]] || continue
-    depst=$(fm_get "$depfile" status)
-    [[ $depst == merged ]] || not_yet "$id depends on $(basename "$depfile" .md), which is '$depst' (must be merged)"
-  done
-  local aj running inflight
-  aj=$(agents_json)
-  running=$(running_workers "$aj")
-  ((running < MAX_WORKERS)) || not_yet "$running workers already running (MAX_WORKERS=$MAX_WORKERS); leaving $id ready"
-  inflight=$(in_flight_count)
-  # A task stacked on one that's in flight joins a stack that is already counted.
-  has_word "$pst" "$ACTIVE_STATES" || ((inflight < MAX_IN_FLIGHT)) || not_yet "$inflight tasks already in flight (MAX_IN_FLIGHT=$MAX_IN_FLIGHT); leaving $id ready"
-}
-
-cmd_dispatch() {
-  need git; need jq; need claude
-  require_host
-  local arg="" force=0
-  while (($#)); do case $1 in --force) force=1; shift ;; *) arg=$1; shift ;; esac; done
-  local file; file=$(resolve tasks "${arg:?usage: crew dispatch TASK}")
-  local id; id=$(basename "$file" .md)
-  load_project "$(task_project "$file")"
-  worker_settings >/dev/null
-  local base branch wt name parent pid=""
-  base=$(fm_get "$file" base); base=${base:-$DEFAULT_BRANCH}
-  branch=$(fm_get "$file" branch)
-  wt="$WORK_ROOT/$PROJECT/$id"
-
-  lock
-  load_branches "$PROJECT"
-  parent=$(parent_of "$file")
-  # A parent that merged before this task started leaves nothing to stack on, so
-  # start from whatever the parent was based on.
-  if [[ -n $parent && $(fm_get "$parent" status) == merged ]] \
-     && ! git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
-    base=$(effective_base "$file")
-    fm_set "$file" base "$base"
-    append_log "$file" "$(basename "$parent" .md) has merged; based on $base instead of its branch"
-    parent=$(parent_of "$file")
-  fi
-  [[ -z $parent ]] || pid=$(basename "$parent" .md)
-  dispatch_checks "$file" "$force"
-  # Setting up the worktree can take minutes when the project's Worktrunk hooks
-  # install dependencies or create databases, so don't hold the ledger lock (and
-  # block every worker's `crew log`) meanwhile. The checks run again afterwards.
-  unlock
-  if ! git -C "$REPO" fetch --quiet origin "$base" 2>/dev/null; then
-    # A stacked task's PR targets its parent's branch, so that has to be pushed first.
-    [[ -z $parent || $(fm_get "$parent" status) == merged ]] \
-      || not_yet "$id is stacked on $pid, whose branch $base isn't on origin yet; dispatch $id once that task's worker has pushed"
-    warn "git fetch origin $base failed; using local refs"
-  fi
-  setup_worktree "$file" "$wt" "$branch" "$base"
-  lock
-  fm_set "$file" worktree "$wt"
-  if [[ -n $NEW_BRANCH_FROM ]]; then fm_set "$file" base_sha "$NEW_BRANCH_FROM"; fi
-  dispatch_checks "$file" "$force"
-
-  name="crew-$PROJECT-$id"; name=${name:0:80}
-  fm_set "$file" worker_name "$name"
-
-  local prompt="You are the implementer for task $id in project $PROJECT.
-Task file: $file
-Worktree (your working directory): $wt
-Branch: $branch, based on origin/$base.
-Read the task file completely, then follow your first-run workflow. Update the ledger with \`crew log $id \"...\"\` and \`crew set $id <key> <value>\`."
-  if [[ -n $parent ]]; then
-    local ppr; ppr=$(fm_get "$parent" pr)
-    prompt+="
-This task is stacked on task $pid${ppr:+ (PR #${ppr##*/})}: $base is that task's branch, not the default branch. Your PR targets $base; see \"Stacked tasks\" in your instructions."
-  fi
-  launch_worker "$file" "$wt" "$prompt" fresh || die "could not start the worker session (see output above)"
-
-  fm_set "$file" worker_job "$LAUNCH_JOB"
-  fm_set "$file" worker_session "$LAUNCH_SESSION"
-  fm_set "$file" status working
-  touch_updated "$file"
-  append_log "$file" "dispatched: worker $LAUNCH_JOB (session ${LAUNCH_SESSION:-unknown}) in $wt on $branch"
-  commit "dispatch $PROJECT/$id"
-  echo "dispatched $id → worker $LAUNCH_JOB ($name)"
-  echo "  worktree: $wt"
-  echo "  watch:    claude attach $LAUNCH_JOB   |   claude agents"
-}
-
 cmd_followup() {
   need jq; need claude
   local arg="" fresh=0 note=""
@@ -1441,7 +1341,7 @@ tick_task() {  # file agents_json
     # The goal lead marked it ready, which is the go-ahead. A dispatch that has to
     # wait for a cap or a dependency (exit 4) is tried again on the next tick.
     local rc=0 err
-    err=$( (cmd_dispatch "$f") 2>&1 >/dev/null ) || rc=$?
+    err=$(crew_go dispatch "$f" 2>&1 >/dev/null) || rc=$?
     case $rc in
       0) echo "$id: dispatched for goal $(fm_get "$f" goal)" ;;
       4) ;;
@@ -2133,7 +2033,6 @@ case $cmd in
   upgrade) cmd_upgrade "$@" ;;
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
-  dispatch) cmd_dispatch "$@" ;;
   followup) cmd_followup "$@" ;;
   restack) cmd_restack "$@" ;;
   tick) cmd_tick "$@" ;;

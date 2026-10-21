@@ -81,6 +81,7 @@ func (c *Crew) path(parts ...string) string {
 type Project struct {
 	Name     string
 	Dir      string
+	Home     string // the crew home it's in
 	Settings Settings
 }
 
@@ -89,7 +90,7 @@ func (p *Project) DefaultBranch() string { return p.Settings["DEFAULT_BRANCH"] }
 func (p *Project) WorkRoot() string      { return p.Settings["WORK_ROOT"] }
 
 func (c *Crew) loadProject(name string) (*Project, error) {
-	p := &Project{Name: name, Dir: c.path("projects", name), Settings: c.Settings.clone()}
+	p := &Project{Name: name, Dir: c.path("projects", name), Home: c.Home, Settings: c.Settings.clone()}
 	env := filepath.Join(p.Dir, "project.env")
 	if !isFile(env) {
 		return nil, fail("unknown project '%s' (run 'crew project add' in the repo)", name)

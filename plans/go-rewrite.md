@@ -108,3 +108,4 @@ Don't reopen these.
 - Step 4 done: `project`, `checkout`, `observe` in Go (`cmd_project.go`). `gitDo`/`quietly` fail the way `set -e` did (git's or claude's exit code, nothing added). Values crew writes to `*.env` go through `envQuote`. Diffed: identical.
 - Step 5, `feedback` and `reply` in Go (`cmd_feedback.go`; GitHub JSON in `ghComment`, numbers kept as `json.Number`). jq isn't needed by them any more (gh's own `--jq` stays). Each `crew feedback` looks up the login itself; the bash tick's `GH_LOGIN` cache no longer reaches it (one more `gh api user` per changed PR).
 - Step 5, `sync` in Go (`cmd_sync.go`). Diffed: identical.
+- Step 5, `dispatch` in Go (`cmd_dispatch.go`, `worktree.go`, launching in `sessions.go`, and `json.go`, which keeps settings' key order so merged and goal-lead settings come out as jq's did). `relaunch` falls back to a fresh session only on `errNotStarted`. Diffed: identical.
