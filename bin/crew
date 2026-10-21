@@ -577,8 +577,12 @@ cmd_serve() {
   cd "$CREW_HOME/lead" || die "$CREW_HOME/lead is missing"
   # Without CLAUDECODE, as cc does, so it starts from inside a Claude session too.
   # This home's bin/ first, so the lead's sessions run this home's crew.
+  # Without --continue: it fails when no earlier server ran here, and serves only
+  # one session. A plain start brings back the last server's sessions, if it
+  # stopped in the last few hours. same-dir keeps sessions in lead/, not in
+  # worktrees of the home.
   PATH="$CREW_HOME/bin:$PATH" exec env -u CLAUDECODE \
-    claude remote-control --name crew --permission-mode "$LEAD_PERMISSION_MODE" --continue
+    claude remote-control --name crew --spawn same-dir --permission-mode "$LEAD_PERMISSION_MODE"
 }
 
 cmd_host() {

@@ -119,7 +119,7 @@ out=$(tower "$TH/bin/crew" host up </dev/null 2>&1)
 check "host up claims the lease on origin" '[[ $(origin_host) == tower && $(cat "$TH/host") == tower && $out == *"crew runs on tower"* ]]'
 check "host up installs, and enables the timers and the lead service" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled" && grep -qx crew-lead.service "$SB/tower/systemctl-enabled"'
 tower "$TH/bin/crew" serve >/dev/null 2>&1
-check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --permission-mode auto --continue" && $(cat "$SB/tower/remote-control.cwd") == "$TH/lead" ]]'
+check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/remote-control.cwd") == "$TH/lead" ]]'
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
