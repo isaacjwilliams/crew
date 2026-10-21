@@ -21,7 +21,6 @@ load_config() {
 }
 load_config
 
-REPLY_MARKER='<!-- crew -->'
 ACTIVE_STATES="working needs-input addressing-feedback pr-open"
 declare -A BRANCHES=()   # filled by load_branches
 
@@ -1242,120 +1241,6 @@ This task is stacked on task $pid${ppr:+ (PR #${ppr##*/})}: $base is that task's
   echo "  watch:    claude attach $LAUNCH_JOB   |   claude agents"
 }
 
-# Pulls the PR comments newer than feedback_since. The user's own become a review
-# round for the worker. Collaborators' (people with write access, not bots) become
-# unchecked items under Open questions: they wait for the user to decide what to do,
-# and no agent answers them on its own. Anyone else's are left alone. Returns 3 if
-# there was nothing new.
-cmd_feedback() {
-  need gh; need jq
-  local arg="" since=""
-  while (($#)); do
-    case $1 in
-      --since) since=$2; shift 2 ;;
-      *) arg=$1; shift ;;
-    esac
-  done
-  local file; file=$(resolve tasks "${arg:?usage: crew feedback TASK}")
-  local id; id=$(basename "$file" .md)
-  load_project "$(task_project "$file")"
-  local pr num branch
-  pr=$(fm_get "$file" pr); branch=$(fm_get "$file" branch)
-  if [[ -z $pr ]]; then
-    pr=$(cd "$REPO" && gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)
-    [[ -n $pr ]] || die "$id has no PR yet"
-  fi
-  num=${pr##*/}
-  [[ -n $since ]] || since=$(fm_get "$file" feedback_since)
-  [[ -n $since ]] || since="1970-01-01T00:00:00Z"
-  local me; me=$(gh_login) || die "gh is not authenticated (run 'gh auth login')"
-  local stamp; stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-  # $who and $mine are jq fragments, spliced into the programs below. $who gives
-  # each comment .who: "me", "collaborator", or "other" (dropped here).
-  local who='map(.who = if .user.login == $me then "me"
-                       elif (.user.type // "") != "Bot" and ((.author_association // "") | IN("OWNER", "MEMBER", "COLLABORATOR")) then "collaborator"
-                       else "other" end)
-             | map(select(.who != "other" and (((.body // "") | contains($marker)) | not)))'
-  local allreviews reviews inline convo
-  allreviews=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/reviews" --paginate --jq '.[]' | jq -s .)
-  reviews=$(jq --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
-    "$who"' | map(select((.submitted_at // "") > $since and (.body // "") != ""))' <<<"$allreviews")
-  inline=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/comments" --paginate --jq '.[]' \
-    | jq -s --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
-      --argjson rmap "$(jq 'map({key: (.id|tostring), value: {state, submitted_at}}) | from_entries' <<<"$allreviews")" \
-      "$who"' | map(($rmap[(.pull_request_review_id // "" | tostring)] // null) as $r
-                  | select(($r.state // "") != "PENDING")
-                  | select((($r.submitted_at // .created_at) // "") > $since))')
-  convo=$(cd "$REPO" && gh api "repos/{owner}/{repo}/issues/$num/comments" --paginate --jq '.[]' \
-    | jq -s --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
-      "$who"' | map(select(.created_at > $since))')
-
-  local nr ni nc mine theirs
-  mine='map(select(.who == "me"))'
-  nr=$(jq "$mine | length" <<<"$reviews"); ni=$(jq "$mine | length" <<<"$inline"); nc=$(jq "$mine | length" <<<"$convo")
-  theirs=$(jq -n --argjson r "$reviews" --argjson i "$inline" --argjson c "$convo" \
-    '[($r[] | .kind = "review"), ($i[] | .kind = "inline"), ($c[] | .kind = "comment")] | map(select(.who == "collaborator"))')
-  local no; no=$(jq length <<<"$theirs")
-  if ((nr + ni + nc + no == 0)); then
-    echo "No new review feedback on PR #$num since $since."
-    return 3
-  fi
-
-  local q='def quote: (. // "") | gsub("\r"; "") | split("\n") | map("  > " + .) | join("\n");'
-  local rounds roundf="" questf=""
-  rounds=$(fm_get "$file" review_rounds); rounds=${rounds:-0}
-  if ((nr + ni + nc)); then
-    rounds=$((rounds + 1)); roundf=$(mktemp)
-    {
-      echo "### Round $rounds — $(date '+%Y-%m-%d %H:%M') (PR #$num)"
-      echo
-      if ((nr)); then
-        echo "**Review summaries**"
-        jq -r "$q $mine"' | .[] | "- [ ] review \(.id) (\(.state | ascii_downcase))\n\(.body | quote)"' <<<"$reviews"
-        echo
-      fi
-      if ((ni)); then
-        echo "**Inline comments**"
-        jq -r "$q $mine"' | .[] | "- [ ] `\(.path):\(.line // .original_line // "?")` — comment \(.id)\(if .in_reply_to_id then " (in thread \(.in_reply_to_id))" else "" end) — [link](\(.html_url))\n\(.body | quote)"' <<<"$inline"
-        echo
-      fi
-      if ((nc)); then
-        echo "**Conversation comments**"
-        jq -r "$q $mine"' | .[] | "- [ ] comment \(.id) — [link](\(.html_url))\n\(.body | quote)"' <<<"$convo"
-        echo
-      fi
-    } >"$roundf"
-  fi
-  if ((no)); then
-    questf=$(mktemp)
-    jq -r --arg num "$num" "$q"' .[]
-      | "- [ ] @\(.user.login) " + (if .kind == "review" then "reviewed PR #\($num) (\(.state | ascii_downcase)), review \(.id)"
-                                   elif .kind == "inline" then "commented on `\(.path):\(.line // .original_line // "?")` in PR #\($num), comment \(.id)"
-                                   else "commented on PR #\($num), comment \(.id)" end)
-        + " — [link](\(.html_url))\n\(.body | quote)"' <<<"$theirs" >"$questf"
-  fi
-
-  lock
-  if [[ -n $roundf ]]; then
-    insert_before_heading "$file" "## Log" "$roundf"
-    fm_set "$file" review_rounds "$rounds"
-    append_log "$file" "review round $rounds recorded ($nr reviews, $ni inline, $nc conversation)"
-  fi
-  if [[ -n $questf ]]; then
-    append_to_section "$file" "## Open questions" "$questf"
-    append_log "$file" "$no collaborator comment(s) recorded under Open questions for the user"
-  fi
-  fm_set "$file" pr "$pr"
-  fm_set "$file" feedback_since "$stamp"
-  touch_updated "$file"
-  commit "feedback $PROJECT/$id"
-  if [[ -n $questf ]]; then echo "For the user (under Open questions):"; cat "$questf"; rm -f "$questf"; fi
-  [[ -n $roundf ]] || return 0
-  cat "$roundf"; rm -f "$roundf"
-  ((rounds <= MAX_REVIEW_ROUNDS)) || warn "this is round $rounds (MAX_REVIEW_ROUNDS=$MAX_REVIEW_ROUNDS); consider whether the plan needs a rethink"
-}
-
 cmd_followup() {
   need jq; need claude
   local arg="" fresh=0 note=""
@@ -1464,49 +1349,6 @@ cmd_restack() {
   lock
   fm_set "$file" restack_sent "$target"
   commit "restack $PROJECT/$id"
-}
-
-# Replies to one of the review comments a round lists, on the task's own PR only.
-# An inline comment gets a reply in its thread. A conversation comment or a review
-# summary has no thread, so the reply is a new PR comment that quotes it first.
-cmd_reply() {
-  need gh; need jq
-  local file; file=$(resolve tasks "${1:?usage: crew reply TASK COMMENT_ID TEXT}")
-  local cid=${2:?comment id required}; shift 2
-  local text="$*"; [[ -n $text ]] || die "reply text required"
-  [[ $cid =~ ^[0-9]+$ ]] || die "comment id must be a number, not '$cid'"
-  load_project "$(task_project "$file")"
-  [[ $REPLY_TO_THREADS == yes ]] || die "REPLY_TO_THREADS is '$REPLY_TO_THREADS'; not replying"
-  local pr; pr=$(fm_get "$file" pr); [[ -n $pr ]] || die "task has no PR"
-  local num=${pr##*/} body="$text
-
-$REPLY_MARKER" c
-  if c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/comments/$cid" 2>/dev/null); then
-    jq -e --arg n "$num" '(.pull_request_url // "") | endswith("/pulls/" + $n)' <<<"$c" >/dev/null \
-      || die "comment $cid isn't on PR #$num"
-    # GitHub only accepts replies to a thread's top-level comment.
-    local root; root=$(jq -r '.in_reply_to_id // .id' <<<"$c")
-    (cd "$REPO" && gh api --silent "repos/{owner}/{repo}/pulls/$num/comments/$root/replies" -f body="$body")
-    echo "replied to comment $cid in its thread"
-    return
-  fi
-  local kind
-  if c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/issues/comments/$cid" 2>/dev/null); then
-    jq -e --arg n "$num" '(.issue_url // "") | endswith("/issues/" + $n)' <<<"$c" >/dev/null \
-      || die "comment $cid isn't on PR #$num"
-    kind=Comment
-  elif c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/reviews/$cid" 2>/dev/null); then
-    kind=Review
-  else
-    die "$cid isn't a review comment, conversation comment or review on PR #$num"
-  fi
-  local quote
-  quote=$(jq -r --arg kind "$kind" '((.body // "") | gsub("\r"; "") | split("\n") | map(select(test("\\S"))) | first // "") as $l
-    | "> [\($kind)](\(.html_url)): " + (if ($l | length) > 120 then $l[:117] + "…" else $l end)' <<<"$c")
-  (cd "$REPO" && gh api --silent "repos/{owner}/{repo}/issues/$num/comments" -f body="$quote
-
-$body")
-  echo "replied to ${kind,,} $cid on PR #$num"
 }
 
 cmd_sync() {
@@ -1675,7 +1517,7 @@ tick_task() {  # file agents_json
   if [[ -n $(fm_get "$f" pr) ]] && pr_may_have_new_comments "$f"; then
     # crew feedback reports what it recorded only in the task file, so compare before and after.
     rounds=$(fm_get "$f" review_rounds); asked=$(open_questions "$f")
-    if (cmd_feedback "$f") >/dev/null; then
+    if crew_go feedback "$f" >/dev/null; then
       [[ $(fm_get "$f" review_rounds) == "$rounds" ]] || echo "$id: review round $(fm_get "$f" review_rounds) recorded"
       (($(open_questions "$f") == asked)) || echo "$id: $(($(open_questions "$f") - asked)) comment(s) from collaborators, for you"
     fi
@@ -2351,10 +2193,8 @@ case $cmd in
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
-  feedback) cmd_feedback "$@" ;;
   followup) cmd_followup "$@" ;;
   restack) cmd_restack "$@" ;;
-  reply) cmd_reply "$@" ;;
   sync) cmd_sync "$@" ;;
   tick) cmd_tick "$@" ;;
   cleanup) cmd_cleanup "$@" ;;

@@ -44,7 +44,7 @@ type Crew struct {
 	Host     string   // this machine's name: CREW_HOST, else its short hostname
 
 	ledgerLock *os.File // held from lock until unlock or the end of the process
-	ghLogin    string
+	login      string   // the GitHub login crew acts for, once looked up
 }
 
 func newCrew() (*Crew, error) {
