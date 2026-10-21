@@ -74,23 +74,24 @@ func (p *Project) worktreeCreate(wt, branch, startRef, logf string) error {
 	}
 }
 
-// worktreeRemove removes a worktree, and its changes too when force is set.
+// worktreeRemove removes a worktree, and its changes too when force is set. It
+// reports whether it did; the error is for a worktree tool it can't run at all.
 // crew deletes merged branches itself, the same way for both tools.
-func (p *Project) worktreeRemove(wt string, force bool, logf string) error {
+func (p *Project) worktreeRemove(wt string, force bool, logf string) (bool, error) {
 	var flags []string
 	if force {
 		flags = []string{"--force"}
 	}
 	switch tool := p.Settings["WORKTREE_TOOL"]; tool {
 	case "git":
-		return gitDo(p.Repo(), append(append([]string{"worktree", "remove"}, flags...), wt)...)
+		return gitDo(p.Repo(), append(append([]string{"worktree", "remove"}, flags...), wt)...) == nil, nil
 	case "worktrunk":
 		if err := need("wt"); err != nil {
-			return err
+			return false, err
 		}
 		log, err := openLog(logf)
 		if err != nil {
-			return err
+			return false, err
 		}
 		defer log.Close()
 		fmt.Fprintf(log, "== %s wt remove %s\n", now(), wt)
@@ -99,11 +100,11 @@ func (p *Project) worktreeRemove(wt string, force bool, logf string) error {
 		if cmd.Run() != nil {
 			tailTo(os.Stderr, logf, 15)
 			warn("full output in %s", logf)
-			return exitQuietly(1)
+			return false, nil
 		}
-		return nil
+		return true, nil
 	default:
-		return unknownTool(tool)
+		return false, unknownTool(tool)
 	}
 }
 

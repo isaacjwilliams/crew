@@ -110,3 +110,4 @@ Don't reopen these.
 - Step 5, `sync` in Go (`cmd_sync.go`). Diffed: identical.
 - Step 5, `dispatch` in Go (`cmd_dispatch.go`, `worktree.go`, launching in `sessions.go`, and `json.go`, which keeps settings' key order so merged and goal-lead settings come out as jq's did). `relaunch` falls back to a fresh session only on `errNotStarted`. Diffed: identical.
 - Step 5, `followup` and `restack` in Go (`cmd_followup.go`); restack calls `followup` in-process. The bash helpers nothing calls any more were dropped with them. Diffed: identical.
+- Step 5, `cleanup` in Go (`cmd_cleanup.go`; the `/proc` scan in `proc_linux.go`, and `proc_darwin.go` says it isn't supported, which cleanup warns about and carries on). Diffed: identical.

@@ -630,9 +630,6 @@ resolve() {  # kind arg
   die "no ${kind%s} matches '$arg'"
 }
 
-task_project() { fm_get "$1" project; }
-
-# ------------------------------------------------------------------ stacks ---
 # A task is stacked when its `base` is another task's branch; that task is its
 # parent. Nothing else records the relationship, so it can't disagree with `base`.
 
@@ -848,22 +845,6 @@ wait_for_launch() {  # job -> prints the job's sessionId (empty if it never repo
   return 0
 }
 
-worktree_remove() {  # path force(0|1) logfile
-  local wt=$1 force=$2 logf=$3 flags=()
-  ((force)) && flags=(--force)
-  case $WORKTREE_TOOL in
-    git) git -C "$REPO" worktree remove "${flags[@]}" "$wt" ;;
-    worktrunk)
-      need wt
-      mkdir -p "$(dirname "$logf")"
-      echo "== $(now) wt remove $wt" >>"$logf"
-      # crew deletes merged branches itself, the same way for both tools.
-      wt -C "$REPO" remove --no-delete-branch --foreground "${flags[@]}" "$wt" >>"$logf" 2>&1 \
-        || { tail -n 15 "$logf" >&2; warn "full output in $logf"; return 1; } ;;
-    *) die "unknown WORKTREE_TOOL '$WORKTREE_TOOL' (use git or worktrunk)" ;;
-  esac
-}
-
 # A worktree or checkout deleted by hand (rm -rf) stays registered with git, which
 # then refuses to make another at its path. Needs load_project.
 prune_worktrees() { git -C "$REPO" worktree prune; }
@@ -1054,7 +1035,7 @@ tick_task() {  # file agents_json
   fi
   if [[ $st == merged ]]; then
     # A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
-    if [[ -n $(fm_get "$f" worktree) ]] && (cmd_cleanup "$f") >/dev/null; then echo "$id: merged; worktree cleaned up"; fi
+    if [[ -n $(fm_get "$f" worktree) ]] && crew_go cleanup "$f" >/dev/null; then echo "$id: merged; worktree cleaned up"; fi
     return 0
   fi
   has_word "$st" "$ACTIVE_STATES" || return 0
@@ -1101,45 +1082,6 @@ tick_task() {  # file agents_json
   if [[ $st != needs-input ]] && ((waiting > 0)); then
     if crew_go set "$f" status needs-input >/dev/null; then echo "$id: waiting on you ($waiting open question(s))"; fi
   fi
-}
-
-cmd_cleanup() {
-  need git
-  local arg="" force=0 merged=0
-  while (($#)); do case $1 in --force) force=1; shift ;; --merged) merged=1; shift ;; *) arg=$1; shift ;; esac; done
-  local files=()
-  if ((merged)); then
-    local p f; p=$(current_project_or_die)
-    while IFS= read -r f; do
-      [[ -n $f && $(fm_get "$f" status) == merged && -n $(fm_get "$f" worktree) ]] && files+=("$f")
-    done < <(files_of tasks "$p")
-    ((${#files[@]})) || { echo "Nothing to clean up."; return; }
-  else
-    files=("$(resolve tasks "${arg:?usage: crew cleanup TASK|--merged [--force]}")")
-  fi
-  lock
-  local file id st wt branch job
-  for file in "${files[@]}"; do
-    id=$(basename "$file" .md)
-    load_project "$(task_project "$file")"
-    st=$(fm_get "$file" status); wt=$(fm_get "$file" worktree); branch=$(fm_get "$file" branch); job=$(fm_get "$file" worker_job)
-    if [[ $st != merged && $st != abandoned && $force == 0 ]]; then warn "$id is '$st'; skipping (use --force)"; continue; fi
-    if [[ -n $wt && -d $wt && $force == 0 && -n $(git -C "$wt" status --porcelain 2>/dev/null) ]]; then
-      warn "$id: $wt has uncommitted changes; skipping (use --force)"; continue
-    fi
-    # The worker goes first, so it doesn't carry on in a deleted directory, and the
-    # worktree tool's remove hooks run without it or the processes it left behind.
-    remove_worker "$job" || { warn "$id: worker $job is still running; skipping (stop it in claude agents)"; continue; }
-    if [[ -n $wt && -d $wt ]]; then
-      stop_processes_in "$wt"
-      worktree_remove "$wt" "$force" "$CREW_HOME/logs/worktree-$PROJECT-$id.log" || { warn "$id: couldn't remove $wt"; continue; }
-    fi
-    if [[ $st == merged && -n $branch ]]; then git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 || true; fi
-    fm_set "$file" worktree ""; touch_updated "$file"
-    append_log "$file" "cleaned up worktree${st:+ ($st)}"
-    echo "cleaned up $id"
-  done
-  commit "cleanup"
 }
 
 cmd_gardener() {
@@ -1737,7 +1679,6 @@ case $cmd in
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;
   tick) cmd_tick "$@" ;;
-  cleanup) cmd_cleanup "$@" ;;
   gardener) cmd_gardener "$@" ;;
   goal) cmd_goal "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
