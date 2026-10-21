@@ -4,29 +4,41 @@ For an agent working through this alone. Before the first step, read this file, 
 
 ## Why
 
-The user finds bash hard to read, hard to test, and not portable, and wants crew to run on a Mac as well as Linux. They chose a compiled language, and Go over Rust: Go needs no third-party modules here, cross-compiles to macOS from Linux, and reads plainly. Mac support itself comes after this plan, on its own branch.
+The user finds bash hard to read, hard to test, and not portable, and wants crew to run on a Mac as well as Linux. They chose a compiled language, and Go over Rust: Go needs no third-party modules here, cross-compiles to macOS from Linux, and reads plainly. The repo comes "batteries included": a clone runs without Go installed. Mac support itself comes after this plan, on its own branch.
 
 ## Decisions
 
 Don't reopen these.
 
-- **Go, standard library only.** No third-party modules. `gofmt` and `go vet` are the lint.
-- **One binary, built on each machine.** `bin/crew` becomes the build output, gitignored. There's no binary in git and no release download.
-  - After cloning: `go build -o bin/crew ./cmd/crew`, then `bin/crew setup` (or `host up`).
-  - `crew upgrade` merges as today, builds `bin/crew.new`, renames it over `bin/crew`, then runs the new binary's `install`. A failed build leaves the old binary in place.
-  - Go joins the runtime dependencies. `jq` and `flock` leave them, since crew no longer needs them (the tests still use `jq`).
-  - `crew doctor` checks that the binary was built from the home's `HEAD`, using the VCS stamp `go build` embeds (`debug.ReadBuildInfo`).
-- **`crew-guard` becomes `crew guard <role>`.** The hook command is `"${CREW_HOME:-$HOME/crew}/bin/crew" guard <role>`.
-  - It blocks (exit 2) whenever it can't work out a path. The bash version allows every edit when `realpath` fails, which it always does on macOS.
+- **Go, standard library only.** No third-party modules. `gofmt` and `go vet` are the lint. Go is needed only to develop crew, never to run it.
+- **Binaries are attached to GitHub Releases, never committed.** A GitHub Actions workflow builds them when a `v*` tag is pushed (see step 8).
+  - Files are named after `uname -s` and `uname -m`: `crew-Linux-x86_64`, `crew-Linux-aarch64`. macOS binaries come with the Mac branch.
+  - The version is stamped in at build time (`-ldflags "-X main.version=…"`). `crew doctor` checks that it matches `VERSION`.
+- **`bin/crew` is a committed POSIX `sh` launcher, about 15 lines.**
+  - It runs `bin/release/crew-<VERSION>` (`bin/release/` is gitignored), with `VERSION` read from the home. If that file is missing, it downloads it once with `curl` from the public repo's release `v<VERSION>`: to a temporary file, checked by running it with `version`, then renamed into place.
+  - `CREW_VERSION` in the environment picks another version. `crew upgrade` uses it to fetch the next version's binary before it merges, so only the launcher knows how to download.
+  - It finds itself through symlinks, as the bash did.
+  - When it can't get a binary, it says why and exits 1, or 2 when called as `crew guard`, so a missing binary blocks edits.
+  - The release URL is written into the launcher. A fork changes that one line.
+  - So a fresh clone, or another machine taking over (`git clone <private repo> ~/crew && ~/crew/bin/crew host up --take`), needs no extra step.
+- **`crew upgrade` moves to the newest release tag on `upstream`, not `upstream/main`.**
+  - First `CREW_VERSION=<new> bin/crew version`, which downloads the binary. If that fails, it refuses: the release's binaries may not be up yet.
+  - Then the merge, the new version's `install`, the push and the restart, as today.
+  - Then it deletes the other versions in `bin/release/`.
+  - The agent prompts and the binary then always come from the same release.
+- **Runtime dependencies:** git, gh, claude, fish and curl. `jq` and `flock` drop out, since crew no longer uses them (the tests still do).
+- **The guard is `crew guard <role>`. `bin/crew-guard` stays, as a two-line `sh` file that runs `crew guard "$@"`.** The hook command and its contract don't change.
+  - Sessions started before an upgrade keep calling `bin/crew-guard`. If it disappeared, Claude Code would treat the hook's "not found" as a non-blocking error and allow their edits.
+  - The guard blocks (exit 2) whenever it can't work out a path. The bash version allows every edit when `realpath` fails, which it always does on macOS.
 - **Nothing anyone else sees changes.** The commands, flags, output text, exit codes (1 refused, 3 not the host, 4 `not_yet`), the ledger format and the `*.env` format all stay as they are. The agent prompts and the shell test suites depend on them.
 - **The `*.env` files stay shell-style but get parsed, not sourced.**
   - Supported: `KEY=value`, single or double quotes, `$VAR` / `${VAR}`, and a trailing `# comment`.
   - Any other line is an error that names the file and line. This goes in the release notes.
 - **Port one piece per commit, with every suite passing after each one.**
-  - `git mv bin/crew libexec/crew.sh`. The Go binary runs a command itself if it has been ported, and otherwise hands it to `libexec/crew.sh`.
+  - `git mv bin/crew libexec/crew.sh`, and `bin/crew` becomes the launcher. The Go binary runs a command itself if it has been ported, and otherwise hands it to `libexec/crew.sh`.
   - When a command moves to Go, delete its bash function and change the bash's internal calls to it into calls to `$CREW_HOME/bin/crew`, so each command exists once.
   - `libexec/crew.sh` and the hand-off are deleted in the last port step. They never reach users: the branch merges only once they're gone.
-- **The shell suites are the oracle.** `tests/guard.sh`, `crew-e2e.sh` and `host.sh` test `crew` from outside, so they stay. Change them only where this plan changes a contract (the guard command, the lock check, the build).
+- **The shell suites are the oracle.** `tests/guard.sh`, `crew-e2e.sh` and `host.sh` test `crew` from outside, so they stay. Change them only where this plan changes a contract (the lock check, the launcher, upgrading to a tag).
   - Add Go unit tests (`go test ./...`) for the logic: front matter, sections, env parsing, `resolve`, stacks, dispatch checks, the guard's table.
   - Converting the shell suites to Go is not part of this plan.
 - **Model the ledger instead of passing strings around.** `Task`, `Goal`, `Proposal` and `Project` read and write their own front matter and sections. Statuses are a type, and a test checks that every status value in `LEDGER.md` is handled.
@@ -52,31 +64,38 @@ Don't reopen these.
 0. **[user]** Ask whether the move to the portable crew is finished (old plan's 10.3). If it is, delete `crew migrate-ledger`, its test scenario (tests/host.sh scenario 12) and its docs in one commit on `main` (old plan's 10.4). If not, stop here.
 1. Branch `go-rewrite` from `main`.
    - Add `go.mod` (`github.com/isaacjwilliams/crew`) and `cmd/crew`, which hands every command to `libexec/crew.sh`.
-   - Gitignore `bin/crew`.
-   - `tests/lib.sh` builds the binary once per run, and `make_home` copies it into each home's `bin/`.
-   - `tests/run.sh lint` adds `gofmt -l`, `go vet` (Linux and darwin) and `go test ./...`.
-2. **The guard.** Write `crew guard`, update the hook command everywhere it appears (agent frontmatter, `lead/.claude/settings.json`, `config/worker-settings.json`, `cmd_doctor`, `tests/guard.sh`) and the Contracts table, then delete `bin/crew-guard`.
+   - Add the launcher as `bin/crew`, and gitignore `bin/release/`.
+   - `tests/lib.sh` builds the binary once per run, stamped with `VERSION`, and `make_home` puts it in each home's `bin/release/`, so every suite runs through the launcher.
+   - Add a `tests/stubs/curl` that serves files from the sandbox, and launcher tests:
+     - a missing binary is downloaded and run;
+     - a failed download exits 1, or 2 for `crew guard`;
+     - `CREW_VERSION` fetches another version.
+   - `tests/run.sh lint` adds `gofmt -l`, `go vet` (Linux and darwin), `go test ./...`, and shellcheck on the launcher.
+2. **The guard.** Write `crew guard`, and make `bin/crew-guard` the two-line forwarder.
    - Add tests: a path that can't be resolved is blocked; a path into the home through a symlink is judged by where it points.
 3. **Foundations and the ledger commands:** home and config, env parsing, the ledger model, locks, `commit` and `push_soon`, `resolve`. Then `help`, `config`, `list`, `show`, `path`, `find`, `get`, `set`, `log`, `new`, `ready`, `commit` (with `--hook`), `proposals`, `promote` and `status`. Split this into several commits.
 4. **Projects:** `project`, `checkout`, `observe`.
 5. **Sessions and work:** `dispatch`, `followup`, `restack`, `cleanup`, `feedback`, `reply`, `sync`, `goal`, `gardener`. One or two commands per commit.
-6. **The machine:** `host`, `serve`, `setup`, `install`, `doctor`, and `upgrade` (with the build-and-rename above).
+6. **The machine:** `host`, `serve`, `setup`, `install` and `doctor` (dependencies, the binary's version), and `upgrade` (to the newest release tag, as above). `tests/host.sh` upgrades to a tag in its fake public repo, with the stub `curl` serving that tag's binary.
 7. **`tick`.** Then delete `libexec/crew.sh` and the hand-off.
-8. **Docs.**
-   - CLAUDE.md conventions: Go plus fish; shellcheck only for `tests/`; drop the bash rules.
-   - ARCHITECTURE.md: the `crew` internals section, the layout table, the Contracts table, and "Assumptions to re-check".
-   - SETUP.md: Go as a dependency, building after a clone, and the upgrade window below.
+8. **The release workflow,** `.github/workflows/release.yml`.
+   - It runs on a pushed `v*` tag, and only when `github.repository` is `isaacjwilliams/crew`, so a private home that pushes a tag never builds one.
+   - It checks that `VERSION` matches the tag, installs what the suites need (fish, for one), runs `go test ./...` and `tests/run.sh guard crew-e2e host`, and cross-compiles the two Linux binaries with `CGO_ENABLED=0` and `-trimpath`.
+   - It publishes the release with `gh release create <tag> --verify-tag --notes-from-tag`, using the workflow's `GITHUB_TOKEN` with `contents: write`.
+   - Lint stays a local check, since it needs the `claude` CLI.
+   - This can't be run before the user pushes a tag. Check it with `actionlint` if that's installed, otherwise by reading it closely.
+9. **Docs.**
+   - CLAUDE.md conventions: Go plus fish, and the two `sh` files in `bin/`; shellcheck only for those and `tests/`; drop the bash rules.
+   - CLAUDE.md versions: a release is a pushed tag, and homes upgrade only to releases.
+   - ARCHITECTURE.md: the `crew` internals section, the layout table, the Contracts table (upgrade, locks, the launcher) and "Assumptions to re-check".
+   - SETUP.md: no Go needed, curl, how upgrades and releases work.
    - `tests/README.md`.
-9. A commit bumping `VERSION` to `0.2.0`.
-10. **[user]** Review the branch, merge it to `main` and push. Then upgrade the real home:
-    - Do it while no worker is mid-turn: workers call `crew`, which is missing until the build.
-    - The old bash `crew upgrade` merges, then fails because `bin/crew` isn't built yet. Then run:
-      ```
-      cd ~/crew && go build -o bin/crew ./cmd/crew && bin/crew install && git push
-      systemctl --user restart crew-lead
-      ```
-    - Smoke test: `crew doctor`; a tick from the timer (`journalctl --user -u crew-tick`); the lead on the phone; one tiny task end to end with one review round.
-11. Once the user confirms the smoke test, delete this file in its own commit. Git history keeps it.
+10. A commit bumping `VERSION` to `0.2.0`. Draft release notes for the user, including the stricter `*.env` parsing, and put them in your final report.
+11. **[user]** Review the branch and merge it to `main`.
+    - Release: `git tag -a v0.2.0` with the notes, then `git push origin main v0.2.0`. Check that the release shows both Linux binaries. If the workflow fails, delete the tag locally and on GitHub, have the agent fix it, then tag again.
+    - Upgrade the real home with a plain `crew upgrade`. The old bash version merges `upstream/main`, which is `v0.2.0` now, then runs `bin/crew install`. That is the launcher by then: it downloads the binary and installs.
+    - Smoke test: `crew doctor`; a tick from the timer (`journalctl --user -u crew-tick`); the lead on the phone; one tiny task end to end with one review round; and on another machine, `git clone` of the private home and `bin/crew status`, with no Go installed.
+12. Once the user confirms the smoke test, delete this file in its own commit. Git history keeps it.
 
 ## Progress
 
