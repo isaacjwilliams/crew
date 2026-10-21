@@ -96,13 +96,14 @@ Open a new fish shell afterwards.
 
 `crew host up` also enables `crew-lead.service`, which runs `crew serve`: the lead as a Remote Control server named `crew`, on the machine that runs the crew. In the Claude app, open the Code tab and pick `crew` to talk to the lead from anywhere.
 
+- The lead waits for you to speak first: on the phone it doesn't open with a briefing, as `lead` does in a terminal. Say "Status" for one.
 - Sessions you start from the phone are throwaway: a session started that way hangs once the service restarts (after `crew upgrade`, say), so start a new one. The lead keeps everything in the ledger, so nothing is lost.
 - Workers don't show on the phone, because background sessions don't. Ask the lead about them.
 
 Two first-time prompts need a terminal on that machine, once. Until they're answered the service can't start the lead, and systemd retries it every 30 seconds:
 
 1. Trust the lead's folder: `cd ~/crew/lead; and claude`, accept the trust dialog, `/exit`.
-2. Enable Remote Control for it: run `crew serve` yourself, answer its question with `y`, then Ctrl+C and `systemctl --user restart crew-lead.service`.
+2. Enable Remote Control, if you never have on this machine: run `crew serve` yourself, answer its question with `y`, then Ctrl+C and `systemctl --user restart crew-lead.service`. If `systemctl --user status crew-lead` shows the service active after step 1, it's enabled already, and `crew serve` would be refused while the service runs.
 
 ### Which machine runs the crew
 
@@ -123,10 +124,10 @@ If your crew was installed with the old `install.sh`, move it in one sitting, ab
 
 1. `crew status` in the old setup; let busy workers finish their turn.
 2. `systemctl --user disable --now crew-tick.timer crew-gardener.timer`.
-3. `git clone https://github.com/isaacjwilliams/crew ~/crew; and ~/crew/bin/crew setup`, adding `--name NAME` if your GitHub account has a repo called `crew` already.
+3. `git clone https://github.com/isaacjwilliams/crew ~/crew; and ~/crew/bin/crew setup`, adding `--name NAME` if your GitHub account has a repo called `crew` already. Terminals opened before this step (panes of an older zellij or tmux session, say) still find the old `crew` first: type `~/crew/bin/crew` in them, or start a new session.
 4. `~/crew/bin/crew migrate-ledger ~/agent-ledger`, then `crew doctor`. It imports your tasks, proposals, reports and their history, turns each project's `REPO` into `REMOTE` with your clone in `local.env`, and keeps your own settings (`BRANCH_PREFIX`, say) in `config/crew.env`. If you'd edited the old `config/*-settings.json`, it names them: copy what you need into the home's.
 5. The two first-time prompts in "The lead on your phone" above.
-6. On the phone, open `crew` and check the lead's briefing lists your tasks.
+6. On the phone, open `crew` and say "Status": the lead's answer should list your tasks.
 7. For each task in flight, once it needs its worker: `crew followup TASK --fresh --note "crew moved to ~/crew"`. The old sessions run on the old settings.
 8. Keep `~/agent-ledger` as an archive; nothing reads it any more.
 
