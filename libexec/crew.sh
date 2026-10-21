@@ -1569,101 +1569,6 @@ $body")
   echo "replied to ${kind,,} $cid on PR #$num"
 }
 
-pr_summary() {  # pr-url -> "#N state"
-  local pr=$1
-  [[ -n $pr ]] || { echo "-"; return; }
-  echo "#${pr##*/}"
-}
-
-status_shown() { [[ $done_too == 1 ]] || ! has_word "$(fm_get "$1" status)" "merged done abandoned"; }
-
-# A goal, then its tasks. Reads cmd_status's aj and goal_roots.
-goal_row() {  # goal-file
-  local g=$1 id ls f total=0 merged=0
-  id="goal $(basename "$g" .md)"; id=${id:0:34}
-  ls=$(job_state "$aj" "$(fm_get "$g" lead_job)")
-  while IFS= read -r f; do
-    [[ -n $f ]] || continue
-    total=$((total + 1))
-    if [[ $(fm_get "$f" status) == merged ]]; then merged=$((merged + 1)); fi
-  done < <(goal_tasks "$g")
-  printf '  %s%*s %-20s %-26s %s\n' "$id" $((34 - ${#id})) "" "$(fm_get "$g" status)" "${ls:+lead: $ls}" "$merged of $total task(s) merged"
-  while IFS= read -r f; do
-    if [[ -n $f ]]; then status_row "$f" "  "; fi
-  done <<<"${goal_roots[$(basename "$g" .md)]:-}"
-}
-
-# One task, then the tasks stacked on it. Reads cmd_status's aj, kids and p.
-status_row() {  # file indent
-  local f=$1 id st ws pr prs note reason="" k q
-  id="$2$(basename "$f" .md)"
-  st=$(fm_get "$f" status)
-  ws=$(job_state "$aj" "$(fm_get "$f" worker_job)")
-  pr=$(pr_summary "$(fm_get "$f" pr)")
-  prs=$(fm_get "$f" pr_state)
-  if has_word "$st" "$ACTIVE_STATES"; then
-    reason=$( (load_project "$p" && restack_reason "$f") 2>/dev/null || true)
-  fi
-  note=${prs:+($prs)}
-  [[ -z $reason ]] || note="${note:+$note  }needs restack: $reason"
-  q=$(open_questions "$f")
-  ((q == 0)) || note="${note:+$note  }$q open question(s)"
-  # Padded by hand: printf counts the bytes of the tree marker, not its width.
-  id=${id:0:34}
-  printf '  %s%*s %-20s %-26s %-6s %s\n' "$id" $((34 - ${#id})) "" "$st" "${ws:+worker: $ws}" "$pr" "$note"
-  while IFS= read -r k; do
-    if [[ -n $k ]]; then status_row "$k" "${2//└ /  }└ "; fi
-  done <<<"${kids[$f]:-}"
-}
-
-cmd_status() {
-  need jq
-  local done_too=0
-  [[ ${1:-} == --done ]] && done_too=1
-  local projects=() p
-  mapfile -t projects < <(projects_in_scope)
-  local holder; holder=$(lease_holder)
-  if [[ $holder != "$CREW_HOST" ]]; then
-    # Another machine runs the crew and pushes the ledger; catch up with it. No
-    # crew command changes the ledger here, so this needs no lock.
-    git -C "$CREW_HOME" pull -q --ff-only 2>/dev/null || true
-    holder=$(lease_holder)
-    echo "read-only: crew runs on ${holder:-no machine}"
-    mapfile -t projects < <(projects_in_scope)
-  fi
-  ((${#projects[@]})) || { echo "No projects registered. Run 'crew project add' in a repo."; return; }
-  local aj; aj=$(agents_json)
-  echo "workers running: $(running_workers "$aj")/$MAX_WORKERS   tasks in flight: $(in_flight_count)/$MAX_IN_FLIGHT"
-  local f parent nprop
-  for p in "${projects[@]}"; do
-    echo
-    echo "$p"
-    load_branches "$p"
-    local roots=() goals=() g
-    local -A kids=() goal_roots=()
-    while IFS= read -r g; do
-      if [[ -n $g ]] && status_shown "$g"; then goals+=("$g"); fi
-    done < <(files_of goals "$p")
-    while IFS= read -r f; do
-      [[ -n $f ]] || continue
-      status_shown "$f" || continue
-      parent=$(parent_of "$f")
-      g=$(fm_get "$f" goal)
-      if [[ -n $parent ]] && status_shown "$parent"; then kids[$parent]+="$f"$'\n'
-      elif [[ -n $g ]] && has_word "$CREW_HOME/projects/$p/goals/$g.md" "${goals[*]}"; then goal_roots[$g]+="$f"$'\n'
-      else roots+=("$f"); fi
-    done < <(files_of tasks "$p")
-    ((${#roots[@]} + ${#goals[@]})) || echo "  (no active tasks)"
-    for g in "${goals[@]}"; do goal_row "$g"; done
-    for f in "${roots[@]}"; do status_row "$f" ""; done
-    nprop=0
-    while IFS= read -r f; do
-      [[ -n $f && $(fm_get "$f" status) == open ]] && nprop=$((nprop + 1))
-    done < <(files_of proposals "$p")
-    ((nprop == 0)) || echo "  open gardener proposals: $nprop  (crew proposals)"
-  done
-}
-
 cmd_sync() {
   need gh; need jq
   local quiet=0 scope="" p projects=()
@@ -2557,7 +2462,6 @@ case $cmd in
   followup) cmd_followup "$@" ;;
   restack) cmd_restack "$@" ;;
   reply) cmd_reply "$@" ;;
-  status) cmd_status "$@" ;;
   sync) cmd_sync "$@" ;;
   tick) cmd_tick "$@" ;;
   cleanup) cmd_cleanup "$@" ;;
