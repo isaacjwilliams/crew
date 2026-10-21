@@ -426,7 +426,7 @@ Order: check dependencies and the Claude Code version (≥ 2.1.281) → agents �
 - **Stale files** (`prune`): `~/.local/share/agent-crew/manifest` records `component<TAB>path` for every shipped file. After installing a component (`agents`, `fish`, `systemd`), files the previous install of that component shipped and this one doesn't are backed up and removed (systemd units are disabled first). Components skipped with `--no-fish`/`--no-systemd` keep their manifest entries and lose nothing, and only paths under the component's current root are touched.
 - **The AGENTS.md question** is asked only if the setting is off and the user hasn't declined before (`~/.local/share/agent-crew/agents-md-declined`).
 - **Re-running** is idempotent: a second run with no changes in the home backs nothing up. Backups go to `~/.local/share/agent-crew/backups/<timestamp>/`.
-- **Timers** are installed but not enabled.
+- **Units** are installed but not enabled: `crew host up` enables them. Install names the ones that are off on this machine.
 
 Flags: `--yes`, `--no-fish`, `--no-systemd`, `--skip-agents-md-setting`.
 

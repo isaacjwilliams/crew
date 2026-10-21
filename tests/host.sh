@@ -10,7 +10,8 @@ out=$("$H/bin/crew" install --yes 2>&1)
 check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md ]]'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
 check "fish files installed" '[[ -f $HOME/.config/fish/conf.d/agent-crew.fish && -f $HOME/.config/fish/functions/lead.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
-check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q enable "$HOME/systemctl-calls.log"'
+check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q "user enable" "$HOME/systemctl-calls.log"'
+check "install says the units are off here, and what turns them on" '[[ $out == *"off on this machine: crew-tick.timer crew-gardener.timer crew-lead.service. crew host up turns them on"* ]]'
 check "CREW_HOME set for Claude Code sessions" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
 check "AGENTS.md setting applied with --yes" '[[ $(jq -r ".pluginConfigs[\"agents-md@builtin\"].options.instructionFiles" "$HOME/.claude/settings.json") == claude-md-and-agents-md ]]'
 check "work root created" '[[ -d $HOME/agent-work ]]'
@@ -203,7 +204,7 @@ git -C "$SB/public-tree" commit -qam "v2" && git -C "$SB/public-tree" push -q "$
 before=$(git -C "$H" rev-parse @)
 out=$(up)
 check "upgrade merges the public repo's new version into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
-check "the new version installs itself" '[[ $out == *"by the new install"* ]]'
+check "the new version installs itself, with units that are on left unmentioned" '[[ $out == *"by the new install"* && $out != *"off on this machine"* ]]'
 check "and installs it: the changed agent is copied, the old one backed up" 'grep -q "# new in v2" "$HOME/.claude/agents/lead.md" && compgen -G "$HOME/.local/share/agent-crew/backups/*/.claude/agents/lead.md" >/dev/null && ! grep -q "# new in v2" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
 check "and pushes the merge to the private repo, and restarts the lead's server" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" rev-parse main) == $(git -C "$H" rev-parse @) ]] && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
 echo "an edit" >>"$H/README.md"

@@ -430,9 +430,12 @@ cmd_setup() {
   cmd_host_up
   say "Your crew is set up. Next:"
   cat <<NEXT
-  1. Set BRANCH_PREFIX in $CREW_HOME/config/crew.env, then commit and push it.
-  2. In each repo you want the crew to work on:   crew project add
-  3. Talk to the lead: lead, or the crew session in the Claude app.
+  1. Trust two folders once (accept, then /exit):   cd $WORK_ROOT; and claude
+                                                    cd $CREW_HOME/lead; and claude
+  2. Set BRANCH_PREFIX in $CREW_HOME/config/crew.env, then commit and push it.
+  3. In each repo you want the crew to work on:   crew project add
+  4. Talk to the lead: lead, or the crew session in the Claude app.
+  See SETUP.md for the full walkthrough.
 NEXT
 }
 
@@ -2811,7 +2814,11 @@ cmd_install() {
     done
     prune systemd "$HOME/.config/systemd/user"
     systemctl --user daemon-reload 2>/dev/null || true
-    note "timers installed, not enabled. To enable: systemctl --user enable --now crew-tick.timer crew-gardener.timer"
+    local unit off=()
+    for unit in "${CREW_UNITS[@]}"; do
+      systemctl --user is-enabled --quiet "$unit" 2>/dev/null || off+=("$unit")
+    done
+    ((${#off[@]} == 0)) || note "off on this machine: ${off[*]}. crew host up turns them on, to run the crew here"
   fi
 
   write_manifest
@@ -2831,14 +2838,7 @@ cmd_install() {
   fi
   rm -rf "$INSTALL_TMP"
 
-  say "Done (crew $(crew_version)). Next steps:"
-  cat <<NEXT
-  1. Trust the worktree folder once:   cd $WORK_ROOT; and claude    (accept, then /exit)
-  2. Your settings:                    cp $CREW_HOME/templates/crew.env $CREW_HOME/config/crew.env, then set BRANCH_PREFIX
-  3. In each repo:                     crew project add; and crew doctor
-  4. Talk to the lead:                 lead
-  See SETUP.md for the full walkthrough.
-NEXT
+  say "Done (crew $(crew_version))"
 }
 
 # The lead's reading copy of a project: a detached checkout of a freshly fetched
