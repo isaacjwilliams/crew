@@ -62,6 +62,7 @@ tests/run.sh            # must pass before a change is done
 
 ## When behaviour changes
 
+- **Versions:** `VERSION` holds crew's semantic version, and each one is tagged `v<version>` on the public repo. Bump it, in its own commit, when a push to `main` changes something users get through `crew upgrade`: the patch number for a fix, the minor for a new command, changed behaviour, or anything an upgrade needs them to do. A change that doesn't affect users, a docs tweak say, needs no bump. It stays 0.x until the user calls it stable.
 - Update the **Contracts** table in `ARCHITECTURE.md` if you change anything listed there, and update every side of that contract.
 - Update `SETUP.md` for anything the user sees: commands, config keys, workflow.
 - Update `LEDGER.md` for ledger conventions: statuses, keys, layout.

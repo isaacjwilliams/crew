@@ -2651,7 +2651,8 @@ declare -A INSTALL_PRUNED=()            # component -> 1 once prune has run for 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 
-crew_version() { git -C "$CREW_HOME" describe --always --dirty 2>/dev/null || echo unknown; }
+# The version of crew's code in this home, which comes with each upgrade.
+crew_version() { cat "$CREW_HOME/VERSION" 2>/dev/null || echo unknown; }
 
 backup() {  # file -> a copy in this run's backup dir, at its path under $HOME
   local rel=${1#"$HOME"/}

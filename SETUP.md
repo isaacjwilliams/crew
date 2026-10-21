@@ -73,7 +73,7 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 It also sets `env.CREW_HOME` in `~/.claude/settings.json`, so the agents' hooks find the home, and asks whether to load `CLAUDE.md` and `AGENTS.md` together (see section 4). For a home somewhere other than `~/crew`, it points the fish and systemd files at it.
 
-To upgrade, run `crew upgrade` on the machine that runs the crew. It merges the public repo's new version into your home, runs `crew install`, pushes, and restarts the lead's server. Your ledger and settings are paths the public repo never has, so they never conflict. If an edit you made to crew's own files does, `crew upgrade` stops with the merge in progress and says how to finish or undo it. It refuses a home with uncommitted changes.
+To upgrade, run `crew upgrade` on the machine that runs the crew. It merges the public repo's new version into your home, runs `crew install`, pushes, and restarts the lead's server, then says which version you're on. Your ledger and settings are paths the public repo never has, so they never conflict. If an edit you made to crew's own files does, `crew upgrade` stops with the merge in progress and says how to finish or undo it. It refuses a home with uncommitted changes.
 
 Re-running `crew install` on its own is safe, and it's how changes to the agents, fish files and systemd units reach a machine.
 

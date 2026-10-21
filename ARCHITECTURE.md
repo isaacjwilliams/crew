@@ -79,6 +79,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
 | `templates/proposal.md` | — | Gardener proposal shape |
 | `LEDGER.md` | — | Ledger conventions |
+| `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
 | `projects/.gitkeep` | — | Where the ledger goes |
 | `.gitignore` | — | Ignores what crew keeps per machine: `logs/`, the `.crew*.lock` files, and `tests/.tmp/` |
 | `fish/conf.d/agent-crew.fish` | `~/.config/fish/conf.d/` | Sets `CREW_HOME` and puts `crew` on PATH |

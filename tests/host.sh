@@ -14,13 +14,13 @@ check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd
 check "CREW_HOME set for Claude Code sessions" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
 check "AGENTS.md setting applied with --yes" '[[ $(jq -r ".pluginConfigs[\"agents-md@builtin\"].options.instructionFiles" "$HOME/.claude/settings.json") == claude-md-and-agents-md ]]'
 check "work root created" '[[ -d $HOME/agent-work ]]'
-check "install reports the home's version" '[[ $out == *"Done (crew $(git -C "$H" describe --always --dirty))"* ]]'
+check "install reports the home's version" '[[ $out == *"Done (crew $(cat "$H/VERSION"))"* ]]'
 check "install changes nothing tracked in the home" '[[ -z $(git -C "$H" status --porcelain) ]]'
 LL=$H/lead/.claude/settings.local.json
 check "the lead's settings for this machine add the home and work root, and leave out the home's CLAUDE.md" '[[ $(jq -c . "$LL") == "{\"permissions\":{\"additionalDirectories\":[\"$H\",\"$HOME/agent-work\"]},\"claudeMdExcludes\":[\"$H/CLAUDE.md\"]}" ]]'
 check "and they aren't committed" 'git -C "$H" check-ignore -q "$LL"'
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
-check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(git -C "$H" describe --always --dirty) at $H"* ]]'
+check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(cat "$H/VERSION") at $H"* ]]'
 check "crew doctor finds the guard hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json runs crew-guard"* && $doctor_out == *"ok   config/worker-settings.json runs crew-guard"* ]]'
 check "crew doctor finds the commit hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json commits ledger edits"* && $doctor_out == *"ok   config/worker-settings.json commits ledger edits"* ]]'
 check "crew doctor finds the lead's settings for this machine" '[[ $doctor_out == *"ok   lead/.claude/settings.local.json written for this machine"* ]]'
@@ -197,11 +197,11 @@ check "setup refuses a home that's set up already" '[[ $out == *"set up already"
 # 11. A new version from the public repo, merged into a home that has a ledger.
 up() { CREW_HOST=tower "$H/bin/crew" upgrade </dev/null 2>&1; }
 mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"; CREW_HOST=tower "$H/bin/crew" commit "a ledger note" >/dev/null
-echo "# new in v2" >>"$SB/public-tree/agents/lead.md"
+echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; echo 9.9.9 >"$SB/public-tree/VERSION"
 git -C "$SB/public-tree" commit -qam "v2" && git -C "$SB/public-tree" push -q "$SB/public.git" main
 before=$(git -C "$H" rev-parse @)
 out=$(up)
-check "upgrade merges the public repo's new version into a home with ledger commits" '[[ $out == *"crew upgraded to"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
+check "upgrade merges the public repo's new version into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
 check "and installs it: the changed agent is copied, the old one backed up" 'grep -q "# new in v2" "$HOME/.claude/agents/lead.md" && compgen -G "$HOME/.local/share/agent-crew/backups/*/.claude/agents/lead.md" >/dev/null && ! grep -q "# new in v2" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
 check "and pushes the merge to the private repo, and restarts the lead's server" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" rev-parse main) == $(git -C "$H" rev-parse @) ]] && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
 echo "an edit" >>"$H/README.md"

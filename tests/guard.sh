@@ -40,6 +40,7 @@ for r in lead worker gardener; do
 done
 check "crew-guard's state paths are crew's" '[[ $(grep -m1 "^STATE_PATHS=" "$G") == $(grep -m1 "^STATE_PATHS=" "$REPO_DIR/bin/crew") ]]'
 tracked=$(git -C "$REPO_DIR" ls-files -- projects reports config/crew.env host)
+check "VERSION holds a semantic version" 'grep -qxE "[0-9]+\.[0-9]+\.[0-9]+" "$REPO_DIR/VERSION"'
 check "the repo tracks no state: nothing under projects/ but .gitkeep, no reports/, config/crew.env or host (got: ${tracked//$'\n'/ })" '[[ $tracked == projects/.gitkeep ]]'
 
 printf '{}' | CREW_HOME=$L "$G" bash >/dev/null 2>&1; rc=$?
