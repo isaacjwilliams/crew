@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Stub `gh` for tests: one fake PR (#12) with a fixed set of reviews and comments.
+# isaac is the user (OWNER); bob is a COLLABORATOR.
+#   900  isaac's submitted CHANGES_REQUESTED review    901  isaac's PENDING review
+#   902  bob's submitted COMMENTED review (an open question for the user)
+#   111  isaac, inline, in review 900 (a review round)
+#   112  bob, inline (an open question for the user)
+#   113  isaac's reply tagged <!-- crew --> (a worker reply; never pulled)
+#   114  isaac, inline, in the PENDING review (never pulled)
+#   115  isaac, conversation comment (a review round)
+#   116  isaac, conversation comment on another PR (#99; never answerable from #12)
+#   117  isaac's conversation reply tagged <!-- crew --> (a worker reply; never pulled)
+#   118  carol, conversation comment, no write access (NONE; never pulled)
+#   119  a bot with write access, conversation comment (never pulled)
+# `repo create NAME --private --source . --remote origin` makes a bare repo at
+# $HOME/remotes/NAME.git and adds it as origin, or fails if that repo exists.
+# Looking up any other comment or review ID fails, like a 404. The body of the latest
+# `-f body=…` call goes to $HOME/gh-last-body. Every PR is MERGED unless
+# $HOME/gh-pr-state names another state (e.g. OPEN). Every PR was last updated
+# just after the newest comment above, unless $HOME/gh-pr-updated gives another time.
+echo "gh $*" >>"$HOME/gh-calls.log"
+for a in "$@"; do [[ $a == body=* ]] && printf '%s' "${a#body=}" >"$HOME/gh-last-body"; done
+isaac='"user":{"login":"isaac","type":"User"},"author_association":"OWNER"'
+bob='"user":{"login":"bob","type":"User"},"author_association":"COLLABORATOR"'
+c111='{"id":111,"pull_request_review_id":900,'$isaac',"path":"src/search.ts","line":42,"body":"Rename `f`.","html_url":"u111","created_at":"2026-09-25T20:40:00Z","pull_request_url":"https://api.github.com/repos/isaac/webapp/pulls/12"}'
+c113='{"id":113,'$isaac',"path":"src/search.ts","line":42,"body":"Done\n\n<!-- crew -->","html_url":"u113","created_at":"2026-09-25T21:05:00Z","in_reply_to_id":111,"pull_request_url":"https://api.github.com/repos/isaac/webapp/pulls/12"}'
+c115='{"id":115,'$isaac',"body":"\r\nAlso keep the cutover dates as they are.\r\nThanks.","html_url":"u115","created_at":"2026-09-25T21:20:00Z","issue_url":"https://api.github.com/repos/isaac/webapp/issues/12"}'
+c116='{"id":116,'$isaac',"body":"Elsewhere.","html_url":"u116","created_at":"2026-09-25T21:20:00Z","issue_url":"https://api.github.com/repos/isaac/webapp/issues/99"}'
+c117='{"id":117,'$isaac',"body":"Done\n\n<!-- crew -->","html_url":"u117","created_at":"2026-09-25T21:25:00Z","issue_url":"https://api.github.com/repos/isaac/webapp/issues/12"}'
+c118='{"id":118,"user":{"login":"carol","type":"User"},"author_association":"NONE","body":"Drive-by idea.","html_url":"u118","created_at":"2026-09-25T21:30:00Z","issue_url":"https://api.github.com/repos/isaac/webapp/issues/12"}'
+c119='{"id":119,"user":{"login":"ci[bot]","type":"Bot"},"author_association":"MEMBER","body":"Coverage report.","html_url":"u119","created_at":"2026-09-25T21:30:00Z","issue_url":"https://api.github.com/repos/isaac/webapp/issues/12"}'
+r900='{"id":900,'$isaac',"state":"CHANGES_REQUESTED","body":"See inline.","html_url":"r900","submitted_at":"2026-09-25T21:00:00Z"}'
+r902='{"id":902,'$bob',"state":"COMMENTED","body":"Should this be behind a flag?","html_url":"r902","submitted_at":"2026-09-25T21:02:00Z"}'
+case "$*" in
+  "api user --jq .login") echo isaac ;;
+  "repo create "*" --private --source . --remote origin")
+    # A private repo: a bare repo under $HOME/remotes/, added as origin.
+    url="$HOME/remotes/$3.git"
+    [[ ! -e $url ]] || { echo "GraphQL: Name already exists on this account (createRepository)" >&2; exit 1; }
+    mkdir -p "$(dirname "$url")" && git init -q --bare "$url" && git remote add origin "$url" && echo "$url" ;;
+  *pulls/12/reviews/900) echo "$r900" ;;
+  *pulls/12/reviews/902) echo "$r902" ;;
+  *pulls/12/reviews/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  *pulls/12/reviews*)
+    echo "$r900"
+    echo '{"id":901,'"$isaac"',"state":"PENDING","body":"","submitted_at":null}'
+    echo "$r902" ;;
+  *pulls/comments/111) echo "$c111" ;;
+  *pulls/comments/113) echo "$c113" ;;
+  *pulls/comments/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  *pulls/12/comments/*/replies*) : ;;
+  *pulls/12/comments*)
+    echo "$c111"
+    echo '{"id":112,"pull_request_review_id":902,'"$bob"',"path":"src/search.ts","line":50,"body":"nit from bob","html_url":"u112","created_at":"2026-09-25T21:00:00Z"}'
+    echo "$c113"
+    echo '{"id":114,"pull_request_review_id":901,'"$isaac"',"path":"a.ts","line":1,"body":"draft in pending review","html_url":"u114","created_at":"2026-09-25T21:10:00Z"}' ;;
+  *issues/comments/115) echo "$c115" ;;
+  *issues/comments/116) echo "$c116" ;;
+  *issues/comments/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  *issues/12/comments\ -f\ body=*) : ;;
+  *issues/12/comments*) echo "$c115"; echo "$c117"; echo "$c118"; echo "$c119" ;;
+  "pr list"*) echo "https://github.com/isaac/webapp/pull/12" ;;
+  "pr view"*) echo "{\"state\":\"$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"updatedAt\":\"$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)\"}" ;;
+  "auth status") exit 0 ;;
+esac

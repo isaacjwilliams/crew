@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Stub `claude` for tests. Never talks to a model. State lives in $HOME:
+#   $HOME/claude-calls.log   every invocation
+#   $HOME/agents.json        what `claude agents --json` returns; --bg adds or updates a job
+#   $HOME/fail-resume        if present, `--resume … --bg` fails
+#   $HOME/fail-resume-late   if present, `--resume … --bg` starts a job that ends `failed`
+#   $HOME/placeholder-session  if present, the next `claude agents` after a resume shows
+#                            the resumed job under a new session ID, as a process does
+#                            before it has loaded the session
+#   $HOME/stop-noop          if present, `claude stop` leaves the process open
+#   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
+#   $HOME/claude-settings.last  the --settings value of the latest call that had one
+#   $HOME/remote-control.cwd    the directory `claude remote-control` last ran in
+# Like the real CLI, `--resume <session> --bg <prompt>` continues that session under
+# its own job ID. It starts a copy under a new session instead, and says so in a
+# `note:` line, if any other launch flag is passed (--agent, --settings, …) or the
+# session's process is still open (pid set). A job's ID is the first 8 characters of
+# its session ID. Job IDs are printed in color.
+set -u
+echo "claude $*" >>"$HOME/claude-calls.log"
+[[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/claude-calls.log"
+# A background supervisor that inherited crew's lock fds would hold the locks forever.
+for fd in 7 8 9; do [[ -e /proc/$$/fd/$fd ]] && echo "LEAK LOCK FD $fd" >>"$HOME/claude-calls.log"; done
+[[ -f $HOME/agents.json ]] || echo '[]' >"$HOME/agents.json"
+
+# --add-dir is variadic in the real CLI: the token after its value must be a flag.
+args=("$@") resume="" name="" flags=0
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ ${args[i]} == --add-dir && ${args[i+2]:-} != --* ]]; then
+    echo "stub claude: '${args[i+2]:-}' would be swallowed by --add-dir" >&2; exit 9
+  fi
+  [[ ${args[i]} == --settings ]] && printf '%s' "${args[i+1]:-}" >"$HOME/claude-settings.last"
+  [[ ${args[i]} == --resume ]] && resume=${args[i+1]:-}
+  [[ ${args[i]} == --name ]] && name=${args[i+1]:-}
+  [[ ${args[i]} == --* && ${args[i]} != --resume && ${args[i]} != --bg ]] && flags=1
+done
+
+agents() {  # jq-filter [jq args...]: update agents.json in place
+  local f=$1; shift
+  jq "$@" "$f" "$HOME/agents.json" >"$HOME/agents.json.tmp" && mv "$HOME/agents.json.tmp" "$HOME/agents.json"
+}
+
+case ${1:-} in
+  --version) echo "2.1.290 (Claude Code)" ;;
+  agents)
+    if [[ -f $HOME/placeholder-pending ]]; then
+      jq --arg id "$(cat "$HOME/placeholder-pending")" 'map(if .id==$id then .sessionId="0badf00d-placeholder" else . end)' "$HOME/agents.json"
+      rm -f "$HOME/placeholder-pending"
+    else
+      cat "$HOME/agents.json"
+    fi ;;
+  stop)
+    [[ -f $HOME/stop-noop ]] || agents 'map(if .id==$id then .pid=null | .state="stopped" | del(.status) else . end)' --arg id "${2:-}" ;;
+  rm)
+    if [[ -f $HOME/rm-fail ]]; then echo "Error: couldn't delete ${2:-}" >&2; exit 1; fi
+    agents 'map(select(.id != $id))' --arg id "${2:-}" ;;
+  attach|logs) : ;;
+  remote-control) echo "$PWD" >"$HOME/remote-control.cwd" ;;
+  *)
+    if [[ " $* " == *" --bg "* ]]; then
+      if [[ -f $HOME/fail-resume && -n $resume ]]; then echo "Error: session not found"; exit 1; fi
+      session=""
+      if [[ -n $resume ]]; then
+        if ((flags)); then
+          echo "note: background session $resume keeps its own saved options, so the flags you passed started a copy"
+        elif jq -e --arg s "$resume" 'any(.[]; .sessionId==$s and .pid != null)' "$HOME/agents.json" >/dev/null; then
+          echo "note: session $resume is already running in the background, so this started a copy"
+        else
+          session=$resume
+        fi
+      fi
+      if [[ -z $session ]]; then
+        id=$(printf '%08x' $((RANDOM * RANDOM + RANDOM)))
+        session=$id-stub
+      else
+        id=${session:0:8}
+      fi
+      state=working pid=4242
+      if [[ -f $HOME/fail-resume-late && -n $resume ]]; then state=failed pid=null; fi
+      agents 'if any(.[]; .id==$id) then map(if .id==$id then .state=$st | .pid=$pid | .status="busy" else . end)
+              else . + [{id:$id, kind:"background", state:$st, pid:$pid, status:"busy", sessionId:$s, name:$name, cwd:$cwd}] end' \
+        --arg id "$id" --arg s "$session" --arg st "$state" --argjson pid "$pid" --arg cwd "$PWD" --arg name "${name:-untitled session}"
+      if [[ -f $HOME/placeholder-session && $session == "$resume" ]]; then echo "$id" >"$HOME/placeholder-pending"; fi
+      printf 'backgrounded · \e[36m%s\e[39m · stub\n' "$id"
+    else
+      echo "stub claude -p ok"
+    fi ;;
+esac

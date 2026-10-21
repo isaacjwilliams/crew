@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Stub Worktrunk `wt` for tests: just `switch` and `remove`, the way crew calls them.
+# It makes real git worktrees and stands in for the repo's hooks. State in $HOME:
+#   $HOME/wt-calls.log      every invocation
+#   $HOME/wt-hooks.log      what the stand-in pre-start / pre-remove hooks did
+#   $HOME/wt-unapproved     if present, fail like wt does when hooks need approval
+#   $HOME/wt-elsewhere      if present, `switch` reports an existing worktree elsewhere
+#   $HOME/wt-hook-cmd       if present, the stand-in pre-start and pre-remove hooks also run this script
+#   $HOME/wt-hook-fail      if present, the pre-start hook fails after the worktree is made
+set -u
+echo "wt $*" >>"$HOME/wt-calls.log"
+dir=$PWD
+if [[ ${1:-} == -C ]]; then dir=$2; shift 2; fi
+cmd=${1:-}; shift || true
+
+path="" target="" create=0 base="" force=0
+while (($#)); do
+  case $1 in
+    --config-set) [[ $2 == worktree-path=* ]] && path=$(jq -r . <<<"${2#worktree-path=}"); shift 2 ;;
+    --base) base=$2; shift 2 ;;
+    --format) shift 2 ;;
+    --create) create=1; shift ;;
+    --force) force=1; shift ;;
+    --*) shift ;;
+    *) target=$1; shift ;;
+  esac
+done
+
+case $cmd in
+  switch)
+    branch=$target
+    if [[ -f $HOME/wt-unapproved ]]; then
+      echo "✗ Cannot prompt for approval in non-interactive environment" >&2; exit 1
+    fi
+    if [[ -f $HOME/wt-elsewhere ]]; then
+      jq -cn --arg b "$branch" '{action:"existing", branch:$b, path:"/somewhere/else"}'; exit 0
+    fi
+    [[ -n $path ]] || { echo "stub wt: no worktree-path given" >&2; exit 1; }
+    if ((create)); then git -C "$dir" worktree add --quiet --no-track -b "$branch" "$path" "$base" >&2 || exit 1
+    else git -C "$dir" worktree add --quiet "$path" "$branch" >&2 || exit 1; fi
+    echo "◎ Running pre-start project hook" >&2
+    # Like a real hook's per-worktree config: gitignored, so the worktree stays clean.
+    exclude="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+    grep -qxF /.instance.yml "$exclude" 2>/dev/null || echo /.instance.yml >>"$exclude"
+    echo "instance_name: stub" >"$path/.instance.yml"
+    echo "pre-start $branch" >>"$HOME/wt-hooks.log"
+    [[ -f $HOME/wt-hook-cmd ]] && bash "$HOME/wt-hook-cmd" >>"$HOME/wt-hooks.log" 2>&1
+    [[ -f $HOME/wt-hook-fail ]] && { echo "✗ pre-start hook failed" >&2; exit 1; }
+    jq -cn --arg b "$branch" --arg p "$path" '{action:"created", branch:$b, path:$p, created_branch:true}'
+    ;;
+  remove)
+    echo "pre-remove $target" >>"$HOME/wt-hooks.log"
+    [[ -f $HOME/wt-hook-cmd ]] && bash "$HOME/wt-hook-cmd" >>"$HOME/wt-hooks.log" 2>&1
+    flags=(); ((force)) && flags=(--force)
+    git -C "$dir" worktree remove "${flags[@]}" "$target"
+    ;;
+  *) echo "stub wt: unsupported command '$cmd'" >&2; exit 2 ;;
+esac

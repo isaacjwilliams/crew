@@ -1,0 +1,17 @@
+[Unit]
+Description=crew tick: route PR comments, restacks and cleanups without waiting to be asked
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Includes mise's shims: a service never reads the shell config that puts mise's tools on your PATH.
+Environment=PATH=%h/crew/bin:%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+# When your crew home isn't ~/crew, crew install writes it into this unit: the
+# %h/crew paths above and below, and this line, uncommented:
+# Environment=CREW_HOME=/path/to/crew
+ExecStart=%h/crew/bin/crew tick
+# A tick can start the background-session daemon (`claude --bg`). Stop only crew
+# itself when the run ends, so the workers it resumed keep running.
+KillMode=process
+Nice=10

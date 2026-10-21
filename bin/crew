@@ -1,0 +1,2967 @@
+#!/usr/bin/env bash
+# crew — the CLI for the lead / implementer / casual-observer / gardener crew.
+# Run `crew help` for usage. All coordination state lives in the ledger, under
+# projects/ in the crew home; nothing is written to the repositories themselves
+# except local-only entries in .git/info/exclude.
+set -euo pipefail
+shopt -u patsub_replacement 2>/dev/null || true
+
+# The crew home is a clone of the crew repo: this script, its config, and the
+# ledger. It's $CREW_HOME, else the directory above bin/, so a fresh clone works
+# as it is. Exported, so the sessions and hooks crew starts find it too.
+if [[ -z ${CREW_HOME:-} ]]; then CREW_HOME=$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")"); fi
+export CREW_HOME
+[[ -f "$CREW_HOME/config/defaults.env" ]] || { echo "crew: $CREW_HOME isn't a crew home (no config/defaults.env); set CREW_HOME?" >&2; exit 1; }
+# Every setting has its default in defaults.env; config/crew.env holds the person's own.
+load_config() {
+  # shellcheck source=/dev/null
+  . "$CREW_HOME/config/defaults.env"
+  # shellcheck source=/dev/null
+  if [[ -f $CREW_HOME/config/crew.env ]]; then . "$CREW_HOME/config/crew.env"; fi
+}
+load_config
+
+REPLY_MARKER='<!-- crew -->'
+ACTIVE_STATES="working needs-input addressing-feedback pr-open"
+declare -A BRANCHES=()   # filled by load_branches
+
+# ---------------------------------------------------------------- helpers ---
+
+die()  { echo "crew: $*" >&2; exit 1; }
+warn() { echo "crew: $*" >&2; }
+# A refusal that only has to wait, such as a dispatch held by a cap: exit 4, so crew
+# tick can try again later without reporting it as a failure.
+not_yet() { echo "crew: $*" >&2; exit 4; }
+now()  { date -Iseconds; }
+need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
+has_word() { [[ " $2 " == *" $1 "* ]]; }
+
+# crew's locks, each on a file descriptor of its own:
+#   fd 7  .crew-push.lock   one ledger push at a time (push_soon, crew tick's push)
+#   fd 8  .crew-tick.lock   one crew tick at a time
+#   fd 9  .crew.lock        every change to the ledger (lock)
+# A lock is held by the open file, so a process that inherits the fd holds it too.
+
+# Run claude outside any parent Claude Code session's environment, with all three
+# lock fds closed, so a background supervisor started here can't hold them.
+cc() { PATH="$CREW_HOME/bin:$PATH" env -u CLAUDECODE claude "$@" 7>&- 8>&- 9>&-; }
+
+# Every change to the ledger takes the ledger lock with lock, which also checks
+# that this machine runs the crew (require_host), so it can die with "crew runs
+# on …". take_lock alone is for the commands that move the lease. The lock lasts
+# until unlock or the end of the process. Opening .crew.lock again, even in the
+# same process, waits for it.
+take_lock() {
+  exec 9>"$CREW_HOME/.crew.lock"
+  flock -w 30 9 || die "ledger is locked by another crew command"
+}
+lock() { take_lock; require_host; }
+unlock() { exec 9>&-; }
+
+# The ledger: what crew and the agents write in the home. The rest of the home is
+# crew's own code and config, which comes from upstream.
+STATE_PATHS=(projects reports)
+
+# Commits the ledger, and nothing else in the home, then starts a push in the
+# background (push_soon). It never fails the command.
+commit() {
+  [[ $(git -C "$CREW_HOME" rev-parse --show-toplevel 2>/dev/null) == "$(realpath "$CREW_HOME")" ]] \
+    || { warn "$CREW_HOME is not its own git repo; not committing"; return 0; }
+  local p paths=()
+  for p in "${STATE_PATHS[@]}"; do if [[ -e $CREW_HOME/$p ]]; then paths+=("$p"); fi; done
+  ((${#paths[@]})) || return 0
+  git -C "$CREW_HOME" add -A -- "${paths[@]}" >/dev/null 2>&1 || { warn "ledger commit failed (continuing)"; return 0; }
+  git -C "$CREW_HOME" diff --cached --quiet -- "${paths[@]}" && return 0
+  if git -C "$CREW_HOME" commit -qm "$1" -- "${paths[@]}" >/dev/null 2>&1; then push_soon
+  else warn "ledger commit failed (continuing)"; fi
+}
+
+# ------------------------------------------------------------------ push ---
+# The ledger goes to the home's origin, the person's private repo, soon after each
+# commit, so a machine that dies loses seconds of decisions. A command never waits
+# for that: push_soon pushes in the background. crew tick ends with a push in the
+# foreground, which catches anything a background push missed.
+
+# Whether origin has every ledger commit this machine has.
+ledger_pushed() {
+  [[ $(git -C "$CREW_HOME" rev-parse @ 2>/dev/null) == "$(git -C "$CREW_HOME" rev-parse '@{u}' 2>/dev/null)" ]]
+}
+
+# Takes in the commits origin has and this machine hasn't (one made on GitHub, or
+# pushed from another clone), by rebasing the ledger onto them under the ledger
+# lock, so no crew command commits meanwhile. Call it without the ledger lock.
+# Fails if they moved the lease to another machine: that marks the lease lost
+# (LEASE_LOST), and this machine must not push over them.
+adopt_origin_commits() {
+  git -C "$CREW_HOME" fetch -q origin || return 1
+  if [[ $(origin_holder) != "$CREW_HOST" ]]; then
+    touch "$LEASE_LOST"
+    echo "origin says crew runs on $(origin_holder) now; not pushing. The next crew tick stands this machine down."
+    return 1
+  fi
+  (
+    exec 9>"$CREW_HOME/.crew.lock"
+    flock -w 30 9 || exit 1
+    git -C "$CREW_HOME" pull -q --rebase --autostash || { git -C "$CREW_HOME" rebase --abort 2>/dev/null; exit 1; }
+  ) || { echo "couldn't rebase the ledger onto origin; leaving it for crew tick"; return 1; }
+}
+
+# Pushes until origin has every ledger commit: up to five tries, a second apart
+# when the push fails for a reason like the network. A push origin rejects for
+# commits it has that this machine lacks takes those in first.
+push_ledger() {
+  local out
+  for _ in 1 2 3 4 5; do
+    ledger_pushed && return 0
+    if out=$(git -C "$CREW_HOME" push -q -u origin HEAD 2>&1); then continue; fi
+    echo "$out"
+    if [[ $out == *"[rejected]"* || $out == *"fetch first"* || $out == *"non-fast-forward"* ]]; then
+      adopt_origin_commits || return 1
+    else
+      sleep 1
+    fi
+  done
+  ledger_pushed
+}
+
+# Pushes in the foreground, after any background push that's running. Call it
+# without the ledger lock.
+push_now() {
+  { flock -w 60 7 && push_ledger; } 7>"$CREW_HOME/.crew-push.lock"
+}
+
+# Starts a push in the background, logged to logs/push.log. It closes fds 8 and 9,
+# so it never holds a lock the command that started it took. Pushes take turns on
+# the push lock: one that finds another running exits and leaves the work to it.
+# So the running one, after it lets go of the lock, loops to check again whether
+# origin has everything: a commit made while it held the lock would otherwise wait
+# for the next commit or tick.
+push_soon() {
+  git -C "$CREW_HOME" remote get-url origin >/dev/null 2>&1 || return 0
+  mkdir -p "$CREW_HOME/logs"
+  (
+    exec 8>&- 9>&-
+    while true; do
+      { flock -n 7 || exit 0; push_ledger; } 7>"$CREW_HOME/.crew-push.lock" || exit 1
+      ledger_pushed && exit 0
+    done
+  ) </dev/null >>"$CREW_HOME/logs/push.log" 2>&1 &
+}
+
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'; }
+
+# Main checkout root for any path inside a repo or one of its worktrees.
+repo_root() {
+  local common
+  common=$(git -C "${1:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  dirname "$common"
+}
+
+slug_for() {
+  local root=$1 url s owner repo
+  url=$(git -C "$root" remote get-url origin 2>/dev/null || true)
+  if [[ -n $url ]]; then
+    s=${url%.git}; s=${s%/}; s=${s//://}
+    repo=${s##*/}; s=${s%/*}; owner=${s##*/}
+    slugify "$owner-$repo"
+  else
+    slugify "$(basename "$root")"
+  fi
+}
+
+project_from_cwd() {
+  local root s
+  root=$(repo_root .) || return 1
+  s=$(slug_for "$root")
+  [[ -d "$CREW_HOME/projects/$s" ]] || return 1
+  echo "$s"
+}
+
+# A project's settings: the shared ones, then its project.env (committed, the same on
+# every machine: REMOTE, DEFAULT_BRANCH, overrides), then its local.env (this
+# machine's REPO, never committed). Each project starts again from the shared
+# settings, so crew tick doesn't carry one project's overrides into the next.
+load_project() {
+  PROJECT=$1
+  PDIR="$CREW_HOME/projects/$1"
+  [[ -f "$PDIR/project.env" ]] || die "unknown project '$1' (run 'crew project add' in the repo)"
+  # load_config resets every setting defaults.env has. These three it hasn't.
+  unset REPO REMOTE DEFAULT_BRANCH
+  load_config
+  # shellcheck source=/dev/null
+  . "$PDIR/project.env"
+  # shellcheck source=/dev/null
+  if [[ -f $PDIR/local.env ]]; then . "$PDIR/local.env"; fi
+  [[ -n ${REPO:-} && -d $REPO ]] || die "no clone of $1 on this machine (crew host up makes one, or run 'crew project add' in your clone of it)"
+}
+
+# The cwd's project, or every registered project when run outside one (or given "all").
+projects_in_scope() {  # [all]
+  local p
+  if [[ ${1:-} != all ]] && p=$(project_from_cwd 2>/dev/null); then echo "$p"; return; fi
+  for p in "$CREW_HOME"/projects/*/; do [[ -f $p/project.env ]] && basename "$p"; done
+}
+
+current_project_or_die() {
+  project_from_cwd || die "this directory isn't in a repo registered with crew (run 'crew project add' there)"
+}
+
+# ------------------------------------------------------ front matter / md ---
+
+fm_get() {
+  K="$2" awk 'BEGIN{k=ENVIRON["K"]":"}
+    NR==1 && $0=="---" {infm=1; next}
+    infm && $0=="---" {exit}
+    infm && index($0,k)==1 {
+      v=substr($0, length(k)+1); sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v)
+      if (v ~ /^".*"$/) { v=substr(v,2,length(v)-2); gsub(/\\"/,"\"",v) }
+      print v; exit
+    }' "$1"
+}
+
+fm_set() {
+  local file=$1 key=$2 val=${3//$'\n'/ } tmp
+  if [[ $val == *": "* || $val == *" #"* || $val == \"* || $val == *'"'* ]]; then
+    val="\"${val//\"/\\\"}\""
+  fi
+  tmp=$(mktemp)
+  K="$key" V="$val" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]}
+    NR==1 && $0=="---" {print; infm=1; next}
+    infm && $0=="---" { if (!done) print k": "v; print; infm=0; next }
+    infm && index($0, k":")==1 { if (!done) { print k": "v; done=1 }; next }
+    {print}' "$file" >"$tmp" && cat "$tmp" >"$file"
+  rm -f "$tmp"
+}
+
+touch_updated() { fm_set "$1" updated "$(now)"; }
+
+ensure_trailing_newline() { [[ -z $(tail -c1 "$1") ]] || echo >>"$1"; }
+
+append_log() {  # file message — the Log section is always last
+  ensure_trailing_newline "$1"
+  printf -- '- %s — %s\n' "$(date '+%Y-%m-%d %H:%M')" "$2" >>"$1"
+}
+
+insert_before_heading() {  # file heading contentfile
+  local tmp; tmp=$(mktemp)
+  if grep -qxF "$2" "$1"; then
+    H="$2" CF="$3" awk 'BEGIN{h=ENVIRON["H"]; cf=ENVIRON["CF"]}
+      $0==h && !done { while ((getline line < cf) > 0) print line; print ""; done=1 }
+      {print}' "$1" >"$tmp" && cat "$tmp" >"$1"
+  else
+    ensure_trailing_newline "$1"; cat "$3" >>"$1"
+  fi
+  rm -f "$tmp"
+}
+
+# Adds the content at the end of a section, just before the next heading. A file
+# without the section gets it, before ## Log.
+append_to_section() {  # file heading contentfile
+  local tmp; tmp=$(mktemp)
+  if grep -qxF "$2" "$1"; then
+    H="$2" CF="$3" awk 'BEGIN{h=ENVIRON["H"]; cf=ENVIRON["CF"]}
+      function put() { while ((getline line < cf) > 0) print line; print ""; done=1 }
+      on && /^## / && !done { put() }
+      {print}
+      $0==h {on=1}
+      END { if (on && !done) { print ""; put() } }' "$1" >"$tmp" && cat "$tmp" >"$1"
+  else
+    printf '%s\n\n' "$2" >"$tmp"; cat "$3" >>"$tmp"
+    insert_before_heading "$1" "## Log" "$tmp"
+  fi
+  rm -f "$tmp"
+}
+
+# Section text with HTML comments and blank lines removed.
+section_body() {
+  H="$2" awk 'BEGIN{h=ENVIRON["H"]}
+    $0==h {on=1; next}
+    on && /^## / {exit}
+    on {
+      line=$0; out=""
+      while (length(line)) {
+        if (inc) { p=index(line,"-->"); if (!p) { line=""; break }; line=substr(line,p+3); inc=0 }
+        else { p=index(line,"<!--"); if (!p) { out=out line; line="" } else { out=out substr(line,1,p-1); line=substr(line,p+4); inc=1 } }
+      }
+      if (out ~ /[^ \t]/) print out
+    }' "$1"
+}
+
+# An unchecked item under Open questions is a question still waiting on the user.
+open_questions() {  # file -> how many there are
+  section_body "$1" "## Open questions" | grep -c '^- \[ \]' || true
+}
+
+# ----------------------------------------------------------------- lease ---
+# One machine runs the crew at a time: the one the home's `host` file names. A
+# git push claims it (crew host up), so two machines can't both think they do.
+# Every mutation checks it (lock), and so do the commands that start sessions,
+# before they start one. Reads work on any machine.
+
+CREW_HOST=${CREW_HOST:-$(hostname -s)}
+CREW_UNITS=(crew-tick.timer crew-gardener.timer crew-lead.service)
+# Made by a push that found on origin that another machine claimed the lease
+# (adopt_origin_commits). require_host refuses every change while it exists; the
+# next crew tick stands this machine down and removes it, as does crew host up.
+LEASE_LOST=$CREW_HOME/.crew-lease-lost
+
+lease_holder() { cat "$CREW_HOME/host" 2>/dev/null || true; }   # the machine the home's host file names, or nothing
+
+# The holder as origin last told this machine, or nothing.
+origin_holder() { git -C "$CREW_HOME" show '@{u}:host' 2>/dev/null || true; }
+
+lease_since() { git -C "$CREW_HOME" log -1 --format=%cr -- host 2>/dev/null || true; }
+
+# The last machine before this one that ran the crew. The host file names this
+# machine now, so it's found in the file's history: the newest other name.
+previous_holder() {
+  local c h
+  while IFS= read -r c; do
+    h=$(git -C "$CREW_HOME" show "$c:host" 2>/dev/null || true)
+    if [[ -n $h && $h != "$CREW_HOST" ]]; then echo "$h"; return 0; fi
+  done < <(git -C "$CREW_HOME" log --format=%H -- host 2>/dev/null)
+  echo "another machine"
+}
+
+# Fails unless this machine holds the lease: the host file names it, and no push
+# has found that origin moved it elsewhere.
+require_host() {
+  local holder moved
+  holder=$(lease_holder)
+  if [[ -e $LEASE_LOST ]]; then
+    moved=$(origin_holder)
+    die "crew has moved to ${moved:-another machine}; this machine can only read until its next crew tick stands it down"
+  fi
+  [[ -n $holder ]] || die "no machine runs the crew; this one can only read (crew host up runs it here)"
+  [[ $holder == "$CREW_HOST" ]] || die "crew runs on $holder; this machine can only read (crew host up --take moves it here)"
+}
+
+# This machine ran the crew, and origin, freshly fetched, says another one does
+# now. A machine that never held the lease has nothing to stand down from.
+lease_taken_elsewhere() {
+  git -C "$CREW_HOME" fetch -q origin 2>/dev/null || return 1
+  [[ $(origin_holder) != "$CREW_HOST" ]] || return 1
+  [[ $(lease_holder) == "$CREW_HOST" || -e $LEASE_LOST ]]
+}
+
+set_units() {  # enable|disable — the crew's systemd units, now
+  systemctl --user "$1" --now "${CREW_UNITS[@]}" >/dev/null 2>&1 || warn "couldn't $1 ${CREW_UNITS[*]} (systemctl --user)"
+}
+
+stop_crew_jobs() {  # every background session crew started on this machine
+  local job
+  while IFS= read -r job; do
+    if [[ -n $job ]]; then stop_job "$job" || warn "background session $job didn't stop"; fi
+  done < <(agents_json | jq -r '.[] | select((.name // "") | startswith("crew-")) | select(.pid != null) | .id')
+}
+
+# Commits the host file and pushes it in the foreground: a lease counts only once
+# origin has it. A rejected push is expected when another machine moved first, so
+# git's message is left out; the caller says what failed.
+commit_host() {  # message
+  git -C "$CREW_HOME" add -- host
+  git -C "$CREW_HOME" diff --cached --quiet -- host || git -C "$CREW_HOME" commit -qm "$1" -- host
+  git -C "$CREW_HOME" push -q -u origin HEAD 2>/dev/null
+}
+
+# Keeps what origin doesn't have, ledger commits and uncommitted changes alike, on
+# a new branch, before stand_down resets the home. The working tree is committed
+# through a scratch index, so the home's own index and files stay as they are.
+save_lost_work() {  # branch
+  local tmpidx tree tip
+  tmpidx=$(mktemp)
+  GIT_INDEX_FILE=$tmpidx git -C "$CREW_HOME" read-tree HEAD
+  GIT_INDEX_FILE=$tmpidx git -C "$CREW_HOME" add -A
+  tree=$(GIT_INDEX_FILE=$tmpidx git -C "$CREW_HOME" write-tree)
+  rm -f "$tmpidx"
+  tip=HEAD
+  if [[ $tree != "$(git -C "$CREW_HOME" rev-parse 'HEAD^{tree}')" ]]; then
+    tip=$(git -C "$CREW_HOME" commit-tree "$tree" -p HEAD -m "Uncommitted when $CREW_HOST stood down")
+  fi
+  git -C "$CREW_HOME" branch -q "$1" "$tip"
+}
+
+# Another machine has claimed the lease, so this one steps back: its units off,
+# its sessions stopped, what origin lacks kept on lost/<host>-<time>, and its home
+# reset to origin. Run with the tick lock held.
+stand_down() {
+  local holder=$1 lost
+  echo "crew now runs on ${holder:-no machine}; standing down here"
+  set_units disable
+  stop_crew_jobs
+  take_lock
+  if [[ -n $(git -C "$CREW_HOME" status --porcelain) || -n $(git -C "$CREW_HOME" rev-list '@{u}..@' 2>/dev/null) ]]; then
+    lost="lost/$CREW_HOST-$(date +%Y%m%d-%H%M%S)"
+    save_lost_work "$lost"
+    echo "kept what origin didn't have on $lost"
+  fi
+  git -C "$CREW_HOME" reset -q --hard '@{u}'
+  rm -f "$LEASE_LOST"
+  unlock
+  echo "stood down: units disabled, crew sessions stopped, home reset to origin"
+}
+
+# Turns a fresh clone of the public crew repo into a person's own crew: a private
+# GitHub repo becomes origin, the public one upstream, which can never be pushed
+# to, so a ledger can't reach it. Then it writes their settings file and runs the
+# crew on this machine. Once per person; another machine clones the private repo.
+cmd_setup() {
+  local name=crew login public
+  while (($#)); do case $1 in --name) name=$2; shift 2 ;; *) die "usage: crew setup [--name NAME]" ;; esac; done
+  need gh
+  [[ ! -e $CREW_HOME/config/crew.env ]] || die "$CREW_HOME is set up already (config/crew.env exists)"
+  public=$(git -C "$CREW_HOME" remote get-url origin 2>/dev/null) || die "$CREW_HOME has no origin; clone the public crew repo and run crew setup in it"
+  login=$(gh api user --jq .login 2>/dev/null) || die "gh isn't signed in; run 'gh auth login' first"
+  say "Making $login/$name, your private crew repo"
+  git -C "$CREW_HOME" remote rename origin upstream
+  # Not a URL, so any push to upstream fails.
+  git -C "$CREW_HOME" remote set-url --push upstream DISABLED
+  if ! (cd "$CREW_HOME" && gh repo create "$login/$name" --private --source . --remote origin >/dev/null); then
+    git -C "$CREW_HOME" remote rename upstream origin
+    git -C "$CREW_HOME" config --unset remote.origin.pushurl
+    die "couldn't create $login/$name; if you have a repo by that name, pick another with crew setup --name NAME"
+  fi
+  note "origin: $(git -C "$CREW_HOME" remote get-url origin); upstream: $public (never pushed to)"
+  cp "$CREW_HOME/templates/crew.env" "$CREW_HOME/config/crew.env"
+  git -C "$CREW_HOME" add -- config/crew.env
+  git -C "$CREW_HOME" commit -qm "crew: set up for $login" -- config/crew.env
+  git -C "$CREW_HOME" push -q -u origin HEAD \
+    || die "couldn't push to origin. Push with 'git -C $CREW_HOME push -u origin HEAD', then run crew host up"
+  cmd_host_up
+  say "Your crew is set up. Next:"
+  cat <<NEXT
+  1. Set BRANCH_PREFIX in $CREW_HOME/config/crew.env, then commit and push it.
+  2. In each repo you want the crew to work on:   crew project add
+  3. Talk to the lead: lead, or the crew session in the Claude app.
+NEXT
+}
+
+# Brings in a new version of crew from the public repo (upstream). The ledger and
+# the person's settings are paths the public repo never has, so the merge only
+# meets their own edits to crew's code. A conflict there is theirs to settle:
+# crew stops with the merge in progress and says how. Then the machine's files
+# are installed again, the merge pushed, and the lead's server restarted, so new
+# phone sessions run the new lead.
+cmd_upgrade() {
+  [[ $# == 0 ]] || die "usage: crew upgrade"
+  git -C "$CREW_HOME" remote get-url upstream >/dev/null 2>&1 || die "the home has no upstream (the public crew repo) to upgrade from"
+  lock
+  [[ -z $(git -C "$CREW_HOME" status --porcelain) ]] \
+    || die "the home has uncommitted changes; commit or discard them first (git -C $CREW_HOME status)"
+  git -C "$CREW_HOME" fetch -q upstream || die "couldn't fetch upstream"
+  local ref; ref=$(git -C "$CREW_HOME" symbolic-ref -q --short refs/remotes/upstream/HEAD || echo upstream/main)
+  if ! git -C "$CREW_HOME" merge -q --no-edit "$ref"; then
+    git -C "$CREW_HOME" status --short >&2
+    die "upstream's changes conflict with edits in your home. The merge is left in progress: resolve the files above, then 'git -C $CREW_HOME commit' and run crew upgrade again. Or undo it with 'git -C $CREW_HOME merge --abort'."
+  fi
+  # The merge needed the lock (no ledger commits in the middle of it); installing
+  # doesn't, and the push takes the lock itself if it has to rebase.
+  unlock
+  cmd_install
+  push_now || warn "couldn't push the upgrade to origin; crew tick pushes it later"
+  systemctl --user restart crew-lead.service >/dev/null 2>&1 || warn "couldn't restart crew-lead.service"
+  echo "crew upgraded to $(crew_version)"
+}
+
+# TEMPORARY: removed once the user's migration is done (plan step 10.4).
+# Imports a ledger that install.sh made (~/agent-ledger) into this home, keeping
+# its history. A temporary clone of it loses install.sh's copies of crew, turns
+# each project's REPO into REMOTE (the REPO goes to this machine's local.env),
+# and is merged in. The old ledger's settings that differ from defaults.env are
+# written into the home's config/crew.env.
+
+# A setting's value in an env file, as crew would see it: the file is sourced,
+# not read, since a value may be written in more than one way.
+env_value() {  # file key
+  # shellcheck source=/dev/null
+  (. "$1"; printf '%s' "${!2-}")
+}
+
+# The old crew.env's lines that set something other than the default.
+old_settings_kept() {  # old-ledger
+  local line
+  while IFS= read -r line; do
+    if [[ $(env_value "$1/config/crew.env" "${line%%=*}") != "$(env_value "$CREW_HOME/config/defaults.env" "${line%%=*}")" ]]; then
+      echo "$line"
+    fi
+  done < <(grep -E '^[A-Z_][A-Z0-9_]*=' "$1/config/crew.env")
+}
+
+# Writes each setting line into the home's crew.env, in place of a line that sets
+# the same key (the template's BRANCH_PREFIX, say), or at the end.
+write_settings() {  # line...
+  local f="$CREW_HOME/config/crew.env" line tmp
+  touch "$f"
+  for line; do
+    tmp=$(mktemp)
+    # awk takes the key and the line from the environment, so neither needs escaping.
+    KEY="${line%%=*}=" LINE=$line awk 'index($0, ENVIRON["KEY"]) == 1 { if (!done) print ENVIRON["LINE"]; done = 1; next }
+      { print } END { if (!done) print ENVIRON["LINE"] }' "$f" >"$tmp"
+    cat "$tmp" >"$f"; rm -f "$tmp"
+    note "setting kept: $line"
+  done
+}
+
+cmd_migrate_ledger() {
+  [[ $# == 1 ]] || die "usage: crew migrate-ledger OLD"
+  local old tmp branch pd p repo remote f kept=()
+  local -A repos=()
+  old=$(realpath -e "$1" 2>/dev/null) || die "no ledger at $1"
+  [[ -f $old/config/crew.env && $(git -C "$old" rev-parse --show-toplevel 2>/dev/null) == "$old" ]] \
+    || die "$old isn't a ledger made by install.sh (no config/crew.env, or not its own git repo)"
+  lock
+  ! compgen -G "$CREW_HOME/projects/*/" >/dev/null || die "this home has projects already; migrate into a fresh home"
+  say "Importing $old"
+  mapfile -t kept < <(old_settings_kept "$old")
+  for f in "$old"/config/*-settings.json; do
+    if [[ -f $f && -f $f.dist ]] && ! cmp -s "$f" "$f.dist"; then
+      warn "${f#"$old"/} has edits of yours that aren't carried over; copy what you need into the home's settings"
+    fi
+  done
+  tmp=$(mktemp -d)
+  git clone -q "$old" "$tmp/ledger"
+  branch=$(git -C "$tmp/ledger" symbolic-ref --short HEAD)
+  # What install.sh copied into the ledger: crew itself, its README, version and
+  # .gitignore, and config/. The home has its own of each, and the old settings
+  # that matter are in kept.
+  git -C "$tmp/ledger" rm -rq --ignore-unmatch -- bin templates README.md .crew-version .gitignore config
+  for pd in "$tmp"/ledger/projects/*/; do
+    [[ -f $pd/project.env ]] || continue
+    p=$(basename "$pd")
+    repo=$(env_value "$pd/project.env" REPO)
+    [[ -n $repo ]] || die "$p has no REPO in its project.env"
+    remote=$(git -C "$repo" remote get-url origin 2>/dev/null) || die "$p: can't read the origin of its REPO, $repo"
+    # project.env as crew project add writes it: REMOTE, shared by every machine.
+    REMOTE=$remote awk '/^REPO=/ { print "REMOTE=\"" ENVIRON["REMOTE"] "\""; next } { print }' "$pd/project.env" >"$tmp/env"
+    cat "$tmp/env" >"$pd/project.env"
+    repos[$p]=$repo
+  done
+  git -C "$tmp/ledger" add -A
+  git -C "$tmp/ledger" commit -qm "crew: import the ledger from install.sh's $old"
+  git -C "$CREW_HOME" pull -q --no-rebase --no-edit --allow-unrelated-histories "$tmp/ledger" "$branch" \
+    || die "merging the old ledger failed; see git -C $CREW_HOME status"
+  rm -rf "$tmp"
+  for p in "${!repos[@]}"; do
+    cat >"$CREW_HOME/projects/$p/local.env" <<EOF
+# This machine's clone of $p. Not committed: each machine has its own.
+REPO="${repos[$p]}"
+EOF
+    note "$p: ${repos[$p]}"
+  done
+  if ((${#kept[@]})); then
+    write_settings "${kept[@]}"
+    git -C "$CREW_HOME" add -- config/crew.env
+    git -C "$CREW_HOME" commit -qm "crew: keep the old ledger's settings" -- config/crew.env
+  fi
+  unlock
+  push_now || warn "couldn't push to origin; crew tick pushes it later"
+  say "Imported. For the move, in this order:"
+  cat <<NEXT
+  1. Turn off the old timers, if you haven't: systemctl --user disable --now crew-tick.timer crew-gardener.timer
+     (crew setup's crew host up enabled this home's; check with crew doctor).
+  2. For each task in flight, once it needs its worker: crew followup TASK --fresh --note "crew moved to $CREW_HOME"
+     Its old session still runs on the old settings.
+  3. Keep $old as an archive. Nothing reads it any more.
+NEXT
+}
+
+# What crew-lead.service runs: the lead, as a Remote Control server in the home's
+# lead/, so the person opens it from Claude Mobile. On a machine that doesn't run
+# the crew it exits EXIT_NOT_HOST, which the unit takes as "don't restart"
+# (RestartPreventExitStatus).
+EXIT_NOT_HOST=3
+cmd_serve() {
+  [[ $# == 0 ]] || die "usage: crew serve"
+  # In a subshell, so require_host's die (exit 1) becomes this exit code.
+  (require_host) || exit "$EXIT_NOT_HOST"
+  cd "$CREW_HOME/lead" || die "$CREW_HOME/lead is missing"
+  # Without CLAUDECODE, as cc does, so it starts from inside a Claude session too.
+  # This home's bin/ first, so the lead's sessions run this home's crew.
+  PATH="$CREW_HOME/bin:$PATH" exec env -u CLAUDECODE \
+    claude remote-control --name crew --permission-mode "$LEAD_PERMISSION_MODE" --continue
+}
+
+cmd_host() {
+  local sub=${1:-}
+  shift || true
+  case $sub in
+    "") cmd_host_status ;;
+    up) cmd_host_up "$@" ;;
+    down) cmd_host_down "$@" ;;
+    *) die "usage: crew host [up [--take] | down [--force]]" ;;
+  esac
+}
+
+cmd_host_status() {
+  local holder; holder=$(lease_holder)
+  if [[ -n $holder ]]; then echo "crew runs on $holder (since $(lease_since))"
+  else echo "no machine runs the crew"; fi
+  echo "this machine: $CREW_HOST"
+}
+
+# Claims the lease for this machine by pushing the host file. A rejected push
+# means another machine moved first: this claim is dropped and origin looked at
+# again. Without take, a lease another machine holds is refused.
+claim_lease() {  # take(0|1)
+  local take=$1 holder claimed=0
+  take_lock
+  for _ in 1 2 3 4 5; do
+    git -C "$CREW_HOME" pull -q --ff-only \
+      || die "the home has ledger commits origin hasn't and origin has commits it hasn't; settle that first (git -C $CREW_HOME status)"
+    holder=$(lease_holder)
+    if [[ -n $holder && $holder != "$CREW_HOST" ]] && ((!take)); then
+      die "crew runs on $holder (since $(lease_since)); crew host up --take moves it here"
+    fi
+    echo "$CREW_HOST" >"$CREW_HOME/host"
+    if commit_host "host: $CREW_HOST"; then claimed=1; break; fi
+    git -C "$CREW_HOME" reset -q --hard '@{u}' 2>/dev/null || true
+  done
+  ((claimed)) || die "couldn't push the lease to origin"
+  rm -f "$LEASE_LOST"
+  unlock
+}
+
+# Clones each registered project this machine has no clone of, into
+# $WORK_ROOT/<p>/repo, and records it as this machine's (crew project add).
+clone_missing_projects() {
+  local pd p remote clone
+  for pd in "$CREW_HOME"/projects/*/; do
+    [[ -f $pd/project.env && ! -f $pd/local.env ]] || continue
+    p=$(basename "$pd")
+    # shellcheck source=/dev/null
+    remote=$(. "$pd/project.env" && echo "${REMOTE:-}")
+    [[ -n $remote ]] || { warn "$p has no REMOTE in project.env; run 'crew project add' in a clone of it"; continue; }
+    clone="$WORK_ROOT/$p/repo"
+    if [[ ! -d $clone/.git ]]; then
+      mkdir -p "$(dirname "$clone")"
+      git clone -q "$remote" "$clone" || { warn "couldn't clone $remote for $p"; continue; }
+    fi
+    (cmd_project_add "$clone" >/dev/null) || warn "couldn't register $clone for $p"
+    note "$p: this machine's clone is $clone"
+  done
+}
+
+cmd_host_up() {
+  local take=0
+  while (($#)); do case $1 in --take) take=1; shift ;; *) die "usage: crew host up [--take]" ;; esac; done
+  git -C "$CREW_HOME" remote get-url origin >/dev/null 2>&1 || die "the home has no origin to claim the lease through"
+  cmd_install
+  say "Claiming the lease for $CREW_HOST"
+  claim_lease "$take"
+  note "crew runs on $CREW_HOST"
+  clone_missing_projects
+  set_units enable
+  note "enabled ${CREW_UNITS[*]}"
+  (cmd_doctor) || true
+}
+
+cmd_host_down() {
+  local force=0 f wt id unpushed=()
+  while (($#)); do case $1 in --force) force=1; shift ;; *) die "usage: crew host down [--force]" ;; esac; done
+  lock
+  # Work that exists only in this machine's worktrees would be lost to the next host.
+  while IFS= read -r f; do
+    wt=$(fm_get "$f" worktree); id=$(basename "$f" .md)
+    [[ -n $wt && -d $wt ]] || continue
+    if ! git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null; then unpushed+=("$id: its branch was never pushed")
+    elif [[ -n $(git -C "$wt" rev-list '@{u}..@') ]]; then unpushed+=("$id: $(git -C "$wt" rev-list --count '@{u}..@') commit(s) not pushed"); fi
+  done < <(files_of tasks)
+  if ((${#unpushed[@]})) && ((!force)); then
+    printf '  %s\n' "${unpushed[@]}" >&2
+    die "these worktrees have work origin doesn't; have their workers push, or use --force"
+  fi
+  set_units disable
+  stop_crew_jobs
+  # The push may have to take the ledger lock to rebase.
+  unlock
+  push_now >&2 || warn "couldn't push every ledger commit before handing over"
+  take_lock
+  : >"$CREW_HOME/host"
+  commit_host "host: none ($CREW_HOST stepped down)" || die "couldn't push the handover to origin; crew still runs here as far as origin knows"
+  echo "crew runs on no machine now; crew host up starts it on the next one"
+}
+
+# ------------------------------------------------------------- resolution ---
+
+files_of() {  # kind(tasks|proposals) [project]
+  local d
+  if [[ -n ${2:-} ]]; then d=("$CREW_HOME/projects/$2/$1"); else d=("$CREW_HOME"/projects/*/"$1"); fi
+  local x
+  for x in "${d[@]}"; do [[ -d $x ]] && find "$x" -maxdepth 1 -name '*.md' -type f; done | sort
+}
+
+resolve_in() {  # arg files... ; 0 found, 1 none, 2 ambiguous
+  local arg=$1; shift
+  local f id matches=()
+  if [[ $arg == \#* ]]; then
+    local n=${arg#\#} pr
+    for f; do pr=$(fm_get "$f" pr); [[ -n $pr && ${pr##*/} == "$n" ]] && matches+=("$f"); done
+  else
+    for f; do id=$(basename "$f" .md); [[ $id == "$arg" ]] && { echo "$f"; return 0; }; done
+    if [[ $arg =~ ^[0-9]+$ ]]; then
+      local p; p=$(printf '%03d' "$((10#$arg))")
+      for f; do id=$(basename "$f" .md); [[ $id == "$p"-* ]] && matches+=("$f"); done
+    else
+      for f; do id=$(basename "$f" .md); [[ $id == *"$arg"* ]] && matches+=("$f"); done
+    fi
+  fi
+  if ((${#matches[@]} == 1)); then echo "${matches[0]}"; return 0; fi
+  if ((${#matches[@]} > 1)); then
+    printf 'crew: "%s" is ambiguous:\n' "$arg" >&2
+    printf '  %s\n' "${matches[@]##*/}" >&2
+    return 2
+  fi
+  return 1
+}
+
+resolve() {  # kind arg
+  local kind=$1 arg=$2 cur rc files=()
+  if [[ -f $arg ]]; then realpath "$arg"; return 0; fi
+  cur=$(project_from_cwd 2>/dev/null || true)
+  if [[ -n $cur ]]; then
+    mapfile -t files < <(files_of "$kind" "$cur")
+    if ((${#files[@]})); then
+      rc=0; resolve_in "$arg" "${files[@]}" || rc=$?
+      ((rc == 0)) && return 0
+      ((rc == 2)) && exit 1
+    fi
+  fi
+  mapfile -t files < <(files_of "$kind")
+  if ((${#files[@]})); then
+    rc=0; resolve_in "$arg" "${files[@]}" || rc=$?
+    ((rc == 0)) && return 0
+    ((rc == 2)) && exit 1
+  fi
+  die "no ${kind%s} matches '$arg'"
+}
+
+task_project() { fm_get "$1" project; }
+
+# ------------------------------------------------------------------ stacks ---
+# A task is stacked when its `base` is another task's branch; that task is its
+# parent. Nothing else records the relationship, so it can't disagree with `base`.
+
+load_branches() {  # [project] — index task files by branch, for parent_of
+  BRANCHES=()
+  local f p b
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    p=${f%/tasks/*}; b=$(fm_get "$f" branch)
+    if [[ -n $b ]]; then BRANCHES[${p##*/}:$b]=$f; fi
+  done < <(files_of tasks "${1:-}")
+}
+
+parent_of() {  # file -> the parent task's file, or nothing (call load_branches first)
+  local p=${1%/tasks/*} base found
+  base=$(fm_get "$1" base)
+  [[ -n $base ]] || return 0
+  found=${BRANCHES[${p##*/}:$base]:-}
+  if [[ -n $found && $found != "$1" ]]; then echo "$found"; fi
+}
+
+# The branch a task belongs on now: its own base, or, once its parent has merged,
+# whatever the parent was based on (the default branch when a stack merges bottom-up).
+effective_base() {  # file
+  local f=$1 p n
+  for ((n = 0; n < 50; n++)); do
+    p=$(parent_of "$f")
+    [[ -n $p && $(fm_get "$p" status) == merged ]] || break
+    f=$p
+  done
+  fm_get "$f" base
+}
+
+# Why a stacked task's branch has to be rebased, or nothing: "<parent> merged",
+# "<parent> abandoned", or "<parent> moved" when the parent's pushed branch has
+# commits this one lacks. Reads the refs as last fetched; needs load_project.
+restack_reason() {  # file
+  local p pid branch tip
+  p=$(parent_of "$1")
+  [[ -n $p ]] || return 0
+  branch=$(fm_get "$1" branch)
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch" || return 0
+  pid=$(basename "$p" .md)
+  case $(fm_get "$p" status) in
+    merged) echo "$pid merged"; return 0 ;;
+    abandoned) echo "$pid abandoned"; return 0 ;;
+  esac
+  tip=$(git -C "$REPO" rev-parse --verify --quiet "refs/remotes/origin/$(fm_get "$p" branch)^{commit}" || true)
+  [[ -n $tip ]] || return 0
+  git -C "$REPO" merge-base --is-ancestor "$tip" "refs/heads/$branch" || echo "$pid moved"
+}
+
+# The commit a stacked task's branch belongs on now: the tip of its effective base
+# on origin, as last fetched. Empty if that branch isn't on origin.
+restack_target() {  # file
+  git -C "$REPO" rev-parse --verify --quiet "refs/remotes/origin/$(effective_base "$1")^{commit}" || true
+}
+
+# A stack restacks bottom-up: a parent that is about to be rebased would only move
+# this task again.
+parent_needs_restack() {  # file
+  local p; p=$(parent_of "$1")
+  [[ -n $p ]] && has_word "$(fm_get "$p" status)" "$ACTIVE_STATES" && [[ -n $(restack_reason "$p") ]]
+}
+
+# base_sha is the newest commit of the parent's branch that the task's own branch
+# contains: where `git rebase --onto` has to cut. Once the parent is squash-merged
+# or rebased, the merge base of the two branches falls back to a commit before the
+# parent's work, so the recorded one is kept for as long as the task's branch still
+# contains it. Returns 0 if it changed. Call with the lock held.
+note_base_sha() {  # file parent-file
+  local old mb branch
+  old=$(fm_get "$1" base_sha); branch=refs/heads/$(fm_get "$1" branch)
+  mb=$(git -C "$REPO" merge-base "refs/remotes/origin/$(fm_get "$2" branch)" "$branch" 2>/dev/null) || return 1
+  [[ $mb != "$old" ]] || return 1
+  if [[ -n $old ]] && git -C "$REPO" merge-base --is-ancestor "$old" "$branch" 2>/dev/null \
+     && ! git -C "$REPO" merge-base --is-ancestor "$old" "$mb" 2>/dev/null; then
+    return 1
+  fi
+  fm_set "$1" base_sha "$mb"
+}
+
+# ----------------------------------------------------------- agent sessions ---
+
+# claude agents --json --all, or [] on failure. A live session whose transcript
+# says its last turn has ended gets turnEnded: true (see JQ_BUSY).
+agents_json() {
+  local out s ended=()
+  out=$(cc agents --json --all 2>/dev/null || true)
+  jq -e 'type=="array"' >/dev/null 2>&1 <<<"$out" || { echo '[]'; return 0; }
+  while IFS= read -r s; do
+    if [[ -n $s ]] && turn_ended "$s"; then ended+=("$s"); fi
+  done < <(jq -r '.[] | select(.state == "working" and .pid != null) | .sessionId // empty' <<<"$out")
+  jq --args 'map(if (.sessionId as $s | $ARGS.positional | index($s)) then .turnEnded = true else . end)' \
+    "${ended[@]}" <<<"$out"
+}
+
+# Whether a session's last turn has ended, read from its transcript: Claude Code
+# writes a turn_duration entry when a turn ends, and a prompt or a reply once the
+# next one starts. Fails when there's no transcript to read.
+turn_ended() {  # session
+  local t last
+  t=$(compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/$1.jsonl" | head -n 1 || true)
+  [[ -n $t ]] || return 1
+  last=$(tac "$t" | jq -nr 'first(inputs | select(.type == "user" or .type == "assistant" or .subtype == "turn_duration") | .type)' 2>/dev/null || true)
+  [[ $last == system ]]
+}
+
+job_state() {  # agents_json job
+  [[ -n $2 ]] || return 0
+  jq -r --arg id "$2" 'first(.[] | select(.id==$id) | if .turnEnded then "idle, background task running"
+    else .state + (if .waitingFor then " (" + .waitingFor + ")" else "" end) end) // empty' <<<"$1"
+}
+
+# A worker is busy while a turn runs or while its live process holds an open prompt,
+# such as a permission dialog (status waiting). Anything else can take a followup,
+# including a blocked worker: it ended its turn on a question for the user, and the
+# answer is what the followup sends. A background shell the worker started, such as
+# a dev server, keeps its state working and its status busy after the turn ends, so
+# the turn counts as running only while its transcript says so (turnEnded).
+JQ_BUSY='def busy: (.state == "working" and (.turnEnded | not)) or .status == "waiting";'
+
+job_listed() {  # agents_json job — whether claude agents on this machine knows the job
+  [[ -n $2 ]] || return 1
+  jq -e --arg id "$2" 'any(.[]; .id==$id)' <<<"$1" >/dev/null 2>&1
+}
+
+job_busy() {  # agents_json job
+  [[ -n $2 ]] || return 1
+  jq -e --arg id "$2" "$JQ_BUSY"' any(.[]; .id==$id and busy)' <<<"$1" >/dev/null 2>&1
+}
+
+
+# Workers are the jobs the task files record, not sessions with a crew- name: a
+# session Claude Code copies on resume gets a name of its own.
+running_workers() {  # agents_json
+  local f jobs=()
+  while IFS= read -r f; do
+    [[ -n $f ]] && jobs+=("$(fm_get "$f" worker_job)")
+  done < <(files_of tasks)
+  jq --args "$JQ_BUSY"' [.[] | select(.id as $id | $ARGS.positional | index($id)) | select(busy)] | length' \
+    "${jobs[@]}" <<<"$1"
+}
+
+# Stops a background job and waits up to 10 seconds for its process to close. Its
+# conversation is saved, and background shells it started, such as a dev server,
+# keep running for its next process. Fails if the process is still open.
+stop_job() {  # job
+  cc stop "$1" >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    agents_json | jq -e --arg id "$1" 'any(.[]; .id==$id and .pid != null)' >/dev/null || return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# A background session that ended its turn keeps its process open for about an hour.
+# Resuming it then starts a copy under a new session ("already running in the
+# background"), so stop it first, and the resume continues it in place.
+stop_idle_session() {  # agents_json session
+  [[ -n $2 ]] || return 0
+  local job
+  while IFS= read -r job; do
+    if [[ -n $job ]]; then stop_job "$job" || true; fi
+  done < <(jq -r --arg s "$2" "$JQ_BUSY"' .[] | select(.sessionId==$s and .pid != null and (busy | not)) | .id' <<<"$1")
+}
+
+# Takes a worker out of agent view, stopping it first: `claude rm` isn't documented
+# to end a process that's still open. Fails if the process won't close.
+remove_worker() {  # job
+  [[ -n $1 ]] || return 0
+  local aj; aj=$(agents_json)
+  jq -e --arg id "$1" 'any(.[]; .id==$id)' <<<"$aj" >/dev/null || return 0
+  if jq -e --arg id "$1" 'any(.[]; .id==$id and .pid != null)' <<<"$aj" >/dev/null; then
+    stop_job "$1" || return 1
+  fi
+  cc rm "$1" >/dev/null 2>&1 || warn "couldn't remove worker $1 from agent view; delete it in claude agents"
+}
+
+# Ends the background processes still running in a directory, such as a dev server
+# a worker started in a background shell: stopping the worker leaves those running.
+# Sends TERM, then KILL to any still running after 10 seconds. A process with a
+# terminal is the user's, so it's left alone, and so are crew and the processes
+# that started it. Reads /proc (Linux).
+stop_processes_in() {  # dir
+  local dir pid cwd stat tty p mine=" " pids=() left=()
+  dir=$(realpath -e "$1" 2>/dev/null) || return 0
+  p=$BASHPID
+  while [[ -n $p && $p != 0 ]]; do
+    mine+="$p "
+    p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null || true)
+  done
+  for pid in /proc/[0-9]*; do
+    pid=${pid#/proc/}
+    [[ $mine == *" $pid "* ]] && continue
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+    [[ $cwd == "$dir" || $cwd == "$dir"/* ]] || continue
+    # The 7th field of stat is the terminal; the 2nd, the command name, may hold spaces.
+    stat=$(<"/proc/$pid/stat") || continue
+    read -r _ _ _ _ tty _ <<<"${stat##*) }"
+    if [[ $tty == 0 ]]; then pids+=("$pid"); fi
+  done
+  ((${#pids[@]})) || return 0
+  echo "stopping ${#pids[@]} process(es) still running in $1"
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+  # A process that has exited has no cwd, even before its parent reaps it.
+  for _ in $(seq 1 20); do
+    left=()
+    for p in "${pids[@]}"; do readlink "/proc/$p/cwd" >/dev/null 2>&1 && left+=("$p"); done
+    ((${#left[@]})) || return 0
+    sleep 0.5
+  done
+  warn "killing ${#left[@]} process(es) in $1 that ignored TERM"
+  kill -KILL "${left[@]}" 2>/dev/null || true
+}
+
+strip_ansi() { sed $'s/\e\\[[0-9;?]*[[:alpha:]]//g'; }
+
+# The GitHub login crew acts for. crew tick sets GH_LOGIN once, so the tasks it
+# checks don't each look it up again.
+gh_login() {
+  [[ -n ${GH_LOGIN:-} ]] || GH_LOGIN=$(gh api user --jq .login) || return 1
+  echo "$GH_LOGIN"
+}
+
+# A stack counts once: a task stacked on another in-flight task isn't counted.
+in_flight_count() {
+  local f n=0 p
+  load_branches
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    has_word "$(fm_get "$f" status)" "$ACTIVE_STATES" || continue
+    p=$(parent_of "$f")
+    if [[ -n $p ]] && has_word "$(fm_get "$p" status)" "$ACTIVE_STATES"; then continue; fi
+    n=$((n + 1))
+  done < <(files_of tasks)
+  echo "$n"
+}
+
+# A launch has worked once the job's own process reports the session it loaded.
+# A job's ID is the first 8 characters of its session ID. A process that has just
+# started can report a new session ID for a moment, before it loads the one it
+# resumes, so only a session ID that starts with the job ID counts. A resume of a
+# session that can't be found shows up as a job that ends in `failed`.
+wait_for_launch() {  # job -> prints the job's sessionId (empty if it never reported one); fails if the job failed
+  local entry
+  for _ in $(seq 1 60); do
+    entry=$(agents_json | jq -c --arg id "$1" 'first(.[] | select(.id==$id)) // empty')
+    if [[ -n $entry ]]; then
+      [[ $(jq -r .state <<<"$entry") != failed ]] || return 1
+      jq -er --arg id "$1" 'select(.pid != null and ((.sessionId // "") | startswith($id))) | .sessionId' <<<"$entry" 2>/dev/null \
+        && return 0
+    fi
+    sleep 0.5
+  done
+  return 0
+}
+
+# Task worktrees are made and removed with plain `git worktree`, or with Worktrunk
+# (`wt`) when the project sets WORKTREE_TOOL=worktrunk, so the repo's wt hooks run
+# (per-worktree databases, services, dependency installs). crew never passes
+# --yes: hooks the user hasn't approved make wt fail rather than run. Hook output
+# goes to a log under $CREW_HOME/logs/ instead of the caller's terminal.
+worktree_create() {  # path branch startref(empty: check out the existing branch) logfile
+  local wt=$1 branch=$2 startref=$3 logf=$4
+  mkdir -p "$(dirname "$wt")"
+  prune_worktrees
+  case $WORKTREE_TOOL in
+    git)
+      if [[ -n $startref ]]; then git -C "$REPO" worktree add --quiet --no-track -b "$branch" "$wt" "$startref"
+      else git -C "$REPO" worktree add --quiet "$wt" "$branch"; fi ;;
+    worktrunk)
+      need wt
+      local args=(switch --no-cd --format json --config-set "worktree-path=$(jq -rn --arg p "$wt" '$p | tojson')")
+      [[ -n $startref ]] && args+=(--create --base "$startref")
+      mkdir -p "$(dirname "$logf")"
+      echo "== $(now) wt ${args[*]} $branch" >>"$logf"
+      echo "Creating $wt with Worktrunk (hook output: $logf)"
+      local out path
+      if ! out=$(wt -C "$REPO" "${args[@]}" "$branch" 2>>"$logf"); then
+        tail -n 15 "$logf" >&2
+        die "wt couldn't create the worktree (full output in $logf). If its hooks need approval, run 'wt config approvals add' in $REPO."
+      fi
+      path=$(jq -r '.path // empty' <<<"$out" 2>/dev/null || true)
+      [[ -n $path && $(realpath -m "$path") == $(realpath -m "$wt") ]] \
+        || die "wt left $branch at '${path:-unknown}' instead of $wt; does the branch already have a worktree? (wt list)" ;;
+    *) die "unknown WORKTREE_TOOL '$WORKTREE_TOOL' (use git or worktrunk)" ;;
+  esac
+}
+
+worktree_remove() {  # path force(0|1) logfile
+  local wt=$1 force=$2 logf=$3 flags=()
+  ((force)) && flags=(--force)
+  case $WORKTREE_TOOL in
+    git) git -C "$REPO" worktree remove "${flags[@]}" "$wt" ;;
+    worktrunk)
+      need wt
+      mkdir -p "$(dirname "$logf")"
+      echo "== $(now) wt remove $wt" >>"$logf"
+      # crew deletes merged branches itself, the same way for both tools.
+      wt -C "$REPO" remove --no-delete-branch --foreground "${flags[@]}" "$wt" >>"$logf" 2>&1 \
+        || { tail -n 15 "$logf" >&2; warn "full output in $logf"; return 1; } ;;
+    *) die "unknown WORKTREE_TOOL '$WORKTREE_TOOL' (use git or worktrunk)" ;;
+  esac
+}
+
+# Makes a task's worktree ready for a worker: creates it unless it exists, and
+# copies the WORKTREE_COPY files from the main checkout. A missing worktree checks
+# out the task's local branch. When there's none, it makes the branch from
+# origin/<branch>, where another machine pushed it, or else starts it from
+# origin/<base>. WORKTREE_FROM says which: local-branch, origin-branch or base, or
+# nothing for a worktree that existed. For base, NEW_BRANCH_FROM is the commit the
+# branch starts at.
+# An existing worktree whose path the task file doesn't record yet (dispatch
+# records it only after this succeeds) is left from a dispatch that failed while
+# creating it, where Worktrunk's setup hooks may not have finished, so it's
+# refused. Run it without the ledger lock: Worktrunk hooks can take minutes.
+# Needs load_project.
+setup_worktree() {  # file wt branch base -> sets WORKTREE_FROM NEW_BRANCH_FROM
+  local file=$1 wt=$2 branch=$3 base=$4 id startref="" c
+  id=$(basename "$file" .md)
+  WORKTREE_FROM="" NEW_BRANCH_FROM=""
+  if [[ -d $wt ]]; then
+    git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$wt exists but isn't a git worktree"
+    [[ $WORKTREE_TOOL != worktrunk || -n $(fm_get "$file" worktree) ]] \
+      || die "$wt is left over from a dispatch whose Worktrunk setup failed; remove it with 'wt -C $REPO remove $wt' and dispatch again"
+  else
+    if git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
+      WORKTREE_FROM=local-branch
+    elif git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      WORKTREE_FROM=origin-branch; startref="origin/$branch"
+    else
+      WORKTREE_FROM=base; startref="origin/$base"
+      git -C "$REPO" rev-parse --verify --quiet "$startref" >/dev/null || startref=$base
+      NEW_BRANCH_FROM=$(git -C "$REPO" rev-parse --verify --quiet "$startref^{commit}" || true)
+    fi
+    worktree_create "$wt" "$branch" "$startref" "$CREW_HOME/logs/worktree-$PROJECT-$id.log"
+  fi
+  for c in $WORKTREE_COPY; do
+    if [[ -e $REPO/$c && ! -e $wt/$c ]]; then mkdir -p "$(dirname "$wt/$c")"; cp -a "$REPO/$c" "$wt/$c"; fi
+  done
+}
+
+# A task has been dispatched once crew records a worker or a worktree for it.
+task_dispatched() { [[ -n $(fm_get "$1" worker_job) || -n $(fm_get "$1" worktree) ]]; }
+
+# Makes sure a dispatched task's worktree is on this machine, at
+# $WORK_ROOT/<p>/<id>. After a failover the task file names another machine's
+# path, and the task's branch may be on origin only, or nowhere, if that machine
+# never pushed it: then the branch starts over from its base. Records the path
+# when it changes, and logs how a missing worktree came back. Run it without the
+# ledger lock. Needs load_project.
+ensure_worktree() {  # file
+  local file=$1 id wt branch base msg=""
+  id=$(basename "$file" .md); wt="$WORK_ROOT/$PROJECT/$id"
+  branch=$(fm_get "$file" branch)
+  base=$(fm_get "$file" base); base=${base:-$DEFAULT_BRANCH}
+  if [[ ! -d $wt ]]; then
+    git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "git fetch origin failed; using local refs"
+  fi
+  setup_worktree "$file" "$wt" "$branch" "$base"
+  case $WORKTREE_FROM in
+    local-branch) msg="recreated worktree on the local branch $branch" ;;
+    origin-branch) msg="recreated worktree from origin/$branch" ;;
+    base) msg="started over: $branch was never pushed from $(previous_holder)" ;;
+  esac
+  if [[ $(fm_get "$file" worktree) == "$wt" && -z $msg ]]; then return 0; fi
+  lock
+  fm_set "$file" worktree "$wt"
+  if [[ -n $NEW_BRANCH_FROM ]]; then fm_set "$file" base_sha "$NEW_BRANCH_FROM"; fi
+  if [[ -n $msg ]]; then append_log "$file" "$msg"; fi
+  touch_updated "$file"
+  commit "worktree $PROJECT/$id"
+  unlock
+}
+
+# A worktree or checkout deleted by hand (rm -rf) stays registered with git, which
+# then refuses to make another at its path. Needs load_project.
+prune_worktrees() { git -C "$REPO" worktree prune; }
+
+# A read-only checkout of origin/DEFAULT_BRANCH for a session that reads the code
+# but never changes it (the gardener, a goal lead, the lead). Plain git, never
+# Worktrunk: nothing runs there, so it needs none of the repo's per-worktree
+# setup. Needs load_project.
+detached_checkout() {  # path
+  git -C "$REPO" fetch --quiet origin "$DEFAULT_BRANCH" 2>/dev/null || warn "$PROJECT: fetch failed; using local origin/$DEFAULT_BRANCH"
+  if [[ -d $1 ]]; then git -C "$1" checkout --quiet --detach "origin/$DEFAULT_BRANCH"
+  else
+    prune_worktrees
+    mkdir -p "$(dirname "$1")"; git -C "$REPO" worktree add --quiet --detach "$1" "origin/$DEFAULT_BRANCH"
+  fi
+}
+
+# The settings workers run with: config/worker-settings.json, plus the project's
+# projects/<p>/worker-settings.json when it has one (for example, allow rules
+# or env for that project's test commands). The project file can only add:
+# objects are merged and arrays appended, but any value the base file sets wins,
+# so a project can't drop a deny rule.
+# Prints a path or a JSON string; `claude --settings` takes either. Also checks
+# WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its worktree exists.
+worker_settings() {
+  [[ $WORKER_AUTOCOMPACT_WINDOW =~ ^(auto|[0-9]+[kKmM]?)$ ]] \
+    || die "WORKER_AUTOCOMPACT_WINDOW must be auto or a token count like 400k, not '$WORKER_AUTOCOMPACT_WINDOW'"
+  local base="$CREW_HOME/config/worker-settings.json" extra="$PDIR/worker-settings.json"
+  [[ -f $extra ]] || { echo "$base"; return; }
+  jq -cs 'def add_only($a; $b):
+            if ($a | type) == "object" and ($b | type) == "object" then
+              reduce ($b | keys_unsorted[]) as $k ($a;
+                .[$k] = (if $a | has($k) then add_only($a[$k]; $b[$k]) else $b[$k] end))
+            elif ($a | type) == "array" and ($b | type) == "array" then $a + ($b - $a)
+            else $a end;
+          add_only(.[0]; .[1])' "$base" "$extra" 2>/dev/null \
+    || die "$extra isn't valid JSON"
+}
+
+launch_worker() {  # file wt prompt mode(fresh|resume) -> sets LAUNCH_JOB LAUNCH_SESSION
+  local settings=""
+  if [[ $4 == fresh ]]; then settings=$(worker_settings) || return 1; fi
+  launch_session "$1" worker "$2" "$3" "$4" --agent implementer --permission-mode "$WORKER_PERMISSION_MODE" \
+    --autocompact "$WORKER_AUTOCOMPACT_WINDOW" --settings "$settings"
+}
+
+# Starts a background session for a ledger file, or resumes the one it records as
+# <role>_session, and confirms it started. A fresh session gets the launch flags,
+# the file's <role>_name and the ledger as an extra directory.
+launch_session() {  # file role wt prompt mode(fresh|resume) [launch flags...] -> sets LAUNCH_JOB LAUNCH_SESSION
+  local file=$1 role=$2 wt=$3 prompt=$4 mode=$5 out name session
+  shift 5
+  name=$(fm_get "$file" "${role}_name")
+  session=$(fm_get "$file" "${role}_session")
+  if [[ $mode == resume ]]; then
+    # A background session keeps the options it was started with (agent, permission
+    # mode, settings, --add-dir). Passing any launch flag again makes Claude Code
+    # start a copy under a new session instead of continuing this one. So does a
+    # process that's still open, hence stop_idle_session.
+    stop_idle_session "$(agents_json)" "$session"
+    out=$(cd "$wt" && cc --resume "$session" --bg "$prompt" 2>&1) || true
+  else
+    # --add-dir is variadic, so it must never be the last flag before the prompt.
+    out=$(cd "$wt" && cc --name "$name" --add-dir "$CREW_HOME" --bg "$@" "$prompt" 2>&1) || true
+  fi
+  # The job ID can come wrapped in color codes, which would never match `claude agents`.
+  out=$(strip_ansi <<<"$out")
+  LAUNCH_JOB=$(grep -m1 '^backgrounded' <<<"$out" | awk '{print $3}' || true)
+  if [[ -z $LAUNCH_JOB ]]; then
+    echo "$out" >&2
+    return 1
+  fi
+  # A session did start, so don't fall back to starting another one.
+  [[ $LAUNCH_JOB =~ ^[[:alnum:]_-]+$ ]] \
+    || die "claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':
+$out"
+  grep -i '^note:' <<<"$out" >&2 || true
+  if ! LAUNCH_SESSION=$(wait_for_launch "$LAUNCH_JOB"); then
+    warn "claude started job $LAUNCH_JOB, but it failed straight away (see 'claude agents')"
+    return 1
+  fi
+  if [[ -z $LAUNCH_SESSION ]]; then
+    warn "job $LAUNCH_JOB hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as ${role}_session in $file"
+  elif [[ $mode == resume && $LAUNCH_SESSION != "$session" ]]; then
+    warn "claude started a copy of session $session as $LAUNCH_SESSION; later followups resume the copy"
+  fi
+}
+
+# Resumes the session a file records as <role>_session, or starts a fresh one when it
+# records none, when fresh is 1, or when the resume fails. A fresh session gets the
+# fresh prompt and then the prompt. Sets LAUNCH_MODE as well as LAUNCH_JOB and
+# LAUNCH_SESSION.
+relaunch() {  # launcher role file wt prompt fresh-prompt fresh(0|1)
+  local launcher=$1 role=$2 file=$3 wt=$4 prompt=$5 fresh_prompt=$6 session
+  session=$(fm_get "$file" "${role}_session")
+  LAUNCH_MODE=resume
+  if (($7)) || [[ -z $session ]]; then LAUNCH_MODE=fresh
+  elif ! "$launcher" "$file" "$wt" "$prompt" resume; then
+    warn "couldn't resume session $session; starting a fresh session instead"
+    LAUNCH_MODE=fresh
+  fi
+  if [[ $LAUNCH_MODE == fresh ]]; then
+    "$launcher" "$file" "$wt" "$fresh_prompt
+$prompt" fresh || die "could not start a session (see output above)"
+  fi
+}
+
+# ----------------------------------------------------------------- commands ---
+
+cmd_help() {
+  cat <<'EOF'
+crew — ledger CLI for the agent crew
+
+Setup
+  crew setup [--name NAME]         Once, in a fresh clone of the public crew repo: make
+                                   your private repo (NAME, default crew) its origin,
+                                   with the public one as upstream, and run the crew here
+  crew migrate-ledger OLD          Temporary, removed after the user's migration: import
+                                   a ledger install.sh made (e.g. ~/agent-ledger), history
+                                   and all, into this fresh home
+  crew upgrade                     Merge the public repo's new version, install it,
+                                   push, and restart the lead's server
+  crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]
+                                   Put this machine's files in place: agents, fish
+                                   functions, systemd units (timers not enabled)
+  crew project add [PATH]          Register a repo (default: current) with the ledger,
+                                   or this machine's clone of one registered already
+  crew checkout PROJECT            Bring the lead's reading copy of PROJECT up to date
+                                   with origin; prints its path
+  crew host                        Which machine runs the crew, and this one's name
+  crew host up [--take]            Run the crew on this machine: install, claim the
+                                   lease (--take: from another machine), clone missing
+                                   projects, enable the timers
+  crew host down [--force]         Hand over: stop the crew here and release the lease
+                                   (refused while a worktree has unpushed commits)
+  crew serve                       Serve the lead with Remote Control (what
+                                   crew-lead.service runs); exits 3 on a machine
+                                   that doesn't run the crew
+  crew doctor                      Check dependencies, versions, trust and settings
+  crew config [KEY] [--project P]  Show effective config (project overrides applied:
+                                   the current repo's, or P's)
+
+Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
+  crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
+                                   Create a draft task; prints its path. NAME is the
+                                   branch without BRANCH_PREFIX (default: from title).
+                                   --on stacks it on TASK's unmerged branch; --goal
+                                   makes it one of GOAL's tasks
+  crew ready TASK                  Check the brief is complete and mark it ready
+  crew dispatch TASK [--force]     Create worktree + branch and start an implementer
+  crew feedback TASK [--since ISO]
+                                   Pull new PR comments: yours into a review round,
+                                   collaborators' under Open questions for you
+  crew followup TASK [--fresh] [--note TEXT]
+                                   Resume the task's worker on the latest round/note
+  crew restack TASK [--again]      Have a stacked task's worker rebase it after its
+                                   parent moved or merged (bottom of the stack first);
+                                   --again resends a restack the worker already has
+  crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
+                                   review summary on the task's PR (used by workers)
+  crew status [--done]             Tasks with worker state (current project, or all);
+                                   stacked tasks are listed under their parent
+  crew sync [--quiet] [--all]      Pull PR URLs/states from GitHub; mark merged tasks;
+                                   report stacked tasks that need a restack (current
+                                   project, or all)
+  crew tick                        Do what needs no decision, across all projects:
+                                   sync, record new PR comments, send review rounds
+                                   and restacks to idle workers, mark tasks waiting
+                                   on you, clean up merged ones (run by a timer)
+  crew list [--all] [--status S]   Compact task list
+  crew show TASK | crew path TASK  Print a task file / its path
+  crew find TASK                   Print the resolved task id
+  crew get TASK KEY                Read a front-matter field
+  crew set TASK KEY VALUE...       Write a front-matter field
+  crew log TASK MESSAGE...         Append to the task's Log
+  crew cleanup TASK|--merged [--force]
+                                   Remove worktree/local branch of merged tasks
+  crew commit [MESSAGE]            Commit pending ledger edits
+  crew commit --hook               The same for one file, from an agent's PostToolUse
+                                   hook JSON on stdin (always exits 0)
+
+Goals  (GOAL = id, number, unique substring, or file path)
+  crew goal new "<title>" [--project P]
+                                   Create a draft goal; prints its path
+  crew goal start GOAL             Start its goal lead, which plans every item
+  crew goal note GOAL TEXT         Record your words under the goal's Decisions and
+                                   pass them to its goal lead
+  crew goal followup GOAL          Resume the goal lead with your unsent notes and its
+                                   workers' new questions (run by crew tick)
+  crew goal done GOAL              Close a goal whose tasks are all merged or abandoned
+                                   (run by crew tick)
+  crew goal abandon GOAL           Stop the goal lead; its tasks stay as they are
+  crew goal path GOAL              Print the goal file's path
+
+Review / gardening
+  crew observe [TASK|PATH] [--base REF]
+                                   Run the casual observer headless on a branch
+  crew gardener [--all|PROJECT]    Run the gardener over newly merged commits
+  crew proposals [--all]           List gardener proposals (open by default)
+  crew promote PROPOSAL [--branch NAME]
+                                   Turn a proposal into a draft task
+EOF
+}
+
+cmd_config() {
+  local key="" p=""
+  while (($#)); do
+    case $1 in
+      --project) p=$2; shift 2 ;;
+      *) key=$1; shift ;;
+    esac
+  done
+  if [[ -n $p ]] || p=$(project_from_cwd 2>/dev/null); then load_project "$p"; fi
+  local keys=(MAX_WORKERS MAX_IN_FLIGHT BRANCH_PREFIX WORK_ROOT WORKER_PERMISSION_MODE WORKER_AUTOCOMPACT_WINDOW LEAD_PERMISSION_MODE
+              PRE_PR_REVIEW PR_MODE REPLY_TO_THREADS MAX_REVIEW_ROUNDS WORKTREE_COPY WORKTREE_TOOL GARDENER_LOOKBACK
+              GARDENER_MAX_TURNS REMOTE REPO DEFAULT_BRANCH)
+  if [[ -n $key ]]; then printf '%s\n' "${!key-}"; return; fi
+  echo "CREW_HOME=$CREW_HOME"; [[ -n ${PROJECT:-} ]] && echo "PROJECT=$PROJECT"
+  local k; for k in "${keys[@]}"; do printf '%s=%s\n' "$k" "${!k-}"; done
+}
+
+# Registers a repo: project.env records what every machine shares (its remote and
+# default branch), and local.env this machine's clone. On a machine where the
+# project is registered already, it records only the clone.
+cmd_project_add() {
+  need git
+  local root slug dir def remote
+  root=$(repo_root "${1:-.}") || die "not inside a git repository"
+  remote=$(git -C "$root" remote get-url origin 2>/dev/null) || die "$root has no origin remote; crew works through origin"
+  slug=$(slug_for "$root")
+  dir="$CREW_HOME/projects/$slug"
+  lock
+  mkdir -p "$dir/tasks" "$dir/proposals" "$WORK_ROOT/$slug"
+  def=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  def=${def#origin/}
+  if [[ -z $def ]]; then
+    git -C "$root" remote set-head origin --auto >/dev/null 2>&1 || true
+    def=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)
+    def=${def#origin/}
+  fi
+  [[ -n $def ]] || def=main
+  if [[ ! -f $dir/project.env ]]; then
+    cat >"$dir/project.env" <<EOF
+# crew project settings for $slug. Any key from config/defaults.env can be overridden here.
+REMOTE="$remote"
+DEFAULT_BRANCH="$def"
+# BRANCH_PREFIX="agent/"
+# WORKTREE_COPY=".env.local"
+# WORKTREE_TOOL="worktrunk"   # create/remove task worktrees with wt, so the repo's Worktrunk hooks run
+# PR_MODE="draft"
+# Extra worker settings for this project only (e.g. allow rules, env) go in
+# worker-settings.json next to this file; see SETUP.md.
+EOF
+    echo "Registered $slug ($remote, default branch $def)."
+  else
+    echo "$slug is already registered; left project.env as is."
+  fi
+  # Written every time: this clone is the one this machine uses from now on.
+  cat >"$dir/local.env" <<EOF
+# This machine's clone of $slug. Not committed: each machine has its own.
+REPO="$root"
+EOF
+  echo "This machine's clone: $root"
+  local exclude line
+  exclude="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"; touch "$exclude"
+  for line in ".claude/worktrees/" ".claude/settings.local.json"; do
+    grep -qxF "$line" "$exclude" || echo "$line" >>"$exclude"
+  done
+  [[ -f $root/AGENTS.md ]] && echo "Found AGENTS.md: agents will load it automatically."
+  if [[ -f $root/CLAUDE.md || -f $root/.claude/CLAUDE.md ]]; then
+    if [[ -f $root/AGENTS.md ]]; then
+      echo "Note: this repo has both CLAUDE.md and AGENTS.md. Claude Code reads only CLAUDE.md by default;"
+      echo "      set Project instructions to claude-md-and-agents-md (see SETUP.md) to load both."
+    fi
+  elif [[ ! -f $root/AGENTS.md ]]; then
+    echo "Note: no AGENTS.md or CLAUDE.md found. Agents will have no project conventions to follow."
+  fi
+  commit "project add $slug"
+}
+
+next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- among its files
+  local f n max=0
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    n=$(basename "$f"); n=${n%%-*}
+    if [[ $n =~ ^[0-9]+$ ]] && ((10#$n > max)); then max=$((10#$n)); fi
+  done < <(files_of "$1" "$2")
+  echo $((max + 1))
+}
+
+branch_taken() {  # branch project
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/$1" && return 0
+  git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$1" && return 0
+  local f
+  while IFS= read -r f; do
+    [[ -n $f && $(fm_get "$f" branch) == "$1" ]] && return 0
+  done < <(files_of tasks "$2")
+  return 1
+}
+
+cmd_new() {
+  local title="" proj="" name="" on="" goal=""
+  while (($#)); do
+    case $1 in
+      --project) proj=$2; shift 2 ;;
+      --branch) name=$2; shift 2 ;;
+      --on) on=$2; shift 2 ;;
+      --goal) goal=$2; shift 2 ;;
+      *) title="${title:+$title }$1"; shift ;;
+    esac
+  done
+  [[ -n $title ]] || die 'usage: crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]'
+  # The branch name also names the task id, its worktree and (with Worktrunk)
+  # the per-worktree databases, so keep it short and filesystem-safe.
+  if [[ -n $name ]] && ! [[ $name =~ ^[a-z0-9]+(-[a-z0-9]+)*$ && ${#name} -le 40 ]]; then
+    die "--branch '$name': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)"
+  fi
+  [[ -n $proj ]] || proj=$(current_project_or_die)
+  load_project "$proj"
+  lock
+  local n s id file branch content base=$DEFAULT_BRANCH parent="" pst pfiles=() gfile="" gfiles=()
+  if [[ -n $goal ]]; then
+    mapfile -t gfiles < <(files_of goals "$proj")
+    gfile=$(resolve_in "$goal" "${gfiles[@]}") || die "--goal '$goal' doesn't match exactly one goal in $proj"
+    has_word "$(fm_get "$gfile" status)" "draft running" \
+      || die "goal $(basename "$gfile" .md) is '$(fm_get "$gfile" status)'; only a draft or running goal takes new tasks"
+  fi
+  if [[ -n $on ]]; then
+    mapfile -t pfiles < <(files_of tasks "$proj")
+    parent=$(resolve_in "$on" "${pfiles[@]}") || die "--on '$on' doesn't match exactly one task in $proj"
+    pst=$(fm_get "$parent" status)
+    ! has_word "$pst" "merged abandoned" || die "$(basename "$parent" .md) is '$pst', so it has no open branch to stack on"
+    base=$(fm_get "$parent" branch)
+  fi
+  n=$(next_number tasks "$proj")
+  if [[ -n $name ]]; then s=$name
+  else s=$(slugify "$title"); s=${s:0:40}; s=${s%-}; fi
+  [[ -n $s ]] || s="task-$n"
+  id=$(printf '%03d-%s' "$n" "$s")
+  branch="${BRANCH_PREFIX}${s}"
+  if branch_taken "$branch" "$proj"; then branch="${branch}-$n"; fi
+  git check-ref-format --branch "$branch" >/dev/null 2>&1 || die "'$branch' isn't a valid branch name; check BRANCH_PREFIX"
+  file="$PDIR/tasks/$id.md"
+  content=$(<"$CREW_HOME/templates/task.md")
+  content=${content//'{{ID}}'/$id}
+  content=${content//'{{TITLE}}'/${title//\"/\'}}
+  content=${content//'{{PROJECT}}'/$proj}
+  content=${content//'{{BASE}}'/$base}
+  content=${content//'{{BRANCH}}'/$branch}
+  content=${content//'{{PRE_PR_REVIEW}}'/$PRE_PR_REVIEW}
+  content=${content//'{{PR_MODE}}'/$PR_MODE}
+  content=${content//'{{NOW}}'/$(now)}
+  printf '%s\n' "$content" >"$file"
+  if [[ -n $parent ]]; then fm_set "$file" depends_on "$(basename "$parent" .md)"; fi
+  if [[ -n $gfile ]]; then fm_set "$file" goal "$(basename "$gfile" .md)"; fi
+  append_log "$file" "created${parent:+, stacked on $(basename "$parent" .md)}${gfile:+, for goal $(basename "$gfile" .md)}"
+  commit "new $proj/$id"
+  echo "$file"
+}
+
+cmd_ready() {
+  local file; file=$(resolve tasks "${1:?usage: crew ready TASK}")
+  local missing=() h
+  for h in "## Goal" "## Structure" "## Plan" "## Acceptance criteria"; do
+    [[ -n $(section_body "$file" "$h") ]] || missing+=("${h#\#\# }")
+  done
+  ((${#missing[@]} == 0)) || die "brief is incomplete, fill in: ${missing[*]}"
+  local st; st=$(fm_get "$file" status)
+  [[ $st == draft || $st == ready ]] || die "task is '$st', not draft"
+  lock
+  fm_set "$file" status ready; touch_updated "$file"; append_log "$file" "marked ready"
+  commit "ready $(basename "$file" .md)"
+  echo "ready: $(basename "$file" .md)"
+}
+
+# Refuses a dispatch the user hasn't readied, and holds back (not_yet) one whose
+# dependencies aren't merged, or that would exceed MAX_WORKERS / MAX_IN_FLIGHT. The task's parent, if it is
+# stacked, is the one dependency that needn't be merged: cmd_dispatch requires
+# its branch on origin instead. Call with the lock held.
+dispatch_checks() {  # file force
+  local file=$1 force=$2 id st dep deps depfile depst parent pst="" pfiles=()
+  id=$(basename "$file" .md)
+  st=$(fm_get "$file" status)
+  [[ $st == ready || $force == 1 ]] || die "$id is '$st'; run 'crew ready $id' first"
+  load_branches "$PROJECT"
+  parent=$(parent_of "$file")
+  [[ -z $parent ]] || pst=$(fm_get "$parent" status)
+  [[ $pst != abandoned ]] || die "$id is stacked on $(basename "$parent" .md), which is abandoned; give it another base with 'crew set $id base <branch>'"
+  deps=$(fm_get "$file" depends_on); deps=${deps//,/ }; deps=${deps//[\[\]]/}
+  mapfile -t pfiles < <(files_of tasks "$PROJECT")
+  for dep in $deps; do
+    depfile=$(resolve_in "$dep" "${pfiles[@]}") || die "$id depends on '$dep', which doesn't match exactly one task in $PROJECT"
+    [[ $depfile != "$parent" ]] || continue
+    depst=$(fm_get "$depfile" status)
+    [[ $depst == merged ]] || not_yet "$id depends on $(basename "$depfile" .md), which is '$depst' (must be merged)"
+  done
+  local aj running inflight
+  aj=$(agents_json)
+  running=$(running_workers "$aj")
+  ((running < MAX_WORKERS)) || not_yet "$running workers already running (MAX_WORKERS=$MAX_WORKERS); leaving $id ready"
+  inflight=$(in_flight_count)
+  # A task stacked on one that's in flight joins a stack that is already counted.
+  has_word "$pst" "$ACTIVE_STATES" || ((inflight < MAX_IN_FLIGHT)) || not_yet "$inflight tasks already in flight (MAX_IN_FLIGHT=$MAX_IN_FLIGHT); leaving $id ready"
+}
+
+cmd_dispatch() {
+  need git; need jq; need claude
+  require_host
+  local arg="" force=0
+  while (($#)); do case $1 in --force) force=1; shift ;; *) arg=$1; shift ;; esac; done
+  local file; file=$(resolve tasks "${arg:?usage: crew dispatch TASK}")
+  local id; id=$(basename "$file" .md)
+  load_project "$(task_project "$file")"
+  worker_settings >/dev/null
+  local base branch wt name parent pid=""
+  base=$(fm_get "$file" base); base=${base:-$DEFAULT_BRANCH}
+  branch=$(fm_get "$file" branch)
+  wt="$WORK_ROOT/$PROJECT/$id"
+
+  lock
+  load_branches "$PROJECT"
+  parent=$(parent_of "$file")
+  # A parent that merged before this task started leaves nothing to stack on, so
+  # start from whatever the parent was based on.
+  if [[ -n $parent && $(fm_get "$parent" status) == merged ]] \
+     && ! git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
+    base=$(effective_base "$file")
+    fm_set "$file" base "$base"
+    append_log "$file" "$(basename "$parent" .md) has merged; based on $base instead of its branch"
+    parent=$(parent_of "$file")
+  fi
+  [[ -z $parent ]] || pid=$(basename "$parent" .md)
+  dispatch_checks "$file" "$force"
+  # Setting up the worktree can take minutes when the project's Worktrunk hooks
+  # install dependencies or create databases, so don't hold the ledger lock (and
+  # block every worker's `crew log`) meanwhile. The checks run again afterwards.
+  unlock
+  if ! git -C "$REPO" fetch --quiet origin "$base" 2>/dev/null; then
+    # A stacked task's PR targets its parent's branch, so that has to be pushed first.
+    [[ -z $parent || $(fm_get "$parent" status) == merged ]] \
+      || not_yet "$id is stacked on $pid, whose branch $base isn't on origin yet; dispatch $id once that task's worker has pushed"
+    warn "git fetch origin $base failed; using local refs"
+  fi
+  setup_worktree "$file" "$wt" "$branch" "$base"
+  lock
+  fm_set "$file" worktree "$wt"
+  if [[ -n $NEW_BRANCH_FROM ]]; then fm_set "$file" base_sha "$NEW_BRANCH_FROM"; fi
+  dispatch_checks "$file" "$force"
+
+  name="crew-$PROJECT-$id"; name=${name:0:80}
+  fm_set "$file" worker_name "$name"
+
+  local prompt="You are the implementer for task $id in project $PROJECT.
+Task file: $file
+Worktree (your working directory): $wt
+Branch: $branch, based on origin/$base.
+Read the task file completely, then follow your first-run workflow. Update the ledger with \`crew log $id \"...\"\` and \`crew set $id <key> <value>\`."
+  if [[ -n $parent ]]; then
+    local ppr; ppr=$(fm_get "$parent" pr)
+    prompt+="
+This task is stacked on task $pid${ppr:+ (PR #${ppr##*/})}: $base is that task's branch, not the default branch. Your PR targets $base; see \"Stacked tasks\" in your instructions."
+  fi
+  launch_worker "$file" "$wt" "$prompt" fresh || die "could not start the worker session (see output above)"
+
+  fm_set "$file" worker_job "$LAUNCH_JOB"
+  fm_set "$file" worker_session "$LAUNCH_SESSION"
+  fm_set "$file" status working
+  touch_updated "$file"
+  append_log "$file" "dispatched: worker $LAUNCH_JOB (session ${LAUNCH_SESSION:-unknown}) in $wt on $branch"
+  commit "dispatch $PROJECT/$id"
+  echo "dispatched $id → worker $LAUNCH_JOB ($name)"
+  echo "  worktree: $wt"
+  echo "  watch:    claude attach $LAUNCH_JOB   |   claude agents"
+}
+
+# Pulls the PR comments newer than feedback_since. The user's own become a review
+# round for the worker. Collaborators' (people with write access, not bots) become
+# unchecked items under Open questions: they wait for the user to decide what to do,
+# and no agent answers them on its own. Anyone else's are left alone. Returns 3 if
+# there was nothing new.
+cmd_feedback() {
+  need gh; need jq
+  local arg="" since=""
+  while (($#)); do
+    case $1 in
+      --since) since=$2; shift 2 ;;
+      *) arg=$1; shift ;;
+    esac
+  done
+  local file; file=$(resolve tasks "${arg:?usage: crew feedback TASK}")
+  local id; id=$(basename "$file" .md)
+  load_project "$(task_project "$file")"
+  local pr num branch
+  pr=$(fm_get "$file" pr); branch=$(fm_get "$file" branch)
+  if [[ -z $pr ]]; then
+    pr=$(cd "$REPO" && gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)
+    [[ -n $pr ]] || die "$id has no PR yet"
+  fi
+  num=${pr##*/}
+  [[ -n $since ]] || since=$(fm_get "$file" feedback_since)
+  [[ -n $since ]] || since="1970-01-01T00:00:00Z"
+  local me; me=$(gh_login) || die "gh is not authenticated (run 'gh auth login')"
+  local stamp; stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  # $who and $mine are jq fragments, spliced into the programs below. $who gives
+  # each comment .who: "me", "collaborator", or "other" (dropped here).
+  local who='map(.who = if .user.login == $me then "me"
+                       elif (.user.type // "") != "Bot" and ((.author_association // "") | IN("OWNER", "MEMBER", "COLLABORATOR")) then "collaborator"
+                       else "other" end)
+             | map(select(.who != "other" and (((.body // "") | contains($marker)) | not)))'
+  local allreviews reviews inline convo
+  allreviews=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/reviews" --paginate --jq '.[]' | jq -s .)
+  reviews=$(jq --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
+    "$who"' | map(select((.submitted_at // "") > $since and (.body // "") != ""))' <<<"$allreviews")
+  inline=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/comments" --paginate --jq '.[]' \
+    | jq -s --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
+      --argjson rmap "$(jq 'map({key: (.id|tostring), value: {state, submitted_at}}) | from_entries' <<<"$allreviews")" \
+      "$who"' | map(($rmap[(.pull_request_review_id // "" | tostring)] // null) as $r
+                  | select(($r.state // "") != "PENDING")
+                  | select((($r.submitted_at // .created_at) // "") > $since))')
+  convo=$(cd "$REPO" && gh api "repos/{owner}/{repo}/issues/$num/comments" --paginate --jq '.[]' \
+    | jq -s --arg me "$me" --arg since "$since" --arg marker "$REPLY_MARKER" \
+      "$who"' | map(select(.created_at > $since))')
+
+  local nr ni nc mine theirs
+  mine='map(select(.who == "me"))'
+  nr=$(jq "$mine | length" <<<"$reviews"); ni=$(jq "$mine | length" <<<"$inline"); nc=$(jq "$mine | length" <<<"$convo")
+  theirs=$(jq -n --argjson r "$reviews" --argjson i "$inline" --argjson c "$convo" \
+    '[($r[] | .kind = "review"), ($i[] | .kind = "inline"), ($c[] | .kind = "comment")] | map(select(.who == "collaborator"))')
+  local no; no=$(jq length <<<"$theirs")
+  if ((nr + ni + nc + no == 0)); then
+    echo "No new review feedback on PR #$num since $since."
+    return 3
+  fi
+
+  local q='def quote: (. // "") | gsub("\r"; "") | split("\n") | map("  > " + .) | join("\n");'
+  local rounds roundf="" questf=""
+  rounds=$(fm_get "$file" review_rounds); rounds=${rounds:-0}
+  if ((nr + ni + nc)); then
+    rounds=$((rounds + 1)); roundf=$(mktemp)
+    {
+      echo "### Round $rounds — $(date '+%Y-%m-%d %H:%M') (PR #$num)"
+      echo
+      if ((nr)); then
+        echo "**Review summaries**"
+        jq -r "$q $mine"' | .[] | "- [ ] review \(.id) (\(.state | ascii_downcase))\n\(.body | quote)"' <<<"$reviews"
+        echo
+      fi
+      if ((ni)); then
+        echo "**Inline comments**"
+        jq -r "$q $mine"' | .[] | "- [ ] `\(.path):\(.line // .original_line // "?")` — comment \(.id)\(if .in_reply_to_id then " (in thread \(.in_reply_to_id))" else "" end) — [link](\(.html_url))\n\(.body | quote)"' <<<"$inline"
+        echo
+      fi
+      if ((nc)); then
+        echo "**Conversation comments**"
+        jq -r "$q $mine"' | .[] | "- [ ] comment \(.id) — [link](\(.html_url))\n\(.body | quote)"' <<<"$convo"
+        echo
+      fi
+    } >"$roundf"
+  fi
+  if ((no)); then
+    questf=$(mktemp)
+    jq -r --arg num "$num" "$q"' .[]
+      | "- [ ] @\(.user.login) " + (if .kind == "review" then "reviewed PR #\($num) (\(.state | ascii_downcase)), review \(.id)"
+                                   elif .kind == "inline" then "commented on `\(.path):\(.line // .original_line // "?")` in PR #\($num), comment \(.id)"
+                                   else "commented on PR #\($num), comment \(.id)" end)
+        + " — [link](\(.html_url))\n\(.body | quote)"' <<<"$theirs" >"$questf"
+  fi
+
+  lock
+  if [[ -n $roundf ]]; then
+    insert_before_heading "$file" "## Log" "$roundf"
+    fm_set "$file" review_rounds "$rounds"
+    append_log "$file" "review round $rounds recorded ($nr reviews, $ni inline, $nc conversation)"
+  fi
+  if [[ -n $questf ]]; then
+    append_to_section "$file" "## Open questions" "$questf"
+    append_log "$file" "$no collaborator comment(s) recorded under Open questions for the user"
+  fi
+  fm_set "$file" pr "$pr"
+  fm_set "$file" feedback_since "$stamp"
+  touch_updated "$file"
+  commit "feedback $PROJECT/$id"
+  if [[ -n $questf ]]; then echo "For the user (under Open questions):"; cat "$questf"; rm -f "$questf"; fi
+  [[ -n $roundf ]] || return 0
+  cat "$roundf"; rm -f "$roundf"
+  ((rounds <= MAX_REVIEW_ROUNDS)) || warn "this is round $rounds (MAX_REVIEW_ROUNDS=$MAX_REVIEW_ROUNDS); consider whether the plan needs a rethink"
+}
+
+cmd_followup() {
+  need jq; need claude
+  local arg="" fresh=0 note=""
+  while (($#)); do
+    case $1 in
+      --fresh) fresh=1; shift ;;
+      --note) note=$2; shift 2 ;;
+      *) arg=$1; shift ;;
+    esac
+  done
+  local file; file=$(resolve tasks "${arg:?usage: crew followup TASK [--fresh] [--note TEXT]}")
+  local id; id=$(basename "$file" .md)
+  load_project "$(task_project "$file")"
+  worker_settings >/dev/null
+  local wt job state aj
+  job=$(fm_get "$file" worker_job)
+  task_dispatched "$file" || die "$id has no worker yet; dispatch it first"
+  aj=$(agents_json)
+  state=$(job_state "$aj" "$job")
+  local rounds sent new_round=0
+  rounds=$(fm_get "$file" review_rounds); rounds=${rounds:-0}
+  sent=$(fm_get "$file" last_round_sent); sent=${sent:-0}
+  ((rounds > sent)) && new_round=1
+  if job_busy "$aj" "$job"; then
+    # A round sent any other way would go out again: only crew records last_round_sent.
+    ((new_round)) && die "worker $job is busy ($state). crew tick sends round $rounds once it's free"
+    die "worker $job is busy ($state). Wait for it, answer it in agent view (claude attach $job), or SendMessage $(fm_get "$file" worker_name) a note"
+  fi
+  ((new_round || ${#note})) || die "nothing new for $id: no new review round (run 'crew feedback $id') and no --note"
+  ((rounds <= MAX_REVIEW_ROUNDS)) || warn "round $rounds exceeds MAX_REVIEW_ROUNDS=$MAX_REVIEW_ROUNDS"
+  # The worktree may not be on this machine: the task moved here, say.
+  ensure_worktree "$file"
+  wt=$(fm_get "$file" worktree)
+
+  local prompt
+  prompt="New input for task $id (task file: $file)."
+  if ((new_round)); then
+    prompt+=" New review feedback is in Round $rounds under '## Review rounds'; follow your review-round workflow."
+    if [[ $REPLY_TO_THREADS == yes ]]; then
+      prompt+=" Reply to each comment in the round with \`crew reply\`."
+    else
+      prompt+=" Don't reply to the comments on the PR: this project has REPLY_TO_THREADS off."
+    fi
+  fi
+  [[ -n $note ]] && prompt+=" Note from the lead (also check Decisions in the task file): $note"
+
+  lock
+  relaunch launch_worker worker "$file" "$wt" "$prompt" "You are picking up task $id in project $PROJECT, which already has work on its branch.
+Task file: $file
+Worktree (your working directory): $wt
+Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting." "$fresh"
+  fm_set "$file" worker_job "$LAUNCH_JOB"
+  [[ -n $LAUNCH_SESSION ]] && fm_set "$file" worker_session "$LAUNCH_SESSION"
+  fm_set "$file" last_round_sent "$rounds"
+  if ((new_round)); then fm_set "$file" status addressing-feedback; else fm_set "$file" status working; fi
+  touch_updated "$file"
+  append_log "$file" "followup ($LAUNCH_MODE): worker $LAUNCH_JOB${note:+ — note: $note}"
+  commit "followup $PROJECT/$id"
+  echo "followup sent to $id → worker $LAUNCH_JOB ($LAUNCH_MODE)"
+}
+
+# Has a stacked task's worker rebase it after its parent moved or merged. crew only
+# works out where to cut and what to rebase onto; the worker does the rebase, the
+# push and the PR retarget, and records the new base when it has succeeded, so a
+# failed restack still shows as one that's needed. restack_sent records the commit
+# the last restack asked for, so the same restack isn't sent twice unless --again.
+cmd_restack() {
+  need git
+  local arg="" again=0
+  while (($#)); do case $1 in --again) again=1; shift ;; *) arg=$1; shift ;; esac; done
+  local file; file=$(resolve tasks "${arg:?usage: crew restack TASK [--again]}")
+  local id; id=$(basename "$file" .md)
+  load_project "$(task_project "$file")"
+  load_branches "$PROJECT"
+  local parent pid base branch newbase reason target old note
+  base=$(fm_get "$file" base); branch=$(fm_get "$file" branch)
+  parent=$(parent_of "$file")
+  [[ -n $parent ]] || die "$id isn't stacked: its base '$base' isn't another task's branch"
+  pid=$(basename "$parent" .md)
+  task_dispatched "$file" || die "$id has no branch yet; dispatch it first"
+  # On a machine the task moved to, its branch may be on origin only.
+  ensure_worktree "$file"
+  git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "git fetch failed; using local refs"
+  lock
+  if note_base_sha "$file" "$parent"; then commit "base_sha $PROJECT/$id"; fi
+  unlock
+  ! parent_needs_restack "$file" \
+    || die "$pid needs a restack itself ($(restack_reason "$parent")); restack it first, a stack goes bottom-up"
+  reason=$(restack_reason "$file")
+  [[ -n $reason ]] || { echo "$id already sits on $pid's latest commit; nothing to restack"; return 0; }
+  [[ $reason != *" abandoned" ]] || die "$pid is abandoned; give $id another base with 'crew set $id base <branch>' and tell its worker"
+  newbase=$(effective_base "$file")
+  target=$(restack_target "$file")
+  [[ -n $target ]] || die "origin/$newbase doesn't exist, so there's nothing to restack $id onto"
+  ((again)) || [[ $(fm_get "$file" restack_sent) != "$target" ]] \
+    || die "$id's worker was already asked to restack onto ${target:0:12}; check its Open questions and log, or send it again with --again"
+  old=$(fm_get "$file" base_sha)
+  [[ -n $old ]] || die "$id has no base_sha (it was dispatched before crew recorded one). Find the last commit of $pid's in $branch and run 'crew set $id base_sha <sha>'"
+  git -C "$REPO" merge-base --is-ancestor "$old" "refs/heads/$branch" 2>/dev/null \
+    || die "$branch no longer contains $pid's commits (base_sha ${old:0:12}), so it looks restacked already. If it is, record it with 'crew set $id base $newbase'"
+  note="Restack ($reason): rebase your branch with \`git fetch origin && git rebase --onto $target $old\`, then follow your restack workflow. $target is origin/$newbase now; $old is the last of $pid's commits in your branch."
+  if [[ $newbase != "$base" ]]; then
+    note+=" Your base is now $newbase: after pushing, run \`gh pr edit --base $newbase\` and \`crew set $id base $newbase\`."
+  fi
+  cmd_followup "$file" --note "$note"
+  lock
+  fm_set "$file" restack_sent "$target"
+  commit "restack $PROJECT/$id"
+}
+
+# Replies to one of the review comments a round lists, on the task's own PR only.
+# An inline comment gets a reply in its thread. A conversation comment or a review
+# summary has no thread, so the reply is a new PR comment that quotes it first.
+cmd_reply() {
+  need gh; need jq
+  local file; file=$(resolve tasks "${1:?usage: crew reply TASK COMMENT_ID TEXT}")
+  local cid=${2:?comment id required}; shift 2
+  local text="$*"; [[ -n $text ]] || die "reply text required"
+  [[ $cid =~ ^[0-9]+$ ]] || die "comment id must be a number, not '$cid'"
+  load_project "$(task_project "$file")"
+  [[ $REPLY_TO_THREADS == yes ]] || die "REPLY_TO_THREADS is '$REPLY_TO_THREADS'; not replying"
+  local pr; pr=$(fm_get "$file" pr); [[ -n $pr ]] || die "task has no PR"
+  local num=${pr##*/} body="$text
+
+$REPLY_MARKER" c
+  if c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/comments/$cid" 2>/dev/null); then
+    jq -e --arg n "$num" '(.pull_request_url // "") | endswith("/pulls/" + $n)' <<<"$c" >/dev/null \
+      || die "comment $cid isn't on PR #$num"
+    # GitHub only accepts replies to a thread's top-level comment.
+    local root; root=$(jq -r '.in_reply_to_id // .id' <<<"$c")
+    (cd "$REPO" && gh api --silent "repos/{owner}/{repo}/pulls/$num/comments/$root/replies" -f body="$body")
+    echo "replied to comment $cid in its thread"
+    return
+  fi
+  local kind
+  if c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/issues/comments/$cid" 2>/dev/null); then
+    jq -e --arg n "$num" '(.issue_url // "") | endswith("/issues/" + $n)' <<<"$c" >/dev/null \
+      || die "comment $cid isn't on PR #$num"
+    kind=Comment
+  elif c=$(cd "$REPO" && gh api "repos/{owner}/{repo}/pulls/$num/reviews/$cid" 2>/dev/null); then
+    kind=Review
+  else
+    die "$cid isn't a review comment, conversation comment or review on PR #$num"
+  fi
+  local quote
+  quote=$(jq -r --arg kind "$kind" '((.body // "") | gsub("\r"; "") | split("\n") | map(select(test("\\S"))) | first // "") as $l
+    | "> [\($kind)](\(.html_url)): " + (if ($l | length) > 120 then $l[:117] + "…" else $l end)' <<<"$c")
+  (cd "$REPO" && gh api --silent "repos/{owner}/{repo}/issues/$num/comments" -f body="$quote
+
+$body")
+  echo "replied to ${kind,,} $cid on PR #$num"
+}
+
+pr_summary() {  # pr-url -> "#N state"
+  local pr=$1
+  [[ -n $pr ]] || { echo "-"; return; }
+  echo "#${pr##*/}"
+}
+
+status_shown() { [[ $done_too == 1 ]] || ! has_word "$(fm_get "$1" status)" "merged done abandoned"; }
+
+# A goal, then its tasks. Reads cmd_status's aj and goal_roots.
+goal_row() {  # goal-file
+  local g=$1 id ls f total=0 merged=0
+  id="goal $(basename "$g" .md)"; id=${id:0:34}
+  ls=$(job_state "$aj" "$(fm_get "$g" lead_job)")
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    total=$((total + 1))
+    if [[ $(fm_get "$f" status) == merged ]]; then merged=$((merged + 1)); fi
+  done < <(goal_tasks "$g")
+  printf '  %s%*s %-20s %-26s %s\n' "$id" $((34 - ${#id})) "" "$(fm_get "$g" status)" "${ls:+lead: $ls}" "$merged of $total task(s) merged"
+  while IFS= read -r f; do
+    if [[ -n $f ]]; then status_row "$f" "  "; fi
+  done <<<"${goal_roots[$(basename "$g" .md)]:-}"
+}
+
+# One task, then the tasks stacked on it. Reads cmd_status's aj, kids and p.
+status_row() {  # file indent
+  local f=$1 id st ws pr prs note reason="" k q
+  id="$2$(basename "$f" .md)"
+  st=$(fm_get "$f" status)
+  ws=$(job_state "$aj" "$(fm_get "$f" worker_job)")
+  pr=$(pr_summary "$(fm_get "$f" pr)")
+  prs=$(fm_get "$f" pr_state)
+  if has_word "$st" "$ACTIVE_STATES"; then
+    reason=$( (load_project "$p" && restack_reason "$f") 2>/dev/null || true)
+  fi
+  note=${prs:+($prs)}
+  [[ -z $reason ]] || note="${note:+$note  }needs restack: $reason"
+  q=$(open_questions "$f")
+  ((q == 0)) || note="${note:+$note  }$q open question(s)"
+  # Padded by hand: printf counts the bytes of the tree marker, not its width.
+  id=${id:0:34}
+  printf '  %s%*s %-20s %-26s %-6s %s\n' "$id" $((34 - ${#id})) "" "$st" "${ws:+worker: $ws}" "$pr" "$note"
+  while IFS= read -r k; do
+    if [[ -n $k ]]; then status_row "$k" "${2//└ /  }└ "; fi
+  done <<<"${kids[$f]:-}"
+}
+
+cmd_status() {
+  need jq
+  local done_too=0
+  [[ ${1:-} == --done ]] && done_too=1
+  local projects=() p
+  mapfile -t projects < <(projects_in_scope)
+  local holder; holder=$(lease_holder)
+  if [[ $holder != "$CREW_HOST" ]]; then
+    # Another machine runs the crew and pushes the ledger; catch up with it. No
+    # crew command changes the ledger here, so this needs no lock.
+    git -C "$CREW_HOME" pull -q --ff-only 2>/dev/null || true
+    holder=$(lease_holder)
+    echo "read-only: crew runs on ${holder:-no machine}"
+    mapfile -t projects < <(projects_in_scope)
+  fi
+  ((${#projects[@]})) || { echo "No projects registered. Run 'crew project add' in a repo."; return; }
+  local aj; aj=$(agents_json)
+  echo "workers running: $(running_workers "$aj")/$MAX_WORKERS   tasks in flight: $(in_flight_count)/$MAX_IN_FLIGHT"
+  local f parent nprop
+  for p in "${projects[@]}"; do
+    echo
+    echo "$p"
+    load_branches "$p"
+    local roots=() goals=() g
+    local -A kids=() goal_roots=()
+    while IFS= read -r g; do
+      if [[ -n $g ]] && status_shown "$g"; then goals+=("$g"); fi
+    done < <(files_of goals "$p")
+    while IFS= read -r f; do
+      [[ -n $f ]] || continue
+      status_shown "$f" || continue
+      parent=$(parent_of "$f")
+      g=$(fm_get "$f" goal)
+      if [[ -n $parent ]] && status_shown "$parent"; then kids[$parent]+="$f"$'\n'
+      elif [[ -n $g ]] && has_word "$CREW_HOME/projects/$p/goals/$g.md" "${goals[*]}"; then goal_roots[$g]+="$f"$'\n'
+      else roots+=("$f"); fi
+    done < <(files_of tasks "$p")
+    ((${#roots[@]} + ${#goals[@]})) || echo "  (no active tasks)"
+    for g in "${goals[@]}"; do goal_row "$g"; done
+    for f in "${roots[@]}"; do status_row "$f" ""; done
+    nprop=0
+    while IFS= read -r f; do
+      [[ -n $f && $(fm_get "$f" status) == open ]] && nprop=$((nprop + 1))
+    done < <(files_of proposals "$p")
+    ((nprop == 0)) || echo "  open gardener proposals: $nprop  (crew proposals)"
+  done
+}
+
+cmd_sync() {
+  need gh; need jq
+  local quiet=0 scope="" p projects=()
+  while (($#)); do case $1 in --quiet) quiet=1; shift ;; --all) scope=all; shift ;; *) die "usage: crew sync [--quiet] [--all]" ;; esac; done
+  mapfile -t projects < <(projects_in_scope "$scope")
+  lock
+  local f id st pr branch info state draft decision updated label changed=0 parent reason fetched
+  for p in "${projects[@]}"; do
+    load_project "$p"
+    while IFS= read -r f; do
+      [[ -n $f ]] || continue
+      st=$(fm_get "$f" status)
+      has_word "$st" "draft ready merged abandoned" && continue
+      id=$(basename "$f" .md)
+      pr=$(fm_get "$f" pr); branch=$(fm_get "$f" branch)
+      if [[ -z $pr && -n $branch ]]; then
+        pr=$(cd "$REPO" && gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)
+        if [[ -n $pr ]]; then fm_set "$f" pr "$pr"; changed=1; ((quiet)) || echo "$id: found PR $pr"; fi
+      fi
+      [[ -n $pr ]] || continue
+      info=$(cd "$REPO" && gh pr view "$pr" --json state,isDraft,reviewDecision,updatedAt 2>/dev/null) || { warn "$id: couldn't read $pr"; continue; }
+      state=$(jq -r .state <<<"$info"); draft=$(jq -r .isDraft <<<"$info"); decision=$(jq -r '.reviewDecision // ""' <<<"$info")
+      # For pr_may_have_new_comments.
+      updated=$(jq -r '.updatedAt // ""' <<<"$info")
+      if [[ $(fm_get "$f" pr_updated) != "$updated" ]]; then fm_set "$f" pr_updated "$updated"; changed=1; fi
+      case $state in
+        MERGED) label=merged ;;
+        CLOSED) label=closed ;;
+        *) label=$([[ $draft == true ]] && echo draft || echo open)
+           [[ -n $decision ]] && label+=", $(tr '[:upper:]_' '[:lower:] ' <<<"$decision")" ;;
+      esac
+      if [[ $(fm_get "$f" pr_state) != "$label" ]]; then fm_set "$f" pr_state "$label"; changed=1; fi
+      if [[ $state == MERGED && $st != merged ]]; then
+        fm_set "$f" status merged; touch_updated "$f"; append_log "$f" "PR merged"; changed=1
+        echo "$id: merged (run 'crew cleanup $id')"
+      elif [[ $state == CLOSED && $st != abandoned ]]; then
+        ((quiet)) || echo "$id: PR closed without merging (status left as '$st')"
+      fi
+    done < <(files_of tasks "$p")
+    # Stacked tasks: say which need a restack, now that the merges above are known.
+    load_branches "$p"; fetched=0
+    while IFS= read -r f; do
+      [[ -n $f ]] || continue
+      has_word "$(fm_get "$f" status)" "$ACTIVE_STATES" || continue
+      parent=$(parent_of "$f")
+      [[ -n $parent ]] || continue
+      if ((!fetched)); then
+        git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "$p: git fetch failed; checking stacks against local refs"
+        fetched=1
+      fi
+      if note_base_sha "$f" "$parent"; then changed=1; fi
+      reason=$(restack_reason "$f"); id=$(basename "$f" .md)
+      [[ -z $reason ]] || ((quiet)) || echo "$id: needs a restack, $reason (run 'crew restack $id')"
+    done < <(files_of tasks "$p")
+  done
+  ((changed)) && commit "sync"
+  ((quiet)) || echo "sync done"
+}
+
+# One pass over every project, doing what needs no decision: sync with GitHub,
+# record new PR comments, send review rounds and restacks to idle workers, mark
+# tasks that wait on the user, and clean up merged ones. The crew-tick timer runs
+# it every few minutes; the lead runs it too. Every step is a crew command run in a
+# subshell, so one that refuses (its `die`) skips that step and not the rest.
+# Prints one line per thing it did.
+cmd_tick() {
+  need gh; need jq; need claude
+  [[ $# == 0 ]] || die "usage: crew tick"
+  exec 8>"$CREW_HOME/.crew-tick.lock"
+  flock -n 8 || { echo "another crew tick is running"; return 0; }
+  # A machine that ran the crew, and finds on origin that another one does now,
+  # steps back and does nothing else.
+  if lease_taken_elsewhere; then stand_down "$(origin_holder)"; return 0; fi
+  require_host
+  GH_LOGIN=$(gh_login) || die "gh is not authenticated (run 'gh auth login')"
+  (cmd_sync --quiet --all) >/dev/null || warn "sync failed; carrying on with what the ledger has"
+  local p f aj
+  aj=$(agents_json)
+  while IFS= read -r p; do
+    # load_project dies on a broken project.env; try it in a subshell first, so
+    # one broken project doesn't stop the tick for the others.
+    (load_project "$p") || { warn "$p: skipped"; continue; }
+    load_project "$p"
+    load_branches "$p"
+    while IFS= read -r f; do
+      if [[ -n $f ]]; then tick_task "$f" "$aj"; fi
+    done < <(files_of tasks "$p")
+    while IFS= read -r f; do
+      if [[ -n $f ]]; then tick_goal "$f" "$aj"; fi
+    done < <(files_of goals "$p")
+  done < <(projects_in_scope all)
+  # A catch-all for background pushes that failed, or that a crash cut short.
+  if git -C "$CREW_HOME" remote get-url origin >/dev/null 2>&1; then
+    push_now >&2 || warn "couldn't push the ledger to origin; the next tick tries again"
+  fi
+}
+
+goal_has_input() {  # goal-file
+  local t n
+  n=$(fm_get "$1" unsent_notes)
+  ((${n:-0} == 0)) || return 0
+  while IFS= read -r t; do
+    if [[ -n $t ]] && unrouted_questions "$t" >/dev/null; then return 0; fi
+  done < <(goal_tasks "$1")
+  return 1
+}
+
+# One running goal's share of a tick: pass the goal lead its input once it's free,
+# or close the goal once its tasks are all merged or abandoned.
+tick_goal() {  # goal-file agents_json
+  local g=$1 aj=$2 id job
+  id=$(basename "$g" .md)
+  [[ $(fm_get "$g" status) == running ]] || return 0
+  job=$(fm_get "$g" lead_job)
+  if goal_has_input "$g"; then
+    if job_busy "$aj" "$job"; then echo "goal $id: input waits for its goal lead ($(job_state "$aj" "$job"))"
+    elif (cmd_goal_followup "$g") >/dev/null; then echo "goal $id: input sent to its goal lead"; fi
+  elif goal_finished "$g" && ! job_busy "$aj" "$job"; then
+    if (cmd_goal_done "$g") >/dev/null; then echo "goal $id: done, every task merged or abandoned"; fi
+  fi
+}
+
+# A task in progress that moved here from another machine: crew records a worktree
+# for it that isn't here, and this machine's claude agents doesn't know its worker,
+# whose session stayed behind. The fresh worker crew tick then starts is recorded,
+# and listed by the next tick, so this holds once.
+moved_here() {  # file agents_json
+  local wt; wt=$(fm_get "$1" worktree)
+  has_word "$(fm_get "$1" status)" "working addressing-feedback" && [[ -n $wt && ! -d $wt ]] && ! job_listed "$2" "$(fm_get "$1" worker_job)"
+}
+
+# GitHub moves a PR's updatedAt (recorded as pr_updated by crew sync) whenever a
+# comment is posted or a review submitted. A PR that hasn't changed since crew
+# feedback last read it has no new comments, and reading them costs three API calls.
+# Without either timestamp, assume it may have some.
+pr_may_have_new_comments() {  # file
+  local updated since
+  updated=$(fm_get "$1" pr_updated); since=$(fm_get "$1" feedback_since)
+  [[ -z $updated || -z $since || $updated > $since ]]
+}
+
+# One task's share of a tick. Needs load_project and load_branches.
+tick_task() {  # file agents_json
+  local f=$1 aj=$2 id st rounds sent asked waiting reason target job
+  id=$(basename "$f" .md); st=$(fm_get "$f" status)
+  if [[ $st == ready ]] && goal_running "$f"; then
+    # The goal lead marked it ready, which is the go-ahead. A dispatch that has to
+    # wait for a cap or a dependency (exit 4) is tried again on the next tick.
+    local rc=0 err
+    err=$( (cmd_dispatch "$f") 2>&1 >/dev/null ) || rc=$?
+    case $rc in
+      0) echo "$id: dispatched for goal $(fm_get "$f" goal)" ;;
+      4) ;;
+      *) warn "$id: dispatch failed: $err" ;;
+    esac
+    return 0
+  fi
+  if [[ $st == merged ]]; then
+    # A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
+    if [[ -n $(fm_get "$f" worktree) ]] && (cmd_cleanup "$f") >/dev/null; then echo "$id: merged; worktree cleaned up"; fi
+    return 0
+  fi
+  has_word "$st" "$ACTIVE_STATES" || return 0
+  if [[ -n $(fm_get "$f" pr) ]] && pr_may_have_new_comments "$f"; then
+    # crew feedback reports what it recorded only in the task file, so compare before and after.
+    rounds=$(fm_get "$f" review_rounds); asked=$(open_questions "$f")
+    if (cmd_feedback "$f") >/dev/null; then
+      [[ $(fm_get "$f" review_rounds) == "$rounds" ]] || echo "$id: review round $(fm_get "$f" review_rounds) recorded"
+      (($(open_questions "$f") == asked)) || echo "$id: $(($(open_questions "$f") - asked)) comment(s) from collaborators, for you"
+    fi
+  fi
+  job=$(fm_get "$f" worker_job)
+  if moved_here "$f" "$aj"; then
+    local err
+    if err=$( (cmd_followup "$f" --fresh --note "This task moved to $CREW_HOST; your earlier session is gone. Rebuild context from the task file and the branch.") 2>&1 >/dev/null ); then
+      echo "$id: its worker and worktree aren't on this machine; a fresh worker picks it up"
+    else
+      warn "$id: couldn't start a fresh worker for it here: $err"
+    fi
+    return 0
+  fi
+  # The rest needs the worker free (see job_busy); a busy one is left for a later
+  # tick. It does at most one thing, in this order: send an unsent review round, send
+  # a restack, or mark the task as waiting on the user. Nothing goes out twice:
+  # last_round_sent and restack_sent record what was sent.
+  rounds=$(fm_get "$f" review_rounds); sent=$(fm_get "$f" last_round_sent)
+  if job_busy "$aj" "$job"; then
+    ((${rounds:-0} <= ${sent:-0})) || echo "$id: round $rounds waits for its worker ($(job_state "$aj" "$job"))"
+    return 0
+  fi
+  if ((${rounds:-0} > ${sent:-0})); then
+    if (cmd_followup "$f") >/dev/null; then echo "$id: round $rounds sent to its worker"; fi
+    return 0
+  fi
+  reason=$(restack_reason "$f")
+  if [[ $st == pr-open && -n $reason && $reason != *" abandoned" ]] && ! parent_needs_restack "$f"; then
+    target=$(restack_target "$f")
+    if [[ -n $target && $(fm_get "$f" restack_sent) != "$target" ]]; then
+      if (cmd_restack "$f") >/dev/null; then echo "$id: restack sent to its worker ($reason)"; fi
+      return 0
+    fi
+  fi
+  waiting=$(open_questions "$f")
+  if [[ $st != needs-input ]] && ((waiting > 0)); then
+    if (cmd_set "$f" status needs-input) >/dev/null; then echo "$id: waiting on you ($waiting open question(s))"; fi
+  fi
+}
+
+cmd_list() {
+  local all=0 want="" p
+  while (($#)); do case $1 in --all) all=1; shift ;; --status) want=$2; shift 2 ;; *) shift ;; esac; done
+  local scope=""
+  if ((all == 0)); then scope=$(project_from_cwd 2>/dev/null || true); fi
+  local f st
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    st=$(fm_get "$f" status)
+    [[ -z $want || $st == "$want" ]] || continue
+    printf '%-14s %-34s %-20s %s\n' "$(fm_get "$f" project | cut -c1-14)" "$(basename "$f" .md | cut -c1-34)" "$st" "$(fm_get "$f" title)"
+  done < <(files_of tasks "$scope")
+}
+
+cmd_get() { local f; f=$(resolve tasks "${1:?usage: crew get TASK KEY}"); fm_get "$f" "${2:?key required}"; }
+
+cmd_set() {
+  local f; f=$(resolve tasks "${1:?usage: crew set TASK KEY VALUE}")
+  local key=${2:?key required}; shift 2
+  lock
+  fm_set "$f" "$key" "$*"; touch_updated "$f"
+  [[ $key == status ]] && append_log "$f" "status → $*"
+  commit "set $(basename "$f" .md) $key"
+}
+
+cmd_log() {
+  local f; f=$(resolve tasks "${1:?usage: crew log TASK MESSAGE}"); shift
+  [[ -n $* ]] || die "message required"
+  lock
+  append_log "$f" "$*"; touch_updated "$f"
+  commit "log $(basename "$f" .md)"
+}
+
+cmd_cleanup() {
+  need git
+  local arg="" force=0 merged=0
+  while (($#)); do case $1 in --force) force=1; shift ;; --merged) merged=1; shift ;; *) arg=$1; shift ;; esac; done
+  local files=()
+  if ((merged)); then
+    local p f; p=$(current_project_or_die)
+    while IFS= read -r f; do
+      [[ -n $f && $(fm_get "$f" status) == merged && -n $(fm_get "$f" worktree) ]] && files+=("$f")
+    done < <(files_of tasks "$p")
+    ((${#files[@]})) || { echo "Nothing to clean up."; return; }
+  else
+    files=("$(resolve tasks "${arg:?usage: crew cleanup TASK|--merged [--force]}")")
+  fi
+  lock
+  local file id st wt branch job
+  for file in "${files[@]}"; do
+    id=$(basename "$file" .md)
+    load_project "$(task_project "$file")"
+    st=$(fm_get "$file" status); wt=$(fm_get "$file" worktree); branch=$(fm_get "$file" branch); job=$(fm_get "$file" worker_job)
+    if [[ $st != merged && $st != abandoned && $force == 0 ]]; then warn "$id is '$st'; skipping (use --force)"; continue; fi
+    if [[ -n $wt && -d $wt && $force == 0 && -n $(git -C "$wt" status --porcelain 2>/dev/null) ]]; then
+      warn "$id: $wt has uncommitted changes; skipping (use --force)"; continue
+    fi
+    # The worker goes first, so it doesn't carry on in a deleted directory, and the
+    # worktree tool's remove hooks run without it or the processes it left behind.
+    remove_worker "$job" || { warn "$id: worker $job is still running; skipping (stop it in claude agents)"; continue; }
+    if [[ -n $wt && -d $wt ]]; then
+      stop_processes_in "$wt"
+      worktree_remove "$wt" "$force" "$CREW_HOME/logs/worktree-$PROJECT-$id.log" || { warn "$id: couldn't remove $wt"; continue; }
+    fi
+    if [[ $st == merged && -n $branch ]]; then git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 || true; fi
+    fm_set "$file" worktree ""; touch_updated "$file"
+    append_log "$file" "cleaned up worktree${st:+ ($st)}"
+    echo "cleaned up $id"
+  done
+  commit "cleanup"
+}
+
+cmd_commit() {
+  # A hook must never fail the tool call, and lock can die (on another machine, say).
+  if [[ ${1:-} == --hook ]]; then (commit_hook) || true; return 0; fi
+  lock; commit "${*:-manual edits}"; echo "ledger committed"
+}
+
+# A PostToolUse hook, after an agent's Edit or Write: an edit to the ledger is
+# committed (and so pushed) at once, as crew's own changes are. Any other file is
+# left alone. It reads the hook JSON on stdin and never fails the tool call.
+commit_hook() {
+  local input path cwd home rel p
+  input=$(cat)
+  path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input" 2>/dev/null) || return 0
+  [[ -n $path ]] || return 0
+  if [[ $path != /* ]]; then cwd=$(jq -r '.cwd // empty' <<<"$input"); path="${cwd:-$PWD}/$path"; fi
+  path=$(realpath -m "$path"); home=$(realpath -m "$CREW_HOME")
+  rel=${path#"$home"/}
+  [[ $rel != "$path" ]] || return 0
+  for p in "${STATE_PATHS[@]}"; do
+    if [[ $rel == "$p"/* ]]; then lock; commit "edit $rel"; return 0; fi
+  done
+}
+
+cmd_observe() {
+  need claude
+  local arg="" base="" dir="" p
+  while (($#)); do case $1 in --base) base=$2; shift 2 ;; *) arg=$1; shift ;; esac; done
+  if [[ -n $arg && -d $arg ]]; then dir=$(realpath "$arg")
+  elif [[ -n $arg ]]; then
+    local f; f=$(resolve tasks "$arg"); dir=$(fm_get "$f" worktree)
+    [[ -n $dir ]] || die "task has no worktree"
+    [[ -d $dir ]] || { echo "nothing to observe: $(basename "$f" .md)'s worktree isn't on this machine"; return 0; }
+    if [[ -z $base ]]; then
+      base="origin/$(fm_get "$f" base)"
+      # A merged parent's branch may be gone from origin; base_sha still marks where this task's own commits start.
+      if ! git -C "$dir" rev-parse --verify --quiet "$base^{commit}" >/dev/null && [[ -n $(fm_get "$f" base_sha) ]]; then
+        base=$(fm_get "$f" base_sha)
+      fi
+    fi
+  else dir=$(pwd)
+  fi
+  if [[ -z $base ]]; then
+    if p=$(cd "$dir" && project_from_cwd 2>/dev/null); then load_project "$p"; base="origin/$DEFAULT_BRANCH"; else base="origin/HEAD"; fi
+  fi
+  (cd "$dir" && cc -p --agent casual-observer --permission-mode default --permission-prompts none \
+     --settings "$CREW_HOME/config/readonly-settings.json" \
+     "Review the change $base...HEAD in this repository.")
+}
+
+cmd_gardener() {
+  need git; need claude
+  require_host
+  local projects=() p
+  case ${1:-} in
+    --all) mapfile -t projects < <(projects_in_scope all) ;;
+    "") projects=("$(current_project_or_die)") ;;
+    *) projects=("$1") ;;
+  esac
+  mkdir -p "$CREW_HOME/logs"
+  local wt head last base count range prompt logf rc failures=0
+  for p in "${projects[@]}"; do
+    ( load_project "$p"
+      wt="$WORK_ROOT/$p/_gardener"
+      detached_checkout "$wt"
+      head=$(git -C "$wt" rev-parse HEAD)
+      last=$(cat "$PDIR/gardener.last" 2>/dev/null || true)
+      if [[ $last == "$head" ]]; then echo "$p: nothing new since last run"; exit 0; fi
+      if [[ -n $last ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then base=$last
+      else base=$(git -C "$wt" rev-list -1 --before="$GARDENER_LOOKBACK" "$head" || true); fi
+      if [[ -n $base ]]; then range="$base..$head"; count=$(git -C "$wt" rev-list --count "$range")
+      else range="$head"; count=$(git -C "$wt" rev-list --count "$head"); fi
+      if [[ $count == 0 ]]; then echo "$head" >"$PDIR/gardener.last"; echo "$p: no commits in range"; exit 0; fi
+      prompt="Project: $p
+Proposals directory: $PDIR/proposals
+Tasks directory: $PDIR/tasks
+Proposal template: $CREW_HOME/templates/proposal.md
+Commit range to review: $range ($count commits on origin/$DEFAULT_BRANCH)
+Today's date: $(date +%F)
+Follow your process and write proposals only into the proposals directory."
+      logf="$CREW_HOME/logs/gardener-$p-$(date +%Y%m%d-%H%M).log"
+      echo "$p: reviewing $count commits ($range) — log: $logf"
+      rc=0
+      (cd "$wt" && cc -p --add-dir "$CREW_HOME" --agent gardener --permission-mode acceptEdits \
+         --permission-prompts none --max-turns "$GARDENER_MAX_TURNS" \
+         --settings "$CREW_HOME/config/readonly-settings.json" "$prompt") >"$logf" 2>&1 || rc=$?
+      tail -n 15 "$logf"
+      if ((rc == 0)); then
+        echo "$head" >"$PDIR/gardener.last"
+        lock; commit "gardener $p ($range)"
+      else warn "$p: gardener exited with $rc; see $logf"; exit 1; fi
+    ) || { warn "$p: gardener run failed"; failures=$((failures + 1)); }
+  done
+  ((failures == 0))
+}
+
+cmd_proposals() {
+  local all=0; [[ ${1:-} == --all ]] && all=1
+  local p; p=$(project_from_cwd 2>/dev/null || true)
+  local f st n=0
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    st=$(fm_get "$f" status)
+    [[ $all == 1 || $st == open ]] || continue
+    printf '%-44s %-9s %-3s %s\n' "$(basename "$f" .md | cut -c1-44)" "$st" "$(fm_get "$f" size)" "$(fm_get "$f" title)"
+    n=$((n + 1))
+  done < <(files_of proposals "$p")
+  ((n)) || { ((all)) && echo "No proposals." >&2 || echo "No open proposals." >&2; }
+}
+
+cmd_promote() {
+  local pf; pf=$(resolve proposals "${1:?usage: crew promote PROPOSAL [--branch NAME]}"); shift
+  local branchargs=()
+  while (($#)); do
+    case $1 in
+      --branch) branchargs=(--branch "$2"); shift 2 ;;
+      *) die "usage: crew promote PROPOSAL [--branch NAME]" ;;
+    esac
+  done
+  local proj title taskfile tid tmp pst
+  pst=$(fm_get "$pf" status)
+  [[ $pst == open || $pst == deferred ]] || die "proposal is '$pst' (task: $(fm_get "$pf" task)); only open or deferred proposals can be promoted"
+  proj=$(fm_get "$pf" project); title=$(fm_get "$pf" title)
+  [[ -n $proj && -d $CREW_HOME/projects/$proj ]] || proj=$(basename "$(dirname "$(dirname "$pf")")")
+  taskfile=$(cmd_new "$title" --project "$proj" "${branchargs[@]}" | tail -n1)
+  tid=$(basename "$taskfile" .md)
+  tmp=$(mktemp)
+  {
+    echo "From gardener proposal \`$(basename "$pf")\` ($pf). Run normal intake: confirm the plan with the user."
+    echo
+    section_body "$pf" "## Proposal"
+    echo
+    echo "First step suggested by the gardener:"
+    section_body "$pf" "## First step"
+  } >"$tmp"
+  lock
+  # Replace the Context placeholder with the proposal summary.
+  local tmp2; tmp2=$(mktemp)
+  CF="$tmp" awk 'BEGIN{cf=ENVIRON["CF"]} $0=="## Context"{print; while((getline l<cf)>0) print l; skip=1; next} skip&&/^## /{skip=0; print ""} !skip{print}' "$taskfile" >"$tmp2" && cat "$tmp2" >"$taskfile"
+  rm -f "$tmp" "$tmp2"
+  fm_set "$pf" status accepted; fm_set "$pf" task "$tid"; touch_updated "$pf"
+  append_log "$pf" "promoted to task $tid"
+  commit "promote $(basename "$pf" .md) → $tid"
+  echo "$taskfile"
+}
+
+# ------------------------------------------------------------------- goals ---
+# A goal is a batch of items the user hands the crew to work through without them.
+# Its goal lead, a background session, writes and plan-reviews a brief for each item
+# and marks it ready, answers its workers' questions, and parks what it shouldn't
+# decide alone: a draft task with open questions for the user. crew tick dispatches
+# the ready tasks and resumes the goal lead when there's input for it.
+
+goal_tasks() {  # goal-file -> the files of the tasks that belong to the goal
+  local id f
+  id=$(basename "$1" .md)
+  while IFS= read -r f; do
+    if [[ -n $f && $(fm_get "$f" goal) == "$id" ]]; then echo "$f"; fi
+  done < <(files_of tasks "$(fm_get "$1" project)")
+}
+
+goal_running() {  # task-file -> 0 if the task belongs to a running goal
+  local g; g=$(fm_get "$1" goal)
+  [[ -n $g && $(fm_get "$CREW_HOME/projects/$(fm_get "$1" project)/goals/$g.md" status 2>/dev/null) == running ]]
+}
+
+# Finished: the goal has tasks, and every one of them is merged or abandoned.
+goal_finished() {  # goal-file
+  local f n=0
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    has_word "$(fm_get "$f" status)" "merged abandoned" || return 1
+    n=$((n + 1))
+  done < <(goal_tasks "$1")
+  ((n > 0))
+}
+
+# A worker's open questions: the unchecked items under Open questions, leaving out
+# the collaborators' PR comments crew feedback records there ("@login …"), which
+# are for the user.
+worker_questions() {  # task-file
+  section_body "$1" "## Open questions" | grep '^- \[ \]' | grep -v '^- \[ \] @' || true
+}
+
+# A dispatched goal task whose worker has questions the goal lead hasn't been sent.
+# questions_routed is a checksum of the questions last sent, so one the goal lead
+# left for the user isn't sent again, but a new one is.
+unrouted_questions() {  # task-file -> prints the checksum to record once they're sent
+  local q sum
+  has_word "$(fm_get "$1" status)" "$ACTIVE_STATES" || return 1
+  q=$(worker_questions "$1")
+  [[ -n $q ]] || return 1
+  sum=$(cksum <<<"$q"); sum=${sum%% *}
+  [[ $sum != "$(fm_get "$1" questions_routed)" ]] || return 1
+  echo "$sum"
+}
+
+# The goal lead reads the code in a detached checkout of origin/DEFAULT_BRANCH,
+# which crew refreshes before each of its turns. Needs load_project.
+goal_checkout() {  # goal-file
+  echo "$WORK_ROOT/$PROJECT/_goal-$(basename "$1" .md)"
+}
+
+# A goal lead runs with the lead's settings, lead/.claude/settings.json, all but
+# their "agent": the lead's session takes its agent from that file, a goal lead
+# from --agent. Not the lead's settings.local.json: a goal lead works in its own
+# checkout. A resume passes no launch flags (see launch_session), so only a fresh
+# session needs the settings.
+launch_goal_lead() {  # goal-file checkout prompt mode(fresh|resume) -> sets LAUNCH_JOB LAUNCH_SESSION
+  local settings=""
+  if [[ $4 == fresh ]]; then settings=$(jq -c 'del(.agent)' "$CREW_HOME/lead/.claude/settings.json"); fi
+  launch_session "$1" lead "$2" "$3" "$4" --agent goal-lead --permission-mode "$LEAD_PERMISSION_MODE" \
+    --settings "$settings"
+}
+
+cmd_goal_new() {
+  local title="" proj=""
+  while (($#)); do
+    case $1 in
+      --project) proj=$2; shift 2 ;;
+      *) title="${title:+$title }$1"; shift ;;
+    esac
+  done
+  [[ -n $title ]] || die 'usage: crew goal new "<title>" [--project P]'
+  [[ -n $proj ]] || proj=$(current_project_or_die)
+  load_project "$proj"
+  lock
+  mkdir -p "$PDIR/goals"
+  local n s id file content
+  n=$(next_number goals "$proj")
+  s=$(slugify "$title"); s=${s:0:40}; s=${s%-}
+  id=$(printf '%03d-%s' "$n" "${s:-goal-$n}")
+  file="$PDIR/goals/$id.md"
+  content=$(<"$CREW_HOME/templates/goal.md")
+  content=${content//'{{ID}}'/$id}
+  content=${content//'{{TITLE}}'/${title//\"/\'}}
+  content=${content//'{{PROJECT}}'/$proj}
+  content=${content//'{{NOW}}'/$(now)}
+  printf '%s\n' "$content" >"$file"
+  append_log "$file" "created"
+  commit "new goal $proj/$id"
+  echo "$file"
+}
+
+cmd_goal_start() {
+  need git; need jq; need claude
+  local file; file=$(resolve goals "${1:?usage: crew goal start GOAL}")
+  local id st checkout name
+  id=$(basename "$file" .md); st=$(fm_get "$file" status)
+  load_project "$(fm_get "$file" project)"
+  [[ $st == draft ]] || die "goal $id is '$st'; give a running goal input with 'crew goal note'"
+  [[ -n $(section_body "$file" "## Goal") ]] || die "goal $id has no Goal yet: write the user's own words into its ## Goal section"
+  checkout=$(goal_checkout "$file")
+  detached_checkout "$checkout"
+  name="crew-$PROJECT-goal-$id"; name=${name:0:80}
+  lock
+  fm_set "$file" checkout "$checkout"
+  fm_set "$file" lead_name "$name"
+  launch_goal_lead "$file" "$checkout" "You are the goal lead for goal $id in project $PROJECT.
+Goal file: $file
+Your working directory is a checkout of origin/$DEFAULT_BRANCH; read the code there.
+Read the goal file completely, then follow your workflow for a new goal." fresh \
+    || die "could not start the goal lead (see output above)"
+  fm_set "$file" lead_job "$LAUNCH_JOB"
+  fm_set "$file" lead_session "$LAUNCH_SESSION"
+  fm_set "$file" status running
+  touch_updated "$file"
+  append_log "$file" "started: goal lead $LAUNCH_JOB (session ${LAUNCH_SESSION:-unknown}) in $checkout"
+  commit "start goal $PROJECT/$id"
+  echo "started goal $id → goal lead $LAUNCH_JOB ($name)"
+  echo "  watch: claude attach $LAUNCH_JOB   |   claude agents"
+}
+
+# Records the user's words under the goal's Decisions and passes them to the goal
+# lead, now if it's free, or through crew tick once it is. A note to a done goal
+# reopens it, for work the user adds later ("pick up the new cards").
+cmd_goal_note() {
+  local file; file=$(resolve goals "${1:?usage: crew goal note GOAL TEXT}"); shift
+  [[ -n $* ]] || die "usage: crew goal note GOAL TEXT"
+  local id st n tmp
+  id=$(basename "$file" .md); st=$(fm_get "$file" status)
+  [[ $st != abandoned ]] || die "goal $id is abandoned"
+  tmp=$(mktemp)
+  printf -- '- %s — from the user: %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >"$tmp"
+  lock
+  append_to_section "$file" "## Decisions" "$tmp"
+  rm -f "$tmp"
+  if [[ $st == draft ]]; then
+    touch_updated "$file"; append_log "$file" "note recorded"; commit "note goal $id"
+    echo "recorded under Decisions; the goal lead reads it when the goal starts"
+    return 0
+  fi
+  if [[ $st == "done" ]]; then fm_set "$file" status running; append_log "$file" "reopened by a note"; fi
+  n=$(fm_get "$file" unsent_notes)
+  fm_set "$file" unsent_notes $((${n:-0} + 1))
+  touch_updated "$file"; append_log "$file" "note recorded"
+  commit "note goal $id"
+  unlock
+  (cmd_goal_followup "$file") || echo "recorded under Decisions; crew tick passes it to the goal lead once it's free"
+}
+
+# Resumes the goal lead with what's waiting for it: the user's unsent notes, and
+# questions its tasks' workers have asked. Returns 3 if there's nothing.
+cmd_goal_followup() {
+  need git; need jq; need claude
+  local file; file=$(resolve goals "${1:?usage: crew goal followup GOAL}")
+  local id st notes t sum input="" routed=()
+  id=$(basename "$file" .md); st=$(fm_get "$file" status)
+  load_project "$(fm_get "$file" project)"
+  [[ $st == running ]] || die "goal $id is '$st', not running"
+  notes=$(fm_get "$file" unsent_notes); notes=${notes:-0}
+  ((notes == 0)) || input+=$'\n'"- $notes new note(s) from the user under Decisions in the goal file"
+  while IFS= read -r t; do
+    if [[ -n $t ]] && sum=$(unrouted_questions "$t"); then
+      input+=$'\n'"- $(basename "$t" .md): its worker has asked something (task file: $t)"
+      routed+=("$t" "$sum")
+    fi
+  done < <(goal_tasks "$file")
+  [[ -n $input ]] || { echo "nothing new for goal $id"; return 3; }
+  local aj job
+  aj=$(agents_json); job=$(fm_get "$file" lead_job)
+  if job_busy "$aj" "$job"; then
+    die "goal lead $job is busy ($(job_state "$aj" "$job")); crew tick passes this on once it's free"
+  fi
+  local checkout i
+  checkout=$(goal_checkout "$file")
+  detached_checkout "$checkout"
+  lock
+  fm_set "$file" checkout "$checkout"
+  relaunch launch_goal_lead lead "$file" "$checkout" "New input for goal $id (goal file: $file):$input
+Follow your workflow for new input." "You are the goal lead for goal $id in project $PROJECT, which is already under way.
+Goal file: $file
+Your working directory is a checkout of origin/$DEFAULT_BRANCH; read the code there.
+Read the goal file completely, and the files of the tasks under its Items, before acting." 0
+  fm_set "$file" lead_job "$LAUNCH_JOB"
+  [[ -n $LAUNCH_SESSION ]] && fm_set "$file" lead_session "$LAUNCH_SESSION"
+  fm_set "$file" unsent_notes 0
+  touch_updated "$file"
+  append_log "$file" "followup ($LAUNCH_MODE): goal lead $LAUNCH_JOB"
+  for ((i = 0; i < ${#routed[@]}; i += 2)); do
+    fm_set "${routed[i]}" questions_routed "${routed[i + 1]}"
+    append_log "${routed[i]}" "open questions sent to the goal lead"
+  done
+  commit "followup goal $PROJECT/$id"
+  echo "goal $id: input sent to its goal lead ($LAUNCH_MODE)"
+}
+
+# Stops and removes the goal lead and its checkout. The goal's tasks stay as they are.
+retire_goal() {  # goal-file status(done|abandoned)
+  local file=$1 id checkout job
+  id=$(basename "$file" .md); job=$(fm_get "$file" lead_job); checkout=$(fm_get "$file" checkout)
+  remove_worker "$job" || die "goal lead $job is still running; stop it in claude agents, then try again"
+  if [[ -n $checkout && -d $checkout ]]; then
+    stop_processes_in "$checkout"
+    git -C "$REPO" worktree remove --force "$checkout" || warn "couldn't remove $checkout"
+  fi
+  lock
+  fm_set "$file" checkout ""
+  fm_set "$file" status "$2"
+  touch_updated "$file"
+  append_log "$file" "status → $2; goal lead and its checkout removed"
+  commit "$2 goal $PROJECT/$id"
+  echo "goal $id: $2"
+}
+
+cmd_goal_done() {
+  local file; file=$(resolve goals "${1:?usage: crew goal done GOAL}")
+  local id; id=$(basename "$file" .md)
+  load_project "$(fm_get "$file" project)"
+  [[ $(fm_get "$file" status) == running ]] || die "goal $id is '$(fm_get "$file" status)', not running"
+  goal_finished "$file" || die "goal $id has tasks that aren't merged or abandoned yet"
+  retire_goal "$file" "done"
+}
+
+cmd_goal_abandon() {
+  local file; file=$(resolve goals "${1:?usage: crew goal abandon GOAL}")
+  load_project "$(fm_get "$file" project)"
+  [[ $(fm_get "$file" status) != abandoned ]] || die "goal $(basename "$file" .md) is already abandoned"
+  retire_goal "$file" abandoned
+}
+
+cmd_goal() {
+  local sub=${1:-}
+  shift || true
+  case $sub in
+    new) cmd_goal_new "$@" ;;
+    start) cmd_goal_start "$@" ;;
+    note) cmd_goal_note "$@" ;;
+    followup) cmd_goal_followup "$@" ;;
+    done) cmd_goal_done "$@" ;;
+    abandon) cmd_goal_abandon "$@" ;;
+    path) resolve goals "${1:?usage: crew goal path GOAL}" ;;
+    *) die "usage: crew goal new|start|note|followup|done|abandon|path … (see 'crew help')" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- install ---
+# crew install puts this machine's files in place: the agents in ~/.claude/agents/,
+# the fish files in ~/.config/fish/, and the systemd units (installed, not enabled).
+# Re-running it is safe. A file is replaced only when it differs, after a backup,
+# and by rename, so a running crew-guard hook never reads half a file. A file an
+# earlier install shipped and this one doesn't is backed up and removed. The
+# manifest of what was shipped, and the backups, live in INSTALL_STATE.
+
+INSTALL_STATE="$HOME/.local/share/agent-crew"
+# One run's bookkeeping, set up by cmd_install and used by the helpers below.
+INSTALL_BACKUP=""                       # this run's backup directory
+INSTALL_TMP=""                          # where render puts its copies
+INSTALL_OLD=()                          # the last run's manifest: "component<TAB>path" lines
+INSTALL_NEW=()                          # this run's manifest lines so far
+declare -A INSTALL_SHIPPED=()           # path -> 1 for every file this run shipped
+declare -A INSTALL_PRUNED=()            # component -> 1 once prune has run for it
+
+say()  { printf '\033[1m%s\033[0m\n' "$*"; }
+note() { printf '  %s\n' "$*"; }
+
+crew_version() { git -C "$CREW_HOME" describe --always --dirty 2>/dev/null || echo unknown; }
+
+backup() {  # file -> a copy in this run's backup dir, at its path under $HOME
+  local rel=${1#"$HOME"/}
+  mkdir -p "$INSTALL_BACKUP/$(dirname "$rel")"; cp -p "$1" "$INSTALL_BACKUP/$rel"
+  note "backed up ~/$rel → $INSTALL_BACKUP/"
+}
+
+put() {  # src dst — replace dst with src, backing up a dst that differs
+  local src=$1 dst=$2 mode=644 tmp
+  if [[ -x $src ]]; then mode=755; fi
+  mkdir -p "$(dirname "$dst")"
+  if [[ -f $dst ]] && cmp -s "$src" "$dst"; then chmod "$mode" "$dst"; return 0; fi
+  if [[ -f $dst ]]; then backup "$dst"; fi
+  tmp=$(mktemp "$dst.XXXXXX")
+  cp "$src" "$tmp"; chmod "$mode" "$tmp"; mv -f "$tmp" "$dst"
+}
+
+install_file() {  # component src dst — put, and record it in the manifest
+  put "$2" "$3"
+  INSTALL_NEW+=("$1"$'\t'"$3"); INSTALL_SHIPPED[$3]=1
+}
+
+# Removes the files the last install of a component shipped and this one didn't.
+# Run it after the component's install_file calls. It only touches files under
+# root, the component's directory. A component this run skips (--no-fish,
+# --no-systemd) is never pruned, so it loses nothing.
+prune() {  # component root
+  local comp=$1 root=$2 entry path
+  # write_manifest replaces this component's old lines with the new ones.
+  INSTALL_PRUNED[$comp]=1
+  for entry in "${INSTALL_OLD[@]}"; do
+    [[ ${entry%%$'\t'*} == "$comp" ]] || continue
+    path=${entry#*$'\t'}
+    [[ $path == "$root"/* && -f $path && -z ${INSTALL_SHIPPED[$path]:-} ]] || continue
+    if [[ $comp == systemd ]]; then systemctl --user disable --now "$(basename "$path")" >/dev/null 2>&1 || true; fi
+    backup "$path"; rm -f "$path"
+    note "removed ${path/#"$HOME"/\~} (no longer shipped)"
+  done
+}
+
+# The manifest has a "component<TAB>path" line for every file shipped: by this run,
+# or by the last run of a component this one skipped.
+write_manifest() {
+  local entry
+  mkdir -p "$INSTALL_STATE"
+  {
+    for entry in "${INSTALL_OLD[@]}"; do [[ -n ${INSTALL_PRUNED[${entry%%$'\t'*}]:-} ]] || printf '%s\n' "$entry"; done
+    for entry in "${INSTALL_NEW[@]}"; do printf '%s\n' "$entry"; done
+  } >"$INSTALL_STATE/manifest.tmp"
+  mv -f "$INSTALL_STATE/manifest.tmp" "$INSTALL_STATE/manifest"
+}
+
+# A copy of src with this machine's crew home put in, so install_file compares
+# what will actually be installed, and an unchanged re-run backs nothing up.
+render() {  # src sed-script -> path of the copy
+  local out; out="$INSTALL_TMP/$(basename "$1")"
+  sed "$2" "$1" >"$out"; echo "$out"
+}
+
+settings_merge() {  # jq-filter [jq args...] — applied to ~/.claude/settings.json, after a backup
+  local f="$HOME/.claude/settings.json" tmp
+  mkdir -p "$HOME/.claude"; [[ -f $f ]] || echo '{}' >"$f"
+  tmp=$(mktemp)
+  if jq "$@" "$f" >"$tmp"; then
+    if ! cmp -s "$tmp" "$f"; then backup "$f"; cat "$tmp" >"$f"; note "updated ~/.claude/settings.json"; fi
+  else
+    note "couldn't parse ~/.claude/settings.json; leaving it alone"
+  fi
+  rm -f "$tmp"
+}
+
+# The lead's settings for this machine, in the home but gitignored: it reads the
+# ledger and the project checkouts as extra directories, and leaves out the home's
+# CLAUDE.md, which is for developing crew. Rewritten only when it changes.
+write_lead_local_settings() {
+  local f="$CREW_HOME/lead/.claude/settings.local.json" tmp
+  tmp=$(mktemp)
+  jq -n --arg home "$CREW_HOME" --arg work "$WORK_ROOT" \
+    '{permissions: {additionalDirectories: [$home, $work]}, claudeMdExcludes: [$home + "/CLAUDE.md"]}' >"$tmp"
+  if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 0; fi
+  mkdir -p "$(dirname "$f")"; mv -f "$tmp" "$f"
+  note "wrote ${f/#"$HOME"/\~}"
+}
+
+confirm() {  # question -> yes, unless the user answers no
+  local a=""; read -r -p "  $1 [Y/n] " a || true
+  [[ -z $a || $a == [Yy]* ]]
+}
+
+cmd_install() {
+  local yes=0 fish=1 systemd=1 agents_md=ask
+  while (($#)); do
+    case $1 in
+      --yes|-y) yes=1; shift ;;
+      --no-fish) fish=0; shift ;;
+      --no-systemd) systemd=0; shift ;;
+      --skip-agents-md-setting) agents_md=skip; shift ;;
+      *) die "usage: crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]" ;;
+    esac
+  done
+  local f rel c v missing=() custom=0
+  INSTALL_BACKUP="$INSTALL_STATE/backups/$(date +%Y%m%d-%H%M%S)"
+  INSTALL_TMP=$(mktemp -d)
+  INSTALL_OLD=() INSTALL_NEW=() INSTALL_SHIPPED=() INSTALL_PRUNED=()
+  if [[ -f $INSTALL_STATE/manifest ]]; then mapfile -t INSTALL_OLD <"$INSTALL_STATE/manifest"; fi
+  # The fish and systemd files name ~/crew, the usual home. Only a home elsewhere
+  # needs its path written into them (render).
+  [[ $CREW_HOME == "$HOME/crew" ]] || custom=1
+
+  say "Checking dependencies"
+  for c in git gh jq flock claude fish; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
+  if ((${#missing[@]})); then
+    note "missing: ${missing[*]}"
+    note "on CachyOS: sudo pacman -S --needed git github-cli jq util-linux fish"
+    note "Claude Code: curl -fsSL https://claude.ai/install.sh | bash   (or 'claude update')"
+  fi
+  need jq
+  if command -v claude >/dev/null 2>&1; then
+    v=$(claude --version 2>/dev/null | awk '{print $1}')
+    if [[ $(printf '%s\n' 2.1.281 "$v" | sort -V | head -1) != 2.1.281 ]]; then
+      note "Claude Code $v is older than 2.1.281; run 'claude update' (AGENTS.md loading and agent view need it)"
+    else note "Claude Code $v"; fi
+  fi
+
+  say "Installing agent profiles → ~/.claude/agents/"
+  for f in "$CREW_HOME"/agents/*.md; do install_file agents "$f" "$HOME/.claude/agents/$(basename "$f")"; note "$(basename "$f" .md)"; done
+  prune agents "$HOME/.claude/agents"
+
+  # Hooks find crew-guard through CREW_HOME, and so do sessions that run crew.
+  say "Crew home: $CREW_HOME"
+  settings_merge '.env.CREW_HOME = $home' --arg home "$CREW_HOME"
+  mkdir -p "$WORK_ROOT"
+  write_lead_local_settings
+
+  if ((fish)); then
+    say "Installing fish integration → ~/.config/fish/"
+    while IFS= read -r -d '' f; do
+      rel=${f#"$CREW_HOME/fish/"}
+      if [[ $rel == conf.d/agent-crew.fish ]] && ((custom)); then
+        f=$(render "$f" "s#^set -q CREW_HOME; or set -gx CREW_HOME .*#set -q CREW_HOME; or set -gx CREW_HOME $CREW_HOME#")
+      fi
+      install_file fish "$f" "$HOME/.config/fish/$rel"
+    done < <(find "$CREW_HOME/fish" -type f -print0 | sort -z)
+    prune fish "$HOME/.config/fish"
+    note "open a new fish shell (or: source ~/.config/fish/conf.d/agent-crew.fish)"
+  fi
+
+  if ((systemd)); then
+    say "Installing the crew's systemd units → ~/.config/systemd/user/"
+    for f in "$CREW_HOME"/systemd/*; do
+      if [[ $f == *.service ]] && ((custom)); then
+        f=$(render "$f" "s#%h/crew#$CREW_HOME#g; s|^# Environment=CREW_HOME=.*|Environment=CREW_HOME=$CREW_HOME|")
+      fi
+      install_file systemd "$f" "$HOME/.config/systemd/user/$(basename "$f")"
+    done
+    prune systemd "$HOME/.config/systemd/user"
+    systemctl --user daemon-reload 2>/dev/null || true
+    note "timers installed, not enabled. To enable: systemctl --user enable --now crew-tick.timer crew-gardener.timer"
+  fi
+
+  write_manifest
+
+  # Asked once: not when the setting is on already, or when the user declined before.
+  if [[ $agents_md == ask && ! -f $INSTALL_STATE/agents-md-declined ]] \
+     && ! jq -e '.pluginConfigs["agents-md@builtin"].options.instructionFiles == "claude-md-and-agents-md"' \
+            "$HOME/.claude/settings.json" >/dev/null 2>&1; then
+    say "AGENTS.md loading"
+    note "Claude Code reads AGENTS.md automatically, but only when a repo has no CLAUDE.md."
+    if ((yes)) || confirm "In repos that have both, load CLAUDE.md and AGENTS.md together?"; then
+      settings_merge '.pluginConfigs["agents-md@builtin"].options.instructionFiles = "claude-md-and-agents-md"'
+    else
+      mkdir -p "$INSTALL_STATE"; touch "$INSTALL_STATE/agents-md-declined"
+      note "skipped, and won't ask again; see SETUP.md if you change your mind"
+    fi
+  fi
+  rm -rf "$INSTALL_TMP"
+
+  say "Done (crew $(crew_version)). Next steps:"
+  cat <<NEXT
+  1. Trust the worktree folder once:   cd $WORK_ROOT; and claude    (accept, then /exit)
+  2. Your settings:                    cp $CREW_HOME/templates/crew.env $CREW_HOME/config/crew.env, then set BRANCH_PREFIX
+  3. In each repo:                     crew project add; and crew doctor
+  4. Talk to the lead:                 lead
+  See SETUP.md for the full walkthrough.
+NEXT
+}
+
+# The lead's reading copy of a project: a detached checkout of a freshly fetched
+# origin/DEFAULT_BRANCH, beside the task worktrees. Prints its path.
+cmd_checkout() {
+  [[ $# == 1 ]] || die "usage: crew checkout PROJECT"
+  load_project "$1"
+  local co="$WORK_ROOT/$PROJECT/_lead"
+  detached_checkout "$co"
+  echo "$co"
+}
+
+cmd_project() {
+  local sub=${1:-}
+  shift || true
+  case $sub in
+    add) cmd_project_add "$@" ;;
+    *) die "usage: crew project add [PATH]" ;;
+  esac
+}
+
+cmd_doctor() {
+  local ok=1 v
+  chk() { if eval "$2" >/dev/null 2>&1; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s%s\n' "$1" "${3:+ — $3}"; ok=0; fi; }
+  echo "crew $(crew_version) at $CREW_HOME"
+  echo "Dependencies"
+  local deps=(git gh jq flock claude) c
+  for c in "${deps[@]}"; do chk "$c installed" "command -v $c"; done
+  if command -v claude >/dev/null; then
+    v=$(claude --version 2>/dev/null | awk '{print $1}')
+    chk "claude $v >= 2.1.281" "[[ \$(printf '%s\n' 2.1.281 '$v' | sort -V | head -1) == 2.1.281 ]]" "run 'claude update'"
+  fi
+  chk "gh authenticated" "gh auth status" "run 'gh auth login'"
+  echo "Agents"
+  for c in lead implementer casual-observer plan-reviewer gardener goal-lead; do chk "$c" "[[ -f \$HOME/.claude/agents/$c.md ]]" "run crew install"; done
+  echo "Crew home"
+  chk "$CREW_HOME is a git repo" "git -C '$CREW_HOME' rev-parse"
+  chk "crew-guard executable" "[[ -x '$CREW_HOME/bin/crew-guard' ]]"
+  # The settings hook is what guards the subagents a lead or worker spawns. An edited
+  # settings file keeps its old contents on re-install, so it can be missing.
+  guard_hooked() {  # settings-file role
+    chk "$1 runs crew-guard" "jq -e '[.hooks.PreToolUse[]?.hooks[]?.command] | any(endswith(\"crew-guard\\\" $2\"))' '$CREW_HOME/$1'" \
+        "restore its hook: git -C $CREW_HOME diff $1"
+  }
+  guard_hooked lead/.claude/settings.json lead
+  guard_hooked config/worker-settings.json worker
+  # Without it, an agent's own edits to the ledger wait for crew's next commit.
+  for c in lead/.claude/settings.json config/worker-settings.json; do
+    chk "$c commits ledger edits (crew commit --hook)" \
+        "jq -e '[.hooks.PostToolUse[]?.hooks[]?.command] | any(endswith(\"bin/crew\\\" commit --hook\"))' '$CREW_HOME/$c'" \
+        "restore its hook: git -C $CREW_HOME diff $c"
+  done
+  chk "lead/.claude/settings.local.json written for this machine" "[[ -f '$CREW_HOME/lead/.claude/settings.local.json' ]]" "run crew install"
+  local pd p tool
+  for pd in "$CREW_HOME"/projects/*/; do
+    [[ -f $pd/project.env ]] || continue
+    p=$(basename "$pd")
+    # shellcheck source=/dev/null
+    tool=$(. "$pd/project.env" && echo "${WORKTREE_TOOL:-git}")
+    case $tool in
+      git) ;;
+      worktrunk) chk "$p: wt installed (WORKTREE_TOOL=worktrunk)" "command -v wt" "install Worktrunk: https://worktrunk.dev" ;;
+      *) chk "$p: WORKTREE_TOOL is git or worktrunk (got '$tool')" false "fix $pd/project.env" ;;
+    esac
+    chk "$p: cloned on this machine (local.env)" "(. '$pd/local.env' && [[ -d \$REPO ]])" "run 'crew project add' in your clone of it"
+    [[ -f $pd/worker-settings.json ]] && chk "$p: worker-settings.json is valid JSON" "jq -e . '$pd/worker-settings.json'" "fix it; dispatch refuses to start workers until then"
+  done
+  echo "Trust (workers start in worktrees under WORK_ROOT; the lead in the home's lead/)"
+  for c in "$WORK_ROOT" "$CREW_HOME/lead"; do
+    chk "$c trusted" "jq -e --arg p '$c' '.projects[\$p].hasTrustDialogAccepted == true' \$HOME/.claude.json" "cd $c && claude, accept, /exit"
+  done
+  # A unit runs crew with the PATH its service sets, not your shell's, so a tool
+  # your shell finds through its config (mise, nvm, ...) can be missing there.
+  echo "Enabled units"
+  local unit svc path
+  for unit in "${CREW_UNITS[@]}"; do
+    systemctl --user is-enabled --quiet "$unit" 2>/dev/null || continue
+    svc=${unit%.*}.service   # crew-tick.timer starts crew-tick.service
+    path=$(systemctl --user show "$svc" -p Environment --value 2>/dev/null | tr " " "\n" | sed -n "s/^PATH=//p")
+    for c in "${deps[@]}"; do
+      chk "$svc finds $c" "(PATH='$path'; command -v $c)" "add its directory to PATH: systemctl --user edit $svc"
+    done
+  done
+  echo "AGENTS.md loading"
+  local req_ok=$ok
+  chk "Project instructions = claude-md-and-agents-md (optional)" \
+      "jq -e '.pluginConfigs[\"agents-md@builtin\"].options.instructionFiles == \"claude-md-and-agents-md\"' \$HOME/.claude/settings.json" \
+      "only matters for repos that have both CLAUDE.md and AGENTS.md"
+  if ((req_ok)); then echo "Required checks passed."; else echo "Some required checks failed."; return 1; fi
+}
+
+# ------------------------------------------------------------------- main ---
+
+cmd=${1:-help}; shift || true
+case $cmd in
+  help|-h|--help) cmd_help ;;
+  project) cmd_project "$@" ;;
+  checkout) cmd_checkout "$@" ;;
+  host) cmd_host "$@" ;;
+  serve) cmd_serve "$@" ;;
+  setup) cmd_setup "$@" ;;
+  upgrade) cmd_upgrade "$@" ;;
+  migrate-ledger) cmd_migrate_ledger "$@" ;;
+  config) cmd_config "$@" ;;
+  doctor) cmd_doctor ;;
+  install) cmd_install "$@" ;;
+  new) cmd_new "$@" ;;
+  ready) cmd_ready "$@" ;;
+  dispatch) cmd_dispatch "$@" ;;
+  feedback) cmd_feedback "$@" ;;
+  followup) cmd_followup "$@" ;;
+  restack) cmd_restack "$@" ;;
+  reply) cmd_reply "$@" ;;
+  status) cmd_status "$@" ;;
+  sync) cmd_sync "$@" ;;
+  tick) cmd_tick "$@" ;;
+  list|ls) cmd_list "$@" ;;
+  show) f=$(resolve tasks "${1:?usage: crew show TASK}") && cat "$f" ;;
+  path) resolve tasks "${1:?usage: crew path TASK}" ;;
+  find) f=$(resolve tasks "${1:?usage: crew find TASK}") && basename "$f" .md ;;
+  get) cmd_get "$@" ;;
+  set) cmd_set "$@" ;;
+  log) cmd_log "$@" ;;
+  cleanup) cmd_cleanup "$@" ;;
+  commit) cmd_commit "$@" ;;
+  observe) cmd_observe "$@" ;;
+  gardener) cmd_gardener "$@" ;;
+  proposals) cmd_proposals "$@" ;;
+  promote) cmd_promote "$@" ;;
+  goal) cmd_goal "$@" ;;
+  *) die "unknown command '$cmd' (see 'crew help')" ;;
+esac

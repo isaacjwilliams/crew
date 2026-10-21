@@ -1,0 +1,7 @@
+# Files crew makes in the home on each machine, and the test sandboxes.
+logs/
+.crew*.lock
+.crew-lease-lost
+projects/*/local.env
+lead/.claude/settings.local.json
+tests/.tmp/

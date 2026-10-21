@@ -1,0 +1,24 @@
+[Unit]
+Description=crew lead: the lead's Remote Control server, which you open from Claude Mobile
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Includes mise's shims: a service never reads the shell config that puts mise's tools on your PATH.
+Environment=PATH=%h/crew/bin:%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+# When your crew home isn't ~/crew, crew install writes it into this unit: the
+# %h/crew paths above and below, and this line, uncommented:
+# Environment=CREW_HOME=/path/to/crew
+ExecStart=%h/crew/bin/crew serve
+# Restarted whenever it stops, unless crew host down (or a stand-down) disabled it.
+Restart=always
+RestartSec=30
+# crew serve exits 3 on a machine that doesn't run the crew: leave it stopped there.
+RestartPreventExitStatus=3
+# Stop only the server's own process, so the workers its sessions started keep
+# running (as for crew tick). Live check L2 in the plan decides whether to keep it.
+KillMode=process
+
+[Install]
+WantedBy=default.target

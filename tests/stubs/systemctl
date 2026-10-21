@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Stub systemctl so tests never touch your real user systemd.
+echo "systemctl $*" >>"$HOME/systemctl-calls.log"
+enabled=$HOME/systemctl-enabled
+units=$HOME/.config/systemd/user
+case "$1 $2" in
+  "--user enable") shift 2; [[ $1 == --now ]] && shift; printf '%s\n' "$@" >>"$enabled" ;;
+  "--user disable")
+    shift 2; [[ $1 == --now ]] && shift
+    for u; do grep -vxF "$u" "$enabled" >"$enabled.tmp" 2>/dev/null; mv -f "$enabled.tmp" "$enabled"; done ;;
+  "--user is-enabled") grep -qxF "${*: -1}" "$enabled" 2>/dev/null ;;
+  "--user show")
+    # Only `show UNIT -p Environment --value`: the unit's Environment= settings,
+    # then its drop-ins', a later value for a variable replacing an earlier one.
+    cat "$units/$3" "$units/$3.d"/*.conf 2>/dev/null | sed -n "s/^Environment=//p" | sed "s|%h|$HOME|g" |
+      awk -F= '!($1 in v) { keys[++n] = $1 } { v[$1] = $0 }
+               END { for (i = 1; i <= n; i++) printf "%s%s", v[keys[i]], (i < n ? " " : "\n") }' ;;
+esac

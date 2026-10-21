@@ -1,0 +1,65 @@
+{
+  "agent": "lead",
+  "permissions": {
+    "allow": [
+      "Read(~/.claude/agents/lead.md)",
+      "Bash(crew *)",
+      "Bash(claude agents *)",
+      "Bash(claude logs *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git grep *)",
+      "Bash(git fetch *)",
+      "Bash(git branch *)",
+      "Bash(git worktree list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(git -C * show *)",
+      "Bash(git -C * grep *)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * diff *)",
+      "Bash(git -C * fetch *)"
+    ],
+    "deny": [
+      "Bash(gh pr merge *)",
+      "Bash(gh pr close *)",
+      "Bash(gh pr review *)",
+      "Bash(git push *)",
+      "Agent(lead)",
+      "Agent(implementer)",
+      "Agent(gardener)",
+      "Agent(goal-lead)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew-guard\" lead"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew\" commit --hook"
+          }
+        ]
+      }
+    ]
+  }
+}
