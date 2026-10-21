@@ -2,8 +2,8 @@
 # Static checks. Uses the REAL claude only for `plugin validate` (no model call).
 . "$(dirname "$0")/lib.sh"
 cd "$REPO_DIR" || exit 2
-launchers=(bin/crew)
-scripts=(bin/crew-guard libexec/crew.sh tests/*.sh tests/stubs/*)
+launchers=(bin/crew bin/crew-guard)
+scripts=(libexec/crew.sh tests/*.sh tests/stubs/*)
 
 for f in "${launchers[@]}"; do check "sh -n $f" "sh -n '$f'"; done
 for f in "${scripts[@]}"; do check "bash -n $f" "bash -n '$f'"; done

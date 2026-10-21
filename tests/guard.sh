@@ -4,11 +4,11 @@
 
 SB=$(new_sandbox guard)
 isolate_home "$SB/home"
-G=$REPO_DIR/bin/crew-guard
 # crew's source, wherever each part of it lives while it moves from bash to Go.
 # shellcheck disable=SC2034  # read inside check strings
 SRC=$(cat "$REPO_DIR"/libexec/crew.sh "$REPO_DIR"/cmd/crew/*.go 2>/dev/null)
-L=$SB/ledger; mkdir -p "$L"
+L=$SB/ledger; make_home "$L"
+G=$L/bin/crew-guard
 M=$SB/main; W=$SB/wt
 git init -q "$M" && git -C "$M" commit -q --allow-empty -m init && git -C "$M" worktree add -q -b agent/x "$W" 2>/dev/null
 
@@ -33,6 +33,13 @@ w block lead "$M" "$M/a"
 w allow lead "$M" "$L/projects/p/tasks/001-x.md"
 w block gardener "$W" "$W/a"
 w allow gardener "$W" "$L/projects/p/proposals/x.md"
+# --- a path is judged by where it leads, and one that can't be worked out is blocked
+ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
+w block worker "$W" "$W/into-home/crew"
+w allow lead "$M" "$SB/ledger-link/p/tasks/001-x.md"
+w block worker "$W" "$W/loop/a.ts"
+printf '{not json' | CREW_HOME=$L "$G" lead >/dev/null 2>&1; rc=$?
+check "hook input that isn't JSON blocks (rc=$rc)" "[[ $rc == 2 ]]"
 
 # --- in the crew home, only the state paths (the ledger) take edits, for every role
 for r in lead worker gardener; do
@@ -41,7 +48,6 @@ for r in lead worker gardener; do
   w allow $r "$d" "$L/reports/x.md"
   for f in bin/crew agents/lead.md config/defaults.env lead/.claude/settings.json; do w block $r "$d" "$L/$f"; done
 done
-check "crew-guard's state paths are crew's" '[[ $(grep -m1 "^STATE_PATHS=" "$G") == $(grep -m1 "^STATE_PATHS=" "$REPO_DIR/libexec/crew.sh") ]]'
 tracked=$(git -C "$REPO_DIR" ls-files -- projects reports config/crew.env host)
 check "VERSION holds a semantic version" 'grep -qxE "[0-9]+\.[0-9]+\.[0-9]+" "$REPO_DIR/VERSION"'
 check "the repo tracks no state: nothing under projects/ but .gitkeep, no reports/, config/crew.env or host (got: ${tracked//$'\n'/ })" '[[ $tracked == projects/.gitkeep ]]'
@@ -55,7 +61,6 @@ check "no agent hooks Bash" "! grep -q 'matcher: \"Bash\"' $REPO_DIR/agents/*.md
 # --- the lead and workers inherit every tool, MCP servers included, so their settings carry the guard
 #     too: settings hooks also fire for the subagents they spawn, which their frontmatter hooks don't cover.
 A=$REPO_DIR/agents; C=$REPO_DIR/config; LS=$REPO_DIR/lead/.claude/settings.json
-mkdir -p "$L/bin" && ln -sf "$G" "$L/bin/crew-guard"
 # s EXPECT ROLE PATH: run the settings file's hook command the way Claude Code would, from the worktree
 s() {
   local exp=$1 role=$2 p=$3 cmd json rc got f
