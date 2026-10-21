@@ -1351,65 +1351,6 @@ cmd_restack() {
   commit "restack $PROJECT/$id"
 }
 
-cmd_sync() {
-  need gh; need jq
-  local quiet=0 scope="" p projects=()
-  while (($#)); do case $1 in --quiet) quiet=1; shift ;; --all) scope=all; shift ;; *) die "usage: crew sync [--quiet] [--all]" ;; esac; done
-  mapfile -t projects < <(projects_in_scope "$scope")
-  lock
-  local f id st pr branch info state draft decision updated label changed=0 parent reason fetched
-  for p in "${projects[@]}"; do
-    load_project "$p"
-    while IFS= read -r f; do
-      [[ -n $f ]] || continue
-      st=$(fm_get "$f" status)
-      has_word "$st" "draft ready merged abandoned" && continue
-      id=$(basename "$f" .md)
-      pr=$(fm_get "$f" pr); branch=$(fm_get "$f" branch)
-      if [[ -z $pr && -n $branch ]]; then
-        pr=$(cd "$REPO" && gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)
-        if [[ -n $pr ]]; then fm_set "$f" pr "$pr"; changed=1; ((quiet)) || echo "$id: found PR $pr"; fi
-      fi
-      [[ -n $pr ]] || continue
-      info=$(cd "$REPO" && gh pr view "$pr" --json state,isDraft,reviewDecision,updatedAt 2>/dev/null) || { warn "$id: couldn't read $pr"; continue; }
-      state=$(jq -r .state <<<"$info"); draft=$(jq -r .isDraft <<<"$info"); decision=$(jq -r '.reviewDecision // ""' <<<"$info")
-      # For pr_may_have_new_comments.
-      updated=$(jq -r '.updatedAt // ""' <<<"$info")
-      if [[ $(fm_get "$f" pr_updated) != "$updated" ]]; then fm_set "$f" pr_updated "$updated"; changed=1; fi
-      case $state in
-        MERGED) label=merged ;;
-        CLOSED) label=closed ;;
-        *) label=$([[ $draft == true ]] && echo draft || echo open)
-           [[ -n $decision ]] && label+=", $(tr '[:upper:]_' '[:lower:] ' <<<"$decision")" ;;
-      esac
-      if [[ $(fm_get "$f" pr_state) != "$label" ]]; then fm_set "$f" pr_state "$label"; changed=1; fi
-      if [[ $state == MERGED && $st != merged ]]; then
-        fm_set "$f" status merged; touch_updated "$f"; append_log "$f" "PR merged"; changed=1
-        echo "$id: merged (run 'crew cleanup $id')"
-      elif [[ $state == CLOSED && $st != abandoned ]]; then
-        ((quiet)) || echo "$id: PR closed without merging (status left as '$st')"
-      fi
-    done < <(files_of tasks "$p")
-    # Stacked tasks: say which need a restack, now that the merges above are known.
-    load_branches "$p"; fetched=0
-    while IFS= read -r f; do
-      [[ -n $f ]] || continue
-      has_word "$(fm_get "$f" status)" "$ACTIVE_STATES" || continue
-      parent=$(parent_of "$f")
-      [[ -n $parent ]] || continue
-      if ((!fetched)); then
-        git -C "$REPO" fetch --quiet origin 2>/dev/null || warn "$p: git fetch failed; checking stacks against local refs"
-        fetched=1
-      fi
-      if note_base_sha "$f" "$parent"; then changed=1; fi
-      reason=$(restack_reason "$f"); id=$(basename "$f" .md)
-      [[ -z $reason ]] || ((quiet)) || echo "$id: needs a restack, $reason (run 'crew restack $id')"
-    done < <(files_of tasks "$p")
-  done
-  ((changed)) && commit "sync"
-  ((quiet)) || echo "sync done"
-}
-
 # One pass over every project, doing what needs no decision: sync with GitHub,
 # record new PR comments, send review rounds and restacks to idle workers, mark
 # tasks that wait on the user, and clean up merged ones. The crew-tick timer runs
@@ -1426,7 +1367,7 @@ cmd_tick() {
   if lease_taken_elsewhere; then stand_down "$(origin_holder)"; return 0; fi
   require_host
   GH_LOGIN=$(gh_login) || die "gh is not authenticated (run 'gh auth login')"
-  (cmd_sync --quiet --all) >/dev/null || warn "sync failed; carrying on with what the ledger has"
+  crew_go sync --quiet --all >/dev/null || warn "sync failed; carrying on with what the ledger has"
   local p f aj
   aj=$(agents_json)
   while IFS= read -r p; do
@@ -2195,7 +2136,6 @@ case $cmd in
   dispatch) cmd_dispatch "$@" ;;
   followup) cmd_followup "$@" ;;
   restack) cmd_restack "$@" ;;
-  sync) cmd_sync "$@" ;;
   tick) cmd_tick "$@" ;;
   cleanup) cmd_cleanup "$@" ;;
   gardener) cmd_gardener "$@" ;;

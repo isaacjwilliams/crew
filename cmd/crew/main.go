@@ -41,6 +41,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"observe":   cmdObserve,
 	"feedback":  cmdFeedback,
 	"reply":     cmdReply,
+	"sync":      cmdSync,
 }
 
 func main() {
