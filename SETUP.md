@@ -32,7 +32,8 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 
 ## 1. Requirements
 
-- **Packages** (CachyOS): `sudo pacman -S --needed git github-cli jq util-linux fish`.
+- **Packages** (CachyOS): `sudo pacman -S --needed git github-cli fish curl`.
+- **Linux**, on x86_64 or aarch64. macOS isn't supported yet. You don't need Go: `crew` is one binary, which `~/crew/bin/crew` downloads from the release for your home's version the first time it runs, into `~/crew/bin/release/`.
 - **Claude Code 2.1.281 or later**: run `claude update`. The crew relies on background sessions (agent view), automatic `AGENTS.md` loading, and `--permission-prompts`.
 - **GitHub CLI signed in**: run `gh auth login`. Workers push and open PRs as you.
 - **A plan with auto mode** (Pro, Max, or Team) is recommended. The lead and workers use it by default, so they aren't stopped for every new shell command. See `WORKER_PERMISSION_MODE` and `LEAD_PERMISSION_MODE` below.
@@ -73,14 +74,16 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 It also sets `env.CREW_HOME` in `~/.claude/settings.json`, so the agents' hooks find the home, and asks whether to load `CLAUDE.md` and `AGENTS.md` together (see section 4). For a home somewhere other than `~/crew`, it points the fish and systemd files at it.
 
-To upgrade, run `crew upgrade` on the machine that runs the crew. It merges the public repo's new version into your home, installs it with the new version's `crew install`, pushes, and restarts the lead's server, then says which version you're on. Your ledger and settings are paths the public repo never has, so they never conflict. If an edit you made to crew's own files does, `crew upgrade` stops with the merge in progress and says how to finish or undo it. It refuses a home with uncommitted changes.
+To upgrade, run `crew upgrade` on the machine that runs the crew. It moves your home to the public repo's newest release: its newest `v<version>` tag, not whatever is on its main branch. It downloads that release's binary first, and if the release's binaries aren't up yet, it says so and changes nothing. Then it merges the release into your home, installs it with the new version's `crew install`, pushes, restarts the lead's server, removes the old version's binary, and says which version you're on. Your ledger and settings are paths the public repo never has, so they never conflict. If an edit you made to crew's own files does, `crew upgrade` stops with the merge in progress and says how to finish or undo it. It refuses a home with uncommitted changes.
+
+**Releases** are made in the public repo. Pushing a tag `v<version>` that matches its `VERSION` file runs a GitHub Actions workflow, which runs the tests, builds the Linux binaries and publishes them as that tag's release, with the tag's message as the release notes. A private home that pushes a tag builds nothing. If you run a fork of crew for others, change the release URL in `bin/crew` to your fork's.
 
 Re-running `crew install` on its own is safe, and it's how changes to the agents, fish files and systemd units reach a machine.
 
 - Files that changed are replaced; files the home no longer ships are removed.
 - Anything replaced or removed is backed up to `~/.local/share/agent-crew/backups/<timestamp>/`.
 - It changes nothing tracked in the home: your config, tasks and proposals stay as they are. It does write the lead's per-machine settings, `lead/.claude/settings.local.json`, which git ignores.
-- `crew doctor` shows the home's version (`git describe`).
+- `crew doctor` shows the home's version (its `VERSION` file), and checks that the binary in use is that version.
 
 Options:
 
@@ -246,7 +249,7 @@ Keys: `Space` peeks and lets you reply without leaving the list, `Enter` attache
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
 - for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes and its workers' questions, and closes the goal once every task is merged or abandoned.
 
-It's plain bash: it starts a model session only when it resumes a worker or a goal lead. `crew host up` turns its timer on, on the machine that runs the crew. To keep the timers and the lead's service running while you're logged out, and to read what a tick did:
+It starts a model session only when it resumes a worker or a goal lead. `crew host up` turns its timer on, on the machine that runs the crew. To keep the timers and the lead's service running while you're logged out, and to read what a tick did:
 
 ```fish
 loginctl enable-linger $USER     # once per machine
@@ -434,7 +437,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 - **The lead or a worker ignores a change you just installed.** A resumed conversation (`lead -c`, `crew followup`) keeps the agent instructions it started with until it's compacted, and a resumed worker also keeps the worker settings it was dispatched with. Start a fresh `lead`, or run `/compact` in it; for a worker, `crew followup --fresh`.
 - **A worker's context keeps growing over review rounds.** Each `crew followup` continues the same conversation, so it carries the earlier rounds. Claude Code compacts a worker once it reaches `WORKER_AUTOCOMPACT_WINDOW` (400k tokens by default), and the worker then rereads its task file. For a clean start on the next round, use `crew followup --fresh`. Workers dispatched before you installed this setting keep compacting at about 967k until then.
 - **`crew doctor` says a settings file doesn't run crew-guard.** The `hooks` block of `lead/.claude/settings.json` or `config/worker-settings.json` in your home has gone, perhaps in an edit or a merge. Restore it from git (`git -C ~/crew diff`). Until then the guard still covers the lead and workers themselves, but not the subagents they spawn.
-- **A timer's log says `'gh' is required but not installed`** (or `jq`, `claude`). A systemd service doesn't read your shell config, so it only has the `PATH` set in its unit. The units already look in mise's shims (`~/.local/share/mise/shims`). Run `crew doctor` to see what it can't find, then add that directory with `systemctl --user edit crew-tick.service`:
+- **A timer's log says `'gh' is required but not installed`** (or `claude`). A systemd service doesn't read your shell config, so it only has the `PATH` set in its unit. The units already look in mise's shims (`~/.local/share/mise/shims`). Run `crew doctor` to see what it can't find, then add that directory with `systemctl --user edit crew-tick.service`:
 
   ```ini
   [Service]
@@ -443,17 +446,19 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 
   `crew install` never touches that drop-in.
 - **The agents don't seem to follow AGENTS.md.** See section 4: usually a `CLAUDE.md` or `CLAUDE.local.md` is taking precedence.
-- **Hooks don't seem to fire.** Check that `jq` is installed and run `claude --debug`. The guard fails closed without `jq`.
-- **`crew status` shows no worker states.** `claude agents --json` is part of a research-preview feature. If its output format changes, `crew` degrades to ledger-only status. The fix goes in `agents_json()` in `bin/crew`.
+- **Hooks don't seem to fire.** Run `claude --debug`. The guard blocks any edit whose path it can't work out, and blocks every edit when `bin/crew` can't get its binary.
+- **`crew` says it couldn't download crew `<version>`.** `bin/crew` fetches the binary for your home's `VERSION` from that version's release the first time it runs. Check that the machine is online and that the release exists on GitHub with a binary for your machine (`uname -s`, `uname -m`). After a `crew upgrade`, the binary is already there.
+- **`crew` says a settings file has an unexpected line**, naming the file and line. crew reads `config/crew.env`, `project.env` and `local.env` as `KEY=value` lines (quotes, `$VAR`, `${VAR}` and a trailing `# comment` are fine) without running them, so anything else, like `$(…)` or `export`, is refused. Rewrite that line as a plain value.
+- **`crew status` shows no worker states.** `claude agents --json` is part of a research-preview feature. If its output format changes, `crew` degrades to ledger-only status. The fix goes in `agents` in `cmd/crew/sessions.go`.
 - **Something looks wrong in the ledger.** It's a git repo: `git -C ~/crew log -p`.
 
 ## 11. What was and wasn't verified
 
 **Verified:**
 - The agent files pass `claude plugin validate`, and every CLI flag `crew` uses was checked against `claude --help` on 2.1.283. That check caught `--add-dir` being variadic, so it is never placed right before a prompt.
-- `crew` and `crew-guard` pass shellcheck.
+- `crew` passes `go vet` for Linux and macOS and its Go unit tests (front matter, settings files, the guard's table, resolution, statuses against `LEDGER.md`); `bin/crew`, `bin/crew-guard` and the test suites pass shellcheck.
 - A separate reviewer agent audited the bundle. The bugs it found were fixed and added to the regression suites below.
-- `crew-guard`: the write-guard allow/block table for worker, lead and gardener paths, including through the hook in the lead and worker settings files. Checks that no settings file turns the sandbox on, that the lead and workers default to auto mode, that they have no tool allowlist hiding MCP servers, and that the worker's `allow`/`deny` rules match its instructions.
+- `crew guard`: the write-guard allow/block table for worker, lead and gardener paths, including through the hook in the lead and worker settings files. Checks that no settings file turns the sandbox on, that the lead and workers default to auto mode, that they have no tool allowlist hiding MCP servers, and that the worker's `allow`/`deny` rules match its instructions.
 - `crew`: end-to-end checks in a crew home made from a copy of the repo, against scratch git repos, with stub `claude`, `gh` and `wt` binaries. They cover:
   - branch names chosen with `--branch` (validated, prefixed, made unique), ready checks, dispatch, and dependency gating;
   - worker-side updates from inside a worktree;
@@ -466,7 +471,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
   - stacked tasks: `--on`, dispatch once the parent's branch is pushed, a stack counting once in flight, sync reporting a moved or merged parent, and `crew restack` through a real squash merge and rebases of a three-task stack;
   - the home: settings layered from `defaults.env`, `crew.env` and `project.env`, the ledger pushed to a bare origin in the background (rebased over commits from elsewhere), agents' own edits committed by the hook, `crew checkout`, and tasks that moved here getting their worktrees back and fresh workers.
-- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; and `crew upgrade` with a clean merge and a conflict.
+- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
 - The fish files were checked with fish 3.7.
 
 **Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (the lead service under systemd and on the phone, workers surviving its restart, what the lead loads, a real failover), a project's `worker-settings.json` reaching a live `--bg` worker (it's passed as a JSON string to `--settings`), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.

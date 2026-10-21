@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared helpers for the test suites. Sourced, not executed.
 #
-# Every suite runs in a sandbox under tests/.tmp/ (never /tmp: crew-guard always
+# Every suite runs in a sandbox under tests/.tmp/ (never /tmp: the guard always
 # allows writes under /tmp, which would hide write-guard failures), with HOME
 # pointed at the sandbox and stub claude/gh/systemctl/curl binaries first on PATH.
 # Nothing here touches your real ~/.claude, ~/crew or systemd, or the network.
