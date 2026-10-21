@@ -46,6 +46,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"followup":  cmdFollowup,
 	"restack":   cmdRestack,
 	"cleanup":   cmdCleanup,
+	"goal":      cmdGoal,
 }
 
 func main() {
@@ -116,17 +117,22 @@ func warn(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "crew: "+format+"\n", a...)
 }
 
+// exitCode reports err and returns the code crew exits with.
 func exitCode(err error) int {
 	if err == nil {
 		return 0
 	}
+	report(err)
 	var e *exitError
 	if errors.As(err, &e) {
-		if e.msg != "" {
-			fmt.Fprintln(os.Stderr, "crew: "+e.msg)
-		}
 		return e.code
 	}
-	fmt.Fprintln(os.Stderr, "crew: "+err.Error())
 	return 1
+}
+
+// report prints an error's message, if it has one, as crew does when it exits.
+func report(err error) {
+	if msg := err.Error(); msg != "" {
+		fmt.Fprintln(os.Stderr, "crew: "+msg)
+	}
 }

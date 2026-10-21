@@ -211,3 +211,13 @@ func TestResolveIn(t *testing.T) {
 		t.Errorf("no match: %q, %v", f, m)
 	}
 }
+
+// questions_routed holds what POSIX cksum printed for the questions, so the
+// checksum mustn't change.
+func TestCksum(t *testing.T) {
+	for in, want := range map[string]uint32{"abc\n": 1112837078, "- [ ] Which header style? A or B.\n": 2648987952, "": 4294967295} {
+		if got := cksum([]byte(in)); got != want {
+			t.Errorf("cksum(%q) = %d, want %d", in, got, want)
+		}
+	}
+}

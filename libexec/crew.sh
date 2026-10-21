@@ -219,60 +219,6 @@ fm_get() {
     }' "$1"
 }
 
-fm_set() {
-  local file=$1 key=$2 val=${3//$'\n'/ } tmp
-  if [[ $val == *": "* || $val == *" #"* || $val == \"* || $val == *'"'* ]]; then
-    val="\"${val//\"/\\\"}\""
-  fi
-  tmp=$(mktemp)
-  K="$key" V="$val" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]}
-    NR==1 && $0=="---" {print; infm=1; next}
-    infm && $0=="---" { if (!done) print k": "v; print; infm=0; next }
-    infm && index($0, k":")==1 { if (!done) { print k": "v; done=1 }; next }
-    {print}' "$file" >"$tmp" && cat "$tmp" >"$file"
-  rm -f "$tmp"
-}
-
-touch_updated() { fm_set "$1" updated "$(now)"; }
-
-ensure_trailing_newline() { [[ -z $(tail -c1 "$1") ]] || echo >>"$1"; }
-
-append_log() {  # file message — the Log section is always last
-  ensure_trailing_newline "$1"
-  printf -- '- %s — %s\n' "$(date '+%Y-%m-%d %H:%M')" "$2" >>"$1"
-}
-
-insert_before_heading() {  # file heading contentfile
-  local tmp; tmp=$(mktemp)
-  if grep -qxF "$2" "$1"; then
-    H="$2" CF="$3" awk 'BEGIN{h=ENVIRON["H"]; cf=ENVIRON["CF"]}
-      $0==h && !done { while ((getline line < cf) > 0) print line; print ""; done=1 }
-      {print}' "$1" >"$tmp" && cat "$tmp" >"$1"
-  else
-    ensure_trailing_newline "$1"; cat "$3" >>"$1"
-  fi
-  rm -f "$tmp"
-}
-
-# Adds the content at the end of a section, just before the next heading. A file
-# without the section gets it, before ## Log.
-append_to_section() {  # file heading contentfile
-  local tmp; tmp=$(mktemp)
-  if grep -qxF "$2" "$1"; then
-    H="$2" CF="$3" awk 'BEGIN{h=ENVIRON["H"]; cf=ENVIRON["CF"]}
-      function put() { while ((getline line < cf) > 0) print line; print ""; done=1 }
-      on && /^## / && !done { put() }
-      {print}
-      $0==h {on=1}
-      END { if (on && !done) { print ""; put() } }' "$1" >"$tmp" && cat "$tmp" >"$1"
-  else
-    printf '%s\n\n' "$2" >"$tmp"; cat "$3" >>"$tmp"
-    insert_before_heading "$1" "## Log" "$tmp"
-  fi
-  rm -f "$tmp"
-}
-
-# Section text with HTML comments and blank lines removed.
 section_body() {
   H="$2" awk 'BEGIN{h=ENVIRON["H"]}
     $0==h {on=1; next}
@@ -757,92 +703,10 @@ stop_job() {  # job
   return 1
 }
 
-# A background session that ended its turn keeps its process open for about an hour.
-# Resuming it then starts a copy under a new session ("already running in the
-# background"), so stop it first, and the resume continues it in place.
-stop_idle_session() {  # agents_json session
-  [[ -n $2 ]] || return 0
-  local job
-  while IFS= read -r job; do
-    if [[ -n $job ]]; then stop_job "$job" || true; fi
-  done < <(jq -r --arg s "$2" "$JQ_BUSY"' .[] | select(.sessionId==$s and .pid != null and (busy | not)) | .id' <<<"$1")
-}
-
-# Takes a worker out of agent view, stopping it first: `claude rm` isn't documented
-# to end a process that's still open. Fails if the process won't close.
-remove_worker() {  # job
-  [[ -n $1 ]] || return 0
-  local aj; aj=$(agents_json)
-  jq -e --arg id "$1" 'any(.[]; .id==$id)' <<<"$aj" >/dev/null || return 0
-  if jq -e --arg id "$1" 'any(.[]; .id==$id and .pid != null)' <<<"$aj" >/dev/null; then
-    stop_job "$1" || return 1
-  fi
-  cc rm "$1" >/dev/null 2>&1 || warn "couldn't remove worker $1 from agent view; delete it in claude agents"
-}
-
-# Ends the background processes still running in a directory, such as a dev server
-# a worker started in a background shell: stopping the worker leaves those running.
-# Sends TERM, then KILL to any still running after 10 seconds. A process with a
-# terminal is the user's, so it's left alone, and so are crew and the processes
-# that started it. Reads /proc (Linux).
-stop_processes_in() {  # dir
-  local dir pid cwd stat tty p mine=" " pids=() left=()
-  dir=$(realpath -e "$1" 2>/dev/null) || return 0
-  p=$BASHPID
-  while [[ -n $p && $p != 0 ]]; do
-    mine+="$p "
-    p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null || true)
-  done
-  for pid in /proc/[0-9]*; do
-    pid=${pid#/proc/}
-    [[ $mine == *" $pid "* ]] && continue
-    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
-    [[ $cwd == "$dir" || $cwd == "$dir"/* ]] || continue
-    # The 7th field of stat is the terminal; the 2nd, the command name, may hold spaces.
-    stat=$(<"/proc/$pid/stat") || continue
-    read -r _ _ _ _ tty _ <<<"${stat##*) }"
-    if [[ $tty == 0 ]]; then pids+=("$pid"); fi
-  done
-  ((${#pids[@]})) || return 0
-  echo "stopping ${#pids[@]} process(es) still running in $1"
-  kill -TERM "${pids[@]}" 2>/dev/null || true
-  # A process that has exited has no cwd, even before its parent reaps it.
-  for _ in $(seq 1 20); do
-    left=()
-    for p in "${pids[@]}"; do readlink "/proc/$p/cwd" >/dev/null 2>&1 && left+=("$p"); done
-    ((${#left[@]})) || return 0
-    sleep 0.5
-  done
-  warn "killing ${#left[@]} process(es) in $1 that ignored TERM"
-  kill -KILL "${left[@]}" 2>/dev/null || true
-}
-
-strip_ansi() { sed $'s/\e\\[[0-9;?]*[[:alpha:]]//g'; }
-
-# The GitHub login crew acts for. crew tick sets GH_LOGIN once, so the tasks it
 # checks don't each look it up again.
 gh_login() {
   [[ -n ${GH_LOGIN:-} ]] || GH_LOGIN=$(gh api user --jq .login) || return 1
   echo "$GH_LOGIN"
-}
-
-# A launch has worked once the job's own process reports the session it loaded.
-# A job's ID is the first 8 characters of its session ID. A process that has just
-# started can report a new session ID for a moment, before it loads the one it
-# resumes, so only a session ID that starts with the job ID counts. A resume of a
-# session that can't be found shows up as a job that ends in `failed`.
-wait_for_launch() {  # job -> prints the job's sessionId (empty if it never reported one); fails if the job failed
-  local entry
-  for _ in $(seq 1 60); do
-    entry=$(agents_json | jq -c --arg id "$1" 'first(.[] | select(.id==$id)) // empty')
-    if [[ -n $entry ]]; then
-      [[ $(jq -r .state <<<"$entry") != failed ]] || return 1
-      jq -er --arg id "$1" 'select(.pid != null and ((.sessionId // "") | startswith($id))) | .sessionId' <<<"$entry" 2>/dev/null \
-        && return 0
-    fi
-    sleep 0.5
-  done
-  return 0
 }
 
 # A worktree or checkout deleted by hand (rm -rf) stays registered with git, which
@@ -862,78 +726,7 @@ detached_checkout() {  # path
   fi
 }
 
-# Starts a background session for a ledger file, or resumes the one it records as
-# <role>_session, and confirms it started. A fresh session gets the launch flags,
-# the file's <role>_name and the ledger as an extra directory.
-launch_session() {  # file role wt prompt mode(fresh|resume) [launch flags...] -> sets LAUNCH_JOB LAUNCH_SESSION
-  local file=$1 role=$2 wt=$3 prompt=$4 mode=$5 out name session
-  shift 5
-  name=$(fm_get "$file" "${role}_name")
-  session=$(fm_get "$file" "${role}_session")
-  if [[ $mode == resume ]]; then
-    # A background session keeps the options it was started with (agent, permission
-    # mode, settings, --add-dir). Passing any launch flag again makes Claude Code
-    # start a copy under a new session instead of continuing this one. So does a
-    # process that's still open, hence stop_idle_session.
-    stop_idle_session "$(agents_json)" "$session"
-    out=$(cd "$wt" && cc --resume "$session" --bg "$prompt" 2>&1) || true
-  else
-    # --add-dir is variadic, so it must never be the last flag before the prompt.
-    out=$(cd "$wt" && cc --name "$name" --add-dir "$CREW_HOME" --bg "$@" "$prompt" 2>&1) || true
-  fi
-  # The job ID can come wrapped in color codes, which would never match `claude agents`.
-  out=$(strip_ansi <<<"$out")
-  LAUNCH_JOB=$(grep -m1 '^backgrounded' <<<"$out" | awk '{print $3}' || true)
-  if [[ -z $LAUNCH_JOB ]]; then
-    echo "$out" >&2
-    return 1
-  fi
-  # A session did start, so don't fall back to starting another one.
-  [[ $LAUNCH_JOB =~ ^[[:alnum:]_-]+$ ]] \
-    || die "claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':
-$out"
-  grep -i '^note:' <<<"$out" >&2 || true
-  if ! LAUNCH_SESSION=$(wait_for_launch "$LAUNCH_JOB"); then
-    warn "claude started job $LAUNCH_JOB, but it failed straight away (see 'claude agents')"
-    return 1
-  fi
-  if [[ -z $LAUNCH_SESSION ]]; then
-    warn "job $LAUNCH_JOB hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as ${role}_session in $file"
-  elif [[ $mode == resume && $LAUNCH_SESSION != "$session" ]]; then
-    warn "claude started a copy of session $session as $LAUNCH_SESSION; later followups resume the copy"
-  fi
-}
-
-# Resumes the session a file records as <role>_session, or starts a fresh one when it
-# records none, when fresh is 1, or when the resume fails. A fresh session gets the
-# fresh prompt and then the prompt. Sets LAUNCH_MODE as well as LAUNCH_JOB and
-# LAUNCH_SESSION.
-relaunch() {  # launcher role file wt prompt fresh-prompt fresh(0|1)
-  local launcher=$1 role=$2 file=$3 wt=$4 prompt=$5 fresh_prompt=$6 session
-  session=$(fm_get "$file" "${role}_session")
-  LAUNCH_MODE=resume
-  if (($7)) || [[ -z $session ]]; then LAUNCH_MODE=fresh
-  elif ! "$launcher" "$file" "$wt" "$prompt" resume; then
-    warn "couldn't resume session $session; starting a fresh session instead"
-    LAUNCH_MODE=fresh
-  fi
-  if [[ $LAUNCH_MODE == fresh ]]; then
-    "$launcher" "$file" "$wt" "$fresh_prompt
-$prompt" fresh || die "could not start a session (see output above)"
-  fi
-}
-
 # ----------------------------------------------------------------- commands ---
-
-next_number() {  # kind(tasks|goals) project -> one more than the highest NNN- among its files
-  local f n max=0
-  while IFS= read -r f; do
-    [[ -n $f ]] || continue
-    n=$(basename "$f"); n=${n%%-*}
-    if [[ $n =~ ^[0-9]+$ ]] && ((10#$n > max)); then max=$((10#$n)); fi
-  done < <(files_of "$1" "$2")
-  echo $((max + 1))
-}
 
 # One pass over every project, doing what needs no decision: sync with GitHub,
 # record new PR comments, send review rounds and restacks to idle workers, mark
@@ -992,9 +785,9 @@ tick_goal() {  # goal-file agents_json
   job=$(fm_get "$g" lead_job)
   if goal_has_input "$g"; then
     if job_busy "$aj" "$job"; then echo "goal $id: input waits for its goal lead ($(job_state "$aj" "$job"))"
-    elif (cmd_goal_followup "$g") >/dev/null; then echo "goal $id: input sent to its goal lead"; fi
+    elif crew_go goal followup "$g" >/dev/null; then echo "goal $id: input sent to its goal lead"; fi
   elif goal_finished "$g" && ! job_busy "$aj" "$job"; then
-    if (cmd_goal_done "$g") >/dev/null; then echo "goal $id: done, every task merged or abandoned"; fi
+    if crew_go goal "done" "$g" >/dev/null; then echo "goal $id: done, every task merged or abandoned"; fi
   fi
 }
 
@@ -1179,205 +972,6 @@ unrouted_questions() {  # task-file -> prints the checksum to record once they'r
   sum=$(cksum <<<"$q"); sum=${sum%% *}
   [[ $sum != "$(fm_get "$1" questions_routed)" ]] || return 1
   echo "$sum"
-}
-
-# The goal lead reads the code in a detached checkout of origin/DEFAULT_BRANCH,
-# which crew refreshes before each of its turns. Needs load_project.
-goal_checkout() {  # goal-file
-  echo "$WORK_ROOT/$PROJECT/_goal-$(basename "$1" .md)"
-}
-
-# A goal lead runs with the lead's settings, lead/.claude/settings.json, all but
-# their "agent": the lead's session takes its agent from that file, a goal lead
-# from --agent. Not the lead's settings.local.json: a goal lead works in its own
-# checkout. A resume passes no launch flags (see launch_session), so only a fresh
-# session needs the settings.
-launch_goal_lead() {  # goal-file checkout prompt mode(fresh|resume) -> sets LAUNCH_JOB LAUNCH_SESSION
-  local settings=""
-  if [[ $4 == fresh ]]; then settings=$(jq -c 'del(.agent)' "$CREW_HOME/lead/.claude/settings.json"); fi
-  launch_session "$1" lead "$2" "$3" "$4" --agent goal-lead --permission-mode "$LEAD_PERMISSION_MODE" \
-    --settings "$settings"
-}
-
-cmd_goal_new() {
-  local title="" proj=""
-  while (($#)); do
-    case $1 in
-      --project) proj=$2; shift 2 ;;
-      *) title="${title:+$title }$1"; shift ;;
-    esac
-  done
-  [[ -n $title ]] || die 'usage: crew goal new "<title>" [--project P]'
-  [[ -n $proj ]] || proj=$(current_project_or_die)
-  load_project "$proj"
-  lock
-  mkdir -p "$PDIR/goals"
-  local n s id file content
-  n=$(next_number goals "$proj")
-  s=$(slugify "$title"); s=${s:0:40}; s=${s%-}
-  id=$(printf '%03d-%s' "$n" "${s:-goal-$n}")
-  file="$PDIR/goals/$id.md"
-  content=$(<"$CREW_HOME/templates/goal.md")
-  content=${content//'{{ID}}'/$id}
-  content=${content//'{{TITLE}}'/${title//\"/\'}}
-  content=${content//'{{PROJECT}}'/$proj}
-  content=${content//'{{NOW}}'/$(now)}
-  printf '%s\n' "$content" >"$file"
-  append_log "$file" "created"
-  commit "new goal $proj/$id"
-  echo "$file"
-}
-
-cmd_goal_start() {
-  need git; need jq; need claude
-  local file; file=$(resolve goals "${1:?usage: crew goal start GOAL}")
-  local id st checkout name
-  id=$(basename "$file" .md); st=$(fm_get "$file" status)
-  load_project "$(fm_get "$file" project)"
-  [[ $st == draft ]] || die "goal $id is '$st'; give a running goal input with 'crew goal note'"
-  [[ -n $(section_body "$file" "## Goal") ]] || die "goal $id has no Goal yet: write the user's own words into its ## Goal section"
-  checkout=$(goal_checkout "$file")
-  detached_checkout "$checkout"
-  name="crew-$PROJECT-goal-$id"; name=${name:0:80}
-  lock
-  fm_set "$file" checkout "$checkout"
-  fm_set "$file" lead_name "$name"
-  launch_goal_lead "$file" "$checkout" "You are the goal lead for goal $id in project $PROJECT.
-Goal file: $file
-Your working directory is a checkout of origin/$DEFAULT_BRANCH; read the code there.
-Read the goal file completely, then follow your workflow for a new goal." fresh \
-    || die "could not start the goal lead (see output above)"
-  fm_set "$file" lead_job "$LAUNCH_JOB"
-  fm_set "$file" lead_session "$LAUNCH_SESSION"
-  fm_set "$file" status running
-  touch_updated "$file"
-  append_log "$file" "started: goal lead $LAUNCH_JOB (session ${LAUNCH_SESSION:-unknown}) in $checkout"
-  commit "start goal $PROJECT/$id"
-  echo "started goal $id → goal lead $LAUNCH_JOB ($name)"
-  echo "  watch: claude attach $LAUNCH_JOB   |   claude agents"
-}
-
-# Records the user's words under the goal's Decisions and passes them to the goal
-# lead, now if it's free, or through crew tick once it is. A note to a done goal
-# reopens it, for work the user adds later ("pick up the new cards").
-cmd_goal_note() {
-  local file; file=$(resolve goals "${1:?usage: crew goal note GOAL TEXT}"); shift
-  [[ -n $* ]] || die "usage: crew goal note GOAL TEXT"
-  local id st n tmp
-  id=$(basename "$file" .md); st=$(fm_get "$file" status)
-  [[ $st != abandoned ]] || die "goal $id is abandoned"
-  tmp=$(mktemp)
-  printf -- '- %s — from the user: %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >"$tmp"
-  lock
-  append_to_section "$file" "## Decisions" "$tmp"
-  rm -f "$tmp"
-  if [[ $st == draft ]]; then
-    touch_updated "$file"; append_log "$file" "note recorded"; commit "note goal $id"
-    echo "recorded under Decisions; the goal lead reads it when the goal starts"
-    return 0
-  fi
-  if [[ $st == "done" ]]; then fm_set "$file" status running; append_log "$file" "reopened by a note"; fi
-  n=$(fm_get "$file" unsent_notes)
-  fm_set "$file" unsent_notes $((${n:-0} + 1))
-  touch_updated "$file"; append_log "$file" "note recorded"
-  commit "note goal $id"
-  unlock
-  (cmd_goal_followup "$file") || echo "recorded under Decisions; crew tick passes it to the goal lead once it's free"
-}
-
-# Resumes the goal lead with what's waiting for it: the user's unsent notes, and
-# questions its tasks' workers have asked. Returns 3 if there's nothing.
-cmd_goal_followup() {
-  need git; need jq; need claude
-  local file; file=$(resolve goals "${1:?usage: crew goal followup GOAL}")
-  local id st notes t sum input="" routed=()
-  id=$(basename "$file" .md); st=$(fm_get "$file" status)
-  load_project "$(fm_get "$file" project)"
-  [[ $st == running ]] || die "goal $id is '$st', not running"
-  notes=$(fm_get "$file" unsent_notes); notes=${notes:-0}
-  ((notes == 0)) || input+=$'\n'"- $notes new note(s) from the user under Decisions in the goal file"
-  while IFS= read -r t; do
-    if [[ -n $t ]] && sum=$(unrouted_questions "$t"); then
-      input+=$'\n'"- $(basename "$t" .md): its worker has asked something (task file: $t)"
-      routed+=("$t" "$sum")
-    fi
-  done < <(goal_tasks "$file")
-  [[ -n $input ]] || { echo "nothing new for goal $id"; return 3; }
-  local aj job
-  aj=$(agents_json); job=$(fm_get "$file" lead_job)
-  if job_busy "$aj" "$job"; then
-    die "goal lead $job is busy ($(job_state "$aj" "$job")); crew tick passes this on once it's free"
-  fi
-  local checkout i
-  checkout=$(goal_checkout "$file")
-  detached_checkout "$checkout"
-  lock
-  fm_set "$file" checkout "$checkout"
-  relaunch launch_goal_lead lead "$file" "$checkout" "New input for goal $id (goal file: $file):$input
-Follow your workflow for new input." "You are the goal lead for goal $id in project $PROJECT, which is already under way.
-Goal file: $file
-Your working directory is a checkout of origin/$DEFAULT_BRANCH; read the code there.
-Read the goal file completely, and the files of the tasks under its Items, before acting." 0
-  fm_set "$file" lead_job "$LAUNCH_JOB"
-  [[ -n $LAUNCH_SESSION ]] && fm_set "$file" lead_session "$LAUNCH_SESSION"
-  fm_set "$file" unsent_notes 0
-  touch_updated "$file"
-  append_log "$file" "followup ($LAUNCH_MODE): goal lead $LAUNCH_JOB"
-  for ((i = 0; i < ${#routed[@]}; i += 2)); do
-    fm_set "${routed[i]}" questions_routed "${routed[i + 1]}"
-    append_log "${routed[i]}" "open questions sent to the goal lead"
-  done
-  commit "followup goal $PROJECT/$id"
-  echo "goal $id: input sent to its goal lead ($LAUNCH_MODE)"
-}
-
-# Stops and removes the goal lead and its checkout. The goal's tasks stay as they are.
-retire_goal() {  # goal-file status(done|abandoned)
-  local file=$1 id checkout job
-  id=$(basename "$file" .md); job=$(fm_get "$file" lead_job); checkout=$(fm_get "$file" checkout)
-  remove_worker "$job" || die "goal lead $job is still running; stop it in claude agents, then try again"
-  if [[ -n $checkout && -d $checkout ]]; then
-    stop_processes_in "$checkout"
-    git -C "$REPO" worktree remove --force "$checkout" || warn "couldn't remove $checkout"
-  fi
-  lock
-  fm_set "$file" checkout ""
-  fm_set "$file" status "$2"
-  touch_updated "$file"
-  append_log "$file" "status → $2; goal lead and its checkout removed"
-  commit "$2 goal $PROJECT/$id"
-  echo "goal $id: $2"
-}
-
-cmd_goal_done() {
-  local file; file=$(resolve goals "${1:?usage: crew goal done GOAL}")
-  local id; id=$(basename "$file" .md)
-  load_project "$(fm_get "$file" project)"
-  [[ $(fm_get "$file" status) == running ]] || die "goal $id is '$(fm_get "$file" status)', not running"
-  goal_finished "$file" || die "goal $id has tasks that aren't merged or abandoned yet"
-  retire_goal "$file" "done"
-}
-
-cmd_goal_abandon() {
-  local file; file=$(resolve goals "${1:?usage: crew goal abandon GOAL}")
-  load_project "$(fm_get "$file" project)"
-  [[ $(fm_get "$file" status) != abandoned ]] || die "goal $(basename "$file" .md) is already abandoned"
-  retire_goal "$file" abandoned
-}
-
-cmd_goal() {
-  local sub=${1:-}
-  shift || true
-  case $sub in
-    new) cmd_goal_new "$@" ;;
-    start) cmd_goal_start "$@" ;;
-    note) cmd_goal_note "$@" ;;
-    followup) cmd_goal_followup "$@" ;;
-    done) cmd_goal_done "$@" ;;
-    abandon) cmd_goal_abandon "$@" ;;
-    path) resolve goals "${1:?usage: crew goal path GOAL}" ;;
-    *) die "usage: crew goal new|start|note|followup|done|abandon|path … (see 'crew help')" ;;
-  esac
 }
 
 # ---------------------------------------------------------------- install ---
@@ -1680,6 +1274,5 @@ case $cmd in
   install) cmd_install "$@" ;;
   tick) cmd_tick "$@" ;;
   gardener) cmd_gardener "$@" ;;
-  goal) cmd_goal "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
 esac
