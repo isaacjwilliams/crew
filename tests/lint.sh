@@ -3,7 +3,7 @@
 . "$(dirname "$0")/lib.sh"
 cd "$REPO_DIR" || exit 2
 launchers=(bin/crew bin/crew-guard)
-scripts=(libexec/crew.sh tests/*.sh tests/stubs/*)
+scripts=(tests/*.sh tests/stubs/*)
 
 for f in "${launchers[@]}"; do check "sh -n $f" "sh -n '$f'"; done
 for f in "${scripts[@]}"; do check "bash -n $f" "bash -n '$f'"; done
@@ -22,6 +22,6 @@ for f in config/*.json lead/.claude/settings.json; do check "valid JSON $f" "jq 
 if command -v claude >/dev/null; then
   check "claude plugin validate agents" 'claude plugin validate agents >/dev/null 2>&1'
 else echo "  (skipped agent validation: claude not installed)"; fi
-check "executables are executable" '[[ -x bin/crew && -x bin/crew-guard && -x libexec/crew.sh ]]'
+check "executables are executable" '[[ -x bin/crew && -x bin/crew-guard ]]'
 
 summary lint

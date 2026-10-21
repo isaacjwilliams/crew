@@ -8,14 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"syscall"
 )
 
 // version is stamped in at build time: -ldflags "-X main.version=X.Y.Z".
 var version = "dev"
 
-// The commands done in Go. Every other one is handed to libexec/crew.sh.
 var commands = map[string]func(*Crew, []string) error{
 	"help":      cmdHelp,
 	"-h":        cmdHelp,
@@ -54,6 +51,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"serve":     cmdServe,
 	"setup":     cmdSetup,
 	"upgrade":   cmdUpgrade,
+	"tick":      cmdTick,
 }
 
 func main() {
@@ -75,7 +73,7 @@ func run(args []string) int {
 	}
 	cmd, ok := commands[name]
 	if !ok {
-		handOff(append([]string{name}, args...))
+		return exitCode(fail("unknown command '%s' (see 'crew help')", name))
 	}
 	c, err := newCrew()
 	if err == nil {
@@ -85,15 +83,6 @@ func run(args []string) int {
 		return 0 // a hook must never fail the tool call
 	}
 	return exitCode(err)
-}
-
-// handOff runs a command that hasn't moved to Go yet: libexec/crew.sh, in the
-// checkout this binary came with, takes over the process.
-func handOff(args []string) {
-	script := filepath.Join(checkoutOfBinary(), "libexec", "crew.sh")
-	err := syscall.Exec(script, append([]string{script}, args...), os.Environ())
-	fmt.Fprintf(os.Stderr, "crew: can't run %s: %v\n", script, err)
-	os.Exit(1)
 }
 
 // exitError ends a command with a code: 1 for a refusal, 4 for one that only has

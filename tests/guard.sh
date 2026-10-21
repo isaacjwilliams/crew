@@ -4,9 +4,9 @@
 
 SB=$(new_sandbox guard)
 isolate_home "$SB/home"
-# crew's source, wherever each part of it lives while it moves from bash to Go.
+# crew's source, for the checks that the agents' prompts agree with it.
 # shellcheck disable=SC2034  # read inside check strings
-SRC=$(cat "$REPO_DIR"/libexec/crew.sh "$REPO_DIR"/cmd/crew/*.go 2>/dev/null)
+SRC=$(cat "$REPO_DIR"/cmd/crew/*.go)
 L=$SB/ledger; make_home "$L"
 G=$L/bin/crew-guard
 M=$SB/main; W=$SB/wt
