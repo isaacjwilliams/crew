@@ -142,7 +142,7 @@ check "the tick service stops only crew when a run ends, so the workers it resum
   "grep -qx 'KillMode=process' $REPO_DIR/systemd/crew-tick.service"
 L_UNIT=$REPO_DIR/systemd/crew-lead.service
 check "the lead service runs crew serve, restarts it, and leaves it stopped when serve exits 3 (not the host)" \
-  "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -qx 'EXIT_NOT_HOST=3' <<<\"\$SRC\""
+  "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -q 'exitNotHost = 3' <<<\"\$SRC\""
 check "crew followup's prompt, not the worker, decides whether a review round gets replies" \
   "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in the round with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \

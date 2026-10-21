@@ -251,9 +251,6 @@ lease_holder() { cat "$CREW_HOME/host" 2>/dev/null || true; }   # the machine th
 # The holder as origin last told this machine, or nothing.
 origin_holder() { git -C "$CREW_HOME" show '@{u}:host' 2>/dev/null || true; }
 
-lease_since() { git -C "$CREW_HOME" log -1 --format=%cr -- host 2>/dev/null || true; }
-
-# Fails unless this machine holds the lease: the host file names it, and no push
 # has found that origin moved it elsewhere.
 require_host() {
   local holder moved
@@ -283,15 +280,6 @@ stop_crew_jobs() {  # every background session crew started on this machine
   while IFS= read -r job; do
     if [[ -n $job ]]; then stop_job "$job" || warn "background session $job didn't stop"; fi
   done < <(agents_json | jq -r '.[] | select((.name // "") | startswith("crew-")) | select(.pid != null) | .id')
-}
-
-# Commits the host file and pushes it in the foreground: a lease counts only once
-# origin has it. A rejected push is expected when another machine moved first, so
-# git's message is left out; the caller says what failed.
-commit_host() {  # message
-  git -C "$CREW_HOME" add -- host
-  git -C "$CREW_HOME" diff --cached --quiet -- host || git -C "$CREW_HOME" commit -qm "$1" -- host
-  git -C "$CREW_HOME" push -q -u origin HEAD 2>/dev/null
 }
 
 # Keeps what origin doesn't have, ledger commits and uncommitted changes alike, on
@@ -331,44 +319,6 @@ stand_down() {
   echo "stood down: units disabled, crew sessions stopped, home reset to origin"
 }
 
-# Turns a fresh clone of the public crew repo into a person's own crew: a private
-# GitHub repo becomes origin, the public one upstream, which can never be pushed
-# to, so a ledger can't reach it. Then it writes their settings file and runs the
-# crew on this machine. Once per person; another machine clones the private repo.
-cmd_setup() {
-  local name=crew login public
-  while (($#)); do case $1 in --name) name=$2; shift 2 ;; *) die "usage: crew setup [--name NAME]" ;; esac; done
-  need gh
-  [[ ! -e $CREW_HOME/config/crew.env ]] || die "$CREW_HOME is set up already (config/crew.env exists)"
-  public=$(git -C "$CREW_HOME" remote get-url origin 2>/dev/null) || die "$CREW_HOME has no origin; clone the public crew repo and run crew setup in it"
-  login=$(gh api user --jq .login 2>/dev/null) || die "gh isn't signed in; run 'gh auth login' first"
-  say "Making $login/$name, your private crew repo"
-  git -C "$CREW_HOME" remote rename origin upstream
-  # Not a URL, so any push to upstream fails.
-  git -C "$CREW_HOME" remote set-url --push upstream DISABLED
-  if ! (cd "$CREW_HOME" && gh repo create "$login/$name" --private --source . --remote origin >/dev/null); then
-    git -C "$CREW_HOME" remote rename upstream origin
-    git -C "$CREW_HOME" config --unset remote.origin.pushurl
-    die "couldn't create $login/$name; if you have a repo by that name, pick another with crew setup --name NAME"
-  fi
-  note "origin: $(git -C "$CREW_HOME" remote get-url origin); upstream: $public (never pushed to)"
-  cp "$CREW_HOME/templates/crew.env" "$CREW_HOME/config/crew.env"
-  git -C "$CREW_HOME" add -- config/crew.env
-  git -C "$CREW_HOME" commit -qm "crew: set up for $login" -- config/crew.env
-  git -C "$CREW_HOME" push -q -u origin HEAD \
-    || die "couldn't push to origin. Push with 'git -C $CREW_HOME push -u origin HEAD', then run crew host up"
-  cmd_host_up
-  say "Your crew is set up. Next:"
-  cat <<NEXT
-  1. Trust two folders once (accept, then /exit):   cd $WORK_ROOT; and claude
-                                                    cd $CREW_HOME/lead; and claude
-  2. Set BRANCH_PREFIX in $CREW_HOME/config/crew.env, then commit and push it.
-  3. In each repo you want the crew to work on:   crew project add
-  4. Talk to the lead: lead, or the crew session in the Claude app.
-  See SETUP.md for the full walkthrough.
-NEXT
-}
-
 # Brings in a new version of crew from the public repo (upstream). The ledger and
 # the person's settings are paths the public repo never has, so the merge only
 # meets their own edits to crew's code. A conflict there is theirs to settle:
@@ -395,126 +345,6 @@ cmd_upgrade() {
   push_now || warn "couldn't push the upgrade to origin; crew tick pushes it later"
   systemctl --user restart crew-lead.service >/dev/null 2>&1 || warn "couldn't restart crew-lead.service"
   echo "crew upgraded to $(crew_version)"
-}
-
-# What crew-lead.service runs: the lead, as a Remote Control server in the home's
-# lead/, so the person opens it from Claude Mobile. On a machine that doesn't run
-# the crew it exits EXIT_NOT_HOST, which the unit takes as "don't restart"
-# (RestartPreventExitStatus).
-EXIT_NOT_HOST=3
-cmd_serve() {
-  [[ $# == 0 ]] || die "usage: crew serve"
-  # In a subshell, so require_host's die (exit 1) becomes this exit code.
-  (require_host) || exit "$EXIT_NOT_HOST"
-  cd "$CREW_HOME/lead" || die "$CREW_HOME/lead is missing"
-  # Without CLAUDECODE, as cc does, so it starts from inside a Claude session too.
-  # This home's bin/ first, so the lead's sessions run this home's crew.
-  # Without --continue: it fails when no earlier server ran here, and serves only
-  # one session. A plain start brings back the last server's sessions, if it
-  # stopped in the last few hours. same-dir keeps sessions in lead/, not in
-  # worktrees of the home.
-  PATH="$CREW_HOME/bin:$PATH" exec env -u CLAUDECODE \
-    claude remote-control --name crew --spawn same-dir --permission-mode "$LEAD_PERMISSION_MODE"
-}
-
-cmd_host() {
-  local sub=${1:-}
-  shift || true
-  case $sub in
-    "") cmd_host_status ;;
-    up) cmd_host_up "$@" ;;
-    down) cmd_host_down "$@" ;;
-    *) die "usage: crew host [up [--take] | down [--force]]" ;;
-  esac
-}
-
-cmd_host_status() {
-  local holder; holder=$(lease_holder)
-  if [[ -n $holder ]]; then echo "crew runs on $holder (since $(lease_since))"
-  else echo "no machine runs the crew"; fi
-  echo "this machine: $CREW_HOST"
-}
-
-# Claims the lease for this machine by pushing the host file. A rejected push
-# means another machine moved first: this claim is dropped and origin looked at
-# again. Without take, a lease another machine holds is refused.
-claim_lease() {  # take(0|1)
-  local take=$1 holder claimed=0
-  take_lock
-  for _ in 1 2 3 4 5; do
-    git -C "$CREW_HOME" pull -q --ff-only \
-      || die "the home has ledger commits origin hasn't and origin has commits it hasn't; settle that first (git -C $CREW_HOME status)"
-    holder=$(lease_holder)
-    if [[ -n $holder && $holder != "$CREW_HOST" ]] && ((!take)); then
-      die "crew runs on $holder (since $(lease_since)); crew host up --take moves it here"
-    fi
-    echo "$CREW_HOST" >"$CREW_HOME/host"
-    if commit_host "host: $CREW_HOST"; then claimed=1; break; fi
-    git -C "$CREW_HOME" reset -q --hard '@{u}' 2>/dev/null || true
-  done
-  ((claimed)) || die "couldn't push the lease to origin"
-  rm -f "$LEASE_LOST"
-  unlock
-}
-
-# Clones each registered project this machine has no clone of, into
-# $WORK_ROOT/<p>/repo, and records it as this machine's (crew project add).
-clone_missing_projects() {
-  local pd p remote clone
-  for pd in "$CREW_HOME"/projects/*/; do
-    [[ -f $pd/project.env && ! -f $pd/local.env ]] || continue
-    p=$(basename "$pd")
-    # shellcheck source=/dev/null
-    remote=$(. "$pd/project.env" && echo "${REMOTE:-}")
-    [[ -n $remote ]] || { warn "$p has no REMOTE in project.env; run 'crew project add' in a clone of it"; continue; }
-    clone="$WORK_ROOT/$p/repo"
-    if [[ ! -d $clone/.git ]]; then
-      mkdir -p "$(dirname "$clone")"
-      git clone -q "$remote" "$clone" || { warn "couldn't clone $remote for $p"; continue; }
-    fi
-    crew_go project add "$clone" >/dev/null || warn "couldn't register $clone for $p"
-    note "$p: this machine's clone is $clone"
-  done
-}
-
-cmd_host_up() {
-  local take=0
-  while (($#)); do case $1 in --take) take=1; shift ;; *) die "usage: crew host up [--take]" ;; esac; done
-  git -C "$CREW_HOME" remote get-url origin >/dev/null 2>&1 || die "the home has no origin to claim the lease through"
-  crew_go install
-  say "Claiming the lease for $CREW_HOST"
-  claim_lease "$take"
-  note "crew runs on $CREW_HOST"
-  clone_missing_projects
-  set_units enable
-  note "enabled ${CREW_UNITS[*]}"
-  crew_go doctor || true
-}
-
-cmd_host_down() {
-  local force=0 f wt id unpushed=()
-  while (($#)); do case $1 in --force) force=1; shift ;; *) die "usage: crew host down [--force]" ;; esac; done
-  lock
-  # Work that exists only in this machine's worktrees would be lost to the next host.
-  while IFS= read -r f; do
-    wt=$(fm_get "$f" worktree); id=$(basename "$f" .md)
-    [[ -n $wt && -d $wt ]] || continue
-    if ! git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null; then unpushed+=("$id: its branch was never pushed")
-    elif [[ -n $(git -C "$wt" rev-list '@{u}..@') ]]; then unpushed+=("$id: $(git -C "$wt" rev-list --count '@{u}..@') commit(s) not pushed"); fi
-  done < <(files_of tasks)
-  if ((${#unpushed[@]})) && ((!force)); then
-    printf '  %s\n' "${unpushed[@]}" >&2
-    die "these worktrees have work origin doesn't; have their workers push, or use --force"
-  fi
-  set_units disable
-  stop_crew_jobs
-  # The push may have to take the ledger lock to rebase.
-  unlock
-  push_now >&2 || warn "couldn't push every ledger commit before handing over"
-  take_lock
-  : >"$CREW_HOME/host"
-  commit_host "host: none ($CREW_HOST stepped down)" || die "couldn't push the handover to origin; crew still runs here as far as origin knows"
-  echo "crew runs on no machine now; crew host up starts it on the next one"
 }
 
 # ------------------------------------------------------------- resolution ---
@@ -914,9 +744,6 @@ crew_version() { cat "$CREW_HOME/VERSION" 2>/dev/null || echo unknown; }
 
 cmd=$1; shift
 case $cmd in
-  host) cmd_host "$@" ;;
-  serve) cmd_serve "$@" ;;
-  setup) cmd_setup "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
   tick) cmd_tick "$@" ;;
   *) die "unknown command '$cmd' (see 'crew help')" ;;
