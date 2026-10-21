@@ -198,8 +198,8 @@ check "setup refuses a home that's set up already" '[[ $out == *"set up already"
 # 11. A new version from the public repo, merged into a home that has a ledger.
 up() { CREW_HOST=tower "$H/bin/crew" upgrade </dev/null 2>&1; }
 mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"; CREW_HOST=tower "$H/bin/crew" commit "a ledger note" >/dev/null
-echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; echo 9.9.9 >"$SB/public-tree/VERSION"
-sed -i 's/say "Done (crew $(crew_version))/say "Done (crew $(crew_version), by the new install)/' "$SB/public-tree/bin/crew"
+echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; echo 9.9.9 >"$SB/public-tree/VERSION"; release_binary 9.9.9
+sed -i 's/say "Done (crew $(crew_version))/say "Done (crew $(crew_version), by the new install)/' "$SB/public-tree/libexec/crew.sh"
 git -C "$SB/public-tree" commit -qam "v2" && git -C "$SB/public-tree" push -q "$SB/public.git" main
 before=$(git -C "$H" rev-parse @)
 out=$(up)
@@ -216,5 +216,28 @@ sed -i '1s/.*/# upstream first line/' "$SB/public-tree/agents/gardener.md"
 git -C "$SB/public-tree" commit -qam "v3" && git -C "$SB/public-tree" push -q "$SB/public.git" main
 out=$(up)
 check "a conflict with an edit in the home stops with what to do, and leaves the merge to the person" '[[ $out == *"merge is left in progress"*"merge --abort"* ]] && git -C "$H" rev-parse -q --verify MERGE_HEAD >/dev/null'
+
+# 12. bin/crew, the launcher, runs the binary for the home's VERSION, and fetches
+#     it from the release the first time.
+SB=$(new_sandbox launcher)
+isolate_home "$SB/home"
+H=$HOME/crew; make_home "$H"; rm -rf "$H/bin/release"   # as a fresh clone has it
+V=$(cat "$H/VERSION")
+out=$("$H/bin/crew" version 2>&1)
+check "a missing binary is downloaded from the release for VERSION, and run" '[[ $out == "$V" && -x $H/bin/release/crew-$V ]] && grep -q "releases/download/v$V/$ASSET" "$HOME/curl-calls.log"'
+mkdir -p "$HOME/.local/bin"; ln -s "$H/bin/crew" "$HOME/.local/bin/crew"
+out=$("$HOME/.local/bin/crew" version 2>&1)
+check "it runs through a symlink, and downloads only once" '[[ $out == "$V" && $(wc -l <"$HOME/curl-calls.log") == 1 ]]'
+release_binary 9.9.7
+out=$(CREW_VERSION=9.9.7 "$H/bin/crew" version 2>&1)
+check "CREW_VERSION fetches and runs another version" '[[ $out == 9.9.7 && -x $H/bin/release/crew-9.9.7 && -x $H/bin/release/crew-$V ]]'
+echo 9.9.6 >"$H/VERSION"
+rc=0; out=$("$H/bin/crew" status 2>&1) || rc=$?
+check "a version without a release says so and exits 1" '[[ $rc == 1 && $out == *"couldn'"'"'t download crew 9.9.6 from https://github.com/isaacjwilliams/crew/releases/download/v9.9.6/$ASSET"* ]]'
+rc=0; "$H/bin/crew" guard worker </dev/null >/dev/null 2>&1 || rc=$?
+check "and exits 2 for crew guard, so the edit is blocked" '[[ $rc == 2 ]]'
+mkdir -p "$RELEASES/v9.9.6"; printf '#!/bin/sh\necho 0.0.1\n' >"$RELEASES/v9.9.6/$ASSET"
+rc=0; out=$("$H/bin/crew" version 2>&1) || rc=$?
+check "a download that isn't the version asked for is refused, and not kept" '[[ $rc == 1 && $out == *"couldn'"'"'t download crew 9.9.6"* ]] && ! compgen -G "$H/bin/release/crew-9.9.6*" >/dev/null'
 
 summary host
