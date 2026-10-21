@@ -99,4 +99,4 @@ Don't reopen these.
 
 ## Progress
 
-- (nothing yet)
+- Step 0 done (2026-10-21): the user confirmed the move is finished; `crew migrate-ledger`, host.sh scenario 12 and their docs are removed on `main`. The v0.2.0 release notes should say so.

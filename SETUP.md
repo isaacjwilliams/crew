@@ -118,19 +118,6 @@ crew host down          # hand over: stop the crew here and release the lease
 
 `crew host down` refuses while a worker's branch has commits it hasn't pushed, so nothing is left behind; `--force` hands over anyway. A machine whose lease was taken stops at its next `crew tick`: it turns its timers off, stops its workers, and keeps anything origin didn't get on a branch `lost/<host>-<time>` in the home. The machine's name is `CREW_HOST`, or `hostname -s` when that isn't set.
 
-### Moving from the old installer (`~/agent-ledger`)
-
-If your crew was installed with the old `install.sh`, move it in one sitting, about half an hour, while no worker is mid-turn. `crew migrate-ledger` is temporary: it goes once you've moved.
-
-1. `crew status` in the old setup; let busy workers finish their turn.
-2. `systemctl --user disable --now crew-tick.timer crew-gardener.timer`.
-3. `git clone https://github.com/isaacjwilliams/crew ~/crew; and ~/crew/bin/crew setup`, adding `--name NAME` if your GitHub account has a repo called `crew` already. Terminals opened before this step (panes of an older zellij or tmux session, say) still find the old `crew` first: type `~/crew/bin/crew` in them, or start a new session.
-4. `~/crew/bin/crew migrate-ledger ~/agent-ledger`, then `crew doctor`. It imports your tasks, proposals, reports and their history, turns each project's `REPO` into `REMOTE` with your clone in `local.env`, and keeps your own settings (`BRANCH_PREFIX`, say) in `config/crew.env`. If you'd edited the old `config/*-settings.json`, it names them: copy what you need into the home's.
-5. The two first-time prompts in "The lead on your phone" above.
-6. On the phone, open `crew` and say "Status": the lead's answer should list your tasks.
-7. For each task in flight, once it needs its worker: `crew followup TASK --fresh --note "crew moved to ~/crew"`. The old sessions run on the old settings.
-8. Keep `~/agent-ledger` as an archive; nothing reads it any more.
-
 ## 3. First-time configuration
 
 1. **Edit your settings file**, `~/crew/config/crew.env`, which `crew setup` made from `templates/crew.env`, then commit and push it (`git -C ~/crew commit -am "My settings"; and git -C ~/crew push`). Anything you set there overrides `config/defaults.env`, which lists every setting with its default; leave that file as it is. At minimum:
@@ -479,7 +466,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
   - stacked tasks: `--on`, dispatch once the parent's branch is pushed, a stack counting once in flight, sync reporting a moved or merged parent, and `crew restack` through a real squash merge and rebases of a three-task stack;
   - the home: settings layered from `defaults.env`, `crew.env` and `project.env`, the ledger pushed to a bare origin in the background (rebased over commits from elsewhere), agents' own edits committed by the hook, `crew checkout`, and tasks that moved here getting their worktrees back and fresh workers.
-- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; `crew upgrade` with a clean merge and a conflict; and `crew migrate-ledger` on a ledger shaped like yours.
+- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; and `crew upgrade` with a clean merge and a conflict.
 - The fish files were checked with fish 3.7.
 
 **Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (the lead service under systemd and on the phone, workers surviving its restart, what the lead loads, a real failover), a project's `worker-settings.json` reaching a live `--bg` worker (it's passed as a JSON string to `--settings`), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.

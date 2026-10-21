@@ -7,7 +7,7 @@ Read `ARCHITECTURE.md` before any structural change. It has the design principle
 ## Safety rules for working in this repo
 
 - **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/agent-ledger/` (the ledger of the old installer, kept as an archive), `~/.config/fish/`, `~/.config/systemd/user/`. The user's home takes changes from this repo with `crew upgrade`.
-- **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve`, `crew upgrade` or `crew migrate-ledger` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
+- **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
 - **Never run `claude remote-control`**, not even with `--help`: it may start a server. Read https://code.claude.com/docs/en/remote-control.md instead.
 - **Never push this repo, or create GitHub repos,** unless the user asks: nothing here is public until they publish it.
 - **Don't touch `~/crew`, `~/agent-ledger`** or `~/agent-work`. They hold live task state and unmerged work.

@@ -467,108 +467,6 @@ cmd_upgrade() {
   echo "crew upgraded to $(crew_version)"
 }
 
-# TEMPORARY: removed once the user's migration is done (plan step 10.4).
-# Imports a ledger that install.sh made (~/agent-ledger) into this home, keeping
-# its history. A temporary clone of it loses install.sh's copies of crew, turns
-# each project's REPO into REMOTE (the REPO goes to this machine's local.env),
-# and is merged in. The old ledger's settings that differ from defaults.env are
-# written into the home's config/crew.env.
-
-# A setting's value in an env file, as crew would see it: the file is sourced,
-# not read, since a value may be written in more than one way.
-env_value() {  # file key
-  # shellcheck source=/dev/null
-  (. "$1"; printf '%s' "${!2-}")
-}
-
-# The old crew.env's lines that set something other than the default.
-old_settings_kept() {  # old-ledger
-  local line
-  while IFS= read -r line; do
-    if [[ $(env_value "$1/config/crew.env" "${line%%=*}") != "$(env_value "$CREW_HOME/config/defaults.env" "${line%%=*}")" ]]; then
-      echo "$line"
-    fi
-  done < <(grep -E '^[A-Z_][A-Z0-9_]*=' "$1/config/crew.env")
-}
-
-# Writes each setting line into the home's crew.env, in place of a line that sets
-# the same key (the template's BRANCH_PREFIX, say), or at the end.
-write_settings() {  # line...
-  local f="$CREW_HOME/config/crew.env" line tmp
-  touch "$f"
-  for line; do
-    tmp=$(mktemp)
-    # awk takes the key and the line from the environment, so neither needs escaping.
-    KEY="${line%%=*}=" LINE=$line awk 'index($0, ENVIRON["KEY"]) == 1 { if (!done) print ENVIRON["LINE"]; done = 1; next }
-      { print } END { if (!done) print ENVIRON["LINE"] }' "$f" >"$tmp"
-    cat "$tmp" >"$f"; rm -f "$tmp"
-    note "setting kept: $line"
-  done
-}
-
-cmd_migrate_ledger() {
-  [[ $# == 1 ]] || die "usage: crew migrate-ledger OLD"
-  local old tmp branch pd p repo remote f kept=()
-  local -A repos=()
-  old=$(realpath -e "$1" 2>/dev/null) || die "no ledger at $1"
-  [[ -f $old/config/crew.env && $(git -C "$old" rev-parse --show-toplevel 2>/dev/null) == "$old" ]] \
-    || die "$old isn't a ledger made by install.sh (no config/crew.env, or not its own git repo)"
-  lock
-  ! compgen -G "$CREW_HOME/projects/*/" >/dev/null || die "this home has projects already; migrate into a fresh home"
-  say "Importing $old"
-  mapfile -t kept < <(old_settings_kept "$old")
-  for f in "$old"/config/*-settings.json; do
-    if [[ -f $f && -f $f.dist ]] && ! cmp -s "$f" "$f.dist"; then
-      warn "${f#"$old"/} has edits of yours that aren't carried over; copy what you need into the home's settings"
-    fi
-  done
-  tmp=$(mktemp -d)
-  git clone -q "$old" "$tmp/ledger"
-  branch=$(git -C "$tmp/ledger" symbolic-ref --short HEAD)
-  # What install.sh copied into the ledger: crew itself, its README, version and
-  # .gitignore, and config/. The home has its own of each, and the old settings
-  # that matter are in kept.
-  git -C "$tmp/ledger" rm -rq --ignore-unmatch -- bin templates README.md .crew-version .gitignore config
-  for pd in "$tmp"/ledger/projects/*/; do
-    [[ -f $pd/project.env ]] || continue
-    p=$(basename "$pd")
-    repo=$(env_value "$pd/project.env" REPO)
-    [[ -n $repo ]] || die "$p has no REPO in its project.env"
-    remote=$(git -C "$repo" remote get-url origin 2>/dev/null) || die "$p: can't read the origin of its REPO, $repo"
-    # project.env as crew project add writes it: REMOTE, shared by every machine.
-    REMOTE=$remote awk '/^REPO=/ { print "REMOTE=\"" ENVIRON["REMOTE"] "\""; next } { print }' "$pd/project.env" >"$tmp/env"
-    cat "$tmp/env" >"$pd/project.env"
-    repos[$p]=$repo
-  done
-  git -C "$tmp/ledger" add -A
-  git -C "$tmp/ledger" commit -qm "crew: import the ledger from install.sh's $old"
-  git -C "$CREW_HOME" pull -q --no-rebase --no-edit --allow-unrelated-histories "$tmp/ledger" "$branch" \
-    || die "merging the old ledger failed; see git -C $CREW_HOME status"
-  rm -rf "$tmp"
-  for p in "${!repos[@]}"; do
-    cat >"$CREW_HOME/projects/$p/local.env" <<EOF
-# This machine's clone of $p. Not committed: each machine has its own.
-REPO="${repos[$p]}"
-EOF
-    note "$p: ${repos[$p]}"
-  done
-  if ((${#kept[@]})); then
-    write_settings "${kept[@]}"
-    git -C "$CREW_HOME" add -- config/crew.env
-    git -C "$CREW_HOME" commit -qm "crew: keep the old ledger's settings" -- config/crew.env
-  fi
-  unlock
-  push_now || warn "couldn't push to origin; crew tick pushes it later"
-  say "Imported. For the move, in this order:"
-  cat <<NEXT
-  1. Turn off the old timers, if you haven't: systemctl --user disable --now crew-tick.timer crew-gardener.timer
-     (crew setup's crew host up enabled this home's; check with crew doctor).
-  2. For each task in flight, once it needs its worker: crew followup TASK --fresh --note "crew moved to $CREW_HOME"
-     Its old session still runs on the old settings.
-  3. Keep $old as an archive. Nothing reads it any more.
-NEXT
-}
-
 # What crew-lead.service runs: the lead, as a Remote Control server in the home's
 # lead/, so the person opens it from Claude Mobile. On a machine that doesn't run
 # the crew it exits EXIT_NOT_HOST, which the unit takes as "don't restart"
@@ -1239,9 +1137,6 @@ Setup
   crew setup [--name NAME]         Once, in a fresh clone of the public crew repo: make
                                    your private repo (NAME, default crew) its origin,
                                    with the public one as upstream, and run the crew here
-  crew migrate-ledger OLD          Temporary, removed after the user's migration: import
-                                   a ledger install.sh made (e.g. ~/agent-ledger), history
-                                   and all, into this fresh home
   crew upgrade                     Merge the public repo's new version, install it,
                                    push, and restart the lead's server
   crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]
@@ -2953,7 +2848,6 @@ case $cmd in
   serve) cmd_serve "$@" ;;
   setup) cmd_setup "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
-  migrate-ledger) cmd_migrate_ledger "$@" ;;
   config) cmd_config "$@" ;;
   doctor) cmd_doctor ;;
   install) cmd_install "$@" ;;

@@ -217,43 +217,4 @@ git -C "$SB/public-tree" commit -qam "v3" && git -C "$SB/public-tree" push -q "$
 out=$(up)
 check "a conflict with an edit in the home stops with what to do, and leaves the merge to the person" '[[ $out == *"merge is left in progress"*"merge --abort"* ]] && git -C "$H" rev-parse -q --verify MERGE_HEAD >/dev/null'
 
-# 12. TEMPORARY, removed with crew migrate-ledger: a ledger made by install.sh,
-#     shaped like the user's, imported into a fresh home.
-SB=$(new_sandbox migrate)
-isolate_home "$SB/home"
-export CREW_HOST=tower
-git init -q --bare "$SB/webapp.git"; git clone -q "$SB/webapp.git" "$SB/webapp" 2>/dev/null
-(cd "$SB/webapp" && echo a >a && git add a && git commit -qm init && git push -q -u origin main)
-OLD=$HOME/agent-ledger; P=isaac-webapp
-mkdir -p "$OLD"/{bin,templates,config,reports,logs} "$OLD/projects/$P"/{tasks,proposals,retros,verify}
-cp "$REPO_DIR"/bin/* "$OLD/bin/"; cp "$REPO_DIR"/templates/*.md "$OLD/templates/"; cp "$REPO_DIR/LEDGER.md" "$OLD/README.md"
-printf '.crew.lock\n.crew-tick.lock\nlogs/\nconfig/*.dist\n' >"$OLD/.gitignore"; echo v1 >"$OLD/.crew-version"
-sed 's/^BRANCH_PREFIX=.*/BRANCH_PREFIX="claude\/"/' "$REPO_DIR/config/defaults.env" >"$OLD/config/crew.env"
-for f in worker readonly; do cp "$REPO_DIR/config/$f-settings.json" "$OLD/config/"; cp "$REPO_DIR/config/$f-settings.json" "$OLD/config/$f-settings.json.dist"; done
-cp "$REPO_DIR/lead/.claude/settings.json" "$OLD/config/lead-settings.json"; echo '{}' >"$OLD/config/lead-settings.json.dist"
-printf 'REPO="%s"\nDEFAULT_BRANCH="main"\nWORKTREE_TOOL="git"\n' "$SB/webapp" >"$OLD/projects/$P/project.env"
-sed -e 's/{{ID}}/001-old-task/; s/{{TITLE}}/An old task/; s/{{PROJECT}}/'"$P"'/; s/{{BASE}}/main/; s/{{BRANCH}}/claude\/old-task/; s/{{PRE_PR_REVIEW}}/yes/; s/{{PR_MODE}}/draft/; s/{{NOW}}/2026-10-01T00:00:00Z/' \
-  "$REPO_DIR/templates/task.md" | sed 's/^status: draft/status: pr-open/' >"$OLD/projects/$P/tasks/001-old-task.md"
-echo "# a proposal" >"$OLD/projects/$P/proposals/2026-10-01-x.md"; echo "# a retro" >"$OLD/projects/$P/retros/r.md"
-echo "# checks" >"$OLD/projects/$P/verify/v.md"; echo abc123 >"$OLD/projects/$P/gardener.last"
-echo '{"permissions": {"allow": ["Bash(bin/rspec *)"]}}' >"$OLD/projects/$P/worker-settings.json"
-echo "# a report" >"$OLD/reports/2026-10-15-x.md"; touch "$OLD/logs/gardener.log"
-git -C "$OLD" init -q && git -C "$OLD" add -A && git -C "$OLD" commit -qm "ledger: initial"
-echo "- 2026-10-02 — worked on" >>"$OLD/projects/$P/tasks/001-old-task.md"; git -C "$OLD" commit -qam "log 001-old-task"
-H=$HOME/crew; make_home "$H"; git init -q --bare "$SB/crew.git"; git -C "$H" remote add origin "$SB/crew.git"; git -C "$H" push -q -u origin main
-cp "$H/templates/crew.env" "$H/config/crew.env"; git -C "$H" add config/crew.env; git -C "$H" commit -qm "crew: set up"; git -C "$H" push -q
-"$H/bin/crew" host up </dev/null >/dev/null 2>&1
-out=$("$H/bin/crew" migrate-ledger "$OLD" 2>&1)
-check "migrate-ledger brings the old ledger's files into the home" '[[ -f $H/projects/$P/tasks/001-old-task.md && -f $H/projects/$P/proposals/2026-10-01-x.md && -f $H/projects/$P/retros/r.md && -f $H/projects/$P/verify/v.md && -f $H/projects/$P/worker-settings.json && -f $H/reports/2026-10-15-x.md && $(cat "$H/projects/$P/gardener.last") == abc123 ]]'
-check "with their history" 'git -C "$H" log --format=%s | grep -qx "ledger: initial" && git -C "$H" log --format=%s -- "projects/$P/tasks/001-old-task.md" | grep -qx "log 001-old-task"'
-check "project.env has REMOTE and no REPO; this machine's local.env has the old REPO" '[[ $(grep "^REMOTE=" "$H/projects/$P/project.env") == "REMOTE=\"$SB/webapp.git\"" ]] && ! grep -q "^REPO=" "$H/projects/$P/project.env" && grep -qx "REPO=\"$SB/webapp\"" "$H/projects/$P/local.env" && [[ -z $(git -C "$H" ls-files "projects/$P/local.env") ]]'
-check "the old ledger's own settings are kept in crew.env, and its copy of the defaults isn't" 'grep -qx "BRANCH_PREFIX=\"claude/\"" "$H/config/crew.env" && ! grep -q "^MAX_WORKERS=" "$H/config/crew.env"'
-check "install.sh's copies of crew are left behind" '[[ ! -e $H/.crew-version && ! -e $H/config/lead-settings.json && ! -e $H/config/crew.env.dist ]] && cmp -s "$H/bin/crew" "$REPO_DIR/bin/crew" && cmp -s "$H/README.md" "$REPO_DIR/README.md" && git -C "$H" diff --quiet HEAD -- bin templates'
-check "an edited settings file of the old ledger is named, not silently dropped" '[[ $out == *"lead-settings.json has edits of yours"* && $out != *"worker-settings.json has edits"* ]]'
-check "crew status lists the imported tasks" '[[ $("$H/bin/crew" status 2>&1) == *"001-old-task"*"pr-open"* ]]'
-check "the import reaches origin, and says what to do next" '[[ $(git --git-dir="$SB/crew.git" rev-parse main) == $(git -C "$H" rev-parse @) && $out == *"crew followup TASK --fresh"* ]]'
-out=$("$H/bin/crew" migrate-ledger "$OLD" 2>&1)
-check "migrate-ledger refuses a home that has projects" '[[ $out == *"has projects already"* ]]'
-unset CREW_HOST
-
 summary host
