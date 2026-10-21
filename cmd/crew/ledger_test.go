@@ -221,3 +221,52 @@ func TestCksum(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONKeepsOrder(t *testing.T) {
+	in := `{"z": 1, "a": {"y": [1, "two", true, null], "b": {}}, "m": [], "s": "say \"hi\" $HOME <&>"}`
+	v, err := parseJSON([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := encodeJSON(v, false), `{"z":1,"a":{"y":[1,"two",true,null],"b":{}},"m":[],"s":"say \"hi\" $HOME <&>"}`; got != want {
+		t.Errorf("compact:\n%s\nwant\n%s", got, want)
+	}
+	if got, want := encodeJSON(v, true), "{\n  \"z\": 1,\n  \"a\": {\n    \"y\": [\n      1,\n      \"two\",\n      true,\n      null\n    ],\n    \"b\": {}\n  },\n  \"m\": [],\n  \"s\": \"say \\\"hi\\\" $HOME <&>\"\n}\n"; got != want {
+		t.Errorf("indented:\n%s", got)
+	}
+	for _, bad := range []string{`{"a": }`, `{"a": 1} {}`, `[1, 2`, ``} {
+		if _, err := parseJSON([]byte(bad)); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+// A project's worker settings can add, but never take away or override.
+func TestAddOnly(t *testing.T) {
+	base, _ := parseJSON([]byte(`{"permissions": {"allow": ["a", "b"], "deny": ["x"], "defaultMode": "default"}, "hooks": {}}`))
+	extra, _ := parseJSON([]byte(`{"permissions": {"allow": ["b", "c"], "deny": [], "defaultMode": "bypassPermissions"}, "env": {"K": "v"}}`))
+	want := `{"permissions":{"allow":["a","b","c"],"deny":["x"],"defaultMode":"default"},"hooks":{},"env":{"K":"v"}}`
+	if got := encodeJSON(addOnly(base, extra), false); got != want {
+		t.Errorf("addOnly = %s\nwant %s", got, want)
+	}
+	one, _ := parseJSON([]byte(`{"a": [1, {"b": 2}], "c": 1.0}`))
+	other, _ := parseJSON([]byte(`{"c": 1, "a": [1, {"b": 2}]}`))
+	if !equalJSON(one, other) {
+		t.Error("equal JSON compared unequal")
+	}
+}
+
+// A field whose type changes in a later Claude Code loses only that field.
+func TestAgentsReadEachFieldOnItsOwn(t *testing.T) {
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "claude"), []byte(`#!/bin/sh
+echo '[{"id":"a1","state":"working","pid":4242,"status":"busy","sessionId":"a1-s","name":"crew-x"},
+{"id":"b2","state":"blocked","pid":"4243","waitingFor":{"tool":"Bash"},"sessionId":"b2-s"}]'
+`), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	as := (&Crew{Home: t.TempDir()}).agents()
+	if len(as) != 2 || !as.jobBusy("a1") || as.jobBusy("b2") || !as.find("b2").open() || as.jobState("b2") != "blocked" {
+		t.Errorf("agents = %+v", as)
+	}
+}

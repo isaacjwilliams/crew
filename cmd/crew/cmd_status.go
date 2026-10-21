@@ -107,7 +107,7 @@ func padID(id string) string {
 }
 
 func (s *statusView) goalRow(g Goal, tasks []Task) {
-	lead := s.agents.state(g.LeadJob())
+	lead := s.agents.jobState(g.LeadJob())
 	if lead != "" {
 		lead = "lead: " + lead
 	}
@@ -127,7 +127,7 @@ func (s *statusView) goalRow(g Goal, tasks []Task) {
 // taskRow prints one task, then the tasks stacked on it.
 func (s *statusView) taskRow(t Task, indent string) {
 	st := t.Get("status")
-	worker := s.agents.state(t.WorkerJob())
+	worker := s.agents.jobState(t.WorkerJob())
 	if worker != "" {
 		worker = "worker: " + worker
 	}

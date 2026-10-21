@@ -1,14 +1,15 @@
 package main
 
-// Settings files crew rewrites or merges keep their keys in order, so what crew
-// writes reads like the file it came from, as jq's output did. A parsed value is
-// an *object, a []any, or a json.RawMessage for anything else, kept as written.
+// The settings files crew rewrites or merges keep their keys in order, so what
+// crew writes reads like the file it came from: encoding/json's maps would sort
+// them. A parsed value is an *object, a []any, a string, a json.Number, a bool,
+// or nil.
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"io"
 	"strings"
 )
 
@@ -62,55 +63,47 @@ func parseJSON(b []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := dec.Token(); err == nil {
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("more than one JSON value")
 	}
 	return v, nil
 }
 
+// decodeValue reads the next value from dec, token by token.
 func decodeValue(dec *json.Decoder) (any, error) {
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
+	t, err := dec.Token()
+	if err != nil {
 		return nil, err
 	}
-	raw = bytes.TrimSpace(raw)
-	switch {
-	case len(raw) > 0 && raw[0] == '{':
-		inner := json.NewDecoder(bytes.NewReader(raw))
-		inner.UseNumber()
-		inner.Token()
+	switch t {
+	case json.Delim('{'):
 		o := newObject()
-		for inner.More() {
-			t, err := inner.Token()
+		for dec.More() {
+			k, err := dec.Token()
 			if err != nil {
 				return nil, err
 			}
-			v, err := decodeValue(inner)
+			v, err := decodeValue(dec)
 			if err != nil {
 				return nil, err
 			}
-			o.set(t.(string), v)
+			o.set(k.(string), v) // inside an object, the decoder only returns string keys here
 		}
-		return o, nil
-	case len(raw) > 0 && raw[0] == '[':
-		inner := json.NewDecoder(bytes.NewReader(raw))
-		inner.UseNumber()
-		inner.Token()
+		_, err := dec.Token() // }
+		return o, err
+	case json.Delim('['):
 		arr := []any{}
-		for inner.More() {
-			v, err := decodeValue(inner)
+		for dec.More() {
+			v, err := decodeValue(dec)
 			if err != nil {
 				return nil, err
 			}
 			arr = append(arr, v)
 		}
-		return arr, nil
+		_, err := dec.Token() // ]
+		return arr, err
 	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return nil, err
-	}
-	return json.RawMessage(compact.Bytes()), nil
+	return t, nil
 }
 
 // encodeJSON writes v compactly, or indented by two spaces as jq does, with a
@@ -158,10 +151,14 @@ func writeJSON(b *strings.Builder, v any, indent bool, prefix string) {
 			writeJSON(b, e, indent, inner)
 		}
 		b.WriteString(nl + prefix + "]")
-	case json.RawMessage:
-		b.Write(v)
 	case string:
 		b.WriteString(jsonString(v))
+	case json.Number:
+		b.WriteString(v.String())
+	case bool:
+		fmt.Fprint(b, v)
+	case nil:
+		b.WriteString("null")
 	}
 }
 
@@ -220,9 +217,40 @@ func containsJSON(list []any, x any) bool {
 	return false
 }
 
+// equalJSON compares two values as JSON does: an object's keys in any order, and
+// numbers by value (1 is 1.0).
 func equalJSON(a, b any) bool {
-	var x, y any
-	json.Unmarshal([]byte(encodeJSON(a, false)), &x)
-	json.Unmarshal([]byte(encodeJSON(b, false)), &y)
-	return reflect.DeepEqual(x, y)
+	switch x := a.(type) {
+	case *object:
+		y, ok := b.(*object)
+		if !ok || len(x.keys) != len(y.keys) {
+			return false
+		}
+		for _, k := range x.keys {
+			if yv, ok := y.get(k); !ok || !equalJSON(x.vals[k], yv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		y, ok := b.([]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !equalJSON(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		y, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		f, err1 := x.Float64()
+		g, err2 := y.Float64()
+		return err1 == nil && err2 == nil && f == g
+	}
+	return a == b
 }

@@ -93,7 +93,7 @@ func (c *Crew) pushLedger(w io.Writer) bool {
 			continue
 		}
 		fmt.Fprintln(w, strings.TrimRight(string(out), "\n"))
-		if strings.Contains(string(out), "[rejected]") || strings.Contains(string(out), "fetch first") || strings.Contains(string(out), "non-fast-forward") {
+		if pushRejected(string(out)) {
 			if !c.adoptOriginCommits(w) {
 				return false
 			}
@@ -102,6 +102,11 @@ func (c *Crew) pushLedger(w io.Writer) bool {
 		}
 	}
 	return c.ledgerPushed()
+}
+
+// pushRejected: git's output says origin has commits the push lacks.
+func pushRejected(out string) bool {
+	return strings.Contains(out, "[rejected]") || strings.Contains(out, "fetch first") || strings.Contains(out, "non-fast-forward")
 }
 
 // pushNow pushes in the foreground, after any background push that's running.

@@ -107,7 +107,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
 			fmt.Printf("%s: dispatched for goal %s\n", id, t.Goal())
-		case 4:
+		case exitNotYet: // held by a cap or a dependency; the next tick tries again
 		default:
 			warn("%s: dispatch failed: %s", id, strings.TrimRight(errs.String(), "\n"))
 		}
@@ -151,9 +151,9 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	// send a restack, or mark the task as waiting on the user. Nothing goes out
 	// twice: last_round_sent and restack_sent record what was sent.
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
-	if as.busy(job) {
+	if as.jobBusy(job) {
 		if rounds > sent {
-			fmt.Printf("%s: round %d waits for its worker (%s)\n", id, rounds, as.state(job))
+			fmt.Printf("%s: round %d waits for its worker (%s)\n", id, rounds, as.jobState(job))
 		}
 		return
 	}
@@ -200,7 +200,7 @@ func prMayHaveNewComments(t Task) bool {
 // is recorded, and listed by the next tick, so this holds once.
 func movedHere(t Task, as Agents) bool {
 	st, wt := t.Status(), t.Worktree()
-	return (st == Working || st == AddressingFeedback) && wt != "" && !isDir(wt) && !as.listed(t.WorkerJob())
+	return (st == Working || st == AddressingFeedback) && wt != "" && !isDir(wt) && !as.jobListed(t.WorkerJob())
 }
 
 // tickGoal is one running goal's share of a tick: pass the goal lead its input
@@ -211,12 +211,12 @@ func (c *Crew) tickGoal(g Goal, as Agents) {
 	}
 	id, job := g.ID(), g.LeadJob()
 	if c.goalHasInput(g) {
-		if as.busy(job) {
-			fmt.Printf("goal %s: input waits for its goal lead (%s)\n", id, as.state(job))
+		if as.jobBusy(job) {
+			fmt.Printf("goal %s: input waits for its goal lead (%s)\n", id, as.jobState(job))
 		} else if c.step(nil, "goal", "followup", g.Path) == 0 {
 			fmt.Printf("goal %s: input sent to its goal lead\n", id)
 		}
-	} else if c.goalFinished(g) && !as.busy(job) {
+	} else if c.goalFinished(g) && !as.jobBusy(job) {
 		if c.step(nil, "goal", "done", g.Path) == 0 {
 			fmt.Printf("goal %s: done, every task merged or abandoned\n", id)
 		}

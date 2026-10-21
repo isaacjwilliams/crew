@@ -280,8 +280,8 @@ func (c *Crew) goalFollowup(g Goal) error {
 		return exitQuietly(3)
 	}
 	as, job := c.agents(), g.LeadJob()
-	if as.busy(job) {
-		return fail("goal lead %s is busy (%s); crew tick passes this on once it's free", job, as.state(job))
+	if as.jobBusy(job) {
+		return fail("goal lead %s is busy (%s); crew tick passes this on once it's free", job, as.jobState(job))
 	}
 	co := goalCheckout(p, g)
 	if err := p.detachedCheckout(co); err != nil {

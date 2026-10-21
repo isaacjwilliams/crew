@@ -80,8 +80,11 @@ func run(args []string) int {
 	if err == nil {
 		err = cmd(c, args)
 	}
+	// crew commit --hook runs after an agent's every edit, and must never fail its
+	// tool call: not even when the home's settings can't be read. So its errors
+	// are dropped, unreported.
 	if name == "commit" && len(args) > 0 && args[0] == "--hook" {
-		return 0 // a hook must never fail the tool call
+		return 0
 	}
 	return exitCode(err)
 }
@@ -99,10 +102,13 @@ func fail(format string, a ...any) error {
 	return &exitError{1, fmt.Sprintf(format, a...)}
 }
 
-// notYet is a refusal that only has to wait, such as a dispatch held by a cap:
-// exit 4, so crew tick can try again later without reporting it as a failure.
+// exitNotYet is the exit code of a refusal that only has to wait, such as a
+// dispatch held by a cap, so crew tick can try again later without reporting it
+// as a failure.
+const exitNotYet = 4
+
 func notYet(format string, a ...any) error {
-	return &exitError{4, fmt.Sprintf(format, a...)}
+	return &exitError{exitNotYet, fmt.Sprintf(format, a...)}
 }
 
 // exitQuietly ends a command with code and no message of its own.

@@ -48,12 +48,12 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	as := c.agents()
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
 	newRound := rounds > sent
-	if as.busy(job) {
+	if as.jobBusy(job) {
 		// A round sent any other way would go out again: only crew records last_round_sent.
 		if newRound {
-			return fail("worker %s is busy (%s). crew tick sends round %d once it's free", job, as.state(job), rounds)
+			return fail("worker %s is busy (%s). crew tick sends round %d once it's free", job, as.jobState(job), rounds)
 		}
-		return fail("worker %s is busy (%s). Wait for it, answer it in agent view (claude attach %s), or SendMessage %s a note", job, as.state(job), job, t.Get("worker_name"))
+		return fail("worker %s is busy (%s). Wait for it, answer it in agent view (claude attach %s), or SendMessage %s a note", job, as.jobState(job), job, t.Get("worker_name"))
 	}
 	if !newRound && note == "" {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())

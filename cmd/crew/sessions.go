@@ -16,16 +16,12 @@ import (
 
 // Agent is one entry of `claude agents --json --all`.
 type Agent struct {
-	ID         string  `json:"id"`
-	State      string  `json:"state"`
-	PID        *int64  `json:"pid"`
-	Status     string  `json:"status"`
-	WaitingFor *string `json:"waitingFor"`
-	SessionID  string  `json:"sessionId"`
-	Name       string  `json:"name"`
+	ID, State, Status, SessionID, Name string
+	WaitingFor                         string // the prompt it's waiting on, if any
+	PID                                bool   // whether it has a process: pid isn't null
 	// TurnEnded: the session's transcript says its last turn has ended, though its
 	// state may still be working (see busy).
-	TurnEnded bool `json:"-"`
+	TurnEnded bool
 }
 
 type Agents []Agent
@@ -46,16 +42,27 @@ func (c *Crew) claude(args ...string) *exec.Cmd {
 }
 
 // agents is what `claude agents --json --all` lists, or nothing when it fails.
+// Each field is read on its own, as a string or not at all, so a field whose
+// type changes in a later Claude Code loses only that field, not every entry.
 func (c *Crew) agents() Agents {
 	out, err := c.claude("agents", "--json", "--all").Output()
-	var as Agents
-	if err != nil || json.Unmarshal(out, &as) != nil {
+	var entries []map[string]json.RawMessage
+	if err != nil || json.Unmarshal(out, &entries) != nil {
 		return Agents{}
 	}
-	for i, a := range as {
-		if a.State == "working" && a.PID != nil && a.SessionID != "" {
-			as[i].TurnEnded = turnEnded(a.SessionID)
+	text := func(e map[string]json.RawMessage, k string) string {
+		var s string
+		json.Unmarshal(e[k], &s)
+		return s
+	}
+	as := make(Agents, 0, len(entries))
+	for _, e := range entries {
+		a := Agent{ID: text(e, "id"), State: text(e, "state"), Status: text(e, "status"), SessionID: text(e, "sessionId"),
+			Name: text(e, "name"), WaitingFor: text(e, "waitingFor"), PID: len(e["pid"]) > 0 && string(e["pid"]) != "null"}
+		if a.State == "working" && a.PID && a.SessionID != "" {
+			a.TurnEnded = turnEnded(a.SessionID)
 		}
+		as = append(as, a)
 	}
 	return as
 }
@@ -86,8 +93,11 @@ func turnEnded(session string) bool {
 		if json.Unmarshal([]byte(lines[i]), &e) != nil {
 			return false
 		}
-		if e.Type == "user" || e.Type == "assistant" || e.Subtype == "turn_duration" {
-			return e.Type == "system"
+		switch {
+		case e.Subtype == "turn_duration":
+			return true
+		case e.Type == "user" || e.Type == "assistant":
+			return false
 		}
 	}
 	return false
@@ -116,30 +126,31 @@ func (a Agent) busy() bool {
 }
 
 // open: its process is running.
-func (a Agent) open() bool { return a.PID != nil }
+func (a Agent) open() bool { return a.PID }
 
-// state says what a job is doing, for status lines: its state, and the prompt
-// it's waiting on, if any. Nothing for a job that isn't listed.
-func (as Agents) state(job string) string {
+// jobState says what a job is doing, for status lines: its state, and the
+// prompt it's waiting on, if any. Nothing for a job that isn't listed.
+func (as Agents) jobState(job string) string {
 	a := as.find(job)
 	switch {
 	case a == nil:
 		return ""
 	case a.TurnEnded:
 		return "idle, background task running"
-	case a.WaitingFor != nil:
-		return a.State + " (" + *a.WaitingFor + ")"
+	case a.WaitingFor != "":
+		return a.State + " (" + a.WaitingFor + ")"
 	}
 	return a.State
 }
 
-func (as Agents) busy(job string) bool {
+// jobBusy: the job is listed, and busy.
+func (as Agents) jobBusy(job string) bool {
 	a := as.find(job)
 	return a != nil && a.busy()
 }
 
-// listed: claude agents on this machine knows the job.
-func (as Agents) listed(job string) bool { return as.find(job) != nil }
+// jobListed: claude agents on this machine knows the job.
+func (as Agents) jobListed(job string) bool { return as.find(job) != nil }
 
 // runningWorkers counts the busy jobs the task files record as their worker. It
 // doesn't go by name: a session Claude Code copies on resume gets a name of its own.

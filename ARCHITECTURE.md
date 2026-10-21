@@ -381,8 +381,8 @@ Go, standard library only, in one package. Each area has a file of its own; each
 
   It searches the cwd's project first, then all projects. On ambiguity it prints the candidates and fails.
 - **Sessions (`sessions.go`):**
-  - `agents` returns what `claude agents --json --all` lists as `Agent`s, or nothing on failure. It sets `TurnEnded` on a live `working` session whose transcript (`~/.claude/projects/*/<session>.jsonl`) ends with the `turn_duration` entry Claude Code writes when a turn ends (`turnEnded`).
-  - `busy` counts a job as busy while a turn runs (`state` working) or while its live process holds an open prompt, such as a permission request (`status` waiting). A `blocked` job without an open prompt ended its turn on a question for the user, so it takes a followup: the answer is what the followup sends. A background shell the worker started, such as a dev server, keeps its `state` working and its `status` busy after its turn ends, so a `working` job counts as mid-turn only until it has `TurnEnded`. `state` shows such a job as "idle, background task running". `runningWorkers` and `stopIdleSession` use the same rule.
+  - `agents` returns what `claude agents --json --all` lists as `Agent`s, or nothing on failure. It reads each field on its own, so a field whose type changes loses only that field. It sets `TurnEnded` on a live `working` session whose transcript (`~/.claude/projects/*/<session>.jsonl`) ends with the `turn_duration` entry Claude Code writes when a turn ends (`turnEnded`).
+  - `busy` counts a job as busy while a turn runs (`state` working) or while its live process holds an open prompt, such as a permission request (`status` waiting). A `blocked` job without an open prompt ended its turn on a question for the user, so it takes a followup: the answer is what the followup sends. A background shell the worker started, such as a dev server, keeps its `state` working and its `status` busy after its turn ends, so a `working` job counts as mid-turn only until it has `TurnEnded`. `jobState` shows such a job as "idle, background task running". `runningWorkers` and `stopIdleSession` use the same rule.
   - `runningWorkers` counts the busy sessions whose job a task file records as `worker_job`, across all projects. It doesn't go by name: a session Claude Code copies on resume gets a name of its own.
   - `stopJob` runs `claude stop` and waits up to 10 seconds for the job's `pid` to clear. `stopIdleSession` uses it on a recorded session that isn't busy but whose process is still open, before a resume.
   - `removeSession` stops a listed job whose process is open, busy or not, then runs `claude rm` on it. It fails only if the process won't close.
@@ -450,9 +450,9 @@ Changing any of these means updating every side listed.
 
 | Contract | Producer → consumer |
 |---|---|
-| `worker_job` in task files is the job ID `claude agents` lists | `launchWorker` → `runningWorkers` (the concurrency cap), `Agents.state`, `Agents.busy` |
+| `worker_job` in task files is the job ID `claude agents` lists | `launchWorker` → `runningWorkers` (the concurrency cap), `Agents.jobState`, `Agents.jobBusy` |
 | `claude --bg` prints `backgrounded · <job> · …`, the job possibly in color, and a `note:` line when it starts a copy | Claude Code → `launchSession` (color codes stripped, the job is the line's third field) |
-| `claude agents --json --all` entries have `id`, `state`, `pid`, `status`, `waitingFor`, `sessionId`, `name` | Claude Code (research preview) → `agents`, `Agents.state`, `Agents.busy`, `runningWorkers`, `stopIdleSession`, `waitForLaunch` |
+| `claude agents --json --all` entries have `id`, `state`, `pid`, `status`, `waitingFor`, `sessionId`, `name` | Claude Code (research preview) → `agents`, `Agents.jobState`, `Agents.jobBusy`, `runningWorkers`, `stopIdleSession`, `waitForLaunch` |
 | A session's transcript is `~/.claude/projects/<dir>/<session>.jsonl` (under `CLAUDE_CONFIG_DIR` when set), one JSON entry per line; a turn ends with a `system` entry whose `subtype` is `turn_duration`, and the next one starts with a `user` entry | Claude Code (not documented) → `turnEnded` |
 | A job's ID is the first 8 characters of its session ID. A job with a `pid` reports the session its process has loaded. A resume whose session can't be found ends in `failed` | Claude Code → `waitForLaunch` |
 | `claude --resume <session> --bg` continues the session in place only when given no other launch flags and the session's process has exited | Claude Code → `launchSession` (resume), `stopIdleSession` |
