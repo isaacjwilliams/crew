@@ -17,7 +17,7 @@ Setup
                                    push, and restart the lead's server
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, fish
-                                   functions, systemd units (timers not enabled)
+                                   functions, the services (not enabled)
   crew project add [PATH]          Register a repo (default: current) with the ledger,
                                    or this machine's clone of one registered already
   crew checkout PROJECT            Bring the lead's reading copy of PROJECT up to date
@@ -25,7 +25,7 @@ Setup
   crew host                        Which machine runs the crew, and this one's name
   crew host up [--take]            Run the crew on this machine: install, claim the
                                    lease (--take: from another machine), clone missing
-                                   projects, enable the timers
+                                   projects, enable the services
   crew host down [--force]         Hand over: stop the crew here and release the lease
                                    (refused while a worktree has unpushed commits)
   crew serve                       Serve the lead with Remote Control (what

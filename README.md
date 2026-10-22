@@ -8,6 +8,7 @@ A lead, implementer workers, a casual observer, a plan reviewer, a gardener and 
 - `fish/`: the `lead` function, PATH setup and completions.
 - `lead/`: the lead's session settings: a session started there is the lead.
 - `systemd/`: the gardener and `crew tick` timers, and the lead's Remote Control service.
+- `launchd/`: the same three services as launchd jobs, for a Mac.
 
 Quick start (fish), with `gh` signed in:
 

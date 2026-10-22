@@ -56,7 +56,7 @@ These are invariants. Breaking one changes the design, not just the implementati
 
 ## Repository layout and where each file installs
 
-A clone of this repo is a **crew home** (`~/crew` by default): `crew` runs from its `bin/`, reads its `config/` and `templates/`, and keeps the ledger under `projects/`. `crew install` copies only what Claude Code, fish and systemd have to find elsewhere.
+A clone of this repo is a **crew home** (`~/crew` by default): `crew` runs from its `bin/`, reads its `config/` and `templates/`, and keeps the ledger under `projects/`. `crew install` copies only what Claude Code, fish and systemd (launchd on a Mac) have to find elsewhere.
 
 This repo is the public one, and never contains state: nothing under `projects/` but `.gitkeep`, and no `reports/`, `config/crew.env` or `host`. A person's private home adds those (see [Runtime state](#runtime-state-created-by-use-never-shipped)), so merging a new public version into it never conflicts on them.
 
@@ -72,7 +72,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `bin/crew-guard` | — | PreToolUse hook: two lines of `sh` that run `crew guard` (below) |
 | — | `bin/release/crew-<version>` | The binary for this machine, from the release; gitignored |
 | `cmd/crew/` | — | The CLI, in Go (below); `go.mod` names the module |
-| `.github/workflows/release.yml` | — | On a pushed `v*` tag in the public repo: tests, builds the Linux binaries and publishes them as the release |
+| `.github/workflows/release.yml` | — | On a pushed `v*` tag in the public repo: tests (the Go tests on macOS too), builds the Linux and macOS binaries and publishes them as the release |
 | `config/defaults.env` | — | Every setting, its default and its comment; read by `crew` |
 | `templates/crew.env` | — | The short starting point for a person's `config/crew.env` (their overrides of `defaults.env`) |
 | `lead/.claude/settings.json` | — | The lead's session, in `lead/`: `"agent": "lead"`, its permission `allow`/`deny` rules, and the `crew-guard` hook (role `lead`), which covers its subagents. Goal leads get the same file without `agent`, as a JSON string to `--settings` |
@@ -91,6 +91,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `systemd/crew-gardener.{service,timer}` | `~/.config/systemd/user/` | Weekly `crew gardener --all` (installed but not enabled) |
 | `systemd/crew-tick.{service,timer}` | `~/.config/systemd/user/` | `crew tick` every 3 minutes, `KillMode=process` so the sessions it resumes outlive the run (installed but not enabled) |
 | `systemd/crew-lead.service` | `~/.config/systemd/user/` | `crew serve`: the lead as a Remote Control server named `crew` in the home's `lead/`, for Claude Mobile. Restarted unless `crew serve` exits 3 (this machine doesn't run the crew). Enabled by `crew host up`. See "The lead as a service" under Assumptions |
+| `launchd/crew-{tick,gardener,lead}.plist` | `~/Library/LaunchAgents/` | On a Mac, the twins of the three services above: LaunchAgents in the user's `gui/<uid>` domain, labelled like the units without their suffix, shipped `Disabled`, logging to the home's `logs/`. Rendered for the home on every install, since launchd expands nothing. A Go test checks each against its unit (`services_test.go`) |
 | — | `~/.local/share/agent-crew/` | `crew install`'s state: `manifest` (every file the last install shipped), `backups/<timestamp>/`, `agents-md-declined` |
 | `SETUP.md`, `README.md`, `ARCHITECTURE.md` | — | Documentation |
 | `CLAUDE.md` | — | Instructions for Claude Code when working in this repo |
@@ -126,6 +127,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
   host                                  the machine that runs the crew (the lease), committed and pushed by crew host
   .crew-lease-lost                      a push found the lease moved to another machine; not committed
   logs/push.log                         output of background ledger pushes; not committed
+  logs/crew-{tick,gardener,lead}.log    on a Mac, the launchd jobs' output (systemd keeps it in the journal); not committed
 ~/agent-work/<owner>-<repo>/
   <task-id>/                            git worktree on the task branch (one per dispatched task)
   _gardener/                            detached checkout of origin/<default> for the gardener
@@ -222,13 +224,13 @@ worker: rebase → checks → git push --force-with-lease
 - `crew cleanup TASK|--merged` stops the worker and removes it from agent view (`removeSession`), then ends any background process still running in the worktree (`stopProcessesIn`: TERM, then KILL after 10 seconds), then removes the worktree (`git worktree remove`, or `wt remove --no-delete-branch --foreground` so the repo's remove hooks run) and deletes the local branch (merged tasks only). The worker goes first so that it doesn't carry on in a deleted directory. Its leftover processes go next: a dev server it started in a background shell outlives `claude stop`, and would otherwise keep running, holding its port, after the worktree is gone. They're found by working directory: in `/proc` on Linux, with `lsof` and `ps` on a Mac. Only processes without a terminal are ended: one with a terminal is the user's, such as their shell sitting in the worktree. crew's own process and those that started it are left alone too. A worker whose process won't close keeps its worktree until a later cleanup; one that `claude rm` won't delete only gets a warning. Cleaning up a merged parent is safe while tasks are still stacked on it: their branches contain its commits, a restack cuts at `base_sha`, and nothing reads the parent's local branch.
 
 ### `crew tick`
-One pass over every project, run by `crew-tick.timer` every 3 minutes, by the lead (at session start and for status), or by hand. A second tick while one runs exits at once (it doesn't wait for `.crew-tick.lock`). Each step is a `crew` command run as a process of its own, so one that refuses doesn't stop the rest. It prints one line per thing it did, and one per review round or goal input it holds back for a busy session; nothing otherwise.
+One pass over every project, run by `crew-tick.timer` every 3 minutes (the `crew-tick` job on a Mac), by the lead (at session start and for status), or by hand. A second tick while one runs exits at once (it doesn't wait for `.crew-tick.lock`). Each step is a `crew` command run as a process of its own, so one that refuses doesn't stop the rest. It prints one line per thing it did, and one per review round or goal input it holds back for a busy session; nothing otherwise.
 
 ```
 crew tick
   ├─ git fetch origin (soft). origin's host names another machine, and this one held the lease
   │    → stand down: crew-* sessions stopped, unpushed ledger work kept on
-  │      lost/<host>-<time>, home reset to origin, units disabled; nothing else happens
+  │      lost/<host>-<time>, home reset to origin, services disabled; nothing else happens
   ├─ require_host: this machine holds the lease, or the tick stops
   ├─ crew sync --all
   ├─ for each task:
@@ -309,21 +311,21 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 1. `crew install`.
 2. Pull, write this machine's name in `host`, commit, push. A rejected push means another machine moved first: drop the claim and look again. Without `--take`, a lease another machine holds is refused.
 3. Clone each project this machine has no clone of into `$WORK_ROOT/<p>/repo`, and record it in `local.env`.
-4. Enable `crew-tick.timer`, `crew-gardener.timer` and `crew-lead.service`, and run `crew doctor`.
+4. Enable the services (`crewServices`: `crew-tick.timer`, `crew-gardener.timer` and `crew-lead.service`, or on a Mac the jobs `crew-tick`, `crew-gardener` and `crew-lead`), and run `crew doctor`.
 
 **Holding it:** every change takes `lock`, which runs `requireHost`: `host` must name this machine, and `.crew-lease-lost` must not exist. Every ledger commit starts a background push (`pushSoon`).
 
 **Losing it** (another machine ran `crew host up --take`):
 1. This machine's next background push is rejected, finds origin's `host` names the other machine, and creates `.crew-lease-lost`. From then on this machine refuses every change.
-2. Its next `crew tick` fetches, sees the same, and stands down: its `crew-*` sessions stopped, what origin lacks kept on a branch `lost/<host>-<time>`, the home reset to origin, and its units off. That removes `.crew-lease-lost`, as a later `crew host up` would. The units go off last, so a stand-down that fails on the way leaves the tick on, and the next tick tries again.
+2. Its next `crew tick` fetches, sees the same, and stands down: its `crew-*` sessions stopped, what origin lacks kept on a branch `lost/<host>-<time>`, the home reset to origin, and its services off. That removes `.crew-lease-lost`, as a later `crew host up` would. The services go off last, so a stand-down that fails on the way leaves the tick on, and the next tick tries again.
 
 **Carrying on, on the new machine:** its `crew tick` gives a working task whose worker and worktree aren't there a fresh worker (`movedHere`, `crew followup --fresh`). `crew followup` and `crew restack` recreate a missing worktree from `origin/<branch>`, or start over from `origin/<base>` when the branch was never pushed.
 
-**Handing over on purpose** (`crew host down [--force]`): refused while a task worktree has unpushed commits; then the units off, sessions stopped, the ledger pushed, and an empty `host` pushed. `crew host up` on the next machine needs no `--take`.
+**Handing over on purpose** (`crew host down [--force]`): refused while a task worktree has unpushed commits; then the services off, sessions stopped, the ledger pushed, and an empty `host` pushed. `crew host up` on the next machine needs no `--take`.
 
 
 - **Losing a machine loses little:** the ledger is pushed seconds after each change, and workers push their branch after every commit. Session transcripts stay on the old machine, which is why a moved task gets a fresh worker: principle 3 already lets any worker be replaced.
-- **The phone follows the lease:** `crew-lead.service` runs only where `crew serve` finds the lease (it exits 3 elsewhere), so Claude Mobile's `crew` is always the machine that runs the crew.
+- **The phone follows the lease:** `crew-lead.service` runs only where `crew serve` finds the lease (it exits 3 elsewhere), so Claude Mobile's `crew` is always the machine that runs the crew. On a Mac, launchd can't leave the job stopped on exit 3, so it's started again every 30 seconds, exiting 3 at once, until the next tick there stands the machine down and boots it out.
 
 ### Upgrading
 ```
@@ -333,11 +335,11 @@ crew upgrade   lock (the host only) → refuse a dirty home
                  if it can't (the release may still be building), refuse, with nothing changed
                → git fetch upstream tag v<version> → git merge --no-edit v<version>
                  a conflict (only the person's own edits to crew's files can conflict) → stop, merge left in progress
-               → the new version's bin/crew install → push → systemctl --user restart crew-lead.service
+               → the new version's bin/crew install → push → restartLeadService (systemctl restart, launchctl kickstart -k)
                → remove the other versions' binaries from bin/release/
 ```
 
-A home moves only from release to release, so its agent prompts and its binary always come from the same one. Releases are made in the public repo: pushing the tag `v<version>` (it must match `VERSION`) runs `.github/workflows/release.yml`, which runs the tests, builds `crew-Linux-x86_64` and `crew-Linux-aarch64` with the version stamped in, and publishes them as the tag's release, the tag's message as its notes. The workflow runs only in the public repo, so a private home that pushes a tag builds nothing.
+A home moves only from release to release, so its agent prompts and its binary always come from the same one. Releases are made in the public repo: pushing the tag `v<version>` (it must match `VERSION`) runs `.github/workflows/release.yml`, which runs the tests, and `go test` on `macos-latest`, builds `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` with the version stamped in, and publishes them as the tag's release only once both pass, the tag's message as its notes. The workflow runs only in the public repo, so a private home that pushes a tag builds nothing.
 
 ## `crew` internals (`cmd/crew/`)
 
@@ -392,7 +394,10 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Stacks (`stacks.go`):** `Branches` indexes a project's task files by branch, and `parentOf`, `effectiveBase`, `restackReason` and `noteBaseSHA` build on it (see [Stacked tasks](#stacked-tasks)). They read git only through `REPO`, whose refs the task worktrees share, and never touch its working tree.
 - **Goals (`cmd_goal.go`):** `goalTasks` finds a goal's tasks by their `goal` key; `goalFinished`, `workerQuestions` and `unroutedQuestions` build on it. `questions_routed` is a POSIX `cksum` of the questions (`cksum`), so ledgers the bash crew wrote keep working. `launchGoalLead` is the only place a goal lead command line is built, on top of `launchSession`, and `relaunch` gives it the same resume-or-fresh fallback as `crew followup`. `retireGoal` ends a goal for `crew goal done` and `abandon`.
 - **Worktrees (`worktree.go`):** `worktreeCreate` and `worktreeRemove` are the only places task worktrees are made or removed, for both `WORKTREE_TOOL` values. `setupWorktree` wraps `worktreeCreate` for a task: it creates the worktree unless it exists (on the task's local branch, or a new one from `origin/<base>`), refuses one that a failed Worktrunk dispatch left behind, and copies the `WORKTREE_COPY` files. Its callers run it without the ledger lock, since Worktrunk hooks can take minutes. A missing branch comes from `origin/<branch>` when another machine pushed it. `ensureWorktree` is how `crew followup` and `crew restack` find a task's worktree on this machine: it makes it at `$WORK_ROOT/<p>/<id>` if it's missing (on a machine the task moved to, say), rewrites `worktree:` when the recorded path differs, and logs "recreated worktree from origin/<branch>", or "started over: … was never pushed from <machine>" when the branch is nowhere and starts again from its base. `crew observe` and `crew cleanup` treat a missing worktree as nothing to do. With `worktrunk`, crew never passes `--yes`: hooks you haven't approved make `wt` fail non-interactively, and dispatch stops before a worker starts. It checks that the JSON `path` `wt` returns is the expected one. If a hook fails after `wt` has made the worktree, the task never records it, and the next dispatch refuses that leftover directory instead of starting a worker in a half-set-up worktree.
-- **Services (`services_linux.go`):** the only place crew runs `systemctl`. `crewServices` names the units; `enableServices` and `disableServices` turn them on and off now (`crew host up`, `crew host down`, the stand-down), `serviceEnabled` and `servicePath` are what `crew install` and `crew doctor` read, `restartLeadService` is `crew upgrade`'s restart, and `installServices` is `crew install`'s systemd step. `services_darwin.go` has the same functions, and says macOS isn't supported yet. `machineName` (`machine_linux.go`, `machine_darwin.go`) is this machine's name for the lease.
+- **Services (`services_linux.go`, `services_darwin.go`):** the only places crew runs `systemctl` or `launchctl`. Each file defines the same functions, and build tags pick one, so callers never ask which system they're on. `crewServices` names the units or jobs; `enableServices` and `disableServices` turn them on and off now (`crew host up`, `crew host down`, the stand-down), `serviceEnabled` and `servicePath` are what `crew install` and `crew doctor` read, `restartLeadService` is `crew upgrade`'s restart, and `installServices` is `crew install`'s step (manifest component `systemd`, or `launchd`). What they share, so it's tested on Linux, is in `services.go`: `renderUnit`, `renderPlist` and `readPlist`, a reader for the plists crew ships.
+  - On a Mac, turning a job on is `launchctl enable gui/<uid>/<label>`, then `bootstrap` (a job already loaded counts as done, and it's retried for a few seconds, since launchd can refuse it just after a bootout); off is `disable`, so it stays off after a login, then `bootout`. "Enabled" means loaded: `launchctl print` succeeds. A changed plist of a loaded job is booted out and bootstrapped again: launchd never rereads one. `restartLeadService` is `launchctl kickstart -k`.
+  - Booting out a job can end crew itself, when crew runs in that job: the tick's stand-down runs in `crew-tick`, and a phone lead's `crew upgrade` in `crew-lead`. So for each job the bootout is the last thing crew asks of launchd. `crewServices` lists `crew-tick` last, and the stand-down turns the services off as its last step. A reload's bootout and bootstrap run in a shell in a session of its own, which loads the job again even if crew has ended.
+- **This machine (`machine_linux.go`, `machine_darwin.go`):** `machineName` is its name for the lease, and `installTools` how `crew install` suggests getting the tools it lacks (pacman, or Homebrew).
 - **Processes (`proc.go`):** `stopProcessesIn` ends the processes left in a worktree or checkout, for `crew cleanup` and `crew goal done`. `processesToStop` chooses them, the same way on both systems: those whose working directory is in it, without a terminal, other than crew and the processes that started it. `processes` lists them per system: from `/proc` on Linux (`proc_linux.go`), and on a Mac (`proc_darwin.go`) from `/bin/ps -A -o pid=,ppid=,tty=,stat=` and `/usr/sbin/lsof -nP -a -d cwd -F pn`, named by their full paths since a launchd job's `PATH` may lack `/usr/sbin`. The parsing of all three is in `proc.go`, so it's tested on Linux; the `ps` and `lsof` samples in `proc_test.go` are written from their man pages. When the processes can't be listed, it warns and leaves them running.
 - **Commands:** one `cmd…` function each, listed in `commands` in `main.go`. `version` and `guard` run before the home is read: the launcher checks a download with `version`, and the guard must work whatever the home's settings say.
 
@@ -406,6 +411,8 @@ It's called from the agents' frontmatter hooks, and from the hooks in `lead/.cla
 - `lead` (the lead and goal leads), `gardener`: nothing else.
 
 The target path is structured input, so this needs no shell parsing. Bash commands aren't checked: shell parsing can never be complete.
+
+On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home `~/crew`'s ledger, but the guard compares paths as spelled, so it blocks that edit. That errs only one way: it never allows an edit it should block. Paths aren't lowercased to "fix" it, since a case-sensitive volume would then be judged wrongly.
 
 Why the hook is in two places:
 
@@ -431,19 +438,19 @@ What governs Bash instead:
 
 ## `crew install`
 
-Order: check dependencies and the Claude Code version (≥ 2.1.281) → agents → `env.CREW_HOME`, `WORK_ROOT` and the lead's `settings.local.json` → fish → systemd → manifest → the optional AGENTS.md setting → next steps. It only puts files where Claude Code, fish and systemd look for them, and writes the lead's gitignored `lead/.claude/settings.local.json` for this machine; it changes nothing tracked in the home.
+Order: check dependencies and the Claude Code version (≥ 2.1.281) → agents → `env.CREW_HOME`, `WORK_ROOT` and the lead's `settings.local.json` → fish → services (systemd, or launchd) → manifest → the optional AGENTS.md setting → next steps. It only puts files where Claude Code, fish and systemd or launchd look for them, and writes the lead's gitignored `lead/.claude/settings.local.json` for this machine; it changes nothing tracked in the home.
 
 - **The home** is `CREW_HOME`, else the checkout of the `bin/crew` that ran (symlinks resolved), so `~/crew/bin/crew install` works straight after a clone.
-- **What gets installed** is discovered, not listed: every `agents/*.md`, every file under `fish/`, and every `systemd/*`. Adding a file here is enough to ship it.
+- **What gets installed** is discovered, not listed: every `agents/*.md`, every file under `fish/`, and every `systemd/*` (or on a Mac every `launchd/*.plist`). Adding a file here is enough to ship it.
 - **Files are replaced by rename** (`installContent`: a temp file in the same directory, then a rename), never rewritten in place, so a running guard hook never reads a half-written file. A file that differs is backed up first.
-- **A home other than `~/crew`** is substituted into the fish `conf.d` snippet and the systemd services (`renderLines`) *before* comparing, so an unchanged re-run takes no backups.
+- **A home other than `~/crew`** is substituted into the fish `conf.d` snippet and the systemd services (`renderUnit`) *before* comparing, so an unchanged re-run takes no backups. On a Mac every plist is rendered (`renderPlist`): launchd expands nothing, so `%h/crew` becomes the home and every other `%h` the user's home, XML-escaped. It also makes the home's `logs/`, which launchd needs before it starts a job.
 - **`~/.claude/settings.json`** is rewritten, after a backup, only when a value crew sets there changes. It keeps its keys in their order (`json.go`).
-- **Stale files** (`prune`): `~/.local/share/agent-crew/manifest` records `component<TAB>path` for every shipped file. After installing a component (`agents`, `fish`, `systemd`), files the previous install of that component shipped and this one doesn't are backed up and removed (systemd units are disabled first). Components skipped with `--no-fish`/`--no-services` keep their manifest entries and lose nothing, and only paths under the component's current root are touched.
+- **Stale files** (`prune`): `~/.local/share/agent-crew/manifest` records `component<TAB>path` for every shipped file. After installing a component (`agents`, `fish`, `systemd` or `launchd`), files the previous install of that component shipped and this one doesn't are backed up and removed (services are turned off first). Components skipped with `--no-fish`/`--no-services` keep their manifest entries and lose nothing, and only paths under the component's current root are touched.
 - **The AGENTS.md question** is asked only if the setting is off and the user hasn't declined before (`~/.local/share/agent-crew/agents-md-declined`).
 - **Re-running** is idempotent: a second run with no changes in the home backs nothing up. Backups go to `~/.local/share/agent-crew/backups/<timestamp>/`.
-- **Units** are installed but not enabled: `crew host up` enables them. Install names the ones that are off on this machine.
+- **Services** are installed but not enabled: `crew host up` enables them. Install names the ones that are off on this machine. On a Mac, a plist installed in `~/Library/LaunchAgents/` would load at the next login, so the shipped ones say `Disabled`; `launchctl enable` overrides that.
 
-Flags: `--yes`, `--no-fish`, `--no-services` (the systemd units), `--skip-agents-md-setting`.
+Flags: `--yes`, `--no-fish`, `--no-services` (the systemd units, or the launchd jobs), `--skip-agents-md-setting`.
 
 ## Contracts between components
 
@@ -461,8 +468,8 @@ Changing any of these means updating every side listed.
 | `--add-dir` is variadic, so it's never placed right before the prompt | `launchSession`, `crew gardener` |
 | `REPO` is per machine: `projects/<p>/local.env`, gitignored. `project.env` holds what every machine shares (`REMOTE`, `DEFAULT_BRANCH`, overrides) | `crew project add` → `loadProject`, `crew doctor`, `.gitignore` |
 | `host` at the home's root holds one line, the `CREW_HOST` of the machine that runs the crew, or nothing; it counts once origin has it | `crew host up`/`down` (`commitHost`) → `requireHost`, `originHolder` (`pushLedger`, the tick's stand-down), `crew status` |
-| `crew host up` enables and `down`, `prune` and the stand-down disable `crewServices` | `crew host up`, `crew host down`, `standDown` ↔ `systemd/` |
-| `crew serve` exits 3 on a machine that doesn't hold the lease; the unit doesn't restart on 3 | `crew serve` → `systemd/crew-lead.service` (`RestartPreventExitStatus=3`); checked in `tests/guard.sh` |
+| `crew host up` enables and `down`, `prune` and the stand-down disable `crewServices`; on a Mac, a job's label is its plist's file name | `crew host up`, `crew host down`, `standDown` ↔ `systemd/`, `launchd/` |
+| `crew serve` exits 3 on a machine that doesn't hold the lease; the unit doesn't restart on 3. launchd has no counterpart: `launchd/crew-lead.plist` restarts it every 30 seconds (`ThrottleInterval`) until the stand-down boots the job out, which is why the job is enabled only on the lease holder | `crew serve` → `systemd/crew-lead.service` (`RestartPreventExitStatus=3`); checked in `tests/guard.sh` |
 | Front-matter key names | `templates/task.md`, `templates/goal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
 | A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `goalRunning` (`crew tick` dispatch), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
@@ -486,16 +493,17 @@ Changing any of these means updating every side listed.
 | State paths, the ledger: `projects/` and `reports/` in the home. Only they are committed by `crew`, edited by agents, or absent from the public repo | `statePaths` in `crew` (`commit` and the guard); checked in `tests/guard.sh`, which also checks this repo tracks nothing there but `projects/.gitkeep`, and no `config/crew.env` or `host` |
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" commit --hook` on `Edit\|Write\|NotebookEdit`; `.tool_input.file_path` (or `notebook_path`) and `.cwd` in its JSON | `lead/.claude/settings.json`, `config/worker-settings.json` → `commitHook`, `crew doctor`; checked in `tests/guard.sh` |
 | Hook command path `${CREW_HOME:-$HOME/crew}/bin/crew-guard` and role names. `~/crew` is the usual home; `crew install` sets `env.CREW_HOME` in `~/.claude/settings.json`, so hooks find a home anywhere | agent frontmatter, `lead/.claude/settings.json` and `config/worker-settings.json` → `bin/crew-guard` (which runs `crew guard`), `crew doctor`; checked in `tests/guard.sh` |
-| A home other than `~/crew` is written into the line `set -q CREW_HOME; or set -gx CREW_HOME …` of `fish/conf.d/agent-crew.fish`, and into the `%h/crew` paths and the `# Environment=CREW_HOME=` line of `systemd/*.service` | those files → `renderLines` in `crew install`; checked in `tests/host.sh` |
+| A home other than `~/crew` is written into the line `set -q CREW_HOME; or set -gx CREW_HOME …` of `fish/conf.d/agent-crew.fish`, and into the `%h/crew` paths and the `# Environment=CREW_HOME=` line of `systemd/*.service`. Every `launchd/*.plist` is rendered: `%h/crew` is the home, any other `%h` the user's home | those files → `renderLines`, `renderUnit` and `renderPlist` in `crew install`; checked in `tests/host.sh` and `services_test.go` |
+| Each `launchd/<label>.plist` is the twin of `systemd/<label>.service`: the same command, the unit's `PATH` entries within its own, the same `Nice`, `AbandonProcessGroup` where the unit has `KillMode=process`; `Label` is the file's name, `Disabled` is true, `CREW_HOME` is `%h/crew`, output goes to `%h/crew/logs/<label>.log` | `systemd/` ↔ `launchd/`; checked in `services_test.go` |
 | What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
 | Locks: `.crew.lock` (every mutation), `.crew-tick.lock` (one `crew tick` at a time) and `.crew-push.lock` (one ledger push at a time), taken with `flock(2)`; Go opens them close-on-exec, so a session or background push crew starts never holds one | `crew` → `claude`; checked by `tests/stubs/claude` (no open fd on a `.crew*.lock` file) and `tests/crew-e2e.sh` |
 | `crew` on PATH for agents | `conf.d` and the units' `PATH` (the lead, through `lead` and `crew serve`, which also prepends it), `claude` (in `sessions.go`) prepending PATH (workers, goal leads, gardener) |
 | `crew setup` makes `upstream` the public repo, with its push URL `DISABLED`, and `origin` the private one; `crew upgrade` merges the newest `v<version>` tag `upstream` has, once its binary has been fetched | `crew setup` → `crew upgrade`; checked in `tests/host.sh` |
-| A release is the tag `v<version>`, matching `VERSION`, with `crew-Linux-x86_64` and `crew-Linux-aarch64` attached, each stamped with that version (`-X main.version`) | `.github/workflows/release.yml` → `crew upgrade` (`newestRelease`), `bin/crew`, `crew doctor` (the binary's version is `VERSION`'s) |
+| A release is the tag `v<version>`, matching `VERSION`, with `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` attached, each stamped with that version (`-X main.version`) | `.github/workflows/release.yml` → `crew upgrade` (`newestRelease`), `bin/crew`, `crew doctor` (the binary's version is `VERSION`'s) |
 | `bin/crew` runs `bin/release/crew-<VERSION>` (or `CREW_VERSION`), fetching a missing one from `https://github.com/isaacjwilliams/crew/releases/download/v<version>/crew-<uname -s>-<uname -m>` and checking it with `crew version`; it exits 2 for `crew guard` when it can't, so a missing binary blocks edits | `bin/crew` ↔ the release's asset names, `crew upgrade` (`CREW_VERSION=<new> bin/crew version`); checked in `tests/host.sh`, with `tests/stubs/curl` serving releases |
 | The lead's settings are `lead/.claude/settings.json`; a goal lead's are the same without `agent` (deleted from the parsed file, key order kept), so the two can't drift | `launchGoalLead`; checked in `tests/guard.sh` and `tests/crew-e2e.sh` |
 | Settings file names | `crew` |
-| Every tool `crew` needs (`deps` in `crew doctor`) is on the `PATH` its systemd services set | `systemd/*.service` → `crew doctor`, for enabled units (`crewServices`) |
+| Every tool `crew` needs (`deps` in `crew doctor`) is on the `PATH` its services set | `systemd/*.service`, `launchd/*.plist` (read from the installed copy) → `crew doctor`, for enabled services (`crewServices`) |
 | `wt switch … --format json` prints `{"action", "path", …}`; `--config-set worktree-path=<TOML string>` sets the path; unapproved hooks fail when stdin isn't a terminal | Worktrunk → `worktreeCreate`; mirrored in `tests/stubs/wt` |
 
 ## Extension points
@@ -523,12 +531,12 @@ Changing any of these means updating every side listed.
 tests/run.sh            # lint + guard + crew-e2e + host; must pass before a change is done
 ```
 
-- **`lint`**: `gofmt`, `go vet` for Linux and for macOS, `go test ./...` (the ledger model, settings files, the guard's table, `resolve`, statuses against `LEDGER.md`), `sh -n` on `bin/`, `bash -n` on the tests, shellcheck on both, fish syntax, JSON validity, and `claude plugin validate agents`.
+- **`lint`**: `gofmt`, `go vet` for Linux and for macOS, `go test ./...` (the ledger model, settings files, the guard's table, `resolve`, statuses against `LEDGER.md`, each launchd job against its unit, plist rendering and reading, and `/proc`, `ps` and `lsof` output), `sh -n` on `bin/`, `bash -n` on the tests, shellcheck on both, fish syntax, JSON validity, and `claude plugin validate agents`.
 - **`guard`**: the write-guard allow/block table, run directly and through the lead and worker settings hooks, the home's state paths among them, plus checks that this repo tracks no state, that the lead, the implementer and the goal lead have no tool allowlist, that no settings file turns the sandbox on, that the lead and workers default to auto mode, that the settings run `crew commit --hook`, that the lead service leaves itself stopped on exit 3, and that the agents' prompts agree with `crew` and the settings.
 - **`crew-e2e`**: `crew` end to end in a crew home made from this checkout (`make_home`, which puts a binary built from this checkout in its `bin/release/`), against a bare-repo remote, with stub `claude`, `gh` and `wt`.
 - **`host`**: a machine and its home, in fake `HOME`s: `crew install` (a fresh install, unchanged re-runs, edited, new and dropped files, skipped components, the AGENTS.md question, a home outside `~/crew`, `crew doctor`'s checks), the lease between two machines (`host up`, `--take`, a lost lease, the stand-down, `host down`, `crew serve`), `crew setup`, `crew upgrade` to a release tag in a fake public repo, and the launcher (a download, a failed one, `CREW_VERSION`), with `tests/stubs/curl` serving the releases.
 
-Every suite runs in a fake `HOME` under `tests/.tmp/` with the stubs first on `PATH`, so the tests never start a model session or touch the real setup. See `tests/README.md` for how to add cases.
+Every suite runs in a fake `HOME` under `tests/.tmp/` with the stubs first on `PATH`, so the tests never start a model session or touch the real setup. The shell suites run only on Linux: they use GNU and util-linux tools, and `/proc`. On macOS, `go test ./...` runs in the release workflow, and the rest is the live checks M1–M8 below. See `tests/README.md` for how to add cases.
 
 What the tests *can't* cover is the live Claude Code behaviour listed below. After changing anything that depends on it, do a smoke test with a tiny task.
 
@@ -543,7 +551,16 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
   - L6: a failover drill with one `pr-open` and one `working` task: `crew host up --take` on another machine, its tick re-homing the working task, and the old machine standing down when it's back on the network.
   - L7: a goal lead started with the lead's settings minus `agent` runs as goal-lead.
   - L8: the colleague path on a fresh account: clone the public repo, `crew setup`, `crew project add`, a lead from the phone.
-- **Releases** haven't been made yet. `bin/crew` fetches `https://github.com/isaacjwilliams/crew/releases/download/v<version>/crew-<uname -s>-<uname -m>`, GitHub's documented download URL for a release asset, with `curl -fsSL` (which follows GitHub's redirect to its storage). `.github/workflows/release.yml` assumes `actions/checkout@v4` and `actions/setup-go@v5` (with `go-version-file`), that fish installs on `ubuntu-latest`, and that `gh release create --notes-from-tag` reads the annotated tag's message from the local clone, hence the explicit fetch of the tag. The first tag pushed checks all of it.
+- **Live checks on a Mac** (0.3.0), each in a person's real setup. None has run yet:
+  - M1: a clone of the private home in `~/crew`, `~/crew/bin/crew install` with no Go installed: the binary downloads and runs without a Gatekeeper prompt (`codesign -dv ~/crew/bin/release/crew-0.3.0` shows a signature: Go's linker signs darwin/arm64 ad hoc, and `curl` sets no quarantine attribute), `crew doctor` passes, and `crew host` shows the name from `scutil`.
+  - M2: after `crew install`, a logout and login leave the jobs off (`launchctl print gui/$(id -u)/crew-tick` fails): the plist's `Disabled` holds.
+  - M3: `crew host up --take`: `launchctl enable` overrides `Disabled`, `crew-tick` runs every 3 minutes (`~/crew/logs/crew-tick.log`), and a tick reaches `claude` and `gh` and pushes the ledger with no Keychain prompt or auth error: a LaunchAgent in the `gui` domain is assumed to reach the login Keychain and the ssh-agent.
+  - M4: `crew` appears on the phone from the Mac's `crew-lead`, after the two first-time prompts.
+  - M5: workers dispatched from the phone keep running when a tick ends and when `crew upgrade` restarts `crew-lead`: `AbandonProcessGroup` is assumed to do what `KillMode=process` does (L2 on the Mac).
+  - M6: `crew cleanup` on a merged task stops a dev server left in its worktree and leaves a process started from a terminal there alone. Swap real `ps` and `lsof` output into `proc_test.go` while there.
+  - M7: after the Mac sleeps and wakes, the ticks carry on. `crew host down` turns the jobs off, and they stay off after a logout and login.
+  - M8: L6, the failover drill, between the Linux machine and the Mac, both ways. On the Mac, the stand-down runs inside `crew-tick` and its last step boots that job out, which ends the tick: `~/crew/logs/crew-tick.log` says "stood down", the home is reset, `.crew-lease-lost` is gone, and `launchctl print gui/$(id -u)/crew-tick` fails.
+- **Releases** have been made since v0.1.0, which checked the Linux side of what follows. `bin/crew` fetches `https://github.com/isaacjwilliams/crew/releases/download/v<version>/crew-<uname -s>-<uname -m>`, GitHub's documented download URL for a release asset, with `curl -fsSL` (which follows GitHub's redirect to its storage). `.github/workflows/release.yml` assumes `actions/checkout@v4` and `actions/setup-go@v5` (with `go-version-file`), that fish installs on `ubuntu-latest`, and that `gh release create --notes-from-tag` reads the annotated tag's message from the local clone, hence the explicit fetch of the tag. Not yet checked: the `macos-latest` job and the Darwin binaries, which v0.3.0 is the first to have.
 - **Settings and instructions for the lead in `lead/`:** a project's `"agent"` setting picks a session's agent; `permissions.additionalDirectories` and `PreToolUse` hooks apply to sessions a `remote-control` server starts (checked live on 2026-10-20). From the docs, not live: `claudeMdExcludes` (absolute-path globs, any settings layer) keeps a CLAUDE.md out of a session, and CLAUDE.md files in parent directories load by default, hence the exclude for the home's `CLAUDE.md`. `auto` can't come from a project settings file, so the mode is passed on the command line (`LEAD_PERMISSION_MODE`).
 - **Background sessions don't show on Claude Mobile** (checked live on 2026-10-20). The phone sees workers only through the lead.
 - **Cloud sessions were ruled out** for the lead: they load no user-level agents or plugins, run on throwaway machines, and have no `--bg`.
