@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- crew gardener: review newly merged commits and write refactor proposals.
+     The Mac's twin of systemd/crew-gardener.service and crew-gardener.timer.
+     launchd expands nothing, so crew install writes your crew home and your
+     home directory into the paths below. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>crew-gardener</string>
+	<!-- Off until crew host up turns it on, so it doesn't start at the next login. -->
+	<key>Disabled</key>
+	<true/>
+	<key>ProgramArguments</key>
+	<array>
+		<string>%h/crew/bin/crew</string>
+		<string>gardener</string>
+		<string>--all</string>
+	</array>
+	<!-- A job never reads your shell config, so PATH lists the usual places for
+	     crew's tools, mise's shims and Homebrew's among them. To add one, edit
+	     this file in your home, commit it, and run crew install. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>%h/crew/bin:%h/.local/bin:%h/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>CREW_HOME</key>
+		<string>%h/crew</string>
+	</dict>
+	<!-- Weekly, Monday 06:00. A run missed while the Mac slept happens when it wakes. -->
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>1</integer>
+		<key>Hour</key>
+		<integer>6</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>Nice</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>%h/crew/logs/crew-gardener.log</string>
+	<key>StandardErrorPath</key>
+	<string>%h/crew/logs/crew-gardener.log</string>
+</dict>
+</plist>

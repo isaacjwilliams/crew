@@ -66,12 +66,7 @@ func (in *installer) installServices() error {
 	for _, f := range units {
 		var content []byte
 		if strings.HasSuffix(f, ".service") && custom {
-			content = renderLines(f, func(l string) string {
-				if strings.HasPrefix(l, "# Environment=CREW_HOME=") {
-					return "Environment=CREW_HOME=" + in.Home
-				}
-				return strings.ReplaceAll(l, "%h/crew", in.Home)
-			})
+			content = renderUnit(f, in.Home)
 		}
 		if err := in.installContent("systemd", f, content, filepath.Join(dir, filepath.Base(f))); err != nil {
 			return err

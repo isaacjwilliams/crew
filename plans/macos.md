@@ -66,7 +66,7 @@ Don't reopen these.
 - **A plist in `~/Library/LaunchAgents/` loads at the next login,** unless it's disabled. `crew install` must leave the jobs off, as it leaves the units off on Linux. So:
   - the shipped plists carry `Disabled` true;
   - `crew host up` runs `launchctl enable gui/<uid>/<label>` and then `launchctl bootstrap gui/<uid> <plist>`;
-  - `crew host down` and the stand-down run `launchctl bootout` and then `launchctl disable`, so the job stays off after a reboot.
+  - `crew host down` and the stand-down run `launchctl disable`, so the job stays off after a reboot, and then `launchctl bootout`.
   - `bootstrap` fails on a job that's already loaded. Treat that as done, not as an error.
 - **launchd doesn't reread a plist file.** When `crew install` changes the plist of a loaded job, it must boot the job out and bootstrap it again. That is launchd's `daemon-reload`.
   - For `crew-lead`, this restarts the lead's server, which `crew upgrade` does anyway.
@@ -146,3 +146,4 @@ Don't reopen these.
 - 2026-10-22: step 2 done: `--no-services`, with a `tests/host.sh` check. Step 3 is next.
 - 2026-10-22: step 3 done: `scutil --get LocalHostName` on a Mac. Step 4 is next.
 - 2026-10-22: step 4 done: `proc.go` (the choice and the parsing, shared by both systems), `proc_darwin.go` runs `ps` and `lsof`. The samples in `proc_test.go` are from the man pages; swap in real output in step 9. Step 5 is next.
+- 2026-10-22: step 5 done: `launchd/*.plist`, `services_darwin.go`, the rendering and plist reader in `services.go`, and `services_test.go` (each plist against its unit, rendering, the reader). Two things beyond the plan, both in `services_darwin.go`: booting a job out can end crew when crew runs in it (the tick's own stand-down, say), so the bootout is the last thing crew asks for a job: `crew-tick` is turned off last, after the rest of the stand-down, and a reload's bootout and bootstrap run in a shell of their own; and `servicePath` reads the installed plist already, which is step 6's doctor half. Step 6 (the install hint) is next.
