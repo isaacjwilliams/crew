@@ -114,13 +114,14 @@ func (c *Crew) claimLease(take bool) error {
 
 // commitHost commits the host file and pushes it in the foreground: a lease counts
 // only once origin has it. A rejected push is expected when another machine moved
-// first, so git's message is left out; the caller says what failed.
+// first, so git's message is left out; the caller says what failed. Like
+// pushLedger, it doesn't push with -u.
 func (c *Crew) commitHost(msg string) bool {
 	gitOK(c.Home, "add", "--", "host")
 	if !gitOK(c.Home, "diff", "--cached", "--quiet", "--", "host") {
 		gitOK(c.Home, "commit", "-qm", msg, "--", "host")
 	}
-	return gitOK(c.Home, "push", "-q", "-u", "origin", "HEAD")
+	return gitOK(c.Home, "push", "-q", "origin", "HEAD")
 }
 
 // cloneMissingProjects clones each registered project this machine has no clone

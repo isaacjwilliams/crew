@@ -40,8 +40,8 @@ func cmdTick(c *Crew, args []string) error {
 	defer lock.Close()
 	// A machine that ran the crew, and finds on origin that another one does now,
 	// steps back and does nothing else.
-	if c.leaseTakenElsewhere() {
-		return c.standDown(c.originHolder())
+	if holder, taken := c.leaseTakenElsewhere(); taken {
+		return c.standDown(holder)
 	}
 	if err := c.requireHost(); err != nil {
 		return err
@@ -237,13 +237,18 @@ func (c *Crew) goalHasInput(g Goal) bool {
 }
 
 // leaseTakenElsewhere: this machine ran the crew, and origin, freshly fetched,
-// says another one does now. A machine that never held the lease has nothing to
-// stand down from.
-func (c *Crew) leaseTakenElsewhere() bool {
-	if !gitOK(c.Home, "fetch", "-q", "origin") || c.originHolder() == c.Host {
-		return false
+// names another holder now, or none. A machine that never held the lease has
+// nothing to stand down from, and one that can't read origin's branch doesn't
+// know it lost it.
+func (c *Crew) leaseTakenElsewhere() (holder string, taken bool) {
+	if !gitOK(c.Home, "fetch", "-q", "origin") {
+		return "", false
 	}
-	return c.holder() == c.Host || exists(c.leaseLost())
+	holder, ok := c.originHolder()
+	if !ok || holder == c.Host {
+		return "", false
+	}
+	return holder, c.holder() == c.Host || exists(c.leaseLost())
 }
 
 // standDown: another machine has claimed the lease, so this one steps back: its

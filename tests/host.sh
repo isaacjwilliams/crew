@@ -135,9 +135,11 @@ out=$(laptop "$LH/bin/crew" host 2>&1)
 check "crew host says who runs the crew, since when, and this machine's name" '[[ $out == *"crew runs on tower (since "*"ago)"* && $out == *"this machine: laptop"* ]]'
 out=$(laptop "$LH/bin/crew" host up </dev/null 2>&1)
 check "host up is refused while another machine runs the crew" '[[ $out == *"crew runs on tower (since "*"crew host up --take moves it here"* && $(origin_host) == tower ]]'
+config=$(stat -c %i "$LH/.git/config")
 laptop "$LH/bin/crew" host up --take </dev/null >/dev/null 2>&1
 LREPO=$SB/laptop/agent-work/$P/repo
 check "host up --take moves the lease" '[[ $(origin_host) == laptop ]] && grep -qx crew-tick.timer "$SB/laptop/systemctl-enabled"'
+check "its push leaves the home's git config alone" '[[ $(stat -c %i "$LH/.git/config") == "$config" ]]'
 check "and clones each project this machine has no clone of" '[[ $(git -C "$LREPO" remote get-url origin) == "$SB/webapp.git" ]] && grep -q "^REPO=\"$LREPO\"" "$LH/projects/$P/local.env"'
 
 # The tower hasn't heard yet. Its next commit is refused by origin, so it learns.
