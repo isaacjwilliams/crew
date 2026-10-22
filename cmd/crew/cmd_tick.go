@@ -259,7 +259,7 @@ func (c *Crew) standDown(holder string) error {
 		holder = "no machine"
 	}
 	fmt.Printf("crew now runs on %s; standing down here\n", holder)
-	c.setUnits("disable")
+	disableServices()
 	c.stopCrewJobs()
 	if err := c.takeLock(); err != nil {
 		return err

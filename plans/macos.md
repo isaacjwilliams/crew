@@ -142,3 +142,4 @@ Don't reopen these.
 ## Progress
 
 - 2026-10-22: the plan written. The user settled its three open questions (plist files in `launchd/`, `--no-services`, a broad default `PATH` and edits to the home's plists); they're in Decisions. Step 1 is next.
+- 2026-10-22: step 1 done on branch `macos`: `services_linux.go`, `services_darwin.go` (stubs), `machine_*.go`. The doctor's heading is "Enabled services" now, on both systems. Step 2 is next.
