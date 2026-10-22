@@ -150,3 +150,4 @@ Don't reopen these.
 - 2026-10-22: step 6 done: `installTools` in `machine_*.go`. Step 7 is next.
 - 2026-10-22: step 7 done: four binaries, and a `test-macos` job that publishing needs. No actionlint here: checked by reading, by parsing the YAML, and by running the build loop locally (the darwin/arm64 binary has `LC_CODE_SIGNATURE`). Step 8 is next.
 - 2026-10-22: step 8's docs done (SETUP.md has an "On a Mac" section; ARCHITECTURE.md has M1–M8; CLAUDE.md, tests/README.md, README.md, help). The oldest macOS is 13 Ventura: Claude Code needs 13.0+, Go 1.25 needs 12. The VERSION commit is next, then step 9 is the user's.
+- 2026-10-22: `VERSION` 0.3.0. Step 9 is the user's: review, merge, release `v0.3.0`, then M1–M8 on the Mac.
