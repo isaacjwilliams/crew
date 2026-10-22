@@ -119,7 +119,7 @@ crew host up --take     # take it over from another machine, say one that's down
 crew host down          # hand over: stop the crew here and release the lease
 ```
 
-`crew host down` refuses while a worker's branch has commits it hasn't pushed, so nothing is left behind; `--force` hands over anyway. A machine whose lease was taken stops at its next `crew tick`: it turns its timers off, stops its workers, and keeps anything origin didn't get on a branch `lost/<host>-<time>` in the home. The machine's name is `CREW_HOST`, or `hostname -s` when that isn't set.
+`crew host down` refuses while a worker's branch has commits it hasn't pushed, so nothing is left behind; `--force` hands over anyway. A machine whose lease was taken stops at its next `crew tick`: it turns its timers off, stops its workers, and keeps anything origin didn't get on a branch `lost/<host>-<time>` in the home. The machine's name is `CREW_HOST`, or when that isn't set, `hostname -s` on Linux and `scutil --get LocalHostName` on a Mac (the Local hostname in System Settings → General → Sharing, which doesn't change with the network).
 
 ## 3. First-time configuration
 
