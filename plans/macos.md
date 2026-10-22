@@ -145,3 +145,4 @@ Don't reopen these.
 - 2026-10-22: step 1 done on branch `macos`: `services_linux.go`, `services_darwin.go` (stubs), `machine_*.go`. The doctor's heading is "Enabled services" now, on both systems. Step 2 is next.
 - 2026-10-22: step 2 done: `--no-services`, with a `tests/host.sh` check. Step 3 is next.
 - 2026-10-22: step 3 done: `scutil --get LocalHostName` on a Mac. Step 4 is next.
+- 2026-10-22: step 4 done: `proc.go` (the choice and the parsing, shared by both systems), `proc_darwin.go` runs `ps` and `lsof`. The samples in `proc_test.go` are from the man pages; swap in real output in step 9. Step 5 is next.
