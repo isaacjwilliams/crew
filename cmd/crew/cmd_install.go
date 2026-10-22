@@ -81,7 +81,7 @@ func cmdInstall(c *Crew, args []string) error {
 	}
 	if len(missing) > 0 {
 		note("missing: %s", strings.Join(missing, " "))
-		note("on CachyOS: sudo pacman -S --needed git github-cli fish curl")
+		note("%s", installTools)
 		note("Claude Code: curl -fsSL https://claude.ai/install.sh | bash   (or 'claude update')")
 	}
 	if v, ok := claudeVersion(); ok {

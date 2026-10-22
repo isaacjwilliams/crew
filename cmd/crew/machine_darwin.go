@@ -16,3 +16,7 @@ func machineName() string {
 	}
 	return shortHostname()
 }
+
+// installTools is how crew install suggests installing the tools it's missing.
+// macOS comes with curl.
+const installTools = "with Homebrew: brew install git gh fish"
