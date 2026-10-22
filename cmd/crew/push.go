@@ -63,7 +63,7 @@ func (c *Crew) adoptOriginCommits(w io.Writer) bool {
 	if !gitTo(w, c.Home, "fetch", "-q", "origin") {
 		return false
 	}
-	if holder := c.originHolder(); holder != c.Host {
+	if holder, ok := c.originHolder(); ok && holder != c.Host {
 		os.WriteFile(c.leaseLost(), nil, 0o644)
 		fmt.Fprintf(w, "origin says crew runs on %s now; not pushing. The next crew tick stands this machine down.\n", holder)
 		return false
@@ -83,12 +83,16 @@ func (c *Crew) adoptOriginCommits(w io.Writer) bool {
 // pushLedger pushes until origin has every ledger commit: up to five tries, a
 // second apart when the push fails for a reason like the network. A push origin
 // rejects for commits it has that this machine lacks takes those in first.
+//
+// The push has no -u: crew setup set the upstream once. -u rewrites .git/config on
+// every push, and a crew tick that read the upstream at that moment would find
+// none.
 func (c *Crew) pushLedger(w io.Writer) bool {
 	for range 5 {
 		if c.ledgerPushed() {
 			return true
 		}
-		out, err := exec.Command("git", "-C", c.Home, "push", "-q", "-u", "origin", "HEAD").CombinedOutput()
+		out, err := exec.Command("git", "-C", c.Home, "push", "-q", "origin", "HEAD").CombinedOutput()
 		if err == nil {
 			continue
 		}

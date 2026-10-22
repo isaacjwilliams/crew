@@ -71,6 +71,8 @@ check "project.env overrides crew.env" '[[ $(crew config MAX_WORKERS) == 2 ]]'
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'
+config=$(stat -c %i "$L/.git/config"); crew log 1 "pushed" >/dev/null
+check "a ledger push leaves the home's git config alone, so crew tick always finds the upstream there" 'pushed && [[ $(stat -c %i "$L/.git/config") == "$config" ]]'
 printf '#!/bin/sh\nsleep 2\n' >"$SB/home.git/hooks/pre-receive"; chmod +x "$SB/home.git/hooks/pre-receive"   # a slow push
 F2=$(crew new "Saved search filters")
 check "a push still running holds none of crew's locks" 'wait_for "! flock -n \"$L/.crew-push.lock\" true" && flock -n "$L/.crew.lock" true && flock -n "$L/.crew-tick.lock" true'
@@ -87,6 +89,10 @@ check "a push that fails in the background gives up and leaves the commit" '[[ $
 git -C "$L" remote set-url origin "$SB/home.git"
 crew tick >/dev/null 2>&1
 check "crew tick ends by pushing what a background push missed" '[[ $(git -C "$L" rev-parse @) == "$(git --git-dir="$SB/home.git" rev-parse main)" ]]'
+git -C "$L" branch -q --unset-upstream
+out=$(crew tick 2>&1)
+check "a tick that can't read origin's branch doesn't stand down" '[[ $out != *"standing down"* && $(cat "$L/host") == tower ]]'
+git -C "$L" branch -q -u origin/main
 # An agent's own edits, through its PostToolUse hook.
 hook() { jq -n --arg p "$1" --arg d "${2:-$HOME}" '{cwd: $d, tool_input: {file_path: $p}}' | crew commit --hook; }
 n=$(git -C "$L" rev-list --count @)

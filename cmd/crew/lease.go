@@ -24,10 +24,16 @@ func (c *Crew) holder() string {
 	return strings.TrimRight(string(b), "\n")
 }
 
-// originHolder is the holder as origin last told this machine, or nothing.
-func (c *Crew) originHolder() string {
-	h, _ := git(c.Home, "show", "@{u}:host")
-	return h
+// originHolder is the holder as origin last told this machine, or nothing (after
+// crew host down, say). ok is false when there's no origin branch to read it
+// from: that says nothing about who holds the lease.
+func (c *Crew) originHolder() (holder string, ok bool) {
+	up, err := git(c.Home, "rev-parse", "--verify", "--quiet", "@{u}")
+	if err != nil {
+		return "", false
+	}
+	h, _ := git(c.Home, "show", up+":host")
+	return h, true
 }
 
 func (c *Crew) leaseSince() string {
@@ -52,7 +58,7 @@ func (c *Crew) previousHolder() string {
 // and no push has found that origin moved it elsewhere.
 func (c *Crew) requireHost() error {
 	if exists(c.leaseLost()) {
-		moved := c.originHolder()
+		moved, _ := c.originHolder()
 		if moved == "" {
 			moved = "another machine"
 		}
