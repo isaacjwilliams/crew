@@ -59,6 +59,13 @@ rm "$H/fish/functions/crew-extra.fish"
 check "--no-fish leaves a dropped fish file alone" '[[ -f $HOME/.config/fish/functions/crew-extra.fish ]]'
 "$H/bin/crew" install --yes >/dev/null 2>&1
 check "the next run with fish removes it" '[[ ! -e $HOME/.config/fish/functions/crew-extra.fish && -f $HOME/.config/fish/functions/lead.fish ]]'
+echo '[Timer]' >"$H/systemd/crew-extra.timer"
+"$H/bin/crew" install --yes >/dev/null 2>&1
+rm "$H/systemd/crew-extra.timer"
+"$H/bin/crew" install --yes --no-services >/dev/null 2>&1
+check "--no-services leaves a dropped unit alone" '[[ -f $HOME/.config/systemd/user/crew-extra.timer ]] && ! grep -q "disable --now crew-extra.timer" "$HOME/systemctl-calls.log"'
+"$H/bin/crew" install --yes >/dev/null 2>&1
+check "the next run with services removes it" '[[ ! -e $HOME/.config/systemd/user/crew-extra.timer ]] && grep -q "disable --now crew-extra.timer" "$HOME/systemctl-calls.log"'
 
 # 6. The AGENTS.md question is asked once. (Without a terminal, `ask` reads EOF,
 #    which counts as the default yes, so a repeated question would apply it.)

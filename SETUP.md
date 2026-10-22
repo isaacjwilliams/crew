@@ -90,7 +90,7 @@ Options:
 | Option | Effect |
 |---|---|
 | `--yes` | Non-interactive |
-| `--no-fish`, `--no-systemd` | Skip those parts |
+| `--no-fish`, `--no-services` | Skip those parts: the fish files, or the crew's services (systemd units) |
 | `--skip-agents-md-setting` | Don't ask about loading `AGENTS.md` |
 
 Open a new fish shell afterwards.

@@ -438,12 +438,12 @@ Order: check dependencies and the Claude Code version (≥ 2.1.281) → agents �
 - **Files are replaced by rename** (`installContent`: a temp file in the same directory, then a rename), never rewritten in place, so a running guard hook never reads a half-written file. A file that differs is backed up first.
 - **A home other than `~/crew`** is substituted into the fish `conf.d` snippet and the systemd services (`renderLines`) *before* comparing, so an unchanged re-run takes no backups.
 - **`~/.claude/settings.json`** is rewritten, after a backup, only when a value crew sets there changes. It keeps its keys in their order (`json.go`).
-- **Stale files** (`prune`): `~/.local/share/agent-crew/manifest` records `component<TAB>path` for every shipped file. After installing a component (`agents`, `fish`, `systemd`), files the previous install of that component shipped and this one doesn't are backed up and removed (systemd units are disabled first). Components skipped with `--no-fish`/`--no-systemd` keep their manifest entries and lose nothing, and only paths under the component's current root are touched.
+- **Stale files** (`prune`): `~/.local/share/agent-crew/manifest` records `component<TAB>path` for every shipped file. After installing a component (`agents`, `fish`, `systemd`), files the previous install of that component shipped and this one doesn't are backed up and removed (systemd units are disabled first). Components skipped with `--no-fish`/`--no-services` keep their manifest entries and lose nothing, and only paths under the component's current root are touched.
 - **The AGENTS.md question** is asked only if the setting is off and the user hasn't declined before (`~/.local/share/agent-crew/agents-md-declined`).
 - **Re-running** is idempotent: a second run with no changes in the home backs nothing up. Backups go to `~/.local/share/agent-crew/backups/<timestamp>/`.
 - **Units** are installed but not enabled: `crew host up` enables them. Install names the ones that are off on this machine.
 
-Flags: `--yes`, `--no-fish`, `--no-systemd`, `--skip-agents-md-setting`.
+Flags: `--yes`, `--no-fish`, `--no-services` (the systemd units), `--skip-agents-md-setting`.
 
 ## Contracts between components
 

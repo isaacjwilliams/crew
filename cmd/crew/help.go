@@ -15,7 +15,7 @@ Setup
                                    with the public one as upstream, and run the crew here
   crew upgrade                     Merge the public repo's new version, install it,
                                    push, and restart the lead's server
-  crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]
+  crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, fish
                                    functions, systemd units (timers not enabled)
   crew project add [PATH]          Register a repo (default: current) with the ledger,

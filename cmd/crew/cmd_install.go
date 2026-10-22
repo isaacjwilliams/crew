@@ -43,19 +43,19 @@ type installer struct {
 }
 
 func cmdInstall(c *Crew, args []string) error {
-	yes, fish, systemd, askAgentsMD := false, true, true, true
+	yes, fish, services, askAgentsMD := false, true, true, true
 	for _, a := range args {
 		switch a {
 		case "--yes", "-y":
 			yes = true
 		case "--no-fish":
 			fish = false
-		case "--no-systemd":
-			systemd = false
+		case "--no-services":
+			services = false
 		case "--skip-agents-md-setting":
 			askAgentsMD = false
 		default:
-			return usage("crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]")
+			return usage("crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]")
 		}
 	}
 	home, err := os.UserHomeDir()
@@ -137,7 +137,7 @@ func cmdInstall(c *Crew, args []string) error {
 		note("open a new fish shell (or: source ~/.config/fish/conf.d/agent-crew.fish)")
 	}
 
-	if systemd {
+	if services {
 		if err := in.installServices(); err != nil {
 			return err
 		}
@@ -260,7 +260,7 @@ func (in *installer) backup(path string) {
 // prune removes the files the last install of a component shipped and this one
 // didn't, running beforeRemove (when there is one) on each first. Run it after the
 // component's installs. It only touches files under root, the component's
-// directory. A component this run skips (--no-fish, --no-systemd) is never
+// directory. A component this run skips (--no-fish, --no-services) is never
 // pruned, so it loses nothing.
 func (in *installer) prune(component, root string, beforeRemove func(path string)) {
 	in.pruned[component] = true
