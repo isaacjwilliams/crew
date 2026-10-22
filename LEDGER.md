@@ -6,8 +6,9 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
 
 ```
 ~/crew/
-  bin/crew               CLI (on PATH via the fish conf.d snippet)
+  bin/crew               the CLI's launcher (on PATH via the fish conf.d snippet)
   bin/crew-guard         PreToolUse hook the agents use
+  bin/release/           the CLI's binary for this machine, from its release (not committed)
   config/defaults.env    every setting, its default and what it does (from upstream)
   config/crew.env        your own settings, over the defaults (caps, branch prefix, PR mode, ...)
   config/*-settings.json permission rules passed to sessions with --settings

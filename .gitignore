@@ -1,4 +1,5 @@
 # Files crew makes in the home on each machine, and the test sandboxes.
+bin/release/
 logs/
 .crew*.lock
 .crew-lease-lost

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Stub curl for tests: serves crew's release binaries from $CREW_TEST_RELEASES
+# (see release_binary in lib.sh) instead of GitHub. Only `curl … -o FILE URL`, the
+# way bin/crew calls it. Every call goes to $HOME/curl-calls.log. A file that isn't
+# there fails like a 404 does with -f (exit 22).
+set -u
+echo "curl $*" >>"$HOME/curl-calls.log"
+out="" url=""
+while (($#)); do
+  case $1 in
+    -o) out=$2; shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+prefix=https://github.com/isaacjwilliams/crew/releases/download/
+[[ $url == "$prefix"* && -f $CREW_TEST_RELEASES/${url#"$prefix"} ]] \
+  || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+cp "$CREW_TEST_RELEASES/${url#"$prefix"}" "$out"

@@ -1,10 +1,10 @@
 # shellcheck shell=bash
 # Shared helpers for the test suites. Sourced, not executed.
 #
-# Every suite runs in a sandbox under tests/.tmp/ (never /tmp: crew-guard always
+# Every suite runs in a sandbox under tests/.tmp/ (never /tmp: the guard always
 # allows writes under /tmp, which would hide write-guard failures), with HOME
-# pointed at the sandbox and stub claude/gh/systemctl binaries first on PATH.
-# Nothing here touches your real ~/.claude, ~/crew or systemd.
+# pointed at the sandbox and stub claude/gh/systemctl/curl binaries first on PATH.
+# Nothing here touches your real ~/.claude, ~/crew or systemd, or the network.
 set -uo pipefail
 
 TESTS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -26,6 +26,19 @@ cleanup_sandboxes() {
 }
 trap cleanup_sandboxes EXIT
 
+# Releases the stub curl serves, laid out like GitHub's download URLs:
+# $RELEASES/v<version>/crew-<os>-<arch>.
+RELEASES=$(new_sandbox releases)
+export CREW_TEST_RELEASES=$RELEASES
+ASSET=crew-$(uname -s)-$(uname -m)
+# release_binary VERSION — builds crew stamped with VERSION, as a release would ship it.
+release_binary() {
+  mkdir -p "$RELEASES/v$1"
+  (cd "$REPO_DIR" && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$1" -o "$RELEASES/v$1/$ASSET" ./cmd/crew) \
+    || { echo "couldn't build crew (is Go installed?)" >&2; exit 2; }
+}
+release_binary "$(cat "$REPO_DIR/VERSION")"
+
 # isolate_home DIR — fake HOME with a git identity, stubs first on PATH, and no
 # leakage of the caller's crew/Claude environment.
 isolate_home() {
@@ -40,17 +53,20 @@ isolate_home() {
   [[ $(command -v claude) == "$TESTS_DIR/stubs/claude" ]] || { echo "refusing to run: stub claude isn't first on PATH" >&2; exit 2; }
   [[ $(command -v gh) == "$TESTS_DIR/stubs/gh" ]] || { echo "refusing to run: stub gh isn't first on PATH" >&2; exit 2; }
   [[ $(command -v wt) == "$TESTS_DIR/stubs/wt" ]] || { echo "refusing to run: stub wt isn't first on PATH" >&2; exit 2; }
+  [[ $(command -v curl) == "$TESTS_DIR/stubs/curl" ]] || { echo "refusing to run: stub curl isn't first on PATH" >&2; exit 2; }
 }
 
-# make_home DIR — a crew home, as a clone of this repo would be: the working files
-# of this checkout (uncommitted changes included), committed to a new git repo.
+# make_home DIR — a crew home, as a clone of this repo would be once it has run:
+# the working files of this checkout (uncommitted changes included), committed to
+# a new git repo, with the binary for its VERSION in bin/release/.
 make_home() {
-  local f
+  local f v
   mkdir -p "$1"
   while IFS= read -r -d '' f; do
     if [[ -e $REPO_DIR/$f ]]; then mkdir -p "$1/$(dirname "$f")"; cp -p "$REPO_DIR/$f" "$1/$f"; fi
   done < <(git -C "$REPO_DIR" ls-files -z --cached --others --exclude-standard)
   git -C "$1" init -q && git -C "$1" add -A && git -C "$1" commit -qm "crew"
+  v=$(cat "$1/VERSION"); mkdir -p "$1/bin/release"; cp "$RELEASES/v$v/$ASSET" "$1/bin/release/crew-$v"
 }
 
 wait_for() {  # 'bash expression' — waits up to 5 seconds for it to hold

@@ -11,6 +11,8 @@
 #   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/remote-control.cwd    the directory `claude remote-control` last ran in
+# It records LEAK CLAUDECODE if crew left that variable set, and LEAK LOCK FD <n> if
+# fd n is open on one of crew's .crew*.lock files.
 # Like the real CLI, `--resume <session> --bg <prompt>` continues that session under
 # its own job ID. It starts a copy under a new session instead, and says so in a
 # `note:` line, if any other launch flag is passed (--agent, --settings, …) or the
@@ -19,8 +21,10 @@
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/claude-calls.log"
-# A background supervisor that inherited crew's lock fds would hold the locks forever.
-for fd in 7 8 9; do [[ -e /proc/$$/fd/$fd ]] && echo "LEAK LOCK FD $fd" >>"$HOME/claude-calls.log"; done
+# A background supervisor that inherited one of crew's locks would hold it forever.
+for fd in /proc/$$/fd/*; do
+  [[ $(readlink "$fd" 2>/dev/null) == */.crew*.lock ]] && echo "LEAK LOCK FD ${fd##*/}" >>"$HOME/claude-calls.log"
+done
 [[ -f $HOME/agents.json ]] || echo '[]' >"$HOME/agents.json"
 
 # --add-dir is variadic in the real CLI: the token after its value must be a flag.

@@ -4,8 +4,11 @@
 
 SB=$(new_sandbox guard)
 isolate_home "$SB/home"
-G=$REPO_DIR/bin/crew-guard
-L=$SB/ledger; mkdir -p "$L"
+# crew's source, for the checks that the agents' prompts agree with it.
+# shellcheck disable=SC2034  # read inside check strings
+SRC=$(cat "$REPO_DIR"/cmd/crew/*.go)
+L=$SB/ledger; make_home "$L"
+G=$L/bin/crew-guard
 M=$SB/main; W=$SB/wt
 git init -q "$M" && git -C "$M" commit -q --allow-empty -m init && git -C "$M" worktree add -q -b agent/x "$W" 2>/dev/null
 
@@ -30,6 +33,13 @@ w block lead "$M" "$M/a"
 w allow lead "$M" "$L/projects/p/tasks/001-x.md"
 w block gardener "$W" "$W/a"
 w allow gardener "$W" "$L/projects/p/proposals/x.md"
+# --- a path is judged by where it leads, and one that can't be worked out is blocked
+ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
+w block worker "$W" "$W/into-home/crew"
+w allow lead "$M" "$SB/ledger-link/p/tasks/001-x.md"
+w block worker "$W" "$W/loop/a.ts"
+printf '{not json' | CREW_HOME=$L "$G" lead >/dev/null 2>&1; rc=$?
+check "hook input that isn't JSON blocks (rc=$rc)" "[[ $rc == 2 ]]"
 
 # --- in the crew home, only the state paths (the ledger) take edits, for every role
 for r in lead worker gardener; do
@@ -38,7 +48,6 @@ for r in lead worker gardener; do
   w allow $r "$d" "$L/reports/x.md"
   for f in bin/crew agents/lead.md config/defaults.env lead/.claude/settings.json; do w block $r "$d" "$L/$f"; done
 done
-check "crew-guard's state paths are crew's" '[[ $(grep -m1 "^STATE_PATHS=" "$G") == $(grep -m1 "^STATE_PATHS=" "$REPO_DIR/bin/crew") ]]'
 tracked=$(git -C "$REPO_DIR" ls-files -- projects reports config/crew.env host)
 check "VERSION holds a semantic version" 'grep -qxE "[0-9]+\.[0-9]+\.[0-9]+" "$REPO_DIR/VERSION"'
 check "the repo tracks no state: nothing under projects/ but .gitkeep, no reports/, config/crew.env or host (got: ${tracked//$'\n'/ })" '[[ $tracked == projects/.gitkeep ]]'
@@ -52,7 +61,6 @@ check "no agent hooks Bash" "! grep -q 'matcher: \"Bash\"' $REPO_DIR/agents/*.md
 # --- the lead and workers inherit every tool, MCP servers included, so their settings carry the guard
 #     too: settings hooks also fire for the subagents they spawn, which their frontmatter hooks don't cover.
 A=$REPO_DIR/agents; C=$REPO_DIR/config; LS=$REPO_DIR/lead/.claude/settings.json
-mkdir -p "$L/bin" && ln -sf "$G" "$L/bin/crew-guard"
 # s EXPECT ROLE PATH: run the settings file's hook command the way Claude Code would, from the worktree
 s() {
   local exp=$1 role=$2 p=$3 cmd json rc got f
@@ -90,7 +98,7 @@ for f in "$LS" "$C/worker-settings.json"; do
 done
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
-check "a goal lead gets the lead's settings without their agent" "grep -qF 'jq -c '\''del(.agent)'\'' \"\$CREW_HOME/lead/.claude/settings.json\"' $REPO_DIR/bin/crew"
+check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'o.del(\"agent\")' <<<\"\$SRC\""
 for f in worker readonly; do
   check "$f: network left open" "jq -e >/dev/null '.permissions.allow | index(\"WebFetch(domain:*)\")' $C/$f-settings.json"
 done
@@ -113,7 +121,7 @@ check "implementer answers every kind of review comment with crew reply, and pos
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
 check "implementer has the sections crew's stack prompts name" \
-  "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' $C/../bin/crew && grep -q 'Stacked tasks.. in your instructions' $C/../bin/crew"
+  "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' <<<\"\$SRC\" && grep -q 'Stacked tasks.. in your instructions' <<<\"\$SRC\""
 check "implementer records the new base only after pushing the restack" \
   "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
 check "lead restacks with crew restack and never edits base or depends_on to force a dispatch" \
@@ -134,9 +142,9 @@ check "the tick service stops only crew when a run ends, so the workers it resum
   "grep -qx 'KillMode=process' $REPO_DIR/systemd/crew-tick.service"
 L_UNIT=$REPO_DIR/systemd/crew-lead.service
 check "the lead service runs crew serve, restarts it, and leaves it stopped when serve exits 3 (not the host)" \
-  "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -qx 'EXIT_NOT_HOST=3' $REPO_DIR/bin/crew"
+  "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -q 'exitNotHost = 3' <<<\"\$SRC\""
 check "crew followup's prompt, not the worker, decides whether a review round gets replies" \
-  "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in the round with' $C/../bin/crew"
+  "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in the round with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \
   "grep -q '~/.claude/CLAUDE.md. with their taste' $A/implementer.md && ! grep -q '^## Engineering standards' $A/implementer.md"
 check "plan-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C commands the lead allows" \
@@ -152,7 +160,7 @@ check "lead relays answers to a finished worker with crew followup, not SendMess
   "grep -q 'Only if .crew followup. refuses' $A/lead.md"
 # --- the plan is where structure gets decided, so it has to be visible there and in what reaches the user
 check "the brief has a Structure section that crew ready requires and the lead shows on its own line" \
-  "grep -qx '## Structure' $C/../templates/task.md && grep -q '\"## Structure\"' $C/../bin/crew && grep -q 'Give structure its own line' $A/lead.md"
+  "grep -qx '## Structure' $C/../templates/task.md && grep -q '\"## Structure\"' <<<\"\$SRC\" && grep -q 'Give structure its own line' $A/lead.md"
 check "the lead quotes the user's own words in the Goal" \
   "grep -q 'own description of the problem, quoted' $C/../templates/task.md && grep -q 'own description of the problem, quoted' $A/lead.md"
 check "design findings a worker declines because the brief settles them reach the user" \

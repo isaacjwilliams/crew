@@ -1,0 +1,62 @@
+# Builds crew's binaries and publishes them as a GitHub release when a version
+# tag (v<version>) is pushed. bin/crew, the launcher in every crew home,
+# downloads them from that release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Only the public repo publishes releases: a private crew home that pushes a
+    # tag never builds one.
+    if: github.repository == 'isaacjwilliams/crew'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gh takes the release notes from the tag's message, so the annotated tag
+      # itself has to be here, not just the commit it points at.
+      - name: Fetch the tag
+        run: git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+
+      - name: Check that VERSION is the tag's version
+        run: |
+          version=$(cat VERSION)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::VERSION says $version, but the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The suites need bash, git, jq and util-linux (flock, setsid, script), which
+      # the runner has, and fish, which it hasn't.
+      - name: Install what the test suites need
+        run: sudo apt-get update && sudo apt-get install -y fish jq
+
+      # Lint stays a local check: it needs the claude CLI.
+      - name: Test
+        run: |
+          go test ./...
+          tests/run.sh guard crew-e2e host
+
+      - name: Build the Linux binaries
+        run: |
+          version=$(cat VERSION)
+          mkdir dist
+          for arch in amd64:x86_64 arm64:aarch64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch%%:*}" go build -trimpath \
+              -ldflags "-X main.version=$version" -o "dist/crew-Linux-${arch#*:}" ./cmd/crew
+          done
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag dist/*

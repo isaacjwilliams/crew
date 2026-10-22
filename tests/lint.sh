@@ -2,12 +2,19 @@
 # Static checks. Uses the REAL claude only for `plugin validate` (no model call).
 . "$(dirname "$0")/lib.sh"
 cd "$REPO_DIR" || exit 2
-scripts=(bin/crew bin/crew-guard tests/*.sh tests/stubs/*)
+launchers=(bin/crew bin/crew-guard)
+scripts=(tests/*.sh tests/stubs/*)
 
+for f in "${launchers[@]}"; do check "sh -n $f" "sh -n '$f'"; done
 for f in "${scripts[@]}"; do check "bash -n $f" "bash -n '$f'"; done
 if command -v shellcheck >/dev/null; then
-  check "shellcheck" 'shellcheck -S warning -x "${scripts[@]}"'
+  check "shellcheck" 'shellcheck -S warning -x "${launchers[@]}" "${scripts[@]}"'
 else echo "  (skipped shellcheck: not installed)"; fi
+unformatted=$(gofmt -l cmd)
+check "gofmt (unformatted: ${unformatted//$'\n'/ })" '[[ -z $unformatted ]]'
+check "go vet" 'go vet ./...'
+check "go vet for macOS" 'GOOS=darwin go vet ./...'
+check "go test" 'go test ./... >/dev/null'
 if command -v fish >/dev/null; then
   for f in fish/*/*.fish; do check "fish syntax $f" "fish --no-execute '$f'"; done
 else echo "  (skipped fish syntax: fish not installed)"; fi
