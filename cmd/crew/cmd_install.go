@@ -1,9 +1,10 @@
 package main
 
 // crew install puts this machine's files in place: the agents in ~/.claude/agents/,
-// the fish files in ~/.config/fish/, and the systemd units (installed, not
-// enabled). Re-running it is safe. A file is replaced only when it differs, after
-// a backup, and by rename, so a running crew-guard hook never reads half a file.
+// the fish files in ~/.config/fish/, and the crew's services, installed but not
+// enabled (services_linux.go and services_darwin.go). Re-running it is safe. A
+// file is replaced only when it differs, after a backup, and by rename, so a
+// running crew-guard hook never reads half a file.
 // A file an earlier install shipped and this one doesn't is backed up and
 // removed. The manifest of what was shipped, and the backups, live in
 // ~/.local/share/agent-crew/.
@@ -24,7 +25,7 @@ import (
 )
 
 // The tools crew runs: what crew doctor checks, here and on the PATH of the
-// enabled units.
+// enabled services.
 var runtimeTools = []string{"git", "gh", "claude", "curl"}
 
 const minClaude = "2.1.281"
@@ -42,19 +43,19 @@ type installer struct {
 }
 
 func cmdInstall(c *Crew, args []string) error {
-	yes, fish, systemd, askAgentsMD := false, true, true, true
+	yes, fish, services, askAgentsMD := false, true, true, true
 	for _, a := range args {
 		switch a {
 		case "--yes", "-y":
 			yes = true
 		case "--no-fish":
 			fish = false
-		case "--no-systemd":
-			systemd = false
+		case "--no-services":
+			services = false
 		case "--skip-agents-md-setting":
 			askAgentsMD = false
 		default:
-			return usage("crew install [--yes] [--no-fish] [--no-systemd] [--skip-agents-md-setting]")
+			return usage("crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]")
 		}
 	}
 	home, err := os.UserHomeDir()
@@ -67,8 +68,8 @@ func cmdInstall(c *Crew, args []string) error {
 	if b, err := os.ReadFile(filepath.Join(in.state, "manifest")); err == nil {
 		in.old = splitLines(string(b))
 	}
-	// The fish and systemd files name ~/crew, the usual home. Only a home elsewhere
-	// needs its path written into them.
+	// The fish files name ~/crew, the usual home. Only a home elsewhere needs its
+	// path written into them.
 	custom := c.Home != filepath.Join(home, "crew")
 
 	say("Checking dependencies")
@@ -80,7 +81,7 @@ func cmdInstall(c *Crew, args []string) error {
 	}
 	if len(missing) > 0 {
 		note("missing: %s", strings.Join(missing, " "))
-		note("on CachyOS: sudo pacman -S --needed git github-cli fish curl")
+		note("%s", installTools)
 		note("Claude Code: curl -fsSL https://claude.ai/install.sh | bash   (or 'claude update')")
 	}
 	if v, ok := claudeVersion(); ok {
@@ -99,7 +100,7 @@ func cmdInstall(c *Crew, args []string) error {
 		}
 		note("%s", strings.TrimSuffix(filepath.Base(f), ".md"))
 	}
-	in.prune("agents", filepath.Join(home, ".claude/agents"))
+	in.prune("agents", filepath.Join(home, ".claude/agents"), nil)
 
 	// Hooks find crew-guard through CREW_HOME, and so do sessions that run crew.
 	say("Crew home: %s", c.Home)
@@ -132,33 +133,18 @@ func cmdInstall(c *Crew, args []string) error {
 				return err
 			}
 		}
-		in.prune("fish", filepath.Join(home, ".config/fish"))
+		in.prune("fish", filepath.Join(home, ".config/fish"), nil)
 		note("open a new fish shell (or: source ~/.config/fish/conf.d/agent-crew.fish)")
 	}
 
-	if systemd {
-		say("Installing the crew's systemd units → ~/.config/systemd/user/")
-		units, _ := filepath.Glob(c.path("systemd", "*"))
-		for _, f := range units {
-			var content []byte
-			if strings.HasSuffix(f, ".service") && custom {
-				content = renderLines(f, func(l string) string {
-					if strings.HasPrefix(l, "# Environment=CREW_HOME=") {
-						return "Environment=CREW_HOME=" + c.Home
-					}
-					return strings.ReplaceAll(l, "%h/crew", c.Home)
-				})
-			}
-			if err := in.installContent("systemd", f, content, filepath.Join(home, ".config/systemd/user", filepath.Base(f))); err != nil {
-				return err
-			}
+	if services {
+		if err := in.installServices(); err != nil {
+			return err
 		}
-		in.prune("systemd", filepath.Join(home, ".config/systemd/user"))
-		exec.Command("systemctl", "--user", "daemon-reload").Run()
 		var off []string
-		for _, u := range crewUnits {
-			if !unitEnabled(u) {
-				off = append(off, u)
+		for _, s := range crewServices {
+			if !serviceEnabled(s) {
+				off = append(off, s)
 			}
 		}
 		if len(off) > 0 {
@@ -187,10 +173,6 @@ func cmdInstall(c *Crew, args []string) error {
 	}
 	say("Done (crew %s)", version)
 	return nil
-}
-
-func unitEnabled(unit string) bool {
-	return exec.Command("systemctl", "--user", "is-enabled", "--quiet", unit).Run() == nil
 }
 
 // claudeVersion is what `claude --version` says, if claude is installed.
@@ -276,18 +258,19 @@ func (in *installer) backup(path string) {
 }
 
 // prune removes the files the last install of a component shipped and this one
-// didn't. Run it after the component's installs. It only touches files under
-// root, the component's directory. A component this run skips (--no-fish,
-// --no-systemd) is never pruned, so it loses nothing.
-func (in *installer) prune(component, root string) {
+// didn't, running beforeRemove (when there is one) on each first. Run it after the
+// component's installs. It only touches files under root, the component's
+// directory. A component this run skips (--no-fish, --no-services) is never
+// pruned, so it loses nothing.
+func (in *installer) prune(component, root string, beforeRemove func(path string)) {
 	in.pruned[component] = true
 	for _, row := range in.old {
 		comp, path, _ := strings.Cut(row, "\t")
 		if comp != component || !strings.HasPrefix(path, root+"/") || !isFile(path) || in.shipped[path] {
 			continue
 		}
-		if component == "systemd" {
-			exec.Command("systemctl", "--user", "disable", "--now", filepath.Base(path)).Run()
+		if beforeRemove != nil {
+			beforeRemove(path)
 		}
 		in.backup(path)
 		os.Remove(path)

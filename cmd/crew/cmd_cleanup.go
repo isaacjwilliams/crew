@@ -71,9 +71,7 @@ func cmdCleanup(c *Crew, args []string) error {
 			continue
 		}
 		if wt != "" && isDir(wt) {
-			if err := stopProcessesIn(wt); err != nil {
-				warn("%v", err)
-			}
+			stopProcessesIn(wt)
 			removed, err := p.worktreeRemove(wt, force, p.worktreeLog(t))
 			if err != nil {
 				return err

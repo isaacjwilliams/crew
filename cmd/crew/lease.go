@@ -10,9 +10,6 @@ import (
 	"strings"
 )
 
-// The machines' units: crew host up enables them, and handing over disables them.
-var crewUnits = []string{"crew-tick.timer", "crew-gardener.timer", "crew-lead.service"}
-
 // leaseLost is made by a push that found on origin that another machine claimed
 // the lease. requireHost refuses every change while it exists; the next crew tick
 // stands this machine down and removes it, as does crew host up.

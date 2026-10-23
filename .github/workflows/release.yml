@@ -11,10 +11,24 @@ permissions:
   contents: write
 
 jobs:
+  # The shell suites need Linux. On a Mac, the Go tests check the parsing they
+  # share with Linux, and that the macOS code builds and runs.
+  test-macos:
+    if: github.repository == 'isaacjwilliams/crew'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test ./...
+
   release:
     # Only the public repo publishes releases: a private crew home that pushes a
     # tag never builds one.
     if: github.repository == 'isaacjwilliams/crew'
+    needs: test-macos
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,13 +61,17 @@ jobs:
           go test ./...
           tests/run.sh guard crew-e2e host
 
-      - name: Build the Linux binaries
+      # Named crew-<uname -s>-<uname -m>, which is what bin/crew asks for. Go signs
+      # the darwin/arm64 binary ad hoc, which Apple silicon needs, even when
+      # cross-compiling.
+      - name: Build the binaries
         run: |
           version=$(cat VERSION)
           mkdir dist
-          for arch in amd64:x86_64 arm64:aarch64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH="${arch%%:*}" go build -trimpath \
-              -ldflags "-X main.version=$version" -o "dist/crew-Linux-${arch#*:}" ./cmd/crew
+          for target in linux:amd64:Linux-x86_64 linux:arm64:Linux-aarch64 darwin:arm64:Darwin-arm64 darwin:amd64:Darwin-x86_64; do
+            IFS=: read -r os arch name <<<"$target"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-X main.version=$version" -o "dist/crew-$name" ./cmd/crew
           done
 
       - name: Publish the release

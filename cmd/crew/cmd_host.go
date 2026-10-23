@@ -49,7 +49,7 @@ func cmdHost(c *Crew, args []string) error {
 }
 
 // hostUp runs the crew on this machine: it installs, claims the lease, clones the
-// projects this machine has no clone of, and enables the units.
+// projects this machine has no clone of, and enables the services.
 func (c *Crew) hostUp(take bool) error {
 	if !gitOK(c.Home, "remote", "get-url", "origin") {
 		return fail("the home has no origin to claim the lease through")
@@ -63,8 +63,8 @@ func (c *Crew) hostUp(take bool) error {
 	}
 	note("crew runs on %s", c.Host)
 	c.cloneMissingProjects()
-	c.setUnits("enable")
-	note("enabled %s", strings.Join(crewUnits, " "))
+	enableServices()
+	note("enabled %s", strings.Join(crewServices, " "))
 	c.runSelf(os.Stdout, "doctor")
 	return nil
 }
@@ -156,13 +156,6 @@ func (c *Crew) cloneMissingProjects() {
 	}
 }
 
-// setUnits enables or disables the crew's systemd units, now.
-func (c *Crew) setUnits(action string) {
-	if exec.Command("systemctl", append([]string{"--user", action, "--now"}, crewUnits...)...).Run() != nil {
-		warn("couldn't %s %s (systemctl --user)", action, strings.Join(crewUnits, " "))
-	}
-}
-
 // stopCrewJobs stops every background session crew started on this machine.
 func (c *Crew) stopCrewJobs() {
 	for _, a := range c.agents() {
@@ -197,7 +190,7 @@ func (c *Crew) hostDown(force bool) error {
 		}
 		return fail("these worktrees have work origin doesn't; have their workers push, or use --force")
 	}
-	c.setUnits("disable")
+	disableServices()
 	c.stopCrewJobs()
 	// The push may have to take the ledger lock to rebase.
 	c.unlock()

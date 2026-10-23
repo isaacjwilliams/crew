@@ -97,23 +97,16 @@ func cmdDoctor(c *Crew, args []string) error {
 	for _, dir := range []string{c.Settings["WORK_ROOT"], c.path("lead")} {
 		d.check(dir+" trusted", trusted(home, dir), "cd "+dir+" && claude, accept, /exit")
 	}
-	// A unit runs crew with the PATH its service sets, not your shell's, so a tool
-	// your shell finds through its config (mise, nvm, ...) can be missing there.
-	fmt.Println("Enabled units")
-	for _, u := range crewUnits {
-		if !unitEnabled(u) {
+	// A service runs crew with the PATH it sets, not your shell's, so a tool your
+	// shell finds through its config (mise, nvm, ...) can be missing there.
+	fmt.Println("Enabled services")
+	for _, s := range crewServices {
+		if !serviceEnabled(s) {
 			continue
 		}
-		svc := strings.TrimSuffix(u, filepath.Ext(u)) + ".service" // crew-tick.timer starts crew-tick.service
-		out, _ := exec.Command("systemctl", "--user", "show", svc, "-p", "Environment", "--value").Output()
-		path := ""
-		for _, kv := range strings.Fields(string(out)) {
-			if v, ok := strings.CutPrefix(kv, "PATH="); ok {
-				path = v
-			}
-		}
+		service, path, fix := c.servicePath(s)
 		for _, t := range runtimeTools {
-			d.check(svc+" finds "+t, onPath(t, path), "add its directory to PATH: systemctl --user edit "+svc)
+			d.check(service+" finds "+t, onPath(t, path), fix)
 		}
 	}
 	fmt.Println("AGENTS.md loading")

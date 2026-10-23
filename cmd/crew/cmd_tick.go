@@ -3,7 +3,7 @@ package main
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments, send review rounds and restacks to idle
 // workers, mark tasks that wait on the user, clean up merged ones, and dispatch
-// and close goals. The crew-tick timer runs it every few minutes; the lead runs
+// and close goals. The crew-tick service runs it every few minutes; the lead runs
 // it too. It prints one line per thing it did.
 //
 // Every step is a crew command run as a process of its own, so one that refuses
@@ -252,14 +252,15 @@ func (c *Crew) leaseTakenElsewhere() (holder string, taken bool) {
 }
 
 // standDown: another machine has claimed the lease, so this one steps back: its
-// units off, its sessions stopped, what origin lacks kept on lost/<host>-<time>,
-// and its home reset to origin. Run with the tick lock held.
+// sessions stopped, what origin lacks kept on lost/<host>-<time>, its home reset
+// to origin, and its services off. Run with the tick lock held. The services go
+// off last, so a stand-down that fails on the way leaves the tick on to try
+// again.
 func (c *Crew) standDown(holder string) error {
 	if holder == "" {
 		holder = "no machine"
 	}
 	fmt.Printf("crew now runs on %s; standing down here\n", holder)
-	c.setUnits("disable")
 	c.stopCrewJobs()
 	if err := c.takeLock(); err != nil {
 		return err
@@ -278,7 +279,8 @@ func (c *Crew) standDown(holder string) error {
 		return err
 	}
 	os.Remove(c.leaseLost())
-	fmt.Println("stood down: units disabled, crew sessions stopped, home reset to origin")
+	fmt.Println("stood down: crew sessions stopped, home reset to origin, services disabled")
+	disableServices()
 	return nil
 }
 

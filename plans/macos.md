@@ -66,7 +66,7 @@ Don't reopen these.
 - **A plist in `~/Library/LaunchAgents/` loads at the next login,** unless it's disabled. `crew install` must leave the jobs off, as it leaves the units off on Linux. So:
   - the shipped plists carry `Disabled` true;
   - `crew host up` runs `launchctl enable gui/<uid>/<label>` and then `launchctl bootstrap gui/<uid> <plist>`;
-  - `crew host down` and the stand-down run `launchctl bootout` and then `launchctl disable`, so the job stays off after a reboot.
+  - `crew host down` and the stand-down run `launchctl disable`, so the job stays off after a reboot, and then `launchctl bootout`.
   - `bootstrap` fails on a job that's already loaded. Treat that as done, not as an error.
 - **launchd doesn't reread a plist file.** When `crew install` changes the plist of a loaded job, it must boot the job out and bootstrap it again. That is launchd's `daemon-reload`.
   - For `crew-lead`, this restarts the lead's server, which `crew upgrade` does anyway.
@@ -142,3 +142,12 @@ Don't reopen these.
 ## Progress
 
 - 2026-10-22: the plan written. The user settled its three open questions (plist files in `launchd/`, `--no-services`, a broad default `PATH` and edits to the home's plists); they're in Decisions. Step 1 is next.
+- 2026-10-22: step 1 done on branch `macos`: `services_linux.go`, `services_darwin.go` (stubs), `machine_*.go`. The doctor's heading is "Enabled services" now, on both systems. Step 2 is next.
+- 2026-10-22: step 2 done: `--no-services`, with a `tests/host.sh` check. Step 3 is next.
+- 2026-10-22: step 3 done: `scutil --get LocalHostName` on a Mac. Step 4 is next.
+- 2026-10-22: step 4 done: `proc.go` (the choice and the parsing, shared by both systems), `proc_darwin.go` runs `ps` and `lsof`. The samples in `proc_test.go` are from the man pages; swap in real output in step 9. Step 5 is next.
+- 2026-10-22: step 5 done: `launchd/*.plist`, `services_darwin.go`, the rendering and plist reader in `services.go`, and `services_test.go` (each plist against its unit, rendering, the reader). Two things beyond the plan, both in `services_darwin.go`: booting a job out can end crew when crew runs in it (the tick's own stand-down, say), so the bootout is the last thing crew asks for a job: `crew-tick` is turned off last, after the rest of the stand-down, and a reload's bootout and bootstrap run in a shell of their own; and `servicePath` reads the installed plist already, which is step 6's doctor half. Step 6 (the install hint) is next.
+- 2026-10-22: step 6 done: `installTools` in `machine_*.go`. Step 7 is next.
+- 2026-10-22: step 7 done: four binaries, and a `test-macos` job that publishing needs. No actionlint here: checked by reading, by parsing the YAML, and by running the build loop locally (the darwin/arm64 binary has `LC_CODE_SIGNATURE`). Step 8 is next.
+- 2026-10-22: step 8's docs done (SETUP.md has an "On a Mac" section; ARCHITECTURE.md has M1–M8; CLAUDE.md, tests/README.md, README.md, help). The oldest macOS is 13 Ventura: Claude Code needs 13.0+, Go 1.25 needs 12. The VERSION commit is next, then step 9 is the user's.
+- 2026-10-22: `VERSION` 0.3.0. Step 9 is the user's: review, merge, release `v0.3.0`, then M1–M8 on the Mac.
