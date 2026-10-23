@@ -227,8 +227,8 @@ One pass over every project, run by `crew-tick.timer` every 3 minutes, by the le
 ```
 crew tick
   ├─ git fetch origin (soft). origin's host names another machine, and this one held the lease
-  │    → stand down: units disabled, crew-* sessions stopped, unpushed ledger work kept on
-  │      lost/<host>-<time>, home reset to origin; nothing else happens
+  │    → stand down: crew-* sessions stopped, unpushed ledger work kept on
+  │      lost/<host>-<time>, home reset to origin, units disabled; nothing else happens
   ├─ require_host: this machine holds the lease, or the tick stops
   ├─ crew sync --all
   ├─ for each task:
@@ -315,7 +315,7 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 
 **Losing it** (another machine ran `crew host up --take`):
 1. This machine's next background push is rejected, finds origin's `host` names the other machine, and creates `.crew-lease-lost`. From then on this machine refuses every change.
-2. Its next `crew tick` fetches, sees the same, and stands down: its units off, its `crew-*` sessions stopped, what origin lacks kept on a branch `lost/<host>-<time>`, and the home reset to origin. That removes `.crew-lease-lost`, as a later `crew host up` would.
+2. Its next `crew tick` fetches, sees the same, and stands down: its `crew-*` sessions stopped, what origin lacks kept on a branch `lost/<host>-<time>`, the home reset to origin, and its units off. That removes `.crew-lease-lost`, as a later `crew host up` would. The units go off last, so a stand-down that fails on the way leaves the tick on, and the next tick tries again.
 
 **Carrying on, on the new machine:** its `crew tick` gives a working task whose worker and worktree aren't there a fresh worker (`movedHere`, `crew followup --fresh`). `crew followup` and `crew restack` recreate a missing worktree from `origin/<branch>`, or start over from `origin/<base>` when the branch was never pushed.
 

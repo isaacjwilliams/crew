@@ -252,14 +252,14 @@ func (c *Crew) leaseTakenElsewhere() (holder string, taken bool) {
 }
 
 // standDown: another machine has claimed the lease, so this one steps back: its
-// units off, its sessions stopped, what origin lacks kept on lost/<host>-<time>,
-// and its home reset to origin. Run with the tick lock held.
+// sessions stopped, what origin lacks kept on lost/<host>-<time>, its home reset
+// to origin, and its units off. Run with the tick lock held. The units go off
+// last, so a stand-down that fails on the way leaves the tick on to try again.
 func (c *Crew) standDown(holder string) error {
 	if holder == "" {
 		holder = "no machine"
 	}
 	fmt.Printf("crew now runs on %s; standing down here\n", holder)
-	disableServices()
 	c.stopCrewJobs()
 	if err := c.takeLock(); err != nil {
 		return err
@@ -278,7 +278,8 @@ func (c *Crew) standDown(holder string) error {
 		return err
 	}
 	os.Remove(c.leaseLost())
-	fmt.Println("stood down: units disabled, crew sessions stopped, home reset to origin")
+	fmt.Println("stood down: crew sessions stopped, home reset to origin, units disabled")
+	disableServices()
 	return nil
 }
 

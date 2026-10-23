@@ -148,6 +148,10 @@ tower "$TH/bin/crew" log 1 "a late decision" >/dev/null 2>&1
 check "a background push origin rejects for a lease moved elsewhere marks it lost" 'wait_for "[[ -e $TH/.crew-lease-lost ]]" && grep -q "crew runs on laptop now" "$TH/logs/push.log"'
 out=$(tower "$TH/bin/crew" log 1 "another" 2>&1)
 check "and the next change there is refused" '[[ $out == *"crew has moved to laptop"* ]]'
+git -C "$TH" branch lost   # a branch named lost leaves no room for lost/…, so the stand-down fails
+out=$(tower "$TH/bin/crew" tick 2>&1)
+check "a stand-down that fails on the way leaves the tick on to try again" '[[ $out == *"standing down"* && $out != *"stood down"* ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && [[ -e $TH/.crew-lease-lost ]]'
+git -C "$TH" branch -q -D lost
 out=$(tower "$TH/bin/crew" tick 2>&1)
 lost=$(git -C "$TH" branch --list "lost/tower-*" --format="%(refname:short)")
 check "the old host's next tick stands down: units off, crew sessions stopped" '[[ $out == *"standing down"* ]] && grep -q "disable --now crew-tick.timer crew-gardener.timer crew-lead.service" "$SB/tower/systemctl-calls.log" && ! grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx "claude stop job1" "$SB/tower/claude-calls.log"'
