@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- crew lead: the lead's Remote Control server, which you open from Claude
+     Mobile. The Mac's twin of systemd/crew-lead.service. launchd expands
+     nothing, so crew install writes your crew home and your home directory into
+     the paths below. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>crew-lead</string>
+	<!-- Off until crew host up turns it on, so it doesn't start at the next login. -->
+	<key>Disabled</key>
+	<true/>
+	<key>ProgramArguments</key>
+	<array>
+		<string>%h/crew/bin/crew</string>
+		<string>serve</string>
+	</array>
+	<!-- A job never reads your shell config, so PATH lists the usual places for
+	     crew's tools, mise's shims and Homebrew's among them. To add one, edit
+	     this file in your home, commit it, and run crew install. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>%h/crew/bin:%h/.local/bin:%h/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>CREW_HOME</key>
+		<string>%h/crew</string>
+	</dict>
+	<!-- Started again 30 seconds after it stops, until crew host down (or a
+	     stand-down) turns it off. Unlike systemd, launchd can't leave it stopped
+	     when crew serve exits 3 on a machine that doesn't run the crew: it
+	     exits 3 again at once, every 30 seconds, until the next tick here
+	     stands this machine down. -->
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<!-- Stop only the server's own process, so the workers its sessions started
+	     keep running (as for crew tick). -->
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>%h/crew/logs/crew-lead.log</string>
+	<key>StandardErrorPath</key>
+	<string>%h/crew/logs/crew-lead.log</string>
+</dict>
+</plist>

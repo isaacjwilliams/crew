@@ -1,12 +1,12 @@
 # agent-crew
 
-Source for a personal Claude Code agent setup: six agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, gardener), the `crew` CLI (Go, in `cmd/crew/`) with its write guard, fish integration, systemd units, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
+Source for a personal Claude Code agent setup: six agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, gardener), the `crew` CLI (Go, in `cmd/crew/`) with its write guard, fish integration, systemd units and their launchd twins for a Mac, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
 
 Read `ARCHITECTURE.md` before any structural change. It has the design principles, the flows, and the **Contracts** table of cross-file dependencies. `SETUP.md` is the user-facing guide; `tests/README.md` explains the test harness.
 
 ## Safety rules for working in this repo
 
-- **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/agent-ledger/` (the ledger of the old installer, kept as an archive), `~/.config/fish/`, `~/.config/systemd/user/`. The user's home takes changes from this repo with `crew upgrade`.
+- **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/agent-ledger/` (the ledger of the old installer, kept as an archive), `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
 - **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
 - **Never run `claude remote-control`**, not even with `--help`: it may start a server. Read https://code.claude.com/docs/en/remote-control.md instead.
 - **Never push this repo, or create GitHub repos,** unless the user asks: nothing here is public until they publish it.
@@ -32,7 +32,8 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
 - **Shipped code** is Go, standard library only, plus fish, and two `sh` files in `bin/`: the launcher `crew` and the hook forwarder `crew-guard`.
   - Runtime dependencies are git, gh, claude, fish and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add third-party Go modules, Python or Node.
   - `gofmt` and `go vet` are the Go lint. Keep shellcheck clean at `-S warning` for `bin/` and `tests/`.
-  - Linux is the reference, but the macOS build must compile: Linux-only code goes in a `_linux.go` file, with a `_darwin.go` beside it.
+  - Linux is the reference, and crew runs on macOS too. Code that runs a system's own tools goes in a `_linux.go` file with a `_darwin.go` beside it; the parsing and choices around it go in a neutral file, so `go test` on Linux covers them. The shell suites are Linux-only; the release workflow runs `go test` on macOS.
+  - **Services** are `systemd/` units on Linux and `launchd/` plists on a Mac, one plist per `.service`. `services_linux.go` and `services_darwin.go` define the same functions and are the only places crew runs `systemctl` or `launchctl`; callers never branch on the system. A change to a unit needs the same change to its plist: `services_test.go` checks that they agree.
   - Binaries are never committed. A release's workflow builds them (`.github/workflows/release.yml`), and `bin/crew` downloads the one for the home's `VERSION` into the gitignored `bin/release/`.
   - A command returns its refusal as an error: `fail` (exit 1), `notYet` (exit 4, a dispatch that only has to wait) or `exitQuietly(code)`. `warn` is for what doesn't stop it.
 - **`crew tick`** only runs other `crew` commands, each as a process of its own (`step`), so a refusal skips one step and not the rest. Give it new duties as `crew` commands first.
@@ -63,7 +64,7 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
   - Frontmatter field names are exact and camelCase (`disallowedTools`, `initialPrompt`, …). Unknown fields are silently ignored, so check the subagent docs.
 - **`crew install`** must stay safe to re-run.
   - It changes nothing tracked in the home (it writes the gitignored `lead/.claude/settings.local.json`), and backs up anything it replaces or removes to `~/.local/share/agent-crew/backups/`.
-  - It discovers what to ship from the source dirs, so a new file under `agents/`, `fish/` or `systemd/` is installed automatically, and one you delete is removed on the next run. New files still need a line in the ARCHITECTURE.md layout table.
+  - It discovers what to ship from the source dirs, so a new file under `agents/`, `fish/`, `systemd/` or `launchd/` is installed automatically, and one you delete is removed on the next run. New files still need a line in the ARCHITECTURE.md layout table.
 - **Ledger commits** (`commit`) take only the state paths (`statePaths`), never the home's code or config.
 - **`--add-dir` is variadic** in the Claude CLI. Never place it immediately before a positional prompt.
 

@@ -360,9 +360,7 @@ func (c *Crew) retireGoal(p *Project, g Goal, st GoalStatus) error {
 		return fail("goal lead %s is still running; stop it in claude agents, then try again", job)
 	}
 	if co != "" && isDir(co) {
-		if err := stopProcessesIn(co); err != nil {
-			warn("%v", err)
-		}
+		stopProcessesIn(co)
 		if gitDo(p.Repo(), "worktree", "remove", "--force", co) != nil {
 			warn("couldn't remove %s", co)
 		}

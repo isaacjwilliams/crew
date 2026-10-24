@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- crew tick: route PR comments, restacks and cleanups without waiting to be
+     asked. The Mac's twin of systemd/crew-tick.service and crew-tick.timer.
+     launchd expands nothing, so crew install writes your crew home and your
+     home directory into the paths below. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>crew-tick</string>
+	<!-- Off until crew host up turns it on, so it doesn't start at the next login. -->
+	<key>Disabled</key>
+	<true/>
+	<key>ProgramArguments</key>
+	<array>
+		<string>%h/crew/bin/crew</string>
+		<string>tick</string>
+	</array>
+	<!-- A job never reads your shell config, so PATH lists the usual places for
+	     crew's tools, mise's shims and Homebrew's among them. To add one, edit
+	     this file in your home, commit it, and run crew install. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>%h/crew/bin:%h/.local/bin:%h/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>CREW_HOME</key>
+		<string>%h/crew</string>
+	</dict>
+	<!-- Every 3 minutes. Runs missed while the Mac slept become one when it wakes. -->
+	<key>StartInterval</key>
+	<integer>180</integer>
+	<!-- A tick can start the daemon that runs claude's background sessions.
+	     Leave it, and the workers it resumed, running when the run ends. -->
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>Nice</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>%h/crew/logs/crew-tick.log</string>
+	<key>StandardErrorPath</key>
+	<string>%h/crew/logs/crew-tick.log</string>
+</dict>
+</plist>

@@ -30,7 +30,7 @@ complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcomman
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
 complete -c crew -n "__fish_seen_subcommand_from install" -l yes -d 'Answer yes to every question'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-fish -d 'Leave the fish files alone'
-complete -c crew -n "__fish_seen_subcommand_from install" -l no-systemd -d 'Leave the systemd units alone'
+complete -c crew -n "__fish_seen_subcommand_from install" -l no-services -d "Leave the crew's services alone"
 complete -c crew -n "__fish_seen_subcommand_from install" -l skip-agents-md-setting -d "Don't ask about AGENTS.md loading"
 complete -c crew -n "__fish_seen_subcommand_from project; and not __fish_seen_subcommand_from $project_cmds" -a "$project_cmds"
 complete -c crew -n "__fish_seen_subcommand_from project; and __fish_seen_subcommand_from add" -F

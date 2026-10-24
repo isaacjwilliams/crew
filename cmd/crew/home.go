@@ -41,7 +41,7 @@ func checkoutOfBinary() string {
 type Crew struct {
 	Home     string
 	Settings Settings // config/defaults.env, then the person's config/crew.env
-	Host     string   // this machine's name: CREW_HOST, else its short hostname
+	Host     string   // this machine's name: CREW_HOST, else machineName()
 
 	ledgerLock *os.File // held from lock until unlock or the end of the process
 	login      string   // the GitHub login crew acts for, once looked up
@@ -55,8 +55,7 @@ func newCrew() (*Crew, error) {
 	// So the sessions, hooks and wt runs crew starts find it too.
 	os.Setenv("CREW_HOME", c.Home)
 	if c.Host == "" {
-		h, _ := os.Hostname()
-		c.Host, _, _ = strings.Cut(h, ".")
+		c.Host = machineName()
 	}
 	// Every setting has its default in defaults.env; config/crew.env holds the person's own.
 	c.Settings = Settings{}
@@ -69,6 +68,13 @@ func newCrew() (*Crew, error) {
 		}
 	}
 	return c, nil
+}
+
+// shortHostname is the hostname up to its first dot.
+func shortHostname() string {
+	h, _ := os.Hostname()
+	h, _, _ = strings.Cut(h, ".")
+	return h
 }
 
 func (c *Crew) path(parts ...string) string {
