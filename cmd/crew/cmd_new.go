@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -152,8 +151,7 @@ func (c *Crew) fromTemplate(name, path string, vals map[string]string) error {
 func (c *Crew) nextNumber(kind, proj string) int {
 	max := 0
 	for _, f := range c.files(kind, proj) {
-		lead, _, _ := strings.Cut(filepath.Base(f), "-")
-		if n, err := strconv.Atoi(lead); err == nil && allDigits.MatchString(lead) && n > max {
+		if n, ok := fileNumber(f); ok && n > max {
 			max = n
 		}
 	}

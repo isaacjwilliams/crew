@@ -1,17 +1,19 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // files lists the ledger files of a kind (tasks, goals or proposals) in a project,
-// or in every project when project is empty, in order.
+// or in every project when project is empty. They're ordered by project, then by
+// number, so 1000-… comes after 999-….
 func (c *Crew) files(kind, project string) []string {
 	if project == "" {
 		project = "*"
@@ -23,8 +25,19 @@ func (c *Crew) files(kind, project string) []string {
 			files = append(files, m)
 		}
 	}
-	sort.Strings(files)
+	slices.SortFunc(files, func(a, b string) int {
+		na, _ := fileNumber(a)
+		nb, _ := fileNumber(b)
+		return cmp.Or(cmp.Compare(filepath.Dir(a), filepath.Dir(b)), cmp.Compare(na, nb), cmp.Compare(a, b))
+	})
 	return files
+}
+
+// fileNumber is the NNN of a file named NNN-….md, if it has one.
+func fileNumber(f string) (int, bool) {
+	lead, _, _ := strings.Cut(filepath.Base(f), "-")
+	n, err := strconv.Atoi(lead)
+	return n, err == nil && allDigits.MatchString(lead)
 }
 
 func (c *Crew) tasks(project string) []Task {
