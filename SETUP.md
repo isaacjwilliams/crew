@@ -209,6 +209,7 @@ Two details:
 
 ```fish
 lead            # new session, from any directory; opens with a short briefing
+lead "<request>" # the same, starting on your request after a briefing of what needs you
 lead -c         # continue the most recent lead conversation
 lead -r         # pick an earlier conversation to continue
 ```
@@ -221,6 +222,8 @@ One lead covers every project you've registered. It runs in `~/crew/lead`, whose
 - `lead -c` opens the wrong conversation. It takes the most recent one in `~/crew/lead`. Use `lead -r` to choose.
 
 Every lead session is named `lead`. If one is already running, Claude Code gives the new one a variant of that name.
+
+**Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles plan-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` and `MAX_IN_FLIGHT` count across every lead and project, so raise them in `config/crew.env` if they hold back work you're ready to review.
 
 A typical exchange:
 

@@ -62,7 +62,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 
 | In this repo | Installed to | Role |
 |---|---|---|
-| `agents/lead.md` | `~/.claude/agents/` | Lead system prompt, tool denylist, `initialPrompt` briefing (terminal sessions only), write-guard hook (role `lead`) |
+| `agents/lead.md` | `~/.claude/agents/` | Lead system prompt, tool denylist, `initialPrompt` briefing (terminal sessions only; cut to what needs input when a request follows it), write-guard hook (role `lead`) |
 | `agents/implementer.md` | `~/.claude/agents/` | Worker prompt: first-run and review-round workflows, stop-and-ask rules; GitHub allowances; tool denylist; write-guard hook (role `worker`) |
 | `agents/casual-observer.md` | `~/.claude/agents/` | Read-only reviewer: context budget, what to flag, output format; Sonnet, medium effort |
 | `agents/plan-reviewer.md` | `~/.claude/agents/` | Read-only plan reviewer: gets only the task file path; reads the code at the task's base on `origin`; runs in the background (`background: true`); the structural questions, report format; Opus, high effort |
@@ -562,6 +562,7 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
   - M8: L6, the failover drill, between the Linux machine and the Mac, both ways. On the Mac, the stand-down runs inside `crew-tick` and its last step boots that job out, which ends the tick: `~/crew/logs/crew-tick.log` says "stood down", the home is reset, `.crew-lease-lost` is gone, and `launchctl print gui/$(id -u)/crew-tick` fails.
 - **Releases** have been made since v0.1.0, which checked the Linux side of what follows. `bin/crew` fetches `https://github.com/isaacjwilliams/crew/releases/download/v<version>/crew-<uname -s>-<uname -m>`, GitHub's documented download URL for a release asset, with `curl -fsSL` (which follows GitHub's redirect to its storage). `.github/workflows/release.yml` assumes `actions/checkout@v4` and `actions/setup-go@v5` (with `go-version-file`), that fish installs on `ubuntu-latest`, and that `gh release create --notes-from-tag` reads the annotated tag's message from the local clone, hence the explicit fetch of the tag. Not yet checked: the `macos-latest` job and the Darwin binaries, which v0.3.0 is the first to have.
 - **Settings and instructions for the lead in `lead/`:** a project's `"agent"` setting picks a session's agent; `permissions.additionalDirectories` and `PreToolUse` hooks apply to sessions a `remote-control` server starts (checked live on 2026-10-20). From the docs, not live: `claudeMdExcludes` (absolute-path globs, any settings layer) keeps a CLAUDE.md out of a session, and CLAUDE.md files in parent directories load by default, hence the exclude for the home's `CLAUDE.md`. `auto` can't come from a project settings file, so the mode is passed on the command line (`LEAD_PERMISSION_MODE`).
+- **`initialPrompt` is prepended to a prompt given on the command line** (`lead "<request>"`), and can't be skipped. From the `sub-agents` docs, not live. The lead's `initialPrompt` tells it to start on a request that follows.
 - **Background sessions don't show on Claude Mobile** (checked live on 2026-10-20). The phone sees workers only through the lead.
 - **Cloud sessions were ruled out** for the lead: they load no user-level agents or plugins, run on throwaway machines, and have no `--bg`.
 
