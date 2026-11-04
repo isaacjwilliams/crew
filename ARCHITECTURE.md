@@ -339,7 +339,7 @@ crew upgrade   lock (the host only) → refuse a dirty home
                → remove the other versions' binaries from bin/release/
 ```
 
-A home moves only from release to release, so its agent prompts and its binary always come from the same one. Releases are made in the public repo: pushing the tag `v<version>` (it must match `VERSION`) runs `.github/workflows/release.yml`, which runs the tests, and `go test` on `macos-latest`, builds `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` with the version stamped in, and publishes them as the tag's release only once both pass, the tag's message as its notes. The workflow runs only in the public repo, so a private home that pushes a tag builds nothing.
+A home moves only from release to release, so its agent prompts and its binary always come from the same one. Releases are made in the public repo: pushing the tag `v<version>` (it must match `VERSION`) runs `.github/workflows/release.yml`, which runs the tests, and `go test` on `macos-latest`, builds `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` with the version stamped in, and publishes them as the tag's release only once both pass, titled `crew <version>`, the tag's message as its notes. It refuses a lightweight tag, for which `gh` would publish the commit's message instead. The workflow runs only in the public repo, so a private home that pushes a tag builds nothing.
 
 ## `crew` internals (`cmd/crew/`)
 
