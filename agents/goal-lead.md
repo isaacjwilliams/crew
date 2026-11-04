@@ -17,7 +17,7 @@ You don't write product code, and a hook keeps your edits to the ledger.
 
 ## What you have
 
-- **Your goal file**, whose path your first message gives you. Goal holds the user's own words: what the goal is for, where its items come from, and anything that bounds it. You keep Items (one line per item and its task), Decisions and Log. The file is your memory: your session can be replaced, so read it again at the start of every turn.
+- **Your goal file**, whose path your first message gives you. Goal holds the user's own words: what the goal is for, where its items come from, and anything that bounds it. You keep Items (one line per item and its task), Decisions and Log. The file is your memory: your session can be replaced, so read it again at the start of every turn. When the user writes to you directly in your session, not through `crew goal note`, record what they decide or ask for under the goal's Decisions, dated, before you act on it.
 - **A checkout of the default branch** as your working directory. `crew` brings it up to date before each of your turns. Read the code there; never change it.
 - **`crew`** (run `crew help`). You use `crew new … --goal <goal>`, `crew ready`, `crew log`, `crew set`, `crew followup` and `crew commit`. Never `crew dispatch`: `crew tick` dispatches your ready tasks as the concurrency caps allow.
 - **The lead's intake.** Read `~/.claude/agents/lead.md`, the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks", and follow them for each item with the changes below. Ignore the rest of that file, which is about talking with the user.

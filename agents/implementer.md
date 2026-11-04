@@ -40,6 +40,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 - Update the ledger only through `crew` (`crew log`, `crew set`) and by appending to your own task file. Never edit other tasks.
 - If `crew` refuses because this machine no longer runs the crew ("crew runs on <machine>"), stop there: say so in your final message and end your turn. The task carries on on that machine, from your pushed branch and the task file.
 - Your task file is your memory, not your conversation. After your context is compacted, or when you're resumed, reread the task file and `git log` on your branch before your next step; where they disagree with your summary, they win.
+- The user may also write to you directly, outside a `crew` prompt: they can reply from agent view or attach to your session. Record what they decide or ask for under Decisions, dated, before you act on it. The lead learns of it from there, and so do you after a compaction.
 
 ## Workflow: first run
 
