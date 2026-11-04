@@ -94,14 +94,15 @@ out=$(crew tick 2>&1)
 check "a tick that can't read origin's branch doesn't stand down" '[[ $out != *"standing down"* && $(cat "$L/host") == tower ]]'
 git -C "$L" branch -q -u origin/main
 # An agent's own edits, through its PostToolUse hook.
-hook() { jq -n --arg p "$1" --arg d "${2:-$HOME}" '{cwd: $d, tool_input: {file_path: $p}}' | crew commit --hook; }
-n=$(git -C "$L" rev-list --count @)
+hook() { jq -n --arg t "$1" '{tool_name: $t, tool_input: {command: "python3 - <<EOF"}}' | crew commit --hook; }
 echo "- [ ] A question from the hook test" >>"$F1"
-check "an agent's edit to a task file is committed by its hook, and pushed" 'hook "$F1" && [[ $(git -C "$L" log -1 --format=%s) == "edit projects/$P/tasks/001-saved-search-filters.md" ]] && pushed'
-echo "more" >>"$L/reports/note.md"
-check "a relative path is read against the hook's cwd" 'hook reports/note.md "$L" && [[ $(git -C "$L" log -1 --format=%s) == "edit reports/note.md" ]]'
+check "an agent's edit to a task file is committed by its hook, and pushed" 'hook Edit && [[ $(git -C "$L" log -1 --format=%s) == "edit projects/$P/tasks/001-saved-search-filters.md" ]] && pushed'
+echo "more" >>"$L/reports/note.md"; echo "- [ ] Another question" >>"$F1"
+check "a script that edits two ledger files through Bash is committed as one edit" 'hook Bash && [[ $(git -C "$L" log -1 --format=%s) == "edit 2 files" ]] && git -C "$L" diff --quiet @'
 n=$(git -C "$L" rev-list --count @)
-check "an edit outside the ledger is left alone" 'hook "$SB/webapp/AGENTS.md" && hook "$L/config/defaults.env" && [[ $(git -C "$L" rev-list --count @) == "$n" ]]'
+echo "# a local change" >>"$L/config/defaults.env"
+check "a call that changed nothing in the ledger commits nothing, and leaves the home's own files alone" 'hook Bash && [[ $(git -C "$L" rev-list --count @) == "$n" ]] && ! git -C "$L" diff --quiet -- config/defaults.env'
+git -C "$L" checkout -q -- config/defaults.env
 check "malformed hook JSON exits 0" 'echo "{not json" | crew commit --hook && crew commit --hook </dev/null'
 
 

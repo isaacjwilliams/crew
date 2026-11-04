@@ -49,7 +49,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|NotebookEdit",
+        "matcher": "Edit|Write|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",

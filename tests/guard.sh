@@ -94,7 +94,7 @@ for f in "$LS" "$C"/*-settings.json; do
   check "${f#"$REPO_DIR"/}: no sandbox" "jq -e >/dev/null '.sandbox == null' $f"
 done
 for f in "$LS" "$C/worker-settings.json"; do
-  check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit or Write" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
+  check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit, Write or Bash call" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit|Bash\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
 done
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
