@@ -38,6 +38,14 @@ jobs:
       - name: Fetch the tag
         run: git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
 
+      # For a lightweight tag, gh would publish the commit's message as the notes.
+      - name: Check that the tag is annotated
+        run: |
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]; then
+            echo "::error::$GITHUB_REF_NAME is a lightweight tag. Its message is the release notes: tag with git tag -a"
+            exit 1
+          fi
+
       - name: Check that VERSION is the tag's version
         run: |
           version=$(cat VERSION)
@@ -77,4 +85,4 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag dist/*
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "crew $(cat VERSION)" --notes-from-tag dist/*
