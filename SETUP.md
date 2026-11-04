@@ -245,7 +245,7 @@ Each worker is a row named `crew-<project>-<task>`. You'll see:
 - **Needs input** when a worker has a question or a permission prompt;
 - a `#123` link once its PR exists.
 
-Keys: `Space` peeks and lets you reply without leaving the list, `Enter` attaches, `←` detaches. Answering a worker directly here is fine; it records decisions in its task file.
+Keys: `Space` peeks and lets you reply without leaving the list, `Enter` attaches, `←` detaches. Talking to a worker directly here is fine: it records what you decide or ask for under its task's Decisions, so the lead sees it too.
 
 ### Let `crew tick` keep things moving
 
