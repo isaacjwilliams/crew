@@ -3,11 +3,9 @@ package main
 // The commands that read and write ledger files directly.
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -227,51 +225,42 @@ func cmdCommit(c *Crew, args []string) error {
 	return nil
 }
 
-// commitHook is a PostToolUse hook, after an agent's Edit or Write: an edit to the
-// ledger is committed (and so pushed) at once, as crew's own changes are. Any other
-// file is left alone. It reads the hook JSON from in.
+// commitHook is a PostToolUse hook, after an agent's Edit, Write or Bash call:
+// whatever the call changed in the ledger is committed (and so pushed) at once,
+// as crew's own changes are. Agents often edit the ledger with a script run
+// through Bash, so the hook asks git what changed rather than reading a path
+// from the hook JSON on in.
 func (c *Crew) commitHook(in io.Reader) {
-	var hook struct {
-		Cwd       string `json:"cwd"`
-		ToolInput struct {
-			FilePath     string `json:"file_path"`
-			NotebookPath string `json:"notebook_path"`
-		} `json:"tool_input"`
-	}
-	if json.NewDecoder(in).Decode(&hook) != nil {
+	io.Copy(io.Discard, in)
+	if len(c.ledgerChanges()) == 0 {
 		return
 	}
-	p := hook.ToolInput.FilePath
-	if p == "" {
-		p = hook.ToolInput.NotebookPath
-	}
-	if p == "" {
+	if c.lock() != nil {
 		return
 	}
-	if !filepath.IsAbs(p) {
-		cwd := hook.Cwd
-		if cwd == "" {
-			cwd, _ = os.Getwd()
-		}
-		p = filepath.Join(cwd, p)
+	switch changed := c.ledgerChanges(); len(changed) {
+	case 0: // a crew command committed them meanwhile
+	case 1:
+		c.commit("edit " + changed[0])
+	default:
+		c.commit(fmt.Sprintf("edit %d files", len(changed)))
 	}
-	path, err1 := canonical(p)
-	home, err2 := canonical(c.Home)
-	if err1 != nil || err2 != nil {
-		return
+}
+
+// ledgerChanges lists the files under the state paths that differ from the
+// last commit, relative to the home.
+func (c *Crew) ledgerChanges() []string {
+	out, err := git(c.Home, append([]string{"status", "--porcelain", "-z", "-uall", "--no-renames", "--"}, statePaths...)...)
+	if err != nil {
+		return nil
 	}
-	rel, ok := strings.CutPrefix(path, home+"/")
-	if !ok {
-		return
-	}
-	for _, s := range statePaths {
-		if strings.HasPrefix(rel, s+"/") {
-			if c.lock() == nil {
-				c.commit("edit " + rel)
-			}
-			return
+	var changed []string
+	for _, entry := range strings.Split(out, "\x00") {
+		if len(entry) > 3 {
+			changed = append(changed, entry[3:])
 		}
 	}
+	return changed
 }
 
 // crew proposals [--all]

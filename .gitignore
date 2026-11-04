@@ -6,5 +6,7 @@ logs/
 projects/*/local.env
 lead/.claude/settings.local.json
 tests/.tmp/
-# What a stray `go build` in cmd/crew/ leaves; releases are built by the workflow.
+# What a stray `go build` leaves, at the root or in cmd/crew/; releases are built by
+# the workflow.
+/crew
 /cmd/crew/crew

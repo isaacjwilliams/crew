@@ -94,7 +94,7 @@ for f in "$LS" "$C"/*-settings.json; do
   check "${f#"$REPO_DIR"/}: no sandbox" "jq -e >/dev/null '.sandbox == null' $f"
 done
 for f in "$LS" "$C/worker-settings.json"; do
-  check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit or Write" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
+  check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit, Write or Bash call" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit|Bash\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
 done
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
@@ -138,6 +138,10 @@ check "collaborators' comments wait for the user: the lead asks, and workers lea
   "grep -q 'never acted on without the user' $A/lead.md && grep -q 'quote a collaborator.s PR comment are for the user' $A/implementer.md"
 check "the lead runs crew tick at the start of a session and for status, so rounds and restacks go out without the timer" \
   "grep -q '^initialPrompt: .*crew tick; crew status' $A/lead.md && grep -q 'run .crew tick. and then .crew status.' $A/lead.md"
+check "a request given when the lead starts replaces the wait after its briefing" \
+  "grep -q '^initialPrompt: .*If my request follows, .*start on the request. Otherwise wait for me.' $A/lead.md"
+check "the lead knows other lead sessions may run beside it, rereads a task file before acting on it, and doesn't pick up drafts on its own" \
+  "grep -q 'several lead sessions at once' $A/lead.md && grep -q 'Reread a task file right before you change it or act on it' $A/lead.md && grep -q 'pick up a draft on your own' $A/lead.md && ! grep -q 'single point of contact' $A/lead.md"
 check "the tick service stops only crew when a run ends, so the workers it resumed keep running" \
   "grep -qx 'KillMode=process' $REPO_DIR/systemd/crew-tick.service"
 L_UNIT=$REPO_DIR/systemd/crew-lead.service
