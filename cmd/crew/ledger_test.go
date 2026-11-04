@@ -212,6 +212,26 @@ func TestResolveIn(t *testing.T) {
 	}
 }
 
+func TestFilesAreInNumberOrder(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	for _, f := range []string{"a/tasks/1000-x", "a/tasks/101-x", "a/tasks/100-x", "a/tasks/999-x", "b/tasks/002-x", "b/tasks/1001-x"} {
+		p := c.path("projects", f+".md")
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, nil, 0o644)
+	}
+	var got []string
+	for _, f := range c.files("tasks", "") {
+		got = append(got, filepath.Base(filepath.Dir(filepath.Dir(f)))+"/"+(Doc{f}).ID())
+	}
+	want := "a/100-x a/101-x a/999-x a/1000-x b/002-x b/1001-x"
+	if strings.Join(got, " ") != want {
+		t.Errorf("files = %v, want %s", got, want)
+	}
+	if n := c.nextNumber("tasks", "a"); n != 1001 {
+		t.Errorf("nextNumber = %d, want 1001", n)
+	}
+}
+
 // questions_routed holds what POSIX cksum printed for the questions, so the
 // checksum mustn't change.
 func TestCksum(t *testing.T) {
