@@ -76,11 +76,14 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    hook JSON on stdin (always exits 0)
 
 Goals  (GOAL = id, number, unique substring, or file path)
-  crew goal new "<title>" [--project P]
-                                   Create a draft goal; prints its path
+  crew goal new "<title>" [--max-in-flight N] [--project P]
+                                   Create a draft goal; prints its path. N is how many
+                                   of its tasks may be in flight at once (default
+                                   GOAL_MAX_IN_FLIGHT)
   crew goal start GOAL             Start its goal lead, which plans every item
   crew goal note GOAL TEXT         Record your words under the goal's Decisions and
                                    pass them to its goal lead
+  crew goal cap GOAL N             Let N of the goal's tasks be in flight at once
   crew goal followup GOAL          Resume the goal lead with your unsent notes and its
                                    workers' new questions (run by crew tick)
   crew goal done GOAL              Close a goal whose tasks are all merged or abandoned

@@ -8,6 +8,7 @@ lead_name:
 lead_job:
 lead_session:
 unsent_notes: 0
+max_in_flight:
 created: {{NOW}}
 updated: {{NOW}}
 ---

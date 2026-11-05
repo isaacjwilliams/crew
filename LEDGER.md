@@ -47,7 +47,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
-"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. `MAX_IN_FLIGHT` caps how many tasks can be in flight at once, and `MAX_WORKERS` caps how many worker sessions can be running at once. A task stacked on another in-flight task isn't counted, so a stack takes one place.
+"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
 
 ## Front-matter keys (task files)
 
@@ -57,7 +57,7 @@ Front matter is flat `key: value`. Edit it with `crew set` rather than by hand w
 
 ## Goals
 
-A goal is a batch of items, listed in its file or on a tracker, that the user hands the crew to work through without them. `crew goal start` launches its **goal lead**, a background session that writes and plan-reviews a brief for every item and marks each one `ready`. `crew tick` dispatches those as `MAX_WORKERS` and `MAX_IN_FLIGHT` allow. An item the goal lead shouldn't decide alone is **parked**: its task stays `draft`, with the question under Open questions for you.
+A goal is a batch of items, listed in its file or on a tracker, that the user hands the crew to work through without them. `crew goal start` launches its **goal lead**, a background session that writes and plan-reviews a brief for every item and marks each one `ready`. `crew tick` dispatches those as `MAX_WORKERS` and the goal's `max_in_flight` allow. Every task of the goal that's in flight counts toward `max_in_flight`, each task of a stack too. An item the goal lead shouldn't decide alone is **parked**: its task stays `draft`, with the question under Open questions for you.
 
 | status | meaning | set by |
 |---|---|---|
@@ -66,7 +66,7 @@ A goal is a batch of items, listed in its file or on a tracker, that the user ha
 | `done` | every task merged or abandoned; goal lead and checkout removed | `crew goal done` (and so `crew tick`) |
 | `abandoned` | stopped; goal lead and checkout removed, tasks left as they are | `crew goal abandon` |
 
-Front-matter keys: `id`, `title`, `project`, `status`, `checkout` (the goal lead's working directory), `lead_name`, `lead_job`, `lead_session` (its session, like a worker's three identifiers), `unsent_notes` (your notes the goal lead hasn't been sent yet; written by `crew` only), `created`, `updated`. Sections: Goal (your words, including where the items come from), Items (written by the goal lead), Decisions (your notes from `crew goal note`, and the goal lead's own calls), Log.
+Front-matter keys: `id`, `title`, `project`, `status`, `checkout` (the goal lead's working directory), `lead_name`, `lead_job`, `lead_session` (its session, like a worker's three identifiers), `unsent_notes` (your notes the goal lead hasn't been sent yet; written by `crew` only), `max_in_flight` (how many of its tasks may be in flight at once; empty means `GOAL_MAX_IN_FLIGHT`; set by `crew goal new --max-in-flight` and `crew goal cap`), `created`, `updated`. Sections: Goal (your words, including where the items come from), Items (written by the goal lead), Decisions (your notes from `crew goal note`, and the goal lead's own calls), Log.
 
 The goal lead hears about two things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, and new questions from its tasks' workers. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
 

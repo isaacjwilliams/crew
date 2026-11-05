@@ -65,7 +65,7 @@ check "checkout moves the lead's copy to a new commit on the remote" '[[ $(git -
 git pull -q --ff-only   # the clone the tasks use catches up with that push
 check "a home without crew.env runs on the defaults" '[[ ! -e $L/config/crew.env && $(crew config BRANCH_PREFIX) == agent/ && $(crew config MAX_WORKERS) == 3 ]]'
 echo 'MAX_WORKERS=7' >"$L/config/crew.env"
-check "crew.env overrides the defaults" '[[ $(crew config MAX_WORKERS) == 7 && $(crew config MAX_IN_FLIGHT) == 5 ]]'
+check "crew.env overrides the defaults" '[[ $(crew config MAX_WORKERS) == 7 && $(crew config GOAL_MAX_IN_FLIGHT) == 3 ]]'
 echo 'MAX_WORKERS=2' >>"$PE"
 check "project.env overrides crew.env" '[[ $(crew config MAX_WORKERS) == 2 ]]'
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
@@ -299,8 +299,6 @@ work() {  # worktree file — what a worker does: commit and push its branch
 }
 last_prompt() { grep -- "--resume" "$HOME/claude-calls.log" | tail -1; }
 echo OPEN >"$HOME/gh-pr-state"
-inflight() { crew status | sed -n 's/.*tasks in flight: \([0-9]*\).*/\1/p'; }
-n0=$(inflight)
 F9=$(crew new "Season model" --branch season-model); fill "$F9"; crew ready 9 >/dev/null
 setstate "done" null; crew dispatch 9 >/dev/null; WT9=$(crew get 9 worktree)
 check "an unstacked task records the commit it started from" '[[ $(crew get 9 base_sha) == "$(git rev-parse origin/main)" ]]'
@@ -309,15 +307,10 @@ check "--on bases the task on its parent's branch and keeps the dependency" '[[ 
 setstate "done" null; out=$(crew dispatch 10 2>&1)
 check "a stacked task waits until its parent's branch is on origin" '[[ $out == *"on origin yet"* && $(crew get 10 status) == ready && -z $(crew get 10 worktree) ]]'
 work "$WT9" model.txt; crew set 9 pr https://github.com/isaac/webapp/pull/21; crew set 9 status pr-open
-echo "MAX_IN_FLIGHT=$((n0 + 1))" >>"$PD/project.env"
-check "a pushed, unmerged parent is enough to dispatch, even at the in-flight cap" 'crew dispatch 10 >/dev/null 2>&1'
+check "a pushed, unmerged parent is enough to dispatch" 'crew dispatch 10 >/dev/null 2>&1'
 WT10=$(crew get 10 worktree); T9=$(tip season-model)
 check "the stacked worktree starts on the parent's tip, which is recorded" '[[ $(git -C "$WT10" rev-parse HEAD) == "$T9" && $(crew get 10 base_sha) == "$T9" ]]'
 check "the worker is told which task and PR it is stacked on" 'grep -q "stacked on task 009-season-model (PR #21): agent/season-model" "$HOME/claude-calls.log"'
-check "a stack counts once against MAX_IN_FLIGHT" '[[ $(inflight) == $((n0 + 1)) ]]'
-setstate "done" null
-check "an unstacked task still stops at the in-flight cap" 'fill "$F7"; crew ready 7 >/dev/null; ! crew dispatch 7 >/dev/null 2>&1'
-sed -i '/^MAX_IN_FLIGHT=/d' "$PD/project.env"
 work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; crew set 10 status pr-open
 out=$(crew status)
 check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                 pr-open "* ]]'
@@ -496,6 +489,12 @@ last_launch() {  # the latest --bg call, with every line of its prompt
 echo OPEN >"$HOME/gh-pr-state"; setstate "done" null
 GF=$(crew goal new "Ship the season page"); G=001-ship-the-season-page
 check "goal new creates a draft goal" '[[ $GF == "$PD/goals/$G.md" && $(gget "$GF" status) == draft && $(crew goal path 1) == "$GF" ]]'
+check "goal new leaves max_in_flight to GOAL_MAX_IN_FLIGHT unless told" '[[ -z $(gget "$GF" max_in_flight) ]]'
+n=$(ls "$PD/goals" | wc -l)
+check "goal new refuses a --max-in-flight that isn't a whole number" '! crew goal new "Bad cap" --max-in-flight two 2>/dev/null && [[ $(ls "$PD/goals" | wc -l) == "$n" ]]'
+GF2=$(crew goal new "Capped goal" --max-in-flight 2)
+check "goal new --max-in-flight sets the goal's max_in_flight" '[[ $(gget "$GF2" max_in_flight) == 2 ]]'
+crew goal abandon "$GF2" >/dev/null
 check "goal start refuses a goal without the user's words" '! crew goal start 1 2>/dev/null && [[ $(gget "$GF" status) == draft ]]'
 sed -i '/^## Goal$/a "Ship every card in the Season column." (tracker: the Season column)' "$GF"
 out=$(crew goal start 1); GJ=$(gget "$GF" lead_job); CO=$(gget "$GF" checkout)
@@ -509,14 +508,24 @@ NG=$(crew new "Not in a goal"); fill "$NG"; crew ready "$NG" >/dev/null
 check "new --goal makes the task one of the goal's" '[[ $(crew get "$GT1" goal) == "$G" && -z $(crew get "$NG" goal) ]]'
 check "new --goal refuses a goal that doesn't exist" '! crew new "Stray" --goal 9 2>/dev/null'
 sed -i '/^## Open questions$/a - [ ] Add a standings table? It needs a migration. I recommend yes.' "$GT2"
-check "status lists the goal with its tasks under it, and a parked task's open questions" '[[ $(crew status) == *"goal $G"*"running"*"0 of 2 task(s) merged"$'"'"'\n'"'"'"    $T1"*$'"'"'\n'"'"'"    $T2"*"draft"*"1 open question(s)"* ]]'
+check "status lists the goal with its tasks under it, and a parked task's open questions" '[[ $(crew status) == *"goal $G"*"running"*"0 of 2 task(s) merged, 0/3 in flight"$'"'"'\n'"'"'"    $T1"*$'"'"'\n'"'"'"    $T2"*"draft"*"1 open question(s)"* ]]'
 fill "$GT1"; crew ready "$GT1" >/dev/null
+crew goal cap 1 0 >/dev/null
+out=$(crew tick 2>&1)
+check "goal cap sets max_in_flight, and a goal task over it waits without a word" '[[ $(gget "$GF" max_in_flight) == 0 && $out != *"$T1"* && $(crew get "$GT1" status) == ready ]]'
+check "goal cap refuses a value that isn't a whole number" '! crew goal cap 1 -1 2>/dev/null && ! crew goal cap 1 two 2>/dev/null && [[ $(gget "$GF" max_in_flight) == 0 ]]'
+crew goal cap 1 1 >/dev/null
 echo "MAX_WORKERS=0" >>"$L/config/crew.env"
 out=$(crew tick 2>&1)
 check "a goal task held back by a cap waits without a word" '[[ $out != *"$T1"* && $(crew get "$GT1" status) == ready ]]'
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
 out=$(crew tick 2>&1)
 check "tick dispatches a running goal's ready task, and no other ready task" '[[ $out == *"$T1: dispatched for goal $G"* && $(crew get "$GT1" status) == working && $(crew get "$NG" status) == ready ]]'
+GS=$(crew new "Season header styles" --goal "$GF" --on "$GT1"); fill "$GS"; crew ready "$GS" >/dev/null
+out=$(crew dispatch "$GS" 2>&1); code=$?
+check "a task stacked on one of its goal's counts against the goal's max_in_flight" '[[ $code == 4 && $out == *"goal $G already has 1 task(s) in flight (max_in_flight 1)"* && $(crew get "$GS" status) == ready ]]'
+check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(crew status) == *"goal $G"*"0 of 3 task(s) merged, 1/1 in flight"* ]]'
+crew set "$GS" status abandoned >/dev/null; crew goal cap 1 3 >/dev/null
 # The stub's PR has comments of its own; none of these tests are about them.
 crew set "$GT1" feedback_since 2099-01-01T00:00:00Z; crew set "$GT1" status needs-input
 sed -i '/^## Open questions$/a - [ ] @bob commented on PR #40, comment 77 — [link](u77)' "$GT1"

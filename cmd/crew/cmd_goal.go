@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,10 +24,10 @@ func cmdGoal(c *Crew, args []string) error {
 	switch sub {
 	case "new":
 		return c.goalNew(args)
-	case "start", "note", "followup", "done", "abandon", "path":
+	case "start", "note", "cap", "followup", "done", "abandon", "path":
 		if len(args) == 0 {
-			return usage(map[string]string{"start": "crew goal start GOAL", "note": "crew goal note GOAL TEXT", "followup": "crew goal followup GOAL",
-				"done": "crew goal done GOAL", "abandon": "crew goal abandon GOAL", "path": "crew goal path GOAL"}[sub])
+			return usage(map[string]string{"start": "crew goal start GOAL", "note": "crew goal note GOAL TEXT", "cap": "crew goal cap GOAL N",
+				"followup": "crew goal followup GOAL", "done": "crew goal done GOAL", "abandon": "crew goal abandon GOAL", "path": "crew goal path GOAL"}[sub])
 		}
 		g, err := c.resolveGoal(args[0])
 		if err != nil {
@@ -37,6 +38,8 @@ func cmdGoal(c *Crew, args []string) error {
 			return c.goalStart(g)
 		case "note":
 			return c.goalNote(g, strings.Join(args[1:], " "))
+		case "cap":
+			return c.goalCap(g, args[1:])
 		case "followup":
 			return c.goalFollowup(g)
 		case "done":
@@ -47,15 +50,15 @@ func cmdGoal(c *Crew, args []string) error {
 		fmt.Println(g.Path)
 		return nil
 	}
-	return usage("crew goal new|start|note|followup|done|abandon|path … (see 'crew help')")
+	return usage("crew goal new|start|note|cap|followup|done|abandon|path … (see 'crew help')")
 }
 
-// crew goal new "<title>" [--project P]
+// crew goal new "<title>" [--max-in-flight N] [--project P]
 func (c *Crew) goalNew(args []string) error {
-	var title, proj string
+	var title, proj, maxInFlight string
 	for len(args) > 0 {
-		if args[0] == "--project" && len(args) > 1 {
-			proj, args = args[1], args[2:]
+		if flag := map[string]*string{"--project": &proj, "--max-in-flight": &maxInFlight}[args[0]]; flag != nil && len(args) > 1 {
+			*flag, args = args[1], args[2:]
 			continue
 		}
 		if title == "" {
@@ -66,7 +69,10 @@ func (c *Crew) goalNew(args []string) error {
 		args = args[1:]
 	}
 	if title == "" {
-		return usage(`crew goal new "<title>" [--project P]`)
+		return usage(`crew goal new "<title>" [--max-in-flight N] [--project P]`)
+	}
+	if _, ok := parseMaxInFlight(maxInFlight); maxInFlight != "" && !ok {
+		return fail("--max-in-flight must be a whole number, not '%s'", maxInFlight)
 	}
 	if proj == "" {
 		var err error
@@ -92,6 +98,9 @@ func (c *Crew) goalNew(args []string) error {
 		"ID": id, "TITLE": strings.ReplaceAll(title, `"`, "'"), "PROJECT": proj, "NOW": now(),
 	}); err != nil {
 		return err
+	}
+	if maxInFlight != "" {
+		g.Set("max_in_flight", maxInFlight)
 	}
 	g.Log("created")
 	c.commit("new goal " + proj + "/" + id)
@@ -213,6 +222,58 @@ func (c *Crew) goalNote(g Goal, text string) error {
 		fmt.Println("recorded under Decisions; crew tick passes it to the goal lead once it's free")
 	}
 	return nil
+}
+
+// crew goal cap GOAL N: sets how many of the goal's tasks may be in flight at
+// once. Raising it lets crew tick dispatch more of its ready tasks; lowering it
+// stops nothing already dispatched.
+func (c *Crew) goalCap(g Goal, args []string) error {
+	if len(args) != 1 {
+		return usage("crew goal cap GOAL N")
+	}
+	if _, ok := parseMaxInFlight(args[0]); !ok {
+		return fail("N must be a whole number, not '%s'", args[0])
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	g.Set("max_in_flight", args[0])
+	g.Touch()
+	g.Log("max_in_flight → " + args[0])
+	c.commit("cap goal " + g.ID())
+	fmt.Printf("goal %s: up to %s task(s) in flight\n", g.ID(), args[0])
+	return nil
+}
+
+// parseMaxInFlight reads a goal's max_in_flight: a whole number, 0 or more.
+func parseMaxInFlight(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	return n, err == nil && n >= 0
+}
+
+// goalMaxInFlight is how many of the goal's tasks may be in flight at once: its
+// max_in_flight, or the GOAL_MAX_IN_FLIGHT setting when it has none.
+func goalMaxInFlight(s Settings, g Goal) (int, error) {
+	v := g.Get("max_in_flight")
+	if v == "" {
+		return intSetting(s, "GOAL_MAX_IN_FLIGHT")
+	}
+	n, ok := parseMaxInFlight(v)
+	if !ok {
+		return 0, fail("goal %s: max_in_flight must be a whole number, not '%s' (set it with 'crew goal cap')", g.ID(), v)
+	}
+	return n, nil
+}
+
+// goalInFlight counts the goal's tasks in flight. Every task of a stack counts.
+func (c *Crew) goalInFlight(g Goal) int {
+	n := 0
+	for _, t := range c.goalTasks(g) {
+		if t.Status().InFlight() {
+			n++
+		}
+	}
+	return n
 }
 
 // workerQuestions are a task's open questions from its worker: the unchecked

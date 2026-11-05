@@ -126,9 +126,9 @@ func orUnknown(s string) string {
 
 // dispatchChecks refuses a dispatch the user hasn't readied, and holds back
 // (notYet) one whose dependencies aren't merged, or that would exceed MAX_WORKERS
-// or MAX_IN_FLIGHT. The task's parent, if it's stacked, is the one dependency
-// that needn't be merged: dispatch requires its branch on origin instead. Call it
-// with the lock held.
+// or its goal's max_in_flight. The task's parent, if it's stacked, is the one
+// dependency that needn't be merged: dispatch requires its branch on origin
+// instead. Call it with the lock held.
 func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
@@ -155,16 +155,17 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if err != nil {
 		return err
 	}
-	maxInFlight, err := intSetting(p.Settings, "MAX_IN_FLIGHT")
-	if err != nil {
-		return err
-	}
 	if running := c.runningWorkers(c.agents()); running >= maxWorkers {
 		return notYet("%d workers already running (MAX_WORKERS=%d); leaving %s ready", running, maxWorkers, t.ID())
 	}
-	// A task stacked on one that's in flight joins a stack that is already counted.
-	if n := c.inFlight(); !(stacked && parent.Status().InFlight()) && n >= maxInFlight {
-		return notYet("%d tasks already in flight (MAX_IN_FLIGHT=%d); leaving %s ready", n, maxInFlight, t.ID())
+	if g, ok := c.taskGoal(t); ok {
+		limit, err := goalMaxInFlight(p.Settings, g)
+		if err != nil {
+			return err
+		}
+		if n := c.goalInFlight(g); n >= limit {
+			return notYet("goal %s already has %d task(s) in flight (max_in_flight %d); leaving %s ready", g.ID(), n, limit, t.ID())
+		}
 	}
 	return nil
 }

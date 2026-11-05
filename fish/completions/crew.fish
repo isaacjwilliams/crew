@@ -1,5 +1,5 @@
 set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack reply status sync tick list show path find get set log cleanup commit push observe gardener proposals promote goal
-set -l goal_cmds new start note followup done abandon path
+set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
@@ -26,8 +26,9 @@ complete -c crew -n "__fish_seen_subcommand_from gardener" -l all
 complete -c crew -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from goal" -l goal -x -d 'Make it one of this goal\'s tasks' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
 complete -c crew -n "__fish_seen_subcommand_from goal; and not __fish_seen_subcommand_from $goal_cmds" -a "$goal_cmds"
-complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from start note followup done abandon path" \
+complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from start note cap followup done abandon path" \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
+complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from new" -l max-in-flight -x -d 'How many of its tasks may be in flight at once'
 complete -c crew -n "__fish_seen_subcommand_from install" -l yes -d 'Answer yes to every question'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-fish -d 'Leave the fish files alone'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-services -d "Leave the crew's services alone"

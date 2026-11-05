@@ -39,7 +39,7 @@ These are invariants. Breaking one changes the design, not just the implementati
    - **Goal tasks are the exception.** For the tasks of a goal the user started, the plan review and the goal lead stand in for the user's approval of the plan, so the user's judgment reaches the work at the PR instead. A wrong structure there costs a PR the user closes, not a plan the user fixes. Parking keeps the decisions that are expensive to undo with the user: anything irreversible, anything outside the goal, and any plan-review finding the goal lead can't settle with confidence.
 5. **Throughput is capped by review capacity.**
    - `MAX_WORKERS` limits concurrent sessions.
-   - `MAX_IN_FLIGHT` limits dispatched-but-unmerged tasks, including open PRs. A stack of tasks counts once (see [Stacked tasks](#stacked-tasks)).
+   - A goal's `max_in_flight` (`GOAL_MAX_IN_FLIGHT` unless set) limits its dispatched-but-unmerged tasks, including open PRs and every task of a stack. Goals are where work outruns review: a goal lead readies tasks with nobody watching, and a stack it builds on a wrong turn has to be undone PR by PR. The lead's own tasks need no such cap, since the user approves each dispatch.
    - `crew dispatch` enforces both under the ledger lock.
 6. **The user is the only one who merges.**
    - The agent prompts say exactly what each agent may do on GitHub. For workers that is: push their own task branch (with `--force-with-lease` allowed after a rebase), open a PR, and edit it. Merging stays with the user.
@@ -149,9 +149,9 @@ you ⇄ lead (a session in <home>/lead, for every project; reads code in crew ch
   you: "go"                             # if the review is still running, the lead dispatches once it's settled
   lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty
         crew dispatch TASK
-          ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS / MAX_IN_FLIGHT; unlock
-          │     a stacked task's parent is exempt from "must be merged", and the task from MAX_IN_FLIGHT
-          │     when its parent is in flight; a parent that has already merged → base rewritten to its base
+          ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS, the goal's max_in_flight; unlock
+          │     a stacked task's parent is exempt from "must be merged";
+          │     a parent that has already merged → base rewritten to its base
           ├─ git fetch origin <base> (must succeed for a stacked task: the parent's branch has to be pushed);
           │   create ~/agent-work/<p>/<id> on a new <branch> from origin/<base>, recorded as base_sha:
           │     WORKTREE_TOOL=git        git worktree add --no-track -b …
@@ -214,7 +214,7 @@ worker: rebase → checks → git push --force-with-lease
 - **`base_sha`** is the newest commit of the parent's branch that the task's own branch contains, the cut point for `git rebase --onto`. `crew dispatch` records it and `noteBaseSHA` (from `crew sync` and `crew restack`) moves it to the two branches' merge base. Once the parent is squash-merged or rebased, that merge base falls back to a commit before the parent's work, so the recorded value is kept for as long as the task's branch still contains it. Only `crew` writes it.
 - **Whether a restack is needed is computed, never stored** (`restackReason`): the parent is `merged` or `abandoned`, or `origin/<parent branch>` isn't an ancestor of the task's local branch. It reads the refs as last fetched, so `crew status` is as fresh as the last `crew sync`.
 - **The worker changes `base` and the PR's base, last.** `crew restack` returns as soon as the worker is resumed. If it rewrote `base` itself, a rebase that then failed would leave a task that no longer looks stacked, with the parent's commits still in it.
-- **`MAX_IN_FLIGHT`** (`inFlight`) skips a task whose parent is in flight, so a stack counts once, and `dispatchChecks` doesn't apply the cap to such a task. `MAX_WORKERS` still counts every session.
+- **A goal's `max_in_flight`** (`goalInFlight`) counts every task of a stack, as `MAX_WORKERS` counts every session. A deep stack is the case it's for.
 - **`restack_sent`** is the commit the last `crew restack` asked the worker to rebase onto. `crew restack` refuses to send the same one again unless `--again`, so a worker that couldn't restack isn't sent the same note in a loop. Only `crew` writes it.
 - **`crew sync` never restacks.** `crew tick` does, through `crew restack`. Nothing restacks a whole stack at once: each restack is a background worker, and the next task up only needs one after the worker below it has pushed.
 - **`crew observe TASK`** compares against `base_sha` when `origin/<base>` is gone.
@@ -271,16 +271,16 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
                --permission-mode <LEAD_PERMISSION_MODE> --settings "<lead settings without agent>" "<prompt>"
   goal lead, for every item, in one turn: crew new … --goal GOAL → intake to the brief standard
         → plan-reviewer → findings settled → crew ready TASK, or parked (draft, with Open questions)
-  crew tick: dispatches the goal's ready tasks as MAX_WORKERS / MAX_IN_FLIGHT allow;
+  crew tick: dispatches the goal's ready tasks as MAX_WORKERS / the goal's max_in_flight allow;
              resumes the goal lead (crew goal followup) with the user's notes and its workers' questions;
              closes the goal (crew goal done) once every task is merged or abandoned
 ```
 
-- **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job` and `lead_session`; `unsent_notes`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's memory, and the session can be replaced.
+- **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job` and `lead_session`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's memory, and the session can be replaced.
 - **A task belongs to a goal through its `goal:` key**, set by `crew new --goal`. `crew status` lists each goal with its tasks under it.
 - **Parked is a task state, not a goal one.** The goal lead parks an item by leaving its task in `draft` with unchecked Open questions, so the rest of the goal carries on. The user answers through the lead, which records the answer in the task and passes it on with `crew goal note`.
 - **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. `crew goal followup` sends both, once the goal lead is free, and resets them.
-- **The goal lead works one turn per input** and never polls (its prompt, and `disallowedTools` without `ScheduleWakeup` or cron). Every turn starts in a freshly fetched checkout. It doesn't count toward `MAX_WORKERS`, which caps workers: what it produces is capped where it reaches the user, by `MAX_IN_FLIGHT`.
+- **The goal lead works one turn per input** and never polls (its prompt, and `disallowedTools` without `ScheduleWakeup` or cron). Every turn starts in a freshly fetched checkout. It doesn't count toward `MAX_WORKERS`, which caps workers: what it produces is capped where it reaches the user, by the goal's `max_in_flight`.
 - **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a cap, an unmerged dependency, a stacked parent that hasn't pushed. `crew tick` prints nothing for those and tries again; any other refusal is a warning.
 - **Ending a goal** (`crew goal done` or `abandon`) stops and removes the goal lead, any background process still running in its checkout, and the checkout, and leaves the tasks alone. A note to a done goal reopens it, for items added later. The ready tasks of an abandoned goal are the lead's to dispatch.
 - **Items come from wherever the goal says.** If that's an external tracker, the goal lead reads it with the tools its session has and changes nothing there. How to reach a project's tracker belongs in that project's `AGENTS.md`, never in this repo.
@@ -472,7 +472,7 @@ Changing any of these means updating every side listed.
 | `crew host up` enables and `down`, `prune` and the stand-down disable `crewServices`; on a Mac, a job's label is its plist's file name | `crew host up`, `crew host down`, `standDown` ↔ `systemd/`, `launchd/` |
 | `crew serve` exits 3 on a machine that doesn't hold the lease; the unit doesn't restart on 3. launchd has no counterpart: `launchd/crew-lead.plist` restarts it every 30 seconds (`ThrottleInterval`) until the stand-down boots the job out, which is why the job is enabled only on the lease holder | `crew serve` → `systemd/crew-lead.service` (`RestartPreventExitStatus=3`); checked in `tests/guard.sh` |
 | Front-matter key names | `templates/task.md`, `templates/goal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
-| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `goalRunning` (`crew tick` dispatch), `crew status` |
+| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalRunning` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
 | A dispatch that only has to wait exits 4 (`notYet`) | `dispatchChecks`, `crew dispatch` → `tickTask` |
 | The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks" of the installed `lead.md` | `lead.md` → `goal-lead.md`; checked in `tests/guard.sh` |
