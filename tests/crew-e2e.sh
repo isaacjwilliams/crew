@@ -521,7 +521,7 @@ check "a goal task held back by a cap waits without a word" '[[ $out != *"$T1"* 
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
 out=$(crew tick 2>&1)
 check "tick dispatches a running goal's ready task, and no other ready task" '[[ $out == *"$T1: dispatched for goal $G"* && $(crew get "$GT1" status) == working && $(crew get "$NG" status) == ready ]]'
-GS=$(crew new "Season header styles" --goal 1 --on "$T1"); fill "$GS"; crew ready "$GS" >/dev/null
+GS=$(crew new "Season header styles" --goal "$GF" --on "$GT1"); fill "$GS"; crew ready "$GS" >/dev/null
 out=$(crew dispatch "$GS" 2>&1); code=$?
 check "a task stacked on one of its goal's counts against the goal's max_in_flight" '[[ $code == 4 && $out == *"goal $G already has 1 task(s) in flight (max_in_flight 1)"* && $(crew get "$GS" status) == ready ]]'
 check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(crew status) == *"goal $G"*"0 of 3 task(s) merged, 1/1 in flight"* ]]'

@@ -58,10 +58,17 @@ func (c *Crew) goals(project string) []Goal {
 
 var allDigits = regexp.MustCompile(`^[0-9]+$`)
 
-// resolveIn picks the file arg names: "#<pr>" (the number of the file's pr), its
-// exact ID, a number (7 is 007-…), or a unique substring of its ID. When more than
-// one matches, it returns them all and no file.
+// resolveIn picks the file arg names: a path to it, "#<pr>" (the number of the
+// file's pr), its exact ID, a number (7 is 007-…), or a unique substring of its
+// ID. When more than one matches, it returns them all and no file.
 func resolveIn(arg string, files []string) (string, []string) {
+	if fi, err := os.Stat(arg); err == nil {
+		for _, f := range files {
+			if ff, err := os.Stat(f); err == nil && os.SameFile(fi, ff) {
+				return f, nil
+			}
+		}
+	}
 	var matches []string
 	if n, ok := strings.CutPrefix(arg, "#"); ok {
 		for _, f := range files {

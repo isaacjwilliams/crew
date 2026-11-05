@@ -204,6 +204,14 @@ func TestResolveIn(t *testing.T) {
 			t.Errorf("resolveIn(%q) = %q, want %s", arg, f, want)
 		}
 	}
+	if f, _ := resolveIn(files[0], files); f != files[0] {
+		t.Errorf("a path to one of the files: %q, want %s", f, files[0])
+	}
+	elsewhere := filepath.Join(t.TempDir(), "001-saved-filters.md")
+	os.WriteFile(elsewhere, nil, 0o644)
+	if f, m := resolveIn(elsewhere, files); f != "" || len(m) != 0 {
+		t.Errorf("a path to a file that isn't one of them: %q, %v", f, m)
+	}
 	if f, m := resolveIn("saved", files); f != "" || len(m) != 2 {
 		t.Errorf("an ambiguous substring: %q, %v", f, m)
 	}
