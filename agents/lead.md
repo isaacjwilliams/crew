@@ -74,7 +74,7 @@ When the user brings new work, your job is to get to a plan they'd approve at a 
    - When the review arrives, settle each finding: change the brief, or keep the plan and know why. Log the outcome with `crew log <task> "Plan review: …"`. Then tell the user each finding the reviewer marked Raise, and how you settled it. Show any you disagree with as open, so the user decides. If you change the structure substantially, run the review again.
 8. **Dispatch only on a go-ahead, after the plan review.** When the user says go and the review is in and settled, run `crew ready <task>` (it checks the brief is complete) and then `crew dispatch <task>`. If they say go while the review is still running, say you'll dispatch once it's in, and do so then, unless it raises something they should decide first. If the user has said something like "just do it" for small, clear tasks, you may compress steps 3 to 7 into one message and dispatch once the review is in. Even then, run the plan review unless the task adds no new structure (a fix inside existing code, copy, a dependency bump).
 
-If `crew dispatch` refuses because of the concurrency cap, an unmerged dependency, or a stacked task's parent that hasn't pushed its branch yet, tell the user and leave the task `ready`. Don't work around the cap; it exists to match their review capacity. Never clear `depends_on` or edit `base` to get a dispatch through.
+If `crew dispatch` refuses because of `MAX_WORKERS`, a goal's `max_in_flight`, an unmerged dependency, or a stacked task's parent that hasn't pushed its branch yet, tell the user and leave the task `ready`. Don't work around a cap; it exists to match their review capacity. Never clear `depends_on` or edit `base` to get a dispatch through.
 
 ### The brief standard
 
@@ -98,7 +98,7 @@ A task can be based on another task's unmerged branch, so its PR targets that br
 
 - **Declare it at intake:** `crew new "<title>" --branch <name> --project <p> --on <parent task>`. That sets `base` to the parent's branch and `depends_on` to the parent. Say in the brief's Context what the parent provides that this task builds on. Stack only when the pieces really build on each other; independent pieces stay on the default branch.
 - **Stacking on an unreviewed PR:** suggest the user look at the parent PR's structure first, because a structural change at the bottom of a stack means redoing every task above it. Say it once; if they want to stack anyway, stack.
-- **Dispatch** works once the parent's branch is on GitHub, which is when its worker has pushed (normally with its PR open). The parent needn't be merged. A stack counts once against `MAX_IN_FLIGHT`.
+- **Dispatch** works once the parent's branch is on GitHub, which is when its worker has pushed (normally with its PR open). The parent needn't be merged.
 - **`crew status`** lists each stacked task under its parent, bottom of the stack first. The top task's worktree and branch contain the whole stack, which is what the user wants for trying it locally: give them `crew get <top task> worktree` or the branch name.
 - **Restacks.** A stacked task needs one when its parent's branch gets new commits (a review round, say), or its parent merges. `crew tick` sends it: it resumes the task's worker with the exact rebase to do, once that worker is idle and its PR is open, bottom-up, one task at a time. The worker rebases, force-pushes its own branch with a lease, and after a merge retargets its PR and records the new base. Mention a restack under way when you report status. If the user wants one sooner, run `crew restack <task>`.
   - After the user merges the bottom PR, tell them to wait for the next one's restack before they review or merge it: until then its PR still carries the merged task's commits.
@@ -124,14 +124,15 @@ A round that arrives while the worker is busy waits for it to finish; `crew tick
 
 ## Goals
 
-When the user wants a batch of work done without them (a list of items, or a column on the project's tracker), make it a goal. A goal lead, a background session, does your intake for every item with nobody to ask: it writes and plan-reviews each brief and marks it ready, and `crew tick` dispatches the ready tasks as the caps allow. The user's judgment reaches that work at the PR, not the plan.
+When the user wants a batch of work done without them (a list of items, or a column on the project's tracker), make it a goal. A goal lead, a background session, does your intake for every item with nobody to ask: it writes and plan-reviews each brief and marks it ready, and `crew tick` dispatches the ready tasks as the caps allow. The user's judgment reaches that work at the PR, not the plan. A goal's `max_in_flight` keeps it from running far ahead of the user's reviews: once that many of its tasks are dispatched and unmerged (each task of a stack counts), the rest wait.
 
-1. **Pin down the goal.** Confirm what it's for and where its items come from. Run `crew goal new "<title>" --project <p>` and write the Goal section of the file it prints: the user's own words, quoted, including where the items come from and anything that bounds the work (what's out, what order). The goal lead works from that alone, so ask about whatever it would otherwise have to guess.
+1. **Pin down the goal.** Confirm what it's for and where its items come from. Run `crew goal new "<title>" --project <p>`, with `--max-in-flight <n>` if the user gave a number, and write the Goal section of the file it prints: the user's own words, quoted, including where the items come from and anything that bounds the work (what's out, what order). The goal lead works from that alone, so ask about whatever it would otherwise have to guess.
 2. **Start it on the user's go-ahead.** Show them the Goal section, then run `crew goal start <goal>`.
 3. **Report it with the rest.** `crew status` lists each goal with its tasks under it.
    - **Parked items** wait on the user: a goal's draft task with open questions. Summarize the question from its Open questions. When the user answers, record the answer under that task's Decisions, tick the question, and run `crew goal note <goal> "<task>: <the answer>"`.
    - **A goal task's worker questions** go to the goal lead first. One is the user's only once the task's Log says "For the user"; relay the answer as for any worker (`crew followup`).
-   - Anything else the user wants the goal lead to know goes through `crew goal note`, such as "pick up the new cards". To stop a goal, run `crew goal abandon <goal>`: its tasks stay as they are, and you dispatch any ready ones yourself, as usual.
+   - Anything else the user wants the goal lead to know goes through `crew goal note`, such as "pick up the new cards".
+   - To let a goal have more or fewer tasks in flight, run `crew goal cap <goal> <n>`. Lowering it stops nothing already dispatched. To stop a goal, run `crew goal abandon <goal>`: its tasks stay as they are, and you dispatch any ready ones yourself, as usual.
 
 ## Gardener proposals
 

@@ -136,7 +136,7 @@ crew host down          # hand over: stop the crew here and release the lease
 
 1. **Edit your settings file**, `~/crew/config/crew.env`, which `crew setup` made from `templates/crew.env`, then commit and push it (`git -C ~/crew commit -am "My settings"; and git -C ~/crew push`). Anything you set there overrides `config/defaults.env`, which lists every setting with its default; leave that file as it is. At minimum:
    - Set `BRANCH_PREFIX`, e.g. `isaac/`. These branches land on the shared remote.
-   - Check `MAX_WORKERS` (concurrent sessions) and `MAX_IN_FLIGHT` (dispatched but unmerged tasks, open PRs included; a stack of PRs counts once). `MAX_IN_FLIGHT` is the knob that keeps you from being buried in reviews. Start low; raise it once the loop feels trustworthy.
+   - Check `MAX_WORKERS` (concurrent sessions) and `GOAL_MAX_IN_FLIGHT` (how many of a goal's tasks may be dispatched but unmerged at once, open PRs included). A goal can set its own; see [Goals](#goals). Start low; raise them once the loop feels trustworthy.
    - If the app needs untracked files like `.env.local` to run tests, list them in `WORKTREE_COPY`.
 2. **Trust two folders once.** Background sessions check workspace trust before starting, and so does the lead:
    ```fish
@@ -223,7 +223,7 @@ One lead covers every project you've registered. It runs in `~/crew/lead`, whose
 
 Every lead session is named `lead`. If one is already running, Claude Code gives the new one a variant of that name.
 
-**Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles plan-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` and `MAX_IN_FLIGHT` count across every lead and project, so raise them in `config/crew.env` if they hold back work you're ready to review.
+**Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles plan-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` counts across every lead and project, so raise it in `config/crew.env` if it holds back work you're ready to review.
 
 A typical exchange:
 
@@ -282,7 +282,9 @@ For a batch of work you'd rather not plan item by item (a list, or a column on y
 > **lead:** *(writes the goal file, quoting you)* Goal `001-season-column`: every card in Season, nothing touching payments. Start it?
 > **you:** Go.
 
-The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does the lead's intake for every item on its own, in a background session named `crew-<project>-goal-<goal>`: a brief to the usual standard, a plan review, the findings settled, and `crew ready`. `crew tick` dispatches the ready tasks as `MAX_WORKERS` and `MAX_IN_FLIGHT` allow. You see the work as PRs, and review them as usual.
+The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does the lead's intake for every item on its own, in a background session named `crew-<project>-goal-<goal>`: a brief to the usual standard, a plan review, the findings settled, and `crew ready`. `crew tick` dispatches the ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow. You see the work as PRs, and review them as usual.
+
+- **How far a goal runs ahead of you** is its `max_in_flight`: how many of its tasks may be dispatched and unmerged at once, each task of a stack included. Once it's reached, the goal's other ready tasks wait until one merges, so a goal that took a wrong turn has only a few PRs to undo. It's `GOAL_MAX_IN_FLIGHT` (3) unless you give the goal its own, when you start it ("at most 2 at a time") or later with `crew goal cap GOAL N`.
 
 - **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a plan-review finding it can't settle. Each stays a draft task with its question under Open questions, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
 - **Workers' questions** go to the goal lead first. Ones it shouldn't answer reach you through the lead, like any worker question.
@@ -345,7 +347,7 @@ crew status              # a stack is listed bottom first, each task under its p
 - **When you merge the bottom PR**, `crew sync` reports `needs a restack, 044-… merged`, and `crew tick` has 045's worker rebase onto the default branch, cutting away 044's original commits (which a squash merge replaced), retarget the PR, and record the new base. Wait for that before you review or merge 045: until then its PR still shows 044's commits. Merge bottom-up.
 - **A restack force-pushes the task's branch.** If you have it checked out somewhere, reset to the pushed branch rather than pulling.
 - **Let GitHub delete merged branches** ("Automatically delete head branches" in the repo settings) if you can: GitHub then retargets the next PR to the default branch itself. Don't delete an unmerged branch that has PRs stacked on it; GitHub closes them.
-- **`MAX_IN_FLIGHT`** counts a stack once. `MAX_WORKERS` still counts every running worker.
+- **A goal's `max_in_flight`** counts every task of a stack, as `MAX_WORKERS` counts every running worker.
 - To stack a task that already exists, set its base to the parent's branch: `crew set 046 base (crew get 045 branch)`. Leave `depends_on` as it is.
 
 ## 6. The casual observer on its own
@@ -391,7 +393,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | On GitHub, workers only push their own branch (`--force-with-lease` allowed), open PRs and edit them | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
-| Your review capacity isn't exceeded | `crew dispatch` enforces `MAX_WORKERS` and `MAX_IN_FLIGHT`, for the lead and for `crew tick` alike |
+| Your review capacity isn't exceeded | `crew dispatch` enforces `MAX_WORKERS`, and a goal's `max_in_flight` for its tasks, for the lead and for `crew tick` alike |
 
 The GitHub rules are instructions, not mechanical limits. Parsing shell commands to enforce them can't be made complete, so the crew doesn't try. The `deny` rules catch honest mistakes, not an agent that is trying to get around them. Every GitHub action happens under your account, so treat the crew like a junior teammate with your credentials.
 
@@ -404,7 +406,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | Key | Default | Meaning |
 |---|---|---|
 | `MAX_WORKERS` | 3 | Worker sessions running or waiting on you at once |
-| `MAX_IN_FLIGHT` | 5 | Dispatched, unmerged tasks, including open PRs; a stack counts once |
+| `GOAL_MAX_IN_FLIGHT` | 3 | A goal's dispatched, unmerged tasks, including open PRs and each task of a stack, for a goal that doesn't set its own `max_in_flight` |
 | `BRANCH_PREFIX` | `agent/` | Prefix for task branches |
 | `WORK_ROOT` | `~/agent-work` | Where worktrees live |
 | `WORKER_PERMISSION_MODE` | `auto` | `auto`, `acceptEdits`, or `default` |
@@ -485,8 +487,8 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - replies: to thread roots, quoting conversation comments and review summaries, and refusing comments from other PRs; sync, cleanup (ending a background process left running in the worktree, and only that), the gardener, and promoting proposals;
   - `WORKTREE_TOOL=worktrunk`: dispatch and cleanup through `wt`, stopping on unapproved hooks, the ledger unlocked while hooks run;
   - per-project worker settings: merged in, and unable to override a shipped value or drop a `deny` rule;
-  - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
-  - stacked tasks: `--on`, dispatch once the parent's branch is pushed, a stack counting once in flight, sync reporting a moved or merged parent, and `crew restack` through a real squash merge and rebases of a three-task stack;
+  - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap, a goal's `max_in_flight` among them, counting every task of a stack), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
+  - stacked tasks: `--on`, dispatch once the parent's branch is pushed, sync reporting a moved or merged parent, and `crew restack` through a real squash merge and rebases of a three-task stack;
   - the home: settings layered from `defaults.env`, `crew.env` and `project.env`, the ledger pushed to a bare origin in the background (rebased over commits from elsewhere), agents' own edits committed by the hook, `crew checkout`, and tasks that moved here getting their worktrees back and fresh workers.
 - Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
 - The fish files were checked with fish 3.7.

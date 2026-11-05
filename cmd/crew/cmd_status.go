@@ -28,7 +28,7 @@ func cmdStatus(c *Crew, args []string) error {
 		return nil
 	}
 	s.agents = c.agents()
-	fmt.Printf("workers running: %d/%s   tasks in flight: %d/%s\n", c.runningWorkers(s.agents), c.Settings["MAX_WORKERS"], c.inFlight(), c.Settings["MAX_IN_FLIGHT"])
+	fmt.Printf("workers running: %d/%s\n", c.runningWorkers(s.agents), c.Settings["MAX_WORKERS"])
 	for _, p := range projects {
 		fmt.Println()
 		fmt.Println(p)
@@ -43,6 +43,7 @@ type statusView struct {
 	agents   Agents
 	branches Branches
 	repo     string            // the project's clone here, for restack reasons; empty when there's none
+	settings Settings          // the project's, or the crew's when there's no clone here
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 }
 
@@ -52,9 +53,9 @@ func (s *statusView) shown(status string) bool {
 
 func (s *statusView) project(name string) {
 	s.branches = s.Crew.branches(name)
-	s.repo = ""
+	s.repo, s.settings = "", s.Settings
 	if p, err := s.loadProject(name); err == nil {
-		s.repo = p.Repo()
+		s.repo, s.settings = p.Repo(), p.Settings
 	}
 	s.kids = map[string][]Task{}
 	var goals []Goal
@@ -111,14 +112,21 @@ func (s *statusView) goalRow(g Goal, tasks []Task) {
 	if lead != "" {
 		lead = "lead: " + lead
 	}
-	total, merged := 0, 0
+	total, merged, inFlight := 0, 0, 0
 	for _, t := range s.goalTasks(g) {
 		total++
 		if t.Status() == Merged {
 			merged++
 		}
+		if t.Status().InFlight() {
+			inFlight++
+		}
 	}
-	fmt.Printf("  %s %-20s %-26s %d of %d task(s) merged\n", padID("goal "+g.ID()), g.Get("status"), lead, merged, total)
+	limit := "?"
+	if n, err := goalMaxInFlight(s.settings, g); err == nil {
+		limit = fmt.Sprint(n)
+	}
+	fmt.Printf("  %s %-20s %-26s %d of %d task(s) merged, %d/%s in flight\n", padID("goal "+g.ID()), g.Get("status"), lead, merged, total, inFlight, limit)
 	for _, t := range tasks {
 		s.taskRow(t, "  ")
 	}

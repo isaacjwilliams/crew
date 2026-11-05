@@ -181,8 +181,8 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 
 // goalRunning: the task belongs to a running goal.
 func (c *Crew) goalRunning(t Task) bool {
-	g := t.Goal()
-	return g != "" && (Goal{Doc{c.path("projects", t.Project(), "goals", g+".md")}}).Status() == GoalRunning
+	g, ok := c.taskGoal(t)
+	return ok && g.Status() == GoalRunning
 }
 
 // prMayHaveNewComments: GitHub moves a PR's updatedAt (recorded as pr_updated by

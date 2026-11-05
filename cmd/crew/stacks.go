@@ -108,23 +108,6 @@ func noteBaseSHA(t, parent Task, repo string) bool {
 	return true
 }
 
-// inFlight counts the tasks in flight. A stack counts once: a task stacked on
-// another in-flight task isn't counted.
-func (c *Crew) inFlight() int {
-	idx := c.branches("")
-	n := 0
-	for _, t := range c.tasks("") {
-		if !t.Status().InFlight() {
-			continue
-		}
-		if p, ok := idx.parentOf(t); ok && p.Status().InFlight() {
-			continue
-		}
-		n++
-	}
-	return n
-}
-
 // goalTasks are the tasks that belong to the goal.
 func (c *Crew) goalTasks(g Goal) []Task {
 	var ts []Task
@@ -134,4 +117,10 @@ func (c *Crew) goalTasks(g Goal) []Task {
 		}
 	}
 	return ts
+}
+
+// taskGoal is the goal the task belongs to, if any.
+func (c *Crew) taskGoal(t Task) (Goal, bool) {
+	g := t.Goal()
+	return Goal{Doc{c.path("projects", t.Project(), "goals", g+".md")}}, g != ""
 }
