@@ -434,6 +434,7 @@ What governs Bash instead:
 - **Workers** run in `WORKER_PERMISSION_MODE` (`auto` by default): Claude Code's classifier approves routine commands and stops risky ones, as in your own sessions. The `allow` rules in `worker-settings.json` skip the classifier for the usual git and gh commands; the `deny` rules catch `gh pr merge` and force pushes. The implementer prompt tells workers to keep shell writes to their worktree, the ledger, temp directories and tool caches.
 - **The gardener and `crew observe`** run with `--permission-prompts none` and the read-only `allow` list in `readonly-settings.json`, so any other command is denied.
 - **The lead** runs in `LEAD_PERMISSION_MODE` (`auto` by default) in the home's `lead/`, and **goal leads** in the same mode in their own checkouts. `crew guard` keeps their file edits to the ledger.
+- **An allow rule's `*` goes after the subcommand**, never before it. `Bash(git -C * show *)` would also approve `git -C . -c core.pager=<program> show`, and Claude Code warns about such a rule at every start. `tests/guard.sh` checks the settings files for it.
 - **Network is left open.** `WebFetch(domain:*)` pre-allows every host, so background sessions never stop at a network prompt.
 
 ## `crew install`
@@ -547,7 +548,7 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
 - **Live checks still open** for the portable crew, each in a person's real setup:
   - L3: in a phone lead session, nothing from the home's `CLAUDE.md` loads, `~/.claude/CLAUDE.md` does, and reading `~/agent-work/<p>/_lead/AGENTS.md` needs no prompt.
   - L4: a question the lead ticks reaches `origin` within seconds as "edit projects/…".
-  - L5: plan-reviewer's `git -C` commands run without a denial or a prompt (check its transcript).
+  - L5: plan-reviewer's `git -C` commands run without a denial or a prompt (check its transcript). No allow rule covers them since 0.5.1: its reads are assumed to count as Claude Code's built-in read-only git, and auto mode's classifier judges the fetch.
   - L6: a failover drill with one `pr-open` and one `working` task: `crew host up --take` on another machine, its tick re-homing the working task, and the old machine standing down when it's back on the network.
   - L7: a goal lead started with the lead's settings minus `agent` runs as goal-lead.
   - L8: the colleague path on a fresh account: clone the public repo, `crew setup`, `crew project add`, a lead from the phone.

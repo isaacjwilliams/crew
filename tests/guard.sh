@@ -96,6 +96,11 @@ done
 for f in "$LS" "$C/worker-settings.json"; do
   check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit, Write or Bash call" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit|Bash\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
 done
+for f in "$LS" "$C/worker-settings.json" "$C/readonly-settings.json"; do
+  # Bash(git -C * show *) would also approve git -C . -c core.pager=<script> show.
+  check "${f#"$REPO_DIR"/}: no allow rule has a * before the subcommand, where it would let any option through" \
+    "jq -e >/dev/null '[.permissions.allow[] | select(test(\"^Bash\\\\(.*\\\\* [^)]\"))] == []' $f"
+done
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
 check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'o.del(\"agent\")' <<<\"\$SRC\""
@@ -151,8 +156,8 @@ check "crew followup's prompt, not the worker, decides whether a review round ge
   "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in the round with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \
   "grep -q '~/.claude/CLAUDE.md. with their taste' $A/implementer.md && ! grep -q '^## Engineering standards' $A/implementer.md"
-check "plan-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C commands the lead allows" \
-  "grep -q 'as it is on .origin/<base>.' $A/plan-reviewer.md && grep -q 'crew config REPO --project <project>' $A/plan-reviewer.md && grep -q 'git -C <repo> show origin/<base>:<path>' $A/plan-reviewer.md && grep -q 'git -C <repo> grep' $A/plan-reviewer.md && grep -q 'git -C <repo> fetch' $A/plan-reviewer.md && jq -e >/dev/null '.permissions.allow | index(\"Bash(git -C * grep *)\") and index(\"Bash(git -C * show *)\") and index(\"Bash(git -C * fetch *)\") and index(\"Bash(git -C * log *)\") and index(\"Bash(git -C * diff *)\") and index(\"Bash(crew *)\")' $LS"
+check "plan-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C" \
+  "grep -q 'as it is on .origin/<base>.' $A/plan-reviewer.md && grep -q 'crew config REPO --project <project>' $A/plan-reviewer.md && grep -q 'git -C <repo> show origin/<base>:<path>' $A/plan-reviewer.md && grep -q 'git -C <repo> grep' $A/plan-reviewer.md && grep -q 'git -C <repo> fetch' $A/plan-reviewer.md && jq -e >/dev/null '.permissions.allow | index(\"Bash(crew *)\")' $LS"
 check "plan-reviewer reads the project's AGENTS.md at the task's base, since it doesn't load" "grep -q 'Start with the project.s AGENTS.md or CLAUDE.md at that ref' $A/plan-reviewer.md"
 check "the lead reads code in its crew checkout, after the project's AGENTS.md, which doesn't load for it" \
   "grep -q 'Run .crew checkout <p>. and read the project.s AGENTS.md' $A/lead.md && grep -q 'not for you: read it in your checkout' $A/lead.md"
