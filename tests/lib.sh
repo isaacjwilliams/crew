@@ -42,6 +42,13 @@ release_binary "$(cat "$REPO_DIR/VERSION")"
 # isolate_home DIR — fake HOME with a git identity, stubs first on PATH, and no
 # leakage of the caller's crew/Claude environment.
 isolate_home() {
+  # mise's shims (jq, say) look for mise's config and tools under HOME. Keep
+  # them on the real ones: under a fake HOME, mise rejects the real config as an
+  # untrusted project file, or installs every tool again.
+  export MISE_CONFIG_DIR=${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}
+  export MISE_DATA_DIR=${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}
+  export MISE_STATE_DIR=${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}
+  export MISE_CACHE_DIR=${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}
   export HOME=$1
   mkdir -p "$HOME"
   unset CREW_HOME CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
