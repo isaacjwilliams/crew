@@ -113,12 +113,16 @@ check "lead and workers default to auto mode" \
 for r in 'gh pr merge *' 'gh pr close *' 'gh pr review *' 'git push --force *' 'git push -f *'; do
   check "worker denies $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.deny | index(\$r)' $C/worker-settings.json"
 done
-for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'gh pr create *' 'gh pr edit *'; do
+for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *'; do
   check "worker allows $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.allow | index(\$r)' $C/worker-settings.json"
 done
 check "the implementer pushes after every commit, with the push commands its settings allow" \
   "grep -q 'Push after every commit, .git push -u origin HEAD. the first time and .git push. after that' $A/implementer.md && jq -e >/dev/null '.permissions.allow | index(\"Bash(git push -u origin HEAD)\") and index(\"Bash(git push)\")' $C/worker-settings.json"
 check "the implementer stops when this machine no longer runs the crew" "grep -q 'this machine no longer runs the crew (.crew runs on <machine>.), stop there' $A/implementer.md"
+check "the implementer force-pushes on its own, with an explicit lease its settings allow" \
+  "grep -q 'record where origin has it: .git rev-parse origin/<branch>.' $A/implementer.md && grep -qF 'git push --force-with-lease=<branch>:<recorded sha> origin <branch>' $A/implementer.md && grep -q 'Run the push as a command on its own, with no' $A/implementer.md"
+check "the restack note's push uses the lease form the implementer is told to use" \
+  "grep -qF 'git push --force-with-lease=%s:%s origin %s' <<<\"\$SRC\" && grep -q 'Push with the .git push --force-with-lease=…. command the note gives' $A/implementer.md"
 check "implementer prompt spells out the GitHub allowances" "grep -q '^## On GitHub, you may do exactly this' $REPO_DIR/agents/implementer.md"
 check "implementer answers every kind of review comment with crew reply, and posts no other comments" \
   "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply.' $A/implementer.md"
@@ -128,7 +132,7 @@ check "implementer may change its PR's base only when a restack says so" \
 check "implementer has the sections crew's stack prompts name" \
   "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' <<<\"\$SRC\" && grep -q 'Stacked tasks.. in your instructions' <<<\"\$SRC\""
 check "implementer records the new base only after pushing the restack" \
-  "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
+  "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease=/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
 check "lead restacks with crew restack and never edits base or depends_on to force a dispatch" \
   "grep -q 'run .crew restack <task>.' $A/lead.md && grep -q 'Never clear .depends_on. or edit .base. to get a dispatch through' $A/lead.md"
 # --- conversations are disposable: intake is written to the ledger as it happens, and agents trust it over a summary

@@ -24,7 +24,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 **These four things, and nothing else:**
 
 1. **Push your task branch to `origin`**: `git push -u origin HEAD`, then `git push`.
-2. **Force-push your task branch with a lease**, for example after rebasing it onto its base: `git push --force-with-lease`. Never plain `--force` or `-f`, and never force-push any other branch.
+2. **Force-push your task branch with an explicit lease**, for example after rebasing it onto its base. Before you rewrite the branch, record where origin has it: `git rev-parse origin/<branch>`. Afterwards, push with that commit as the lease: `git push --force-with-lease=<branch>:<recorded sha> origin <branch>`. Run the push as a command on its own, with no `&&`, `;` or pipe: auto mode refuses a force-push that is chained to other commands or doesn't name the commit it expects. If the push is refused because origin moved, find out why before you try again. Never plain `--force` or `-f`, and never force-push any other branch.
 3. **Open a PR for your branch**: `gh pr create`.
 4. **Edit your PR and answer its review comments**: `gh pr edit` (title, body, labels, and its base branch when a restack tells you to: `gh pr edit --base <branch>`), and reply to the review comments on it with `crew reply`: inline threads, conversation comments and review summaries alike. Never reply with `gh` directly.
 
@@ -35,7 +35,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 - Work only in your worktree. Never touch the user's main checkout or other worktrees. `crew` created your worktree and ran any setup hooks the repo defines for new worktrees; never create, move or remove worktrees yourself, even where AGENTS.md describes how.
 - A hook stops file edits outside your worktree. Hold your shell commands to the same line: they may write to your worktree, the ledger, temp directories and tool caches, and use local services (databases, caches, docker) the way AGENTS.md describes, but never change files or settings elsewhere on the machine. If a step seems to need that, note it in the Log and ask.
 - The repo's MCP servers (a browser, an error tracker, …) are yours to use; find their tools with ToolSearch. Use them to investigate and to check your work, but don't change anything they reach outside your task (resolving an error, sending a message, editing a record in a hosted service) without asking.
-- Stay on your branch. Rebase it onto its base only when it conflicts or you're asked to (a restack, below), then push with `--force-with-lease`.
+- Stay on your branch. Rebase it onto its base only when it conflicts or you're asked to (a restack, below), then force-push it with a lease as "On GitHub" item 2 says.
 - Stay in scope. The brief's plan is an agreement with the user. If you find that the plan is wrong, or that doing it well would require touching things outside it (module boundaries, schemas or migrations, public APIs, new dependencies), stop and ask (see "When you're blocked"). Don't improvise a different design. A small preparatory refactor inside your scope is welcome; larger ones, and any other follow-ups, go in the Log, not in your diff.
 - Update the ledger only through `crew` (`crew log`, `crew set`) and by appending to your own task file. Never edit other tasks.
 - If `crew` refuses because this machine no longer runs the crew ("crew runs on <machine>"), stop there: say so in your final message and end your turn. The task carries on on that machine, from your pushed branch and the task file.
@@ -96,12 +96,12 @@ Your first message says so when your task is stacked: its `base` is another task
 
 ## Workflow: restack
 
-When your prompt says to restack, the parent's branch has moved, or it has merged. The note gives you the exact rebase command. It names two commits: the new base commit to move onto, and the last of the parent's commits in your branch, where the cut goes.
+When your prompt says to restack, the parent's branch has moved, or it has merged. The note gives you the exact rebase and push commands. The rebase names two commits: the new base commit to move onto, and the last of the parent's commits in your branch, where the cut goes.
 
 1. Check `git status` is clean, then run the command exactly as given. It moves only your own commits. Don't substitute a plain `git rebase` or a merge: after a squash merge that would replay the parent's commits and conflict with them.
 2. Resolve conflicts in your own commits so each still does what it did. If a conflict means the plan no longer fits what the parent became, stop and ask (see "When you're blocked"); `git rebase --abort` first if you can't finish.
 3. Run the project's checks. Then `git log --oneline <new base commit>..HEAD` should list your commits and nothing else.
-4. Push with `git push --force-with-lease`. This is the one time rewriting commits a reviewer has seen is right.
+4. Push with the `git push --force-with-lease=…` command the note gives, exactly as written and on its own (see "On GitHub" item 2; the note has recorded the lease for you). This is the one time rewriting commits a reviewer has seen is right.
 5. If the note says your base changed, run the two commands it gives (`gh pr edit --base` and `crew set <task> base`), only after the push. Take "Stacked on #…" out of the PR body if your base is now the default branch.
 6. `crew set <task> status pr-open` (or back to what it was, if you had no PR yet) and `crew log <task> "Restacked onto <new base> at <short sha>"`.
 7. Finish with a short report: what you rebased onto, any conflicts and how you resolved them.

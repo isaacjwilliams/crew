@@ -298,6 +298,10 @@ work() {  # worktree file — what a worker does: commit and push its branch
   (cd "$1" && echo x >"$2" && git add "$2" && git commit -qm "add $2" && git push -q -u origin HEAD 2>/dev/null)
 }
 last_prompt() { grep -- "--resume" "$HOME/claude-calls.log" | tail -1; }
+restack_push() {  # worktree — runs the push the last restack note gives, as written
+  local cmd; read -ra cmd <<<"$(last_prompt | grep -o 'git push --force-with-lease=[^`]*')"
+  (cd "$1" && "${cmd[@]}" -q 2>/dev/null)
+}
 echo OPEN >"$HOME/gh-pr-state"
 F9=$(crew new "Season model" --branch season-model); fill "$F9"; crew ready 9 >/dev/null
 setstate "done" null; crew dispatch 9 >/dev/null; WT9=$(crew get 9 worktree)
@@ -321,12 +325,13 @@ work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
 check "status shows the restack that's needed" '[[ $(crew status) == *"needs restack: 009-season-model moved"* ]]'
-setstate "done" null; crew restack 10 >/dev/null
+setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); crew restack 10 >/dev/null
+check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_prompt) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_prompt) == *"git rebase --onto $T9b $T9\`"* && $(last_prompt) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
 setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
-(cd "$WT10" && git rebase -q --onto "$T9b" "$T9" && git push -q --force-with-lease 2>/dev/null); crew set 10 status pr-open
+(cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; crew set 10 status pr-open
 out=$(crew sync)
 check "sync sees the restack and moves base_sha to the parent's new tip" '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" ]]'
 setstate "done" null
@@ -351,13 +356,13 @@ check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first
 crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
 check "after a merge, restack targets the default branch and has the worker retarget the PR" '[[ $(last_prompt) == *"git rebase --onto $M $T9b\`"* && $(last_prompt) == *"gh pr edit --base main"* && $(last_prompt) == *"crew set 010-season-admin base main"* ]]'
 check "crew leaves base alone until the worker has restacked" '[[ $(crew get 10 base) == agent/season-model ]]'
-(cd "$WT10" && git rebase -q --onto "$M" "$T9b" && git push -q --force-with-lease 2>/dev/null); crew set 10 base main; crew set 10 status pr-open
+(cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; crew set 10 status pr-open
 T10b=$(tip season-admin)
 out=$(crew sync)
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
-(cd "$WT11" && git rebase -q --onto "$T10b" "$T10" && git push -q --force-with-lease 2>/dev/null); crew set 11 status pr-open
+(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; crew set 11 status pr-open
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
 check "--on refuses a merged task" '! crew new "Too late" --on 9 2>/dev/null'

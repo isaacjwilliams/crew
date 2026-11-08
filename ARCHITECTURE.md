@@ -206,8 +206,9 @@ crew restack TASK                # refuses while a live parent needs a restack i
   ├─ git fetch origin; target = origin/<effective base>:
   │     parent unmerged → the parent's branch; parent merged → the parent's base, following merged parents
   │     upwards (the default branch when a stack merges bottom-up)
-  └─ crew followup TASK --note "…git rebase --onto <target sha> <base_sha>…"
-worker: rebase → checks → git push --force-with-lease
+  └─ crew followup TASK --note "…git rebase --onto <target sha> <base_sha>…
+                                  git push --force-with-lease=<branch>:<origin/<branch> sha> origin <branch>…"
+worker: rebase → checks → the note's push, as a command on its own
         → if the base changed: gh pr edit --base <new>; crew set TASK base <new>   → status pr-open
 ```
 
@@ -479,7 +480,7 @@ Changing any of these means updating every side listed.
 | A goal task's worker question that the goal lead leaves for the user gets a "For the user: …" Log line | `goal-lead.md` → `lead.md` "Goals"; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
-| The restack note: `git rebase --onto <target> <base_sha>`, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
+| The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
 | A review round's followup prompt says whether to reply ("Reply to each comment in the round with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 5; checked in `tests/guard.sh` |
 | Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |

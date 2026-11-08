@@ -188,8 +188,12 @@ func cmdRestack(c *Crew, args []string) error {
 	if !gitOK(repo, "merge-base", "--is-ancestor", old, "refs/heads/"+branch) {
 		return fail("%s no longer contains %s's commits (base_sha %s), so it looks restacked already. If it is, record it with 'crew set %s base %s'", branch, pid, cut(old, 12), t.ID(), newBase)
 	}
-	note := fmt.Sprintf("Restack (%s): rebase your branch with `git fetch origin && git rebase --onto %s %s`, then follow your restack workflow. %s is origin/%s now; %s is the last of %s's commits in your branch.",
-		reason, target, old, target, newBase, old, pid)
+	// The push's lease is where origin has the branch now, so the push fails if
+	// anyone else moved it. A branch that was never pushed gets an empty lease,
+	// which tells git it must not exist on origin yet.
+	lease, _ := git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
+	note := fmt.Sprintf("Restack (%s): rebase your branch with `git fetch origin && git rebase --onto %s %s`, then follow your restack workflow. %s is origin/%s now; %s is the last of %s's commits in your branch. Push the result with `git push --force-with-lease=%s:%s origin %s`, exactly as written and as a command on its own.",
+		reason, target, old, target, newBase, old, pid, branch, lease, branch)
 	if newBase != base {
 		note += fmt.Sprintf(" Your base is now %s: after pushing, run `gh pr edit --base %s` and `crew set %s base %s`.", newBase, newBase, t.ID(), newBase)
 	}
