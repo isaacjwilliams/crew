@@ -58,6 +58,10 @@ func TestGuard(t *testing.T) {
 		{false, "lead", main, home, ""},
 		{false, "gardener", wt, wt + "/a", ""},
 		{true, "gardener", wt, home + "/projects/p/proposals/x.md", ""},
+		{false, "worker", wt, home + "/projects/p/memory.md", ""},
+		{false, "gardener", wt, home + "/projects/p/memory.md", ""},
+		{true, "lead", main, home + "/projects/p/memory.md", ""},
+		{true, "worker", wt, home + "/projects/p/memory-suggestions.md", ""},
 		{true, "lead", main, scratch + "/notes.md", ""},
 		// Judged by where a symlink leads, both ways.
 		{false, "worker", wt, wt + "/into-home/crew", ""},
