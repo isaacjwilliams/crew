@@ -588,5 +588,43 @@ check "propose refuses a worker source that names no task" '! crew propose "Orph
 ST=$(crew promote "$SP" --branch pricing-strategy)
 check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" status) == draft && $(crew get "$SP" status) == accepted && $(crew get "$SP" task) == $(basename "$ST" .md) ]]'
 check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
+out=$(crew proposals --project "$PJ"); all_out=$(crew proposals --any-status --project "$PJ")
+check "proposals lists the open ones, and --any-status the rest too" '[[ $out != *"$(basename "$SP" .md)"* && $all_out == *"$(basename "$SP" .md)"*" accepted "* ]]'
+
+# Project scope: a command works on --project, else CREW_PROJECT (which `lead` and
+# crew's own sessions set), else the current directory's repo, else every project.
+git init -q --bare "$SB/shop.git"; git clone -q "$SB/shop.git" "$SB/shop" 2>/dev/null
+(cd "$SB/shop" && echo "# Conventions" >AGENTS.md && git add -A && git commit -qm init && git push -q -u origin main && git remote set-head origin main && crew project add >/dev/null)
+P2=$(cd "$SB/shop" && crew config PROJECT)
+S1=$(crew new "Shop checkout" --project "$P2")
+QT=$(crew new "Which currency" --project "$PJ"); sed -i '/^## Open questions$/a - [ ] Euros or pounds?' "$QT"
+out=$(cd "$HOME" && crew status)
+check "outside a repo, status shows every project" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* && $out != *"other projects"* ]]'
+out=$(cd "$HOME" && crew find 1 2>&1)
+check "outside a repo, a task number two projects share is ambiguous" '[[ $out == *ambiguous* ]]'
+out=$(CREW_PROJECT=$P2 crew status)
+check "CREW_PROJECT scopes status to its project, over the current directory's" '[[ $out == *"$NL$P2$NL"* && $out != *"$NL$PJ$NL"* ]]'
+check "scoped status ends with what waits on you in other projects" '[[ $out == *"waiting on you in other projects"*"$PJ: "*"task(s) with open questions"* ]]'
+check "CREW_PROJECT resolves a task number in its project first" '[[ $(CREW_PROJECT=$P2 crew find 1) == 001-shop-checkout ]]'
+check "crew new goes to CREW_PROJECT's project, over the current directory's" '[[ $(CREW_PROJECT=$P2 crew new "Shop cart") == "$L/projects/$P2/tasks/"* ]]'
+out=$(CREW_PROJECT=all crew status)
+check "CREW_PROJECT=all is every project, wherever the shell is" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* ]]'
+out=$(CREW_PROJECT=all crew new "Nowhere" 2>&1)
+check "with every project in scope, crew new asks which one" '[[ $out == *"which project?"* ]]'
+out=$(crew status --project all)
+check "--project all is every project, like --all" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* ]]'
+out=$(CREW_PROJECT=nope crew status 2>&1)
+check "an unknown CREW_PROJECT fails clearly" '[[ $out == *"CREW_PROJECT is '"'"'nope'"'"', which isn'"'"'t a project registered with crew"* ]]'
+out=$(cd "$HOME" && crew list --project "$P2")
+check "list takes --project" '[[ $out == *001-shop-checkout* && $out != *saved-search* ]]'
+PP=$(crew propose "Ship to Canada" --project "$P2")
+check "proposals --all is every project" '[[ $(crew proposals --all) == *"$(basename "$PP" .md)"* && $(crew proposals) != *"$(basename "$PP" .md)"* ]]'
+check "sync and cleanup --merged take --project" '(cd "$HOME" && crew sync --project "$P2" >/dev/null && [[ $(crew cleanup --merged --project "$P2") == "Nothing to clean up." ]])'
+fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
+(cd "$HOME" && CREW_PROJECT=$PJ crew dispatch "$S1" >/dev/null 2>&1)
+check "a worker runs with its task's project, not the caller's" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
+(cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
+check "the gardener runs with its project" '[[ $(grep -- "--agent gardener" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
+check "gardener takes --project, not a bare project name" '! crew gardener "$P2" 2>/dev/null'
 
 summary crew-e2e

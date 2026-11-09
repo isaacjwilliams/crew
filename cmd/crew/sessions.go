@@ -28,12 +28,13 @@ type Agents []Agent
 
 // claude is the claude CLI, run outside any parent Claude Code session's
 // environment (so it can be launched from inside one), with this home's bin/
-// first on PATH, so the sessions it starts run this home's crew.
+// first on PATH, so the sessions it starts run this home's crew. It drops the
+// parent's CREW_PROJECT: a session crew starts sets its own.
 func (c *Crew) claude(args ...string) *exec.Cmd {
 	cmd := exec.Command("claude", args...)
 	env := []string{}
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") && !strings.HasPrefix(e, "PATH=") {
+		if !strings.HasPrefix(e, "CLAUDECODE=") && !strings.HasPrefix(e, "PATH=") && !strings.HasPrefix(e, "CREW_PROJECT=") {
 			env = append(env, e)
 		}
 	}
@@ -250,6 +251,7 @@ func (c *Crew) launchSession(d Doc, role, wt, prompt string, resume bool, flags 
 		cmd = c.claude(append(args, prompt)...)
 	}
 	cmd.Dir = wt
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+d.Get("project"))
 	raw, _ := cmd.CombinedOutput()
 	// The job ID can come wrapped in color codes, which would never match `claude agents`.
 	out := ansiCode.ReplaceAllString(string(raw), "")

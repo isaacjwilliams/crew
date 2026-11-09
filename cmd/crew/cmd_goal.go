@@ -74,11 +74,9 @@ func (c *Crew) goalNew(args []string) error {
 	if _, ok := parseMaxInFlight(maxInFlight); maxInFlight != "" && !ok {
 		return fail("--max-in-flight must be a whole number, not '%s'", maxInFlight)
 	}
-	if proj == "" {
-		var err error
-		if proj, err = c.currentProject(); err != nil {
-			return err
-		}
+	proj, err := c.oneProject(proj)
+	if err != nil {
+		return err
 	}
 	p, err := c.loadProject(proj)
 	if err != nil {

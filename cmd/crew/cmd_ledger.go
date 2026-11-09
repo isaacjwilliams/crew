@@ -14,8 +14,8 @@ var configKeys = []string{"MAX_WORKERS", "GOAL_MAX_IN_FLIGHT", "BRANCH_PREFIX", 
 	"WORKER_AUTOCOMPACT_WINDOW", "LEAD_PERMISSION_MODE", "PRE_PR_REVIEW", "PR_MODE", "REPLY_TO_THREADS", "MAX_REVIEW_ROUNDS",
 	"WORKTREE_COPY", "WORKTREE_TOOL", "GARDENER_LOOKBACK", "GARDENER_MAX_TURNS", "REMOTE", "REPO", "DEFAULT_BRANCH"}
 
-// crew config [KEY] [--project P]: the effective settings, with the project's
-// overrides (the current repo's, or P's).
+// crew config [KEY] [--project P]: the effective settings, with the overrides
+// of P or the default project (defaultProject).
 func cmdConfig(c *Crew, args []string) error {
 	key, name := "", ""
 	for len(args) > 0 {
@@ -26,8 +26,9 @@ func cmdConfig(c *Crew, args []string) error {
 		}
 	}
 	settings := c.Settings
-	if name == "" {
-		name, _ = c.projectFromCwd()
+	name, err := c.scope(name, false)
+	if err != nil {
+		return err
 	}
 	if name != "" {
 		p, err := c.loadProject(name)
@@ -62,21 +63,25 @@ func cmdConfig(c *Crew, args []string) error {
 	return nil
 }
 
-// crew list [--all] [--status S]
+// crew list [--all|--project P] [--status S]
 func cmdList(c *Crew, args []string) error {
-	all, want := false, ""
+	all, proj, want := false, "", ""
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--all":
 			all = true
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[1:]
 		case args[0] == "--status" && len(args) > 1:
 			want, args = args[1], args[1:]
+		default:
+			return usage("crew list [--all|--project P] [--status S]")
 		}
 		args = args[1:]
 	}
-	scope := ""
-	if !all {
-		scope, _ = c.projectFromCwd()
+	scope, err := c.scope(proj, all)
+	if err != nil {
+		return err
 	}
 	for _, t := range c.tasks(scope) {
 		st := t.Get("status")

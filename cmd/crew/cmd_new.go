@@ -42,11 +42,9 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
 		return Task{}, fail("--branch '%s': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)", name)
 	}
-	if proj == "" {
-		var err error
-		if proj, err = c.currentProject(); err != nil {
-			return Task{}, err
-		}
+	proj, err := c.oneProject(proj)
+	if err != nil {
+		return Task{}, err
 	}
 	p, err := c.loadProject(proj)
 	if err != nil {
