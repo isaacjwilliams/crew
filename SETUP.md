@@ -203,6 +203,8 @@ Two details:
 
 **Your personal taste goes in your user-level files, not the shared AGENTS.md.** `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md` load alongside `AGENTS.md` in every project and every agent. Use them for the conventions you distil from your review comments ("prefer X over Y", "new data fetching goes through Z"), which you'd otherwise repeat on every PR. The implementer has no coding standards of its own. Everything it knows about your taste comes from these files, so if you have none, it works from the repo's `AGENTS.md` alone.
 
+**Facts about one project that aren't conventions go in its project memory.** That's settled decisions that outlive the task that made them ("dashboard columns are unlimited") and private working facts your collaborators shouldn't see ("PR screenshots go in Dropbox"). It lives in the ledger, in `~/crew/projects/<project>/memory.md`, and every crew agent working on the project loads all of it when its session starts, except the casual observer, which is meant to know little. Agents suggest facts with `crew remember`; you approve them. The lead raises each suggestion with you and, if you keep it, moves it into `memory.md`. `crew status` counts the ones waiting. To add a fact yourself, tell the lead "remember that …". `crew memory` prints a project's memory. Where it disagrees with the code, the code wins, and the agent suggests a correction. Claude Code's own auto memory ranks below both.
+
 ## 5. Daily use
 
 ### Start work: talk to the lead
@@ -399,7 +401,8 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Rule | Enforced by |
 |---|---|
 | Workers only change files in their own worktree (plus the ledger, temp dirs and tool caches) | `crew-guard` blocks Edit/Write anywhere else, for the worker and any subagent it spawns (the hook is in both `implementer.md` and `worker-settings.json`). Shell commands aren't confined: the implementer's instructions set the same limit, and auto mode's classifier stops risky commands |
-| The gardener and `crew observe` don't change your code | They run only the read-only commands in `readonly-settings.json`; anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
+| The gardener and `crew observe` don't change your code | They run only the read-only commands in `gardener-settings.json` and `readonly-settings.json` (the gardener may also suggest project memory with `crew remember`); anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
+| Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
 | On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs and edit them | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
@@ -434,7 +437,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 
 Per-project overrides go in `projects/<project>/project.env`. `crew config` shows the effective values. Per-project additions to the worker settings go in `projects/<project>/worker-settings.json`.
 
-Permission rules for each kind of session are in `lead/.claude/settings.json` (the lead and goal leads), `config/worker-settings.json`, and `config/readonly-settings.json`. Add `allow` rules there if a worker keeps stopping for a command you're happy to allow, such as your test runner under `default` mode.
+Permission rules for each kind of session are in `lead/.claude/settings.json` (the lead and goal leads), `config/worker-settings.json`, `config/gardener-settings.json` and `config/readonly-settings.json` (`crew observe`). Add `allow` rules there if a worker keeps stopping for a command you're happy to allow, such as your test runner under `default` mode.
 
 To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick up changes within seconds.
 
@@ -497,6 +500,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - followup: refusing while a worker is busy, continuing one that ended its turn on a question, never resending an old round, resuming, and falling back to a fresh worker;
   - replies: to thread roots, quoting conversation comments and review summaries, and refusing comments from other PRs; sync, cleanup (ending a background process left running in the worktree, and only that), the gardener, and promoting proposals;
   - `WORKTREE_TOOL=worktrunk`: dispatch and cleanup through `wt`, stopping on unapproved hooks, the ledger unlocked while hooks run;
+  - project memory: suggestions written and counted in `crew status`, the memory printed with its header, and the SessionStart hook's output for each kind of session, and its exit 0 whatever it's given;
   - per-project worker settings: merged in, and unable to override a shipped value or drop a `deny` rule;
   - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap, a goal's `max_in_flight` among them, counting every task of a stack), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
   - stacked tasks: `--on`, dispatch once the parent's branch is pushed, sync reporting a moved or merged parent, and `crew restack` through a real squash merge and rebases of a three-task stack;
@@ -504,7 +508,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 - Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, new and dropped files, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
 - The fish files were checked with fish 3.7.
 
-**Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (what the lead loads, a real failover, everything on a Mac: the shell suites run only on Linux), a project's `worker-settings.json` reaching a live `--bg` worker (it's passed as a JSON string to `--settings`), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.
+**Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (what the lead loads, project memory reaching sessions through the SessionStart hook, a real failover, everything on a Mac: the shell suites run only on Linux), a project's `worker-settings.json` reaching a live `--bg` worker (it's passed as a JSON string to `--settings`), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.
 
 ## 12. Uninstall
 

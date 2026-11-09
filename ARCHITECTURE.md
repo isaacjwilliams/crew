@@ -28,7 +28,7 @@ These are invariants. Breaking one changes the design, not just the implementati
      - two lines in `.git/info/exclude`, which is local to the clone.
 2. **The ledger is the single source of truth, it's plain text, and it's pushed to the person's private remote.**
    - Every change is committed at once and pushed in the background, normally within seconds, so another machine can take over with what this one knew. A push that fails is retried by the next commit, and by every `crew tick`.
-   - Agents never rely on their own memory for state. The lead is effectively stateless: every session starts by reading the ledger.
+   - Agents never rely on their conversation for state. The lead is effectively stateless: every session starts by reading the ledger.
    - That holds for a long conversation too. The lead opens a draft task once the goal is agreed and writes each decision into it as it's made; the lead and workers reread the task file after a compaction or a resume. Compaction and fresh sessions lose nothing that matters, so no conversation has to live forever.
    - Task files hold the brief, the decisions, the review rounds, a log, and the worker's identifiers.
 3. **Work has identity; sessions are disposable.**
@@ -44,10 +44,11 @@ These are invariants. Breaking one changes the design, not just the implementati
 6. **The user is the only one who merges.**
    - The agent prompts say exactly what each agent may do on GitHub. For workers that is: push their own task branch (with `--force-with-lease` allowed after a rebase), open a PR, and edit it. Merging stays with the user.
    - We rely on the prompts for GitHub behaviour and don't try to parse shell commands for it; that approach can't be made complete. `deny` rules in the settings files catch the obvious mistakes (`gh pr merge`, `git push --force`). Branch protection, where the repo allows it, is the real backstop.
-   - File edits are enforced mechanically: `crew guard` checks Edit/Write paths. Bash isn't sandboxed (see [Bash](#bash-no-sandbox)). Workers run it in auto mode, the same trust you give your own sessions, and the gardener only runs its read-only allow list.
+   - File edits are enforced mechanically: `crew guard` checks Edit/Write paths. Bash isn't sandboxed (see [Bash](#bash-no-sandbox)). Workers run it in auto mode, the same trust you give your own sessions, and the gardener only runs its read-only allow list and `crew remember`.
 7. **Project-agnostic agents, project-specific conventions.**
    - Agents live at user level (`~/.claude/agents/`).
    - Project conventions come from the repo's `AGENTS.md`/`CLAUDE.md`, which Claude Code loads automatically for every session in the repo. The lead and plan-reviewer, which run outside every repo, read it explicitly. The user's personal taste goes in `~/.claude/CLAUDE.md` or `~/.claude/rules/`.
+   - Facts about a project that the user approved, and that collaborators shouldn't see or that would be lost in a merged task's Decisions, go in its project memory in the ledger (see [Project memory](#project-memory)).
    - Agent prompts should stay generic.
 8. **One machine runs the crew at a time.**
    - The home's `host` file names it, and a git push claims it, so two machines can't both believe they hold it.
@@ -75,9 +76,9 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `.github/workflows/release.yml` | — | On a pushed `v*` tag in the public repo: tests (the Go tests on macOS too), builds the Linux and macOS binaries and publishes them as the release |
 | `config/defaults.env` | — | Every setting, its default and its comment; read by `crew` |
 | `templates/crew.env` | — | The short starting point for a person's `config/crew.env` (their overrides of `defaults.env`) |
-| `lead/.claude/settings.json` | — | The lead's session, in `lead/`: `"agent": "lead"`, its permission `allow`/`deny` rules, and the `crew-guard` hook (role `lead`), which covers its subagents. Goal leads get the same file without `agent`, as a JSON string to `--settings` |
+| `lead/.claude/settings.json` | — | The lead's session, in `lead/`: `"agent": "lead"`, its permission `allow`/`deny` rules, the `crew-guard` hook (role `lead`), which covers its subagents, and the SessionStart hook that loads project memory. Goal leads get the same file without `agent`, as a JSON string to `--settings` |
 | — | `lead/.claude/settings.local.json` | Written per machine by `crew install`, gitignored: `permissions.additionalDirectories` (the home and `WORK_ROOT`) and `claudeMdExcludes` (the home's `CLAUDE.md`, which is for developing crew) |
-| `config/{worker,readonly}-settings.json` | — | Passed with `--settings`: permission `allow`/`deny` rules for workers (`worker`), and the gardener and `crew observe` (`readonly`); the worker file also hooks `crew-guard`, which covers their subagents |
+| `config/{worker,gardener,readonly}-settings.json` | — | Passed with `--settings`: permission `allow`/`deny` rules for workers (`worker`), the gardener (`gardener`: the read-only list plus `crew remember`) and `crew observe` (`readonly`, which has no hooks). The worker and gardener files load project memory at session start (`crew memory --hook`); the worker file also hooks `crew-guard`, which covers their subagents |
 | `templates/task.md` | — | Task file shape: front matter and sections |
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
 | `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
@@ -119,6 +120,8 @@ This repo is the public one, and never contains state: nothing under `projects/`
     tasks/NNN-<branch-name>.md          one task each (`crew new --branch`, else from the title)
     goals/NNN-<slug>.md                 one goal each (`crew goal new`)
     proposals/YYYY-MM-DD-slug.md        one idea each, from the gardener or `crew propose`
+    memory.md                           project memory: facts the user approved, written by the lead
+    memory-suggestions.md               facts suggested for memory.md (`crew remember`), each waiting on the user
     gardener.last                       last commit the gardener reviewed
   logs/gardener-*.log                   not committed
   logs/worktree-<p>-<id>.log            Worktrunk hook output from dispatch/cleanup; not committed
@@ -278,7 +281,7 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
              closes the goal (crew goal done) once every task is merged or abandoned
 ```
 
-- **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job` and `lead_session`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's memory, and the session can be replaced.
+- **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job` and `lead_session`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's record, and the session can be replaced.
 - **A task belongs to a goal through its `goal:` key**, set by `crew new --goal`. `crew status` lists each goal with its tasks under it.
 - **Parked is a task state, not a goal one.** The goal lead parks an item by leaving its task in `draft` with unchecked Open questions, so the rest of the goal carries on. The user answers through the lead, which records the answer in the task and passes it on with `crew goal note`.
 - **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. `crew goal followup` sends both, once the goal lead is free, and resets them.
@@ -291,7 +294,7 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 `crew gardener [--all|--project P]`:
 1. Fetches the default branch and moves `_gardener` to `origin/<default>`. This checkout always uses plain `git worktree`, whatever `WORKTREE_TOOL` says: the gardener only reads, so it doesn't need the project's per-worktree setup.
 2. Sets the review range to `gardener.last..HEAD`. On the first run it starts from the commit before `GARDENER_LOOKBACK`.
-3. Runs, with `CREW_PROJECT=<p>`, `claude -p --add-dir <home> --agent gardener --permission-mode acceptEdits --permission-prompts none --max-turns … --settings readonly-settings.json "<prompt>"`, writing its output to `logs/`.
+3. Runs, with `CREW_PROJECT=<p>`, `claude -p --add-dir <home> --agent gardener --permission-mode acceptEdits --permission-prompts none --max-turns … --settings gardener-settings.json "<prompt>"`, writing its output to `logs/`.
 4. On success, updates `gardener.last` and commits. It exits non-zero if any project fails.
 
 ### Proposals
@@ -301,6 +304,24 @@ A proposal is an idea worth keeping that isn't ready to be a task: a gardener re
 - **`crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]`** writes one from a title and a paragraph (under Why it matters), with `source: lead` by default and the evidence sections left empty. A `worker:` source must name one task of the project; crew records its full ID.
 - **`crew proposals [--any-status] [--all|--project P]`** lists the open ones, or all of them with `--any-status` (for P, the default project, or every project), with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
 - **`crew promote`** turns an `open` or `deferred` proposal into a draft task. The task's Context names the proposal and who wrote it, its `revisit_when`, and whichever of Why it matters, Proposal and First step have text (`Proposal.TaskContext`).
+
+### Project memory
+A project's memory is `projects/<p>/memory.md`: durable facts about the project that the user approved and every agent working on it should know, mostly settled domain decisions that outlive their task and private working facts collaborators shouldn't see. It isn't status, work, the repo's conventions (AGENTS.md) or the user's taste (`~/.claude/CLAUDE.md`). Claude Code's auto memory can't do this job: it's per repository, so the lead and plan-reviewer, which run outside every repo, never see it, and nobody reviews what goes in.
+
+```
+any agent: crew remember "<fact>" --why "<reason>" --source S
+  → memory-suggestions.md: - [ ] **<fact>** <reason>. (<source>, <date>)   crew status counts it
+lead ⇄ user: keep it? → the text after the checkbox, unchanged, into memory.md;
+             the item ticked "→ kept" or "→ declined: <reason>"
+session start, resume, clear, compaction: SessionStart hook → crew memory --hook
+             → the memory of CREW_PROJECT, into the session's context
+```
+
+- **Agents suggest, the user approves.** Only the lead writes `memory.md`, on the user's say-so; `crew guard` blocks the worker and gardener roles from editing it. Everyone else suggests with `crew remember`, whose `--source` is checked by `ledgerSource`, as for proposals.
+- **Every agent loads the whole file**, mechanically. A SessionStart hook with no matcher, in `lead/.claude/settings.json` (so goal leads too), `config/worker-settings.json` and `config/gardener-settings.json`, runs `crew memory --hook`, and Claude Code adds its stdout to the session's context. It fires again on every resume and compaction, so a session never runs on a stale copy. Launch-prompt lines would load only if the agent obeyed, and `--append-system-prompt-file` would keep a resumed session on its old copy.
+- **The hook prints the memory of `CREW_PROJECT`**, after a line naming the file and the rule for weighing it (`memoryRule`, the only place that rule is written). It prints nothing for no project or `all`, so a lead started for every project, and plan-reviewer (a subagent gets no SessionStart), run `crew memory --project <p>` instead, as their prompts say. It always exits 0.
+- **casual-observer gets none**, on purpose: its value is the read of a teammate who knows little. `crew observe` runs it with `readonly-settings.json`, which has no hooks, and without `CREW_PROJECT`.
+- **The whole file is loaded**, so the lead keeps it under 100 lines. Past that, loading an index and fetching entries on demand is the next step.
 
 ### Public and private repos
 ```
@@ -369,6 +390,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Locks (`lock.go`):** `flock(2)` on files in the home, the same lock util-linux `flock` takes. `lock` takes `.crew.lock` (30 s timeout) for the rest of the process, or until `unlock`, and then checks the lease (`requireHost`). `takeLock` is the lock alone, for the commands that move the lease. `.crew-tick.lock` lets one `crew tick` run at a time, and `.crew-push.lock` one ledger push. Go opens files close-on-exec, so the sessions and processes crew starts never hold a lock. `crew dispatch` unlocks while it creates the worktree, since Worktrunk hooks can take minutes and workers' `crew log` calls would otherwise time out; it repeats its checks once it has the lock again.
 - **Running claude (`sessions.go`):** `claude` runs it with `$CREW_HOME/bin` first on `PATH` and `CLAUDECODE` unset, so it can be launched from inside a Claude session, and without the caller's `CREW_PROJECT`, which the caller sets for its own session (see Project scope).
 - **Ledger commits (`push.go`):** `commit` adds and commits the state paths (`statePaths`: `projects/`, `reports/`) and nothing else in the home, but only if `$CREW_HOME` is its own repo toplevel. It never fails the command. After a commit it calls `pushSoon`.
+- **Project memory (`cmd_memory.go`):** `crew remember` appends a suggestion to `memory-suggestions.md` under the ledger lock (`memorySuggestion`), and `crew memory` prints `memory.md` after its header and `memoryRule`. `crew memory --hook` takes the project from `CREW_PROJECT` (`sessionMemory`). `memorySuggestions` counts the unchecked items for `crew status`. A hook never fails: `main` exits 0 for any command run with `--hook` first, whatever went wrong.
 - **Agents' own edits:** `crew commit --hook` is a PostToolUse hook on Edit, Write, NotebookEdit and Bash, in `lead/.claude/settings.json` and `config/worker-settings.json`. It ignores the hook JSON and asks git what changed under the state paths (`ledgerChanges`), since agents often edit the ledger with a script run through Bash. It commits any change as `edit <path>`, or `edit <n> files`, which pushes it. A call that changed nothing in the ledger costs one `git status` (about 4 ms on a home with a few hundred task files). It always exits 0, so it never fails the tool call.
 - **Public and private repos:** `cmdSetup` and `cmdUpgrade` (see [Public and private repos](#public-and-private-repos) and [Upgrading](#upgrading)). `crew setup` refuses when `config/crew.env` exists, when there's no `origin`, or when `gh` isn't signed in. `crew upgrade` never resolves a conflict itself.
 - **Lease (`lease.go`, `cmd_host.go`):** one machine runs the crew at a time, the one the home's `host` file names (`CREW_HOST`, from the environment, default `machineName()`: the short hostname on Linux, `scutil --get LocalHostName` on a Mac, since a Mac's hostname can change with the network).
@@ -420,6 +442,7 @@ It's called from the agents' frontmatter hooks, and from the hooks in `lead/.cla
 - Always allowed elsewhere: `/tmp`/`$TMPDIR`, `~/.claude/jobs`, `~/.claude/plans`, `$CLAUDE_JOB_DIR`.
 - `worker`: only paths inside the git toplevel of `$CLAUDE_PROJECT_DIR` (falling back to `cwd`), and never when that toplevel is the main checkout.
 - `lead` (the lead and goal leads), `gardener`: nothing else.
+- A project's `memory.md` takes edits only from the `lead` role: `worker` and `gardener` are told to suggest the fact with `crew remember` instead. It's a tripwire, like the rest of the guard: a goal lead shares the lead's role, so only its prompt keeps it out, and a Bash write isn't checked.
 
 The target path is structured input, so this needs no shell parsing. Bash commands aren't checked: shell parsing can never be complete.
 
@@ -443,7 +466,7 @@ No crew session runs in Claude Code's sandbox. It was tried and dropped:
 What governs Bash instead:
 
 - **Workers** run in `WORKER_PERMISSION_MODE` (`auto` by default): Claude Code's classifier approves routine commands and stops risky ones, as in your own sessions. The `allow` rules in `worker-settings.json` skip the classifier for the usual git and gh commands; the `deny` rules catch `gh pr merge` and force pushes. The implementer prompt tells workers to keep shell writes to their worktree, the ledger, temp directories and tool caches.
-- **The gardener and `crew observe`** run with `--permission-prompts none` and the read-only `allow` list in `readonly-settings.json`, so any other command is denied.
+- **The gardener and `crew observe`** run with `--permission-prompts none` and a read-only `allow` list, so any other command is denied: `crew observe` with `readonly-settings.json`, and the gardener with `gardener-settings.json`, the same list plus `crew remember`.
 - **The lead** runs in `LEAD_PERMISSION_MODE` (`auto` by default) in the home's `lead/`, and **goal leads** in the same mode in their own checkouts. `crew guard` keeps their file edits to the ledger.
 - **An allow rule's `*` goes after the subcommand**, never before it. `Bash(git -C * show *)` would also approve `git -C . -c core.pager=<program> show`, and Claude Code warns about such a rule at every start. `tests/guard.sh` checks the settings files for it.
 - **Network is left open.** `WebFetch(domain:*)` pre-allows every host, so background sessions never stop at a network prompt.
@@ -483,7 +506,7 @@ Changing any of these means updating every side listed.
 | `crew host up` enables and `down`, `prune` and the stand-down disable `crewServices`; on a Mac, a job's label is its plist's file name | `crew host up`, `crew host down`, `standDown` ↔ `systemd/`, `launchd/` |
 | `crew serve` exits 3 on a machine that doesn't hold the lease; the unit doesn't restart on 3. launchd has no counterpart: `launchd/crew-lead.plist` restarts it every 30 seconds (`ThrottleInterval`) until the stand-down boots the job out, which is why the job is enabled only on the lease holder | `crew serve` → `systemd/crew-lead.service` (`RestartPreventExitStatus=3`); checked in `tests/guard.sh` |
 | Front-matter key names | `templates/task.md`, `templates/goal.md`, `templates/proposal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
-| A proposal's `source` is `gardener`, `user`, `lead` or `worker:<task id>` | `crew propose` (`ledgerSource`), the gardener → `Proposal.Author` (`crew promote`), `crew proposals`, `lead.md`, `implementer.md`, `LEDGER.md` |
+| A proposal's or memory suggestion's `source` is `gardener`, `user`, `lead` or `worker:<task id>` | `crew propose` and `crew remember` (`ledgerSource`), the gardener → `Proposal.Author` (`crew promote`), `crew proposals`, `lead.md`, `implementer.md`, `gardener.md`, `LEDGER.md` |
 | Proposal section headings (`## Why it matters`, `## Proposal`, `## First step`, `## Log` last) | `templates/proposal.md`, the gardener → `crew propose`, `Proposal.TaskContext` (`crew promote`) |
 | A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalRunning` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
@@ -517,7 +540,10 @@ Changing any of these means updating every side listed.
 | A release is the tag `v<version>`, matching `VERSION`, with `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` attached, each stamped with that version (`-X main.version`) | `.github/workflows/release.yml` → `crew upgrade` (`newestRelease`), `bin/crew`, `crew doctor` (the binary's version is `VERSION`'s) |
 | `bin/crew` runs `bin/release/crew-<VERSION>` (or `CREW_VERSION`), fetching a missing one from `https://github.com/isaacjwilliams/crew/releases/download/v<version>/crew-<uname -s>-<uname -m>` and checking it with `crew version`; it exits 2 for `crew guard` when it can't, so a missing binary blocks edits | `bin/crew` ↔ the release's asset names, `crew upgrade` (`CREW_VERSION=<new> bin/crew version`); checked in `tests/host.sh`, with `tests/stubs/curl` serving releases |
 | The lead's settings are `lead/.claude/settings.json`; a goal lead's are the same without `agent` (deleted from the parsed file, key order kept), so the two can't drift | `launchGoalLead`; checked in `tests/guard.sh` and `tests/crew-e2e.sh` |
-| Settings file names | `crew` |
+| Settings file names: `lead/.claude/settings.json` (the lead, and goal leads without `agent`), `config/worker-settings.json`, `config/gardener-settings.json` (`crew gardener`), `config/readonly-settings.json` (only `crew observe`) | `crew`, `crew doctor`; checked in `tests/guard.sh` and `tests/crew-e2e.sh` |
+| Project memory is `projects/<p>/memory.md` (the lead's: `- **<fact>** <reason>. (<source>, <date>)` per entry) and `projects/<p>/memory-suggestions.md` (`crew remember`'s: the same text after `- [ ] `, ticked `→ kept` or `→ declined: <reason>`) | `crew remember` → `crew status` (`memorySuggestions`), `crew memory`, `lead.md` "Project memory", the guard, `LEDGER.md` |
+| The SessionStart hook `"${CREW_HOME:-$HOME/crew}/bin/crew" memory --hook`, with no matcher; it reads nothing from its JSON | `lead/.claude/settings.json`, `config/worker-settings.json`, `config/gardener-settings.json` → `crew memory --hook`, `crew doctor`; checked in `tests/guard.sh` |
+| A SessionStart hook's stdout, on exit 0, is added to the session's context | Claude Code → `crew memory --hook` |
 | Every tool `crew` needs (`deps` in `crew doctor`) is on the `PATH` its services set | `systemd/*.service`, `launchd/*.plist` (read from the installed copy) → `crew doctor`, for enabled services (`crewServices`) |
 | `wt switch … --format json` prints `{"action", "path", …}`; `--config-set worktree-path=<TOML string>` sets the path; unapproved hooks fail when stdin isn't a terminal | Worktrunk → `worktreeCreate`; mirrored in `tests/stubs/wt` |
 
@@ -538,7 +564,7 @@ Changing any of these means updating every side listed.
 | Add worker settings for one project (`allow` rules, `env`) | `projects/<p>/worker-settings.json` in the ledger (user-owned, add-only merge; see `workerSettings`) |
 | Support another worktree tool | A new `WORKTREE_TOOL` case in `worktreeCreate`/`worktreeRemove` (`worktree.go`), a stub in `tests/stubs/`, `crew doctor`, `config/defaults.env` |
 | Change how a goal lead works | `goal-lead.md` (parking rules, workflows); its intake is the lead's (`lead.md`), so a change there reaches both |
-| Add another agent | New `agents/*.md` (`crew install` copies every `*.md`); add a guard role (`guard.go`) if it edits files, and a settings file with its `allow`/`deny` rules if it runs in the background |
+| Add another agent | New `agents/*.md` (`crew install` copies every `*.md`); add a guard role (`guard.go`) if it edits files, and a settings file with its `allow`/`deny` rules if it runs in the background, with the SessionStart hook if it should know the project's memory |
 
 ## Verification
 
@@ -547,7 +573,7 @@ tests/run.sh            # lint + guard + crew-e2e + host; must pass before a cha
 ```
 
 - **`lint`**: `gofmt`, `go vet` for Linux and for macOS, `go test ./...` (the ledger model, settings files, the guard's table, `resolve`, statuses against `LEDGER.md`, each launchd job against its unit, plist rendering and reading, and `/proc`, `ps` and `lsof` output), `sh -n` on `bin/`, `bash -n` on the tests, shellcheck on both, fish syntax, JSON validity, and `claude plugin validate agents`.
-- **`guard`**: the write-guard allow/block table, run directly and through the lead and worker settings hooks, the home's state paths among them, plus checks that this repo tracks no state, that the lead, the implementer and the goal lead have no tool allowlist, that no settings file turns the sandbox on, that the lead and workers default to auto mode, that the settings run `crew commit --hook`, that the lead service leaves itself stopped on exit 3, and that the agents' prompts agree with `crew` and the settings.
+- **`guard`**: the write-guard allow/block table, run directly and through the lead and worker settings hooks, the home's state paths among them, plus checks that this repo tracks no state, that the lead, the implementer and the goal lead have no tool allowlist, that no settings file turns the sandbox on, that the lead and workers default to auto mode, that the settings run `crew commit --hook` and load project memory, that the lead service leaves itself stopped on exit 3, and that the agents' prompts agree with `crew` and the settings.
 - **`crew-e2e`**: `crew` end to end in a crew home made from this checkout (`make_home`, which puts a binary built from this checkout in its `bin/release/`), against a bare-repo remote, with stub `claude`, `gh` and `wt`.
 - **`host`**: a machine and its home, in fake `HOME`s: `crew install` (a fresh install, unchanged re-runs, edited, new and dropped files, skipped components, the AGENTS.md question, a home outside `~/crew`, `crew doctor`'s checks), the lease between two machines (`host up`, `--take`, a lost lease, the stand-down, `host down`, `crew serve`), `crew setup`, `crew upgrade` to a release tag in a fake public repo, and the launcher (a download, a failed one, `CREW_VERSION`), with `tests/stubs/curl` serving the releases.
 
@@ -598,6 +624,7 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
 - **Frontmatter hooks** in `~/.claude/agents/` run without a workspace-trust prompt; project-level agent hooks would need trust.
 - **Workspace trust** covers the folders below the one it was accepted in. Seen live on 2026-10-21: trust accepted in `~/crew/lead` was recorded in `~/.claude.json` for the repo's top level, `~/crew`, and `claude` in `~/crew/lead` then didn't ask again. `crew doctor` counts a folder above as trust for that reason. Background sessions are assumed to inherit it the same way from `~/agent-work`; that hasn't been confirmed by a live run.
 - **Tool inheritance:** an agent without `tools:` inherits every tool in its session, MCP servers included, also when it runs as the main session with `--agent`. `disallowedTools` names that don't resolve are assumed to be ignored. Neither has been confirmed by a live run.
+- **SessionStart hooks** from `--settings` and from `lead/.claude/settings.json` are assumed to fire for `--bg` sessions, for their resumes (`crew followup`), after compaction, and in `claude -p` (the gardener), and not for subagents. The `hooks` docs list the sources (startup, resume, clear, compact) and say plain stdout reaches the context; the rest is inferred, and none of it has been confirmed by a live run.
 - **Hooks from `--settings`** fire for tool calls in subagents, with `agent_type` set, while frontmatter hooks run only for their own agent. `Agent(<name>)` deny rules block one subagent type. Neither has been confirmed by a live run.
 - **Background subagents:** `background: true` keeps plan-reviewer in the background even where fork mode is off, so the lead stays free to talk while it runs. Its result arrives in a later turn as a completion notification. A background subagent keeps Read, Grep, Glob and Bash, which is all plan-reviewer uses. Documented in `sub-agents`; not confirmed by a live run.
 - **CLAUDE.md in subagents:** a subagent loads the whole CLAUDE.md hierarchy (`~/.claude/CLAUDE.md`, the project's CLAUDE.md or AGENTS.md) unless its frontmatter sets `omitClaudeMd`, and never sees the parent's conversation. plan-reviewer relies on both: the user's taste arrives that way, and its read stays independent of the lead's. As a subagent of the lead, which runs outside every repo, it gets no project CLAUDE.md or AGENTS.md, and reads them at the task's base through `git -C` instead. The lead's `claudeMdExcludes` (in `lead/.claude/settings.local.json`) is assumed to keep the home's `CLAUDE.md` out of plan-reviewer too; not confirmed by a live run. Documented in `sub-agents`; not confirmed by a live run. The implementer, a main session started with `--agent`, is assumed to load `~/.claude/CLAUDE.md` the same way: it has no coding standards of its own. Documented in `memory`; not confirmed by a live run.
