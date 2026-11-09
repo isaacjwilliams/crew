@@ -37,11 +37,9 @@ func cmdPropose(c *Crew, args []string) error {
 	if slug == "" {
 		return fail("the title needs a letter or a digit, to name the proposal's file")
 	}
-	if proj == "" {
-		var err error
-		if proj, err = c.currentProject(); err != nil {
-			return err
-		}
+	proj, err := c.oneProject(proj)
+	if err != nil {
+		return err
 	}
 	p, err := c.loadProject(proj)
 	if err != nil {
@@ -96,8 +94,7 @@ func (c *Crew) proposalSource(s, proj string) (string, error) {
 
 // crew proposals [--all] [--project P]
 func cmdProposals(c *Crew, args []string) error {
-	all := false
-	p, _ := c.projectFromCwd()
+	all, p := false, ""
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--all":
@@ -108,8 +105,9 @@ func cmdProposals(c *Crew, args []string) error {
 			return usage("crew proposals [--all] [--project P]")
 		}
 	}
-	if p != "" && !isDir(c.path("projects", p)) {
-		return fail("unknown project '%s'", p)
+	p, err := c.scope(p, false)
+	if err != nil {
+		return err
 	}
 	n := 0
 	for _, f := range c.files("proposals", p) {

@@ -233,6 +233,7 @@ func cmdServe(c *Crew, args []string) error {
 	// worktrees of the home. Run like any session crew starts, so this home's crew
 	// is the one its sessions find.
 	cmd := c.claude("remote-control", "--name", "crew", "--spawn", "same-dir", "--permission-mode", c.Settings["LEAD_PERMISSION_MODE"])
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+allProjects)
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		return fail("'claude' is required but not installed")

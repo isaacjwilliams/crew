@@ -51,7 +51,7 @@ isolate_home() {
   export MISE_CACHE_DIR=${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}
   export HOME=$1
   mkdir -p "$HOME"
-  unset CREW_HOME CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
+  unset CREW_HOME CREW_PROJECT CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
   export GIT_CONFIG_NOSYSTEM=1
   git config --global user.email test@example.com
   git config --global user.name test

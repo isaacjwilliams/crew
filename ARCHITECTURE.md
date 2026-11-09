@@ -86,8 +86,9 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `projects/.gitkeep` | — | Where the ledger goes |
 | `.gitignore` | — | Ignores what crew keeps per machine: `bin/release/`, `logs/`, the `.crew*.lock` files, and `tests/.tmp/` |
 | `fish/conf.d/agent-crew.fish` | `~/.config/fish/conf.d/` | Sets `CREW_HOME` and puts `crew` on PATH |
-| `fish/functions/lead.fish` | `~/.config/fish/functions/` | `lead` = `claude --name lead --permission-mode <LEAD_PERMISSION_MODE> …` in `$CREW_HOME/lead`; the agent and settings come from that directory |
+| `fish/functions/lead.fish` | `~/.config/fish/functions/` | `lead [--project P]` = `claude --name lead[-<p>] --permission-mode <LEAD_PERMISSION_MODE> …` in `$CREW_HOME/lead`, with `CREW_PROJECT` set to P, the project whose repo you're in, or `all`; the agent and settings come from that directory |
 | `fish/completions/crew.fish` | `~/.config/fish/completions/` | Subcommand, task-ID and proposal-ID completion |
+| `fish/completions/lead.fish` | `~/.config/fish/completions/` | `lead --project` completion |
 | `systemd/crew-gardener.{service,timer}` | `~/.config/systemd/user/` | Weekly `crew gardener --all` (installed but not enabled) |
 | `systemd/crew-tick.{service,timer}` | `~/.config/systemd/user/` | `crew tick` every 3 minutes, `KillMode=process` so the sessions it resumes outlive the run (installed but not enabled) |
 | `systemd/crew-lead.service` | `~/.config/systemd/user/` | `crew serve`: the lead as a Remote Control server named `crew` in the home's `lead/`, for Claude Mobile. Restarted unless `crew serve` exits 3 (this machine doesn't run the crew). Enabled by `crew host up`. See "The lead as a service" under Assumptions |
@@ -141,7 +142,7 @@ The home's own files (code, config, templates) are never part of a ledger commit
 
 ### Intake and dispatch
 ```
-you ⇄ lead (a session in <home>/lead, for every project; reads code in crew checkout <p>)
+you ⇄ lead (a session in <home>/lead, for one project or every one; reads code in crew checkout <p>)
   lead: confirm goal → crew new "<title>" --branch <name> → investigate → plan → acceptance criteria
         → plan-reviewer subagent in the background (task file path only) → summary right away
         → review arrives → findings settled → Raise findings to you
@@ -287,10 +288,10 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 - **Items come from wherever the goal says.** If that's an external tracker, the goal lead reads it with the tools its session has and changes nothing there. How to reach a project's tracker belongs in that project's `AGENTS.md`, never in this repo.
 
 ### Gardener
-`crew gardener [--all|PROJECT]`:
+`crew gardener [--all|--project P]`:
 1. Fetches the default branch and moves `_gardener` to `origin/<default>`. This checkout always uses plain `git worktree`, whatever `WORKTREE_TOOL` says: the gardener only reads, so it doesn't need the project's per-worktree setup.
 2. Sets the review range to `gardener.last..HEAD`. On the first run it starts from the commit before `GARDENER_LOOKBACK`.
-3. Runs `claude -p --add-dir <home> --agent gardener --permission-mode acceptEdits --permission-prompts none --max-turns … --settings readonly-settings.json "<prompt>"`, writing its output to `logs/`.
+3. Runs, with `CREW_PROJECT=<p>`, `claude -p --add-dir <home> --agent gardener --permission-mode acceptEdits --permission-prompts none --max-turns … --settings readonly-settings.json "<prompt>"`, writing its output to `logs/`.
 4. On success, updates `gardener.last` and commits. It exits non-zero if any project fails.
 
 ### Proposals
@@ -298,7 +299,7 @@ A proposal is an idea worth keeping that isn't ready to be a task: a gardener re
 
 - **One shape for every source.** Each is a file from `templates/proposal.md`. Its `source` says who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`. `revisit_when`, optional, is the condition that makes it worth acting on.
 - **`crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]`** writes one from a title and a paragraph (under Why it matters), with `source: lead` by default and the evidence sections left empty. A `worker:` source must name one task of the project; crew records its full ID.
-- **`crew proposals [--all] [--project P]`** lists the open ones (the current directory's project, P, or every project) with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
+- **`crew proposals [--all] [--project P]`** lists the open ones (P, the default project, or every project) with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
 - **`crew promote`** turns an `open` or `deferred` proposal into a draft task. The task's Context names the proposal and who wrote it, its `revisit_when`, and whichever of Why it matters, Proposal and First step have text (`Proposal.TaskContext`).
 
 ### Public and private repos
@@ -360,10 +361,13 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - `CREW_HOME`, exported, so the sessions, hooks and `wt` runs crew starts see it.
   - The settings are `config/defaults.env`, which sets every key, then `config/crew.env` if it exists. `loadProject` adds `projects/<p>/project.env` (committed: `REMOTE`, `DEFAULT_BRANCH`, overrides), then `projects/<p>/local.env` (this machine's `REPO`, gitignored), starting from the shared settings for each project, so one project's values never reach the next. It fails when this machine has no clone.
   - The settings files are shell-style but parsed, not sourced. A line is blank, a `#` comment, or `KEY=value`, where the value is one shell word: plain, `'single-quoted'` and `"double-quoted"` parts, with `$VAR` and `${VAR}` taken from the settings read so far or the environment, then an optional `# comment`. Anything else, a command substitution or an unset variable say, is an error naming the file and line.
-  - `crew config [KEY] [--project P]` prints the effective value, for the cwd's project or P.
+  - `crew config [KEY] [--project P]` prints the effective value, for P or the default project.
+- **Project scope (`home.go`):** a command works on the project `--project` names, else the default project (`defaultProject`): `CREW_PROJECT` when it's set, else the project whose repo the current directory is in. `--project all`, `--all` or `CREW_PROJECT=all` is every project, and so is no project at all for the commands that list (`scope`). Commands that write to one project fail without one (`oneProject`).
+  - `CREW_PROJECT` wins over the current directory because a session's directory is only wherever its shell last went: a lead reading code in `_lead` is still the lead it was started as.
+  - Every session crew starts sets it: a worker or goal lead to its file's project (`launchSession`), the gardener to its project, the Remote Control lead to `all`. The `lead` function sets it to `--project P`, the project whose repo you ran it in, or `all`. So the current directory scopes only your own shell.
 - **Errors (`main.go`):** a command returns its refusal as an error: `fail` (exit 1), `notYet` (exit 4) or `exitQuietly(code)` for one that has said what it had to (`crew feedback`'s 3 for "nothing new"). `main` prints the message as `crew: …`. `warn` reports what doesn't stop the command.
 - **Locks (`lock.go`):** `flock(2)` on files in the home, the same lock util-linux `flock` takes. `lock` takes `.crew.lock` (30 s timeout) for the rest of the process, or until `unlock`, and then checks the lease (`requireHost`). `takeLock` is the lock alone, for the commands that move the lease. `.crew-tick.lock` lets one `crew tick` run at a time, and `.crew-push.lock` one ledger push. Go opens files close-on-exec, so the sessions and processes crew starts never hold a lock. `crew dispatch` unlocks while it creates the worktree, since Worktrunk hooks can take minutes and workers' `crew log` calls would otherwise time out; it repeats its checks once it has the lock again.
-- **Running claude (`sessions.go`):** `claude` runs it with `$CREW_HOME/bin` first on `PATH` and `CLAUDECODE` unset, so it can be launched from inside a Claude session.
+- **Running claude (`sessions.go`):** `claude` runs it with `$CREW_HOME/bin` first on `PATH` and `CLAUDECODE` unset, so it can be launched from inside a Claude session, and without the caller's `CREW_PROJECT`, which the caller sets for its own session (see Project scope).
 - **Ledger commits (`push.go`):** `commit` adds and commits the state paths (`statePaths`: `projects/`, `reports/`) and nothing else in the home, but only if `$CREW_HOME` is its own repo toplevel. It never fails the command. After a commit it calls `pushSoon`.
 - **Agents' own edits:** `crew commit --hook` is a PostToolUse hook on Edit, Write, NotebookEdit and Bash, in `lead/.claude/settings.json` and `config/worker-settings.json`. It ignores the hook JSON and asks git what changed under the state paths (`ledgerChanges`), since agents often edit the ledger with a script run through Bash. It commits any change as `edit <path>`, or `edit <n> files`, which pushes it. A call that changed nothing in the ledger costs one `git status` (about 4 ms on a home with a few hundred task files). It always exits 0, so it never fails the tool call.
 - **Public and private repos:** `cmdSetup` and `cmdUpgrade` (see [Public and private repos](#public-and-private-repos) and [Upgrading](#upgrading)). `crew setup` refuses when `config/crew.env` exists, when there's no `origin`, or when `gh` isn't signed in. `crew upgrade` never resolves a conflict itself.
@@ -388,7 +392,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - a number (`7` → `007-*`);
   - a unique substring.
 
-  It searches the cwd's project first, then all projects. On ambiguity it prints the candidates and fails.
+  It searches the default project first (see Project scope), then all projects, so a task number two projects share resolves in a scoped session. On ambiguity it prints the candidates and fails.
 - **Sessions (`sessions.go`):**
   - `agents` returns what `claude agents --json --all` lists as `Agent`s, or nothing on failure. It reads each field on its own, so a field whose type changes loses only that field. It sets `TurnEnded` on a live `working` session whose transcript (`~/.claude/projects/*/<session>.jsonl`) ends with the `turn_duration` entry Claude Code writes when a turn ends (`turnEnded`).
   - `busy` counts a job as busy while a turn runs (`state` working) or while its live process holds an open prompt, such as a permission request (`status` waiting). A `blocked` job without an open prompt ended its turn on a question for the user, so it takes a followup: the answer is what the followup sends. A background shell the worker started, such as a dev server, keeps its `state` working and its `status` busy after its turn ends, so a `working` job counts as mid-turn only until it has `TurnEnded`. `jobState` shows such a job as "idle, background task running". `runningWorkers` and `stopIdleSession` use the same rule.
@@ -507,6 +511,7 @@ Changing any of these means updating every side listed.
 | Each `launchd/<label>.plist` is the twin of `systemd/<label>.service`: the same command, the unit's `PATH` entries within its own, the same `Nice`, `AbandonProcessGroup` where the unit has `KillMode=process`; `Label` is the file's name, `Disabled` is true, `CREW_HOME` is `%h/crew`, output goes to `%h/crew/logs/<label>.log` | `systemd/` ↔ `launchd/`; checked in `services_test.go` |
 | What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
 | Locks: `.crew.lock` (every mutation), `.crew-tick.lock` (one `crew tick` at a time) and `.crew-push.lock` (one ledger push at a time), taken with `flock(2)`; Go opens them close-on-exec, so a session or background push crew starts never holds one | `crew` → `claude`; checked by `tests/stubs/claude` (no open fd on a `.crew*.lock` file) and `tests/crew-e2e.sh` |
+| `CREW_PROJECT` is a registered project or `all`, set for every session: by `lead` (`--project P`, the repo it's run in, or `all`) and by crew for the sessions it starts | `fish/functions/lead.fish`, `launchSession`, `crew gardener`, `crew serve` → `defaultProject`; checked in `tests/crew-e2e.sh` and `tests/host.sh` |
 | `crew` on PATH for agents | `conf.d` and the units' `PATH` (the lead, through `lead` and `crew serve`, which also prepends it), `claude` (in `sessions.go`) prepending PATH (workers, goal leads, gardener) |
 | `crew setup` makes `upstream` the public repo, with its push URL `DISABLED`, and `origin` the private one; `crew upgrade` merges the newest `v<version>` tag `upstream` has, once its binary has been fetched | `crew setup` → `crew upgrade`; checked in `tests/host.sh` |
 | A release is the tag `v<version>`, matching `VERSION`, with `crew-Linux-x86_64`, `crew-Linux-aarch64`, `crew-Darwin-arm64` and `crew-Darwin-x86_64` attached, each stamped with that version (`-X main.version`) | `.github/workflows/release.yml` → `crew upgrade` (`newestRelease`), `bin/crew`, `crew doctor` (the binary's version is `VERSION`'s) |
@@ -584,7 +589,8 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
 - **AGENTS.md loading** is automatic only when no `CLAUDE.md`/`CLAUDE.local.md` is present, unless Project instructions is set to `claude-md-and-agents-md`.
 - **`--settings` given a JSON string** (a project with `worker-settings.json`) is assumed to apply the same way as a file. This hasn't been confirmed by a live run.
 - **Resumed conversations keep their system prompt** until they're compacted (`--system-prompt-snapshot`, on by default). We assume that includes the `--agent` instructions, so `lead -c` and `crew followup` run on the `lead.md`/`implementer.md` they started with. This hasn't been confirmed by a live run.
-- **Session names:** `claude --resume <name>` resumes by name, and an interactive session whose name is already live gets a variant of it. Every lead session is named `lead`, so several past sessions share it.
+- **Session names:** `claude --resume <name>` resumes by name, and an interactive session whose name is already live gets a variant of it. A lead session is named `lead`, or `lead-<project>` for one project, so several past sessions share a name.
+- **Environment:** a background session (`claude --bg`) and the sessions `claude remote-control` spawns get the environment of the `claude` that started them: `PATH` for this home's `crew`, and `CREW_PROJECT`. If one didn't, a worker or goal lead would still find its project from its working directory, but the Remote Control lead would scope itself to whatever repo its shell visits. This hasn't been confirmed by a live run.
 - **Auto mode** (`--permission-mode auto`) needs a plan that has it. The lead and workers default to it.
 - **Stacked PRs on GitHub:** when a merged PR's head branch is deleted, GitHub retargets the open PRs based on it to the branch it merged into; deleting an unmerged branch closes them instead. Without the deletion, a child PR keeps targeting the merged branch until its worker runs `gh pr edit --base`. Either way the child's branch needs the rebase.
 - **Restack through followup:** `crew restack` relies on the same resume behaviour as `crew followup`, and on the worker following a rebase command from its prompt. Neither has been confirmed by a live run.

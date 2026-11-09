@@ -208,20 +208,23 @@ Two details:
 ### Start work: talk to the lead
 
 ```fish
-lead            # new session, from any directory; opens with a short briefing
+lead            # new session; opens with a short briefing
 lead "<request>" # the same, starting on your request after a briefing of what needs you
+lead --project isaac-webapp   # a lead for one project, from any directory
 lead -c         # continue the most recent lead conversation
 lead -r         # pick an earlier conversation to continue
 ```
 
-One lead covers every project you've registered. It runs in `~/crew/lead`, whose settings make the session the lead, so `cd ~/crew/lead; and claude` is a lead too. Say which project you mean when more than one could fit; the lead asks otherwise. It reads each project's code in its own copy, `~/agent-work/<project>/_lead`, which `crew checkout` keeps on the default branch, and reads the project's `AGENTS.md` there itself, since it isn't loaded for a session outside the repo. For the same reason it gets your user-level MCP servers but not a repo's own (`.mcp.json`); that repo's workers do.
+**One project or all of them.** Run `lead` in a project's repo, or name the project with `--project`, and the lead works on that project: its briefing, `crew status`, `crew list`, `crew proposals` and new tasks are that project's, and a task number like 7 means that project's task 7. Its briefing still mentions anything waiting on you in the other projects, in a line each. Run `lead` anywhere else, or with `--project all`, and it covers every project you've registered; say which one you mean when more than one could fit, and the lead asks otherwise. The lead function passes the choice to the session as `CREW_PROJECT`, which `crew` reads; give `lead -c` the same `--project` as the conversation you continue.
+
+The lead runs in `~/crew/lead`, whose settings make the session the lead, so `cd ~/crew/lead; and claude` is a lead too, for every project. It reads each project's code in its own copy, `~/agent-work/<project>/_lead`, which `crew checkout` keeps on the default branch, and reads the project's `AGENTS.md` there itself, since it isn't loaded for a session outside the repo. For the same reason it gets your user-level MCP servers but not a repo's own (`.mcp.json`); that repo's workers do.
 
 **One conversation or many.** The lead keeps nothing important in its conversation. It opens a draft task as soon as you agree on a goal and writes each decision into it as you agree it, so any lead session can pick up where another left off ("let's continue 007"). Keep one long conversation if you like: Claude Code compacts it when it fills up, and after a compaction the lead rereads the task files rather than trusting its summary. Start a fresh `lead` when:
 
 - you've just run `crew install`. A continued conversation keeps the instructions it started with until it's next compacted, so it won't know about changes to `lead.md`;
 - `lead -c` opens the wrong conversation. It takes the most recent one in `~/crew/lead`. Use `lead -r` to choose.
 
-Every lead session is named `lead`. If one is already running, Claude Code gives the new one a variant of that name.
+A lead session is named `lead`, or `lead-<project>` for one project. If one is already running, Claude Code gives the new one a variant of that name.
 
 **Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles plan-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` counts across every lead and project, so raise it in `config/crew.env` if it holds back work you're ready to review.
 
@@ -299,7 +302,7 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
 Ask the lead "what's going on?", or from fish:
 
 ```fish
-crew status        # current project (or all, outside a repo)
+crew status        # the project whose repo you're in, or all of them elsewhere (--project P, --all)
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
 
@@ -365,7 +368,7 @@ It runs on Sonnet at medium effort on purpose: a smaller model with a narrow con
 Run it by hand a few times before scheduling it, so you can tune how picky it is:
 
 ```fish
-cd ~/code/webapp; and crew gardener     # reviews commits merged since the last run (first run: 14 days)
+crew gardener --project isaac-webapp   # reviews commits merged since the last run (first run: 14 days)
 crew proposals                          # or ask the lead to summarize them
 crew promote 2026-09-29-extract-retry   # turns a proposal into a draft task; the lead then runs intake
 ```

@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// crew gardener [--all|PROJECT]: the gardener over each project's commits merged
-// since its last run. It exits 1 if any project's run fails.
+// crew gardener [--all|--project P]: the gardener over each project's commits
+// merged since its last run. It exits 1 if any project's run fails.
 func cmdGardener(c *Crew, args []string) error {
 	for _, tool := range []string{"git", "claude"} {
 		if err := need(tool); err != nil {
@@ -21,19 +21,24 @@ func cmdGardener(c *Crew, args []string) error {
 	if err := c.requireHost(); err != nil {
 		return err
 	}
-	var projects []string
-	switch {
-	case len(args) > 0 && args[0] == "--all":
-		projects = c.projectsInScope(true)
-	case len(args) > 0:
-		projects = []string{args[0]}
-	default:
-		p, err := c.currentProject()
-		if err != nil {
+	proj, all := "", false
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--all":
+			all, args = true, args[1:]
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[2:]
+		default:
+			return usage("crew gardener [--all|--project P]")
+		}
+	}
+	if !all {
+		var err error
+		if proj, err = c.oneProject(proj); err != nil {
 			return err
 		}
-		projects = []string{p}
 	}
+	projects := c.projects(proj)
 	os.MkdirAll(c.path("logs"), 0o755)
 	failed := false
 	for _, name := range projects {
@@ -95,6 +100,7 @@ func (c *Crew) garden(name string) error {
 		"--permission-prompts", "none", "--max-turns", p.Settings["GARDENER_MAX_TURNS"],
 		"--settings", c.path("config/readonly-settings.json"), prompt)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = wt, log, log
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+name)
 	runErr := cmd.Run()
 	log.Close()
 	tailTo(os.Stdout, logf, 15)

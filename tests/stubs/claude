@@ -11,6 +11,7 @@
 #   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/remote-control.cwd    the directory `claude remote-control` last ran in
+#   $HOME/claude-env.log        every invocation again, after the CREW_PROJECT it ran with ("unset" for none)
 # It records LEAK CLAUDECODE if crew left that variable set, and LEAK LOCK FD <n> if
 # fd n is open on one of crew's .crew*.lock files.
 # Like the real CLI, `--resume <session> --bg <prompt>` continues that session under
@@ -20,6 +21,7 @@
 # its session ID. Job IDs are printed in color.
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
+echo "${CREW_PROJECT-unset} claude $*" >>"$HOME/claude-env.log"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/claude-calls.log"
 # A background supervisor that inherited one of crew's locks would hold it forever.
 for fd in /proc/$$/fd/*; do

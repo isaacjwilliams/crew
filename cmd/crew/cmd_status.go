@@ -6,12 +6,31 @@ import (
 	"unicode/utf8"
 )
 
-// crew status [--done]: the tasks of the current project, or of all of them,
-// with their workers' state. Stacked tasks are listed under their parent, and a
-// goal's tasks under the goal.
+// crew status [--done] [--all|--project P]: the tasks of one project (P, or the
+// default project) or of all of them, with their workers' state. Stacked tasks
+// are listed under their parent, and a goal's tasks under the goal. Showing one
+// project, it ends with what's waiting on you in the others.
 func cmdStatus(c *Crew, args []string) error {
-	s := statusView{Crew: c, doneToo: len(args) > 0 && args[0] == "--done"}
-	projects := c.projectsInScope(false)
+	s := statusView{Crew: c}
+	all, proj := false, ""
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--done":
+			s.doneToo = true
+		case args[0] == "--all":
+			all = true
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[1:]
+		default:
+			return usage("crew status [--done] [--all|--project P]")
+		}
+		args = args[1:]
+	}
+	scope, err := c.scope(proj, all)
+	if err != nil {
+		return err
+	}
+	projects := c.projects(scope)
 	if holder := c.holder(); holder != c.Host {
 		// Another machine runs the crew and pushes the ledger; catch up with it. No
 		// crew command changes the ledger here, so this needs no lock.
@@ -21,7 +40,7 @@ func cmdStatus(c *Crew, args []string) error {
 			holder = "no machine"
 		}
 		fmt.Println("read-only: crew runs on " + holder)
-		projects = c.projectsInScope(false)
+		projects = c.projects(scope)
 	}
 	if len(projects) == 0 {
 		fmt.Println("No projects registered. Run 'crew project add' in a repo.")
@@ -34,7 +53,48 @@ func cmdStatus(c *Crew, args []string) error {
 		fmt.Println(p)
 		s.project(p)
 	}
+	if scope != "" {
+		s.elsewhere(scope)
+	}
 	return nil
+}
+
+// elsewhere lists the other projects with something waiting on the user: tasks
+// with open questions, and PRs to review.
+func (s *statusView) elsewhere(shown string) {
+	var lines []string
+	for _, p := range s.projects("") {
+		if p == shown {
+			continue
+		}
+		questions, prs := 0, 0
+		for _, t := range s.tasks(p) {
+			if t.Status().Finished() {
+				continue
+			}
+			if t.OpenQuestions() > 0 {
+				questions++
+			}
+			if t.Status() == PROpen {
+				prs++
+			}
+		}
+		var waiting []string
+		if questions > 0 {
+			waiting = append(waiting, fmt.Sprintf("%d task(s) with open questions", questions))
+		}
+		if prs > 0 {
+			waiting = append(waiting, fmt.Sprintf("%d PR(s) to review", prs))
+		}
+		if len(waiting) > 0 {
+			lines = append(lines, fmt.Sprintf("  %s: %s", p, strings.Join(waiting, ", ")))
+		}
+	}
+	if len(lines) > 0 {
+		fmt.Println()
+		fmt.Println("waiting on you in other projects  (crew status --all)")
+		fmt.Println(strings.Join(lines, "\n"))
+	}
 }
 
 type statusView struct {

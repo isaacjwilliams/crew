@@ -115,7 +115,8 @@ func ambiguous(arg string, matches []string) string {
 }
 
 // resolve finds the file of a task, goal or proposal: a path, or what resolveIn
-// takes, looked up in the current directory's project first, then in all of them.
+// takes, looked up in the default project first (defaultProject), then in all
+// of them.
 func (c *Crew) resolve(kind, arg string) (string, error) {
 	if isFile(arg) {
 		abs, err := filepath.Abs(arg)
@@ -125,7 +126,7 @@ func (c *Crew) resolve(kind, arg string) (string, error) {
 		return abs, err
 	}
 	scopes := []string{""}
-	if p, ok := c.projectFromCwd(); ok {
+	if p, _ := c.defaultProject(); p != "" {
 		scopes = []string{p, ""}
 	}
 	for _, p := range scopes {

@@ -7,7 +7,8 @@ complete -c crew -n "__fish_seen_subcommand_from ready dispatch feedback followu
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__fish_seen_subcommand_from new propose proposals" -l project -r
+complete -c crew -n "__fish_seen_subcommand_from new propose proposals status list sync cleanup gardener config" -l project -x -d 'Work on this project' \
+    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea, and why it is worth keeping'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l source -x -a 'lead user gardener worker:' -d 'Who wrote it'
@@ -21,9 +22,9 @@ complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a re
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
-complete -c crew -n "__fish_seen_subcommand_from sync" -l all -d 'Every project, not just this one'
+complete -c crew -n "__fish_seen_subcommand_from status list sync" -l all -d 'Every project, not just this one'
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/abandoned'
-complete -c crew -n "__fish_seen_subcommand_from list proposals" -l all
+complete -c crew -n "__fish_seen_subcommand_from proposals" -l all -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r
 complete -c crew -n "__fish_seen_subcommand_from gardener" -l all
 complete -c crew -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from goal" -l goal -x -d 'Make it one of this goal\'s tasks' \
@@ -38,8 +39,6 @@ complete -c crew -n "__fish_seen_subcommand_from install" -l no-services -d "Lea
 complete -c crew -n "__fish_seen_subcommand_from install" -l skip-agents-md-setting -d "Don't ask about AGENTS.md loading"
 complete -c crew -n "__fish_seen_subcommand_from project; and not __fish_seen_subcommand_from $project_cmds" -a "$project_cmds"
 complete -c crew -n "__fish_seen_subcommand_from project; and __fish_seen_subcommand_from add" -F
-complete -c crew -n "__fish_seen_subcommand_from config" -l project -x -d 'Read this project' \
-    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
 complete -c crew -n "__fish_seen_subcommand_from checkout" -x -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
 set -l host_cmds up down
 complete -c crew -n "__fish_seen_subcommand_from host; and not __fish_seen_subcommand_from $host_cmds" -a "$host_cmds"

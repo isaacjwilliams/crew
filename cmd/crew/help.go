@@ -9,6 +9,11 @@ func cmdHelp(c *Crew, args []string) error {
 
 const helpText = `crew — ledger CLI for the agent crew
 
+A command works on one project: --project P, else CREW_PROJECT (set by the lead
+function and for every session crew starts), else the repo you're in. Without
+one, commands that list take every project, and --project all or --all asks
+for every project.
+
 Setup
   crew setup [--name NAME]         Once, in a fresh clone of the public crew repo: make
                                    your private repo (NAME, default crew) its origin,
@@ -33,8 +38,8 @@ Setup
                                    that doesn't run the crew
   crew doctor                      Check dependencies, versions, trust and settings
   crew version                     Print crew's version
-  crew config [KEY] [--project P]  Show effective config (project overrides applied:
-                                   the current repo's, or P's)
+  crew config [KEY] [--project P]  Show effective config, with the project's
+                                   overrides
 
 Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
   crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
@@ -54,22 +59,25 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    --again resends a restack the worker already has
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
-  crew status [--done]             Tasks with worker state (current project, or all);
-                                   stacked tasks are listed under their parent
-  crew sync [--quiet] [--all]      Pull PR URLs/states from GitHub; mark merged tasks;
-                                   report stacked tasks that need a restack (current
-                                   project, or all)
+  crew status [--done] [--all|--project P]
+                                   Tasks with worker state; stacked tasks are listed
+                                   under their parent. For one project, it ends with
+                                   what's waiting on you in the others
+  crew sync [--quiet] [--all|--project P]
+                                   Pull PR URLs/states from GitHub; mark merged tasks;
+                                   report stacked tasks that need a restack
   crew tick                        Do what needs no decision, across all projects:
                                    sync, record new PR comments, send review rounds
                                    and restacks to idle workers, mark tasks waiting
                                    on you, clean up merged ones (run by a timer)
-  crew list [--all] [--status S]   Compact task list
+  crew list [--all|--project P] [--status S]
+                                   Compact task list
   crew show TASK | crew path TASK  Print a task file / its path
   crew find TASK                   Print the resolved task id
   crew get TASK KEY                Read a front-matter field
   crew set TASK KEY VALUE...       Write a front-matter field
   crew log TASK MESSAGE...         Append to the task's Log
-  crew cleanup TASK|--merged [--force]
+  crew cleanup TASK|--merged [--project P] [--force]
                                    Remove worktree/local branch of merged tasks
   crew commit [MESSAGE]            Commit pending ledger edits
   crew commit --hook               The same for one file, from an agent's PostToolUse
@@ -94,15 +102,16 @@ Goals  (GOAL = id, number, unique substring, or file path)
 Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew observe [TASK|PATH] [--base REF]
                                    Run the casual observer headless on a branch
-  crew gardener [--all|PROJECT]    Run the gardener over newly merged commits
+  crew gardener [--all|--project P]
+                                   Run the gardener over newly merged commits
   crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
                [--project P]
                                    Write down an idea worth keeping as a proposal;
                                    prints its path. S is lead (the default), user,
                                    gardener or worker:TASK
   crew proposals [--all] [--project P]
-                                   List proposals (open by default), with who wrote
-                                   each and when to revisit it
+                                   List proposals (--all: of every status, not just
+                                   open), with who wrote each and when to revisit it
   crew promote PROPOSAL [--branch NAME]
                                    Turn a proposal into a draft task
 

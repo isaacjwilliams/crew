@@ -131,6 +131,18 @@ check "on the machine that runs the crew, serve runs the lead's Remote Control s
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
+check "the lead's Remote Control server works on every project" '[[ $(grep " remote-control " "$SB/tower/claude-env.log" | tail -1) == "all claude remote-control "* ]]'
+# The lead function, in fish: in DIR, run `lead ARGS`, and print the claude call it made.
+lead_in() {
+  (cd "$1" && tower env CREW_HOME="$TH" PATH="$TH/bin:$PATH" fish --no-config -c "source $SB/tower/.config/fish/functions/lead.fish; lead $2") >/dev/null 2>&1 || return
+  tail -n 1 "$SB/tower/claude-env.log"
+}
+check "lead outside a repo works on every project" '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" ]]'
+check "lead in a project's repo works on that project" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto hello" ]]'
+check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto -c" ]]'
+check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
+n=$(wc -l <"$SB/tower/claude-env.log")
+check "lead --project with an unknown project starts nothing" '! lead_in "$SB/tower" "--project nope" && ! lead_in "$SB/tower" "--project" && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
 wait_for '[[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-parse main)" ]]'
 
 git clone -q "$SB/crew.git" "$LH"

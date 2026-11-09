@@ -13,23 +13,30 @@ func cmdSync(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
 	}
-	quiet, all := false, false
-	for _, a := range args {
-		switch a {
-		case "--quiet":
+	quiet, all, proj := false, false, ""
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--quiet":
 			quiet = true
-		case "--all":
+		case args[0] == "--all":
 			all = true
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[1:]
 		default:
-			return usage("crew sync [--quiet] [--all]")
+			return usage("crew sync [--quiet] [--all|--project P]")
 		}
+		args = args[1:]
 	}
 	say := func(format string, a ...any) {
 		if !quiet {
 			fmt.Printf(format+"\n", a...)
 		}
 	}
-	projects := c.projectsInScope(all)
+	scope, err := c.scope(proj, all)
+	if err != nil {
+		return err
+	}
+	projects := c.projects(scope)
 	if err := c.lock(); err != nil {
 		return err
 	}

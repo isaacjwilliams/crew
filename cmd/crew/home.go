@@ -115,8 +115,28 @@ func (c *Crew) loadProject(name string) (*Project, error) {
 	return p, nil
 }
 
-// projectFromCwd is the registered project whose repo the current directory is in.
-func (c *Crew) projectFromCwd() (string, bool) { return c.projectFromDir(".") }
+// allProjects is the CREW_PROJECT of a session that works on every project.
+const allProjects = "all"
+
+// defaultProject is the project a command works on when it isn't told which,
+// or "" for every project. In a session crew or the lead fish function starts,
+// it's CREW_PROJECT, a project or "all". In your own shell, it's the project
+// whose repo you're in. The session's choice wins over the current directory,
+// which in a session is only wherever its shell last went.
+func (c *Crew) defaultProject() (string, error) {
+	switch p := os.Getenv("CREW_PROJECT"); p {
+	case allProjects:
+		return "", nil
+	case "":
+		p, _ = c.projectFromDir(".")
+		return p, nil
+	default:
+		if !isDir(c.path("projects", p)) {
+			return "", fail("CREW_PROJECT is '%s', which isn't a project registered with crew", p)
+		}
+		return p, nil
+	}
+}
 
 func (c *Crew) projectFromDir(dir string) (string, bool) {
 	root, ok := repoRoot(dir)
@@ -130,20 +150,37 @@ func (c *Crew) projectFromDir(dir string) (string, bool) {
 	return s, true
 }
 
-func (c *Crew) currentProject() (string, error) {
-	if p, ok := c.projectFromCwd(); ok {
-		return p, nil
+// scope is the project a command works on, or "" for every project: --project
+// when it's given (--project all is every project, like --all), every project
+// with --all, else defaultProject.
+func (c *Crew) scope(project string, all bool) (string, error) {
+	switch {
+	case all || project == allProjects:
+		return "", nil
+	case project != "":
+		if !isDir(c.path("projects", project)) {
+			return "", fail("unknown project '%s'", project)
+		}
+		return project, nil
 	}
-	return "", fail("this directory isn't in a repo registered with crew (run 'crew project add' there)")
+	return c.defaultProject()
 }
 
-// projectsInScope is the cwd's project, or every registered project when run
-// outside one, or when all is set.
-func (c *Crew) projectsInScope(all bool) []string {
-	if !all {
-		if p, ok := c.projectFromCwd(); ok {
-			return []string{p}
-		}
+// oneProject is scope for a command that works on one project: it fails rather
+// than take every project.
+func (c *Crew) oneProject(project string) (string, error) {
+	p, err := c.scope(project, false)
+	if err == nil && p == "" {
+		err = fail("which project? Pass --project P (crew status --all lists them), or run this in a repo registered with crew")
+	}
+	return p, err
+}
+
+// projects is the projects in a scope: the one it names, or every registered
+// project for "".
+func (c *Crew) projects(scope string) []string {
+	if scope != "" {
+		return []string{scope}
 	}
 	var ps []string
 	dirs, _ := filepath.Glob(c.path("projects", "*", "project.env"))

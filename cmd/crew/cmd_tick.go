@@ -53,7 +53,7 @@ func cmdTick(c *Crew, args []string) error {
 		warn("sync failed; carrying on with what the ledger has")
 	}
 	as := c.agents()
-	for _, name := range c.projectsInScope(true) {
+	for _, name := range c.projects("") {
 		p, err := c.loadProject(name)
 		if err != nil {
 			report(err)

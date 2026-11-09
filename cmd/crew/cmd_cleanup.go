@@ -9,20 +9,23 @@ func cmdCleanup(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
 	}
-	arg, force, merged := "", false, false
-	for _, a := range args {
-		switch a {
-		case "--force":
+	arg, proj, force, merged := "", "", false, false
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--force":
 			force = true
-		case "--merged":
+		case args[0] == "--merged":
 			merged = true
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[1:]
 		default:
-			arg = a
+			arg = args[0]
 		}
+		args = args[1:]
 	}
 	var tasks []Task
 	if merged {
-		p, err := c.currentProject()
+		p, err := c.oneProject(proj)
 		if err != nil {
 			return err
 		}
