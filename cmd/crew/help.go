@@ -91,11 +91,18 @@ Goals  (GOAL = id, number, unique substring, or file path)
   crew goal abandon GOAL           Stop the goal lead; its tasks stay as they are
   crew goal path GOAL              Print the goal file's path
 
-Review / gardening
+Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew observe [TASK|PATH] [--base REF]
                                    Run the casual observer headless on a branch
   crew gardener [--all|PROJECT]    Run the gardener over newly merged commits
-  crew proposals [--all]           List gardener proposals (open by default)
+  crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
+               [--project P]
+                                   Write down an idea worth keeping as a proposal;
+                                   prints its path. S is lead (the default), user,
+                                   gardener or worker:TASK
+  crew proposals [--all] [--project P]
+                                   List proposals (open by default), with who wrote
+                                   each and when to revisit it
   crew promote PROPOSAL [--branch NAME]
                                    Turn a proposal into a draft task
 

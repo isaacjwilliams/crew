@@ -1,17 +1,116 @@
 package main
 
-// Proposals: crew proposals, crew promote.
+// Proposals: crew propose, crew proposals, crew promote. A proposal is an idea
+// worth keeping that isn't a task yet, from the gardener or anyone else.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
-// crew proposals [--all]
+// crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S] [--project P]
+func cmdPropose(c *Crew, args []string) error {
+	const use = `crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S] [--project P]`
+	var title, proj, why, revisitWhen string
+	source := "lead"
+	for len(args) > 0 {
+		flag := map[string]*string{"--project": &proj, "--why": &why, "--revisit-when": &revisitWhen, "--source": &source}[args[0]]
+		if flag != nil && len(args) > 1 {
+			*flag, args = args[1], args[2:]
+			continue
+		}
+		if title == "" {
+			title = args[0]
+		} else {
+			title += " " + args[0]
+		}
+		args = args[1:]
+	}
+	if title == "" {
+		return usage(use)
+	}
+	// 33 characters, so the ID with its date fits crew proposals' column.
+	slug := strings.TrimSuffix(cut(slugify(title), 33), "-")
+	if slug == "" {
+		return fail("the title needs a letter or a digit, to name the proposal's file")
+	}
+	if proj == "" {
+		var err error
+		if proj, err = c.currentProject(); err != nil {
+			return err
+		}
+	}
+	p, err := c.loadProject(proj)
+	if err != nil {
+		return err
+	}
+	if source, err = c.proposalSource(source, proj); err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+
+	id := time.Now().Format("2006-01-02") + "-" + slug
+	pr := Proposal{Doc{filepath.Join(p.Dir, "proposals", id+".md")}}
+	if isFile(pr.Path) {
+		return fail("there's already a proposal %s; add to it, or give this one another title", id)
+	}
+	if err := c.fromTemplate("proposal.md", pr.Path, map[string]string{
+		"ID": id, "TITLE": strings.ReplaceAll(title, `"`, "'"), "PROJECT": proj, "SOURCE": source, "NOW": now(),
+	}); err != nil {
+		return err
+	}
+	if revisitWhen != "" {
+		pr.Set("revisit_when", revisitWhen)
+	}
+	if why != "" {
+		pr.ReplaceSection("## Why it matters", why+"\n")
+	}
+	pr.Log("proposed by " + pr.Author())
+	c.commit("propose " + proj + "/" + id)
+	fmt.Println(pr.Path)
+	return nil
+}
+
+// proposalSource checks a --source value: gardener, user, lead, or
+// worker:<task>, with the task's full ID.
+func (c *Crew) proposalSource(s, proj string) (string, error) {
+	switch s {
+	case "gardener", "user", "lead":
+		return s, nil
+	}
+	task, ok := strings.CutPrefix(s, "worker:")
+	if !ok {
+		return "", fail("--source '%s': use user, lead, gardener or worker:<task>", s)
+	}
+	f, matches := resolveIn(task, c.files("tasks", proj))
+	if f == "" {
+		return "", ambiguousFail(task, matches, "--source '%s' doesn't match exactly one task in %s", s, proj)
+	}
+	return "worker:" + (Doc{f}).ID(), nil
+}
+
+// crew proposals [--all] [--project P]
 func cmdProposals(c *Crew, args []string) error {
-	all := len(args) > 0 && args[0] == "--all"
+	all := false
 	p, _ := c.projectFromCwd()
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--all":
+			all, args = true, args[1:]
+		case args[0] == "--project" && len(args) > 1:
+			p, args = args[1], args[2:]
+		default:
+			return usage("crew proposals [--all] [--project P]")
+		}
+	}
+	if p != "" && !isDir(c.path("projects", p)) {
+		return fail("unknown project '%s'", p)
+	}
 	n := 0
 	for _, f := range c.files("proposals", p) {
 		d := Doc{f}
@@ -19,7 +118,10 @@ func cmdProposals(c *Crew, args []string) error {
 		if !all && st != "open" {
 			continue
 		}
-		fmt.Printf("%-44s %-9s %-3s %s\n", cut(d.ID(), 44), st, d.Get("size"), d.Get("title"))
+		fmt.Printf("%-44s %-9s %-3s %-11s %s\n", d.ID(), st, d.Get("size"), cut(d.Get("source"), 11), d.Get("title"))
+		if r := d.Get("revisit_when"); r != "" {
+			fmt.Printf("%45srevisit when: %s\n", "", r)
+		}
 		n++
 	}
 	if n == 0 {
@@ -32,7 +134,7 @@ func cmdProposals(c *Crew, args []string) error {
 	return nil
 }
 
-// crew promote PROPOSAL [--branch NAME]: a gardener proposal becomes a draft task.
+// crew promote PROPOSAL [--branch NAME]: a proposal becomes a draft task.
 func cmdPromote(c *Crew, args []string) error {
 	const use = "crew promote PROPOSAL [--branch NAME]"
 	if len(args) == 0 {
@@ -61,12 +163,10 @@ func cmdPromote(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	context := fmt.Sprintf("From gardener proposal `%s` (%s). Run normal intake: confirm the plan with the user.\n\n%s\nFirst step suggested by the gardener:\n%s",
-		filepath.Base(f), f, withNewline(pr.Section("## Proposal")), withNewline(pr.Section("## First step")))
 	if err := c.lock(); err != nil {
 		return err
 	}
-	t.ReplaceSection("## Context", context)
+	t.ReplaceSection("## Context", pr.TaskContext())
 	pr.Set("status", "accepted")
 	pr.Set("task", t.ID())
 	pr.Touch()
@@ -74,13 +174,4 @@ func cmdPromote(c *Crew, args []string) error {
 	c.commit("promote " + pr.ID() + " → " + t.ID())
 	fmt.Println(t.Path)
 	return nil
-}
-
-// withNewline is text as a command prints it: each line, the last one too, ends
-// in a newline. Text without lines prints nothing.
-func withNewline(text string) string {
-	if text == "" {
-		return ""
-	}
-	return text + "\n"
 }

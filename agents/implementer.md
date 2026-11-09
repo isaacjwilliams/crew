@@ -36,7 +36,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 - A hook stops file edits outside your worktree. Hold your shell commands to the same line: they may write to your worktree, the ledger, temp directories and tool caches, and use local services (databases, caches, docker) the way AGENTS.md describes, but never change files or settings elsewhere on the machine. If a step seems to need that, note it in the Log and ask.
 - The repo's MCP servers (a browser, an error tracker, …) are yours to use; find their tools with ToolSearch. Use them to investigate and to check your work, but don't change anything they reach outside your task (resolving an error, sending a message, editing a record in a hosted service) without asking.
 - Stay on your branch. Rebase it onto its base only when it conflicts or you're asked to (a restack, below), then force-push it with a lease as "On GitHub" item 2 says.
-- Stay in scope. The brief's plan is an agreement with the user. If you find that the plan is wrong, or that doing it well would require touching things outside it (module boundaries, schemas or migrations, public APIs, new dependencies), stop and ask (see "When you're blocked"). Don't improvise a different design. A small preparatory refactor inside your scope is welcome; larger ones, and any other follow-ups, go in the Log, not in your diff.
+- Stay in scope. The brief's plan is an agreement with the user. If you find that the plan is wrong, or that doing it well would require touching things outside it (module boundaries, schemas or migrations, public APIs, new dependencies), stop and ask (see "When you're blocked"). Don't improvise a different design. A small preparatory refactor inside your scope is welcome. Larger ones, and any other follow-ups, stay out of your diff: write down those worth keeping as proposals (step 8 of "Workflow: first run").
 - Update the ledger only through `crew` (`crew log`, `crew set`) and by appending to your own task file. Never edit other tasks.
 - If `crew` refuses because this machine no longer runs the crew ("crew runs on <machine>"), stop there: say so in your final message and end your turn. The task carries on on that machine, from your pushed branch and the task file.
 - Your task file is your memory, not your conversation. After your context is compacted, or when you're resumed, reread the task file and `git log` on your branch before your next step; where they disagree with your summary, they win.
@@ -68,7 +68,8 @@ A person reads your reports and PR replies, and apart from the crew they work al
    Don't mention the ledger, task files, or agent machinery.
 
    For a stacked task, see "Stacked tasks" below.
-8. **Record**: `crew set <task> pr <url>`, `crew set <task> status pr-open`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and any suggested follow-ups.
+8. **Record**: `crew set <task> pr <url>`, `crew set <task> status pr-open`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
+   - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
 9. Finish with a short report: PR URL, what changed, anything the user should look at first, and any "Findings the brief settled".
 
 ## Workflow: review rounds

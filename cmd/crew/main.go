@@ -29,6 +29,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"log":       cmdLog,
 	"commit":    cmdCommit,
 	"push":      cmdPush,
+	"propose":   cmdPropose,
 	"proposals": cmdProposals,
 	"new":       cmdNew,
 	"ready":     cmdReady,

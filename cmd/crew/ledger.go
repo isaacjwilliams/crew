@@ -8,6 +8,7 @@ package main
 // crew's ledger lock: agents edit these files too, so nothing is held in memory.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -332,3 +333,34 @@ func (g Goal) Project() string    { return g.Get("project") }
 func (g Goal) LeadJob() string    { return g.Get("lead_job") }
 
 type Proposal struct{ Doc }
+
+// Author is who wrote the proposal, from its source, as a sentence names them.
+// It's empty for a proposal without a source.
+func (p Proposal) Author() string {
+	s := p.Get("source")
+	if task, ok := strings.CutPrefix(s, "worker:"); ok {
+		return "the worker on " + task
+	}
+	return map[string]string{"gardener": "the gardener", "user": "the user", "lead": "a lead"}[s]
+}
+
+// TaskContext is the Context of the task the proposal becomes: where it came
+// from, then each of its sections that has text. A short proposal may have
+// only Why it matters.
+func (p Proposal) TaskContext() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From proposal `%s` (%s)", filepath.Base(p.Path), p.Path)
+	if a := p.Author(); a != "" {
+		fmt.Fprintf(&b, ", written by %s", a)
+	}
+	b.WriteString(". Run normal intake: confirm the plan with the user.\n")
+	if r := p.Get("revisit_when"); r != "" {
+		fmt.Fprintf(&b, "\nRevisit when: %s\n", r)
+	}
+	for _, h := range []string{"Why it matters", "Proposal", "First step"} {
+		if text := p.Section("## " + h); text != "" {
+			fmt.Fprintf(&b, "\n%s:\n%s\n", h, text)
+		}
+	}
+	return b.String()
+}

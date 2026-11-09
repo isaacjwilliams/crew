@@ -272,8 +272,11 @@ check "project settings add new keys" 'jq -e ".env.PGHOST == \"/run/postgresql\"
 check "project settings can't override a value the shipped file sets" 'jq -e ".permissions.defaultMode == \"default\"" <<<"$S" >/dev/null'
 check "project settings can't drop deny rules" 'jq -e ".permissions.deny | index(\"Bash(gh pr merge *)\") != null" <<<"$S" >/dev/null'
 P=$(ls -d "$L"/projects/*)/proposals/2026-09-25-x.md
-sed -e 's/^title: .*/title: "Extract retry"/' -e "s/^project: .*/project: $(basename "$(dirname "$(dirname "$P")")")/" "$L/templates/proposal.md" >"$P"
+sed -e 's/^title: .*/title: "Extract retry"/' -e "s/^project: .*/project: $(basename "$(dirname "$(dirname "$P")")")/" -e 's/^source: .*/source: gardener/' \
+  -e '/^## Proposal$/a Move the three retry loops into lib/retry.' -e '/^## First step$/a Extract the helper from api/client.' "$L/templates/proposal.md" >"$P"
 check "promote an open proposal with a branch name" 'PF=$(crew promote 2026-09-25-x --branch retry-helper) && [[ $(basename "$PF") == 006-retry-helper.md && $(crew get 6 branch) == agent/retry-helper ]]'
+NL=$'\n'
+check "a promoted gardener proposal gives the task its proposal and first step" '[[ $(section "$PF" "## Context") == *"written by the gardener."*"Proposal:""$NL""Move the three retry loops"*"First step:""$NL""Extract the helper"* && $(section "$PF" "## Context") != *"Why it matters:"* ]]'
 check "promote refuses an accepted proposal" '! crew promote 2026-09-25-x 2>/dev/null'
 check "gardener runs and exits 0" 'crew gardener >/dev/null 2>&1'
 check "gardener records its progress" '[[ -s $(ls -d "$L"/projects/*)/gardener.last ]]'
@@ -568,5 +571,22 @@ out=$(crew tick 2>&1)
 check "an abandoned goal's ready task is left for the lead to dispatch" '[[ $out != *"$(basename "$GT3" .md)"* && $(crew get "$GT3" status) == ready ]]'
 check "a task can't join an abandoned goal" '! crew new "Late" --goal 1 2>/dev/null'
 rm -f "$HOME/gh-pr-state"
+
+# Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
+PJ=$(basename "$PD")
+SP=$(crew propose "Give each jurisdiction a PricingStrategy" --project "$PJ" --source user \
+  --why "Tax, currency and receipts vary by place." --revisit-when "a second pricing rule varies by place: currency, say")
+check "propose writes an open proposal from a title and a paragraph" '[[ $(basename "$SP") == "$(date +%F)-give-each-jurisdiction-a-pricings.md" && $(crew get "$SP" status) == open && $(crew get "$SP" source) == user && $(section "$SP" "## Why it matters") == "Tax, currency and receipts vary by place." ]]'
+check "propose keeps a revisit-when that needs quoting" '[[ $(crew get "$SP" revisit_when) == "a second pricing rule varies by place: currency, say" ]]'
+check "proposals lists who wrote it and when to revisit it" '[[ $(cd "$HOME" && crew proposals --project "$PJ") == *"$(basename "$SP" .md)"*" user "*"Give each jurisdiction a PricingStrategy""$NL"*"revisit when: a second pricing rule"* ]]'
+check "status counts open proposals from any source" '[[ $(crew status) == *"open proposals: "* && $(crew status) != *"gardener proposals"* ]]'
+check "propose refuses a second proposal with the same name" '! crew propose "Give each jurisdiction a PricingStrategy" --project "$PJ" 2>/dev/null'
+check "propose refuses an unknown source" '! crew propose "Something else" --project "$PJ" --source bob 2>/dev/null && [[ ! -e $(dirname "$SP")/$(date +%F)-something-else.md ]]'
+WP=$(crew propose "Share the header partial" --project "$PJ" --source worker:7 --why "Two pages copy it.")
+check "a worker's proposal names its task by full id, and the source defaults to lead" '[[ $(crew get "$WP" source) == worker:007-contestant-type-on-update && $(crew get "$(crew propose "Lead idea" --project "$PJ")" source) == lead ]]'
+check "propose refuses a worker source that names no task" '! crew propose "Orphan idea" --project "$PJ" --source worker:999 2>/dev/null'
+ST=$(crew promote "$SP" --branch pricing-strategy)
+check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" status) == draft && $(crew get "$SP" status) == accepted && $(crew get "$SP" task) == $(basename "$ST" .md) ]]'
+check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
 
 summary crew-e2e

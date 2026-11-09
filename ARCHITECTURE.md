@@ -10,7 +10,7 @@ Six Claude Code agents run on one machine at a time (principle 8):
 - **implementer**: one background session per task, each in its own git worktree and branch. It opens a PR and addresses review rounds.
 - **casual-observer**: a read-only readability review, spawned by workers before a PR (or used ad hoc).
 - **plan-reviewer**: a read-only review of a finished brief's structure, spawned by the lead before the user approves it.
-- **gardener**: runs on a schedule and turns merged commits into refactor *proposals*, never code.
+- **gardener**: runs on a schedule and turns merged commits into refactor *proposals*, never code. A proposal is any idea worth keeping that isn't a task yet; the user, a lead or a worker can write one too.
 - **goal-lead**: one background session per goal the user starts. It does the lead's intake for every item of the goal, without the user.
 
 They coordinate through the **ledger**: Markdown files under `projects/` in the crew home, a clone of the person's private repo, driven by a CLI, `crew`, and pushed to that repo as they change. The crew's code is a public repo; each person's private repo is a copy of it with the ledger added.
@@ -67,7 +67,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `agents/casual-observer.md` | `~/.claude/agents/` | Read-only reviewer: context budget, what to flag, output format; Sonnet, medium effort |
 | `agents/plan-reviewer.md` | `~/.claude/agents/` | Read-only plan reviewer: gets only the task file path; reads the code at the task's base on `origin`; runs in the background (`background: true`); the structural questions, report format; Opus, high effort |
 | `agents/goal-lead.md` | `~/.claude/agents/` | Goal lead prompt: intake without the user (it reads the intake sections of the installed `lead.md`), parking rules, the new-goal and new-input workflows; tool denylist; write-guard hook (role `lead`) |
-| `agents/gardener.md` | `~/.claude/agents/` | Proposal writer: survey process, dedup, max 3 proposals; write-guard hook (role `gardener`) |
+| `agents/gardener.md` | `~/.claude/agents/` | Proposal writer: survey process, dedup against open proposals from any source, max 3 proposals; write-guard hook (role `gardener`) |
 | `bin/crew` | — | The launcher, a POSIX `sh` script: runs `bin/release/crew-<VERSION>`, downloading it from that release the first time (below) |
 | `bin/crew-guard` | — | PreToolUse hook: two lines of `sh` that run `crew guard` (below) |
 | — | `bin/release/crew-<version>` | The binary for this machine, from the release; gitignored |
@@ -80,7 +80,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `config/{worker,readonly}-settings.json` | — | Passed with `--settings`: permission `allow`/`deny` rules for workers (`worker`), and the gardener and `crew observe` (`readonly`); the worker file also hooks `crew-guard`, which covers their subagents |
 | `templates/task.md` | — | Task file shape: front matter and sections |
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
-| `templates/proposal.md` | — | Gardener proposal shape |
+| `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
 | `projects/.gitkeep` | — | Where the ledger goes |
@@ -117,7 +117,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
     worker-settings.json                optional, hand-written: settings added to workers' (add-only)
     tasks/NNN-<branch-name>.md          one task each (`crew new --branch`, else from the title)
     goals/NNN-<slug>.md                 one goal each (`crew goal new`)
-    proposals/YYYY-MM-DD-slug.md        gardener output
+    proposals/YYYY-MM-DD-slug.md        one idea each, from the gardener or `crew propose`
     gardener.last                       last commit the gardener reviewed
   logs/gardener-*.log                   not committed
   logs/worktree-<p>-<id>.log            Worktrunk hook output from dispatch/cleanup; not committed
@@ -293,7 +293,13 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 3. Runs `claude -p --add-dir <home> --agent gardener --permission-mode acceptEdits --permission-prompts none --max-turns … --settings readonly-settings.json "<prompt>"`, writing its output to `logs/`.
 4. On success, updates `gardener.last` and commits. It exits non-zero if any project fails.
 
-Proposals become tasks through `crew promote`, which only accepts `open` or `deferred` proposals.
+### Proposals
+A proposal is an idea worth keeping that isn't ready to be a task: a gardener refactor, or something the user, a lead or a worker wants written down. `crew status` shows only how many are open, so they don't look like work in progress.
+
+- **One shape for every source.** Each is a file from `templates/proposal.md`. Its `source` says who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`. `revisit_when`, optional, is the condition that makes it worth acting on.
+- **`crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]`** writes one from a title and a paragraph (under Why it matters), with `source: lead` by default and the evidence sections left empty. A `worker:` source must name one task of the project; crew records its full ID.
+- **`crew proposals [--all] [--project P]`** lists the open ones (the current directory's project, P, or every project) with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
+- **`crew promote`** turns an `open` or `deferred` proposal into a draft task. The task's Context names the proposal and who wrote it, its `revisit_when`, and whichever of Why it matters, Proposal and First step have text (`Proposal.TaskContext`).
 
 ### Public and private repos
 ```
@@ -472,7 +478,9 @@ Changing any of these means updating every side listed.
 | `host` at the home's root holds one line, the `CREW_HOST` of the machine that runs the crew, or nothing; it counts once origin has it | `crew host up`/`down` (`commitHost`) → `requireHost`, `originHolder` (`pushLedger`, the tick's stand-down), `crew status` |
 | `crew host up` enables and `down`, `prune` and the stand-down disable `crewServices`; on a Mac, a job's label is its plist's file name | `crew host up`, `crew host down`, `standDown` ↔ `systemd/`, `launchd/` |
 | `crew serve` exits 3 on a machine that doesn't hold the lease; the unit doesn't restart on 3. launchd has no counterpart: `launchd/crew-lead.plist` restarts it every 30 seconds (`ThrottleInterval`) until the stand-down boots the job out, which is why the job is enabled only on the lease holder | `crew serve` → `systemd/crew-lead.service` (`RestartPreventExitStatus=3`); checked in `tests/guard.sh` |
-| Front-matter key names | `templates/task.md`, `templates/goal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
+| Front-matter key names | `templates/task.md`, `templates/goal.md`, `templates/proposal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
+| A proposal's `source` is `gardener`, `user`, `lead` or `worker:<task id>` | `crew propose` (`proposalSource`), the gardener → `Proposal.Author` (`crew promote`), `crew proposals`, `lead.md`, `implementer.md`, `LEDGER.md` |
+| Proposal section headings (`## Why it matters`, `## Proposal`, `## First step`, `## Log` last) | `templates/proposal.md`, the gardener → `crew propose`, `Proposal.TaskContext` (`crew promote`) |
 | A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalRunning` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
 | A dispatch that only has to wait exits 4 (`notYet`) | `dispatchChecks`, `crew dispatch` → `tickTask` |
@@ -484,7 +492,7 @@ Changing any of these means updating every side listed.
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
 | A review round's followup prompt says whether to reply ("Reply to each comment in the round with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 5; checked in `tests/guard.sh` |
 | Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
-| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies | `crew reply` → the `crew feedback` filter |
