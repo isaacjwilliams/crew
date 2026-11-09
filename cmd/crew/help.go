@@ -109,9 +109,9 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
                                    Write down an idea worth keeping as a proposal;
                                    prints its path. S is lead (the default), user,
                                    gardener or worker:TASK
-  crew proposals [--all] [--project P]
-                                   List proposals (--all: of every status, not just
-                                   open), with who wrote each and when to revisit it
+  crew proposals [--any-status] [--all|--project P]
+                                   List open proposals (--any-status: every one),
+                                   with who wrote each and when to revisit it
   crew promote PROPOSAL [--branch NAME]
                                    Turn a proposal into a draft task
 

@@ -299,7 +299,7 @@ A proposal is an idea worth keeping that isn't ready to be a task: a gardener re
 
 - **One shape for every source.** Each is a file from `templates/proposal.md`. Its `source` says who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`. `revisit_when`, optional, is the condition that makes it worth acting on.
 - **`crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]`** writes one from a title and a paragraph (under Why it matters), with `source: lead` by default and the evidence sections left empty. A `worker:` source must name one task of the project; crew records its full ID.
-- **`crew proposals [--all] [--project P]`** lists the open ones (P, the default project, or every project) with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
+- **`crew proposals [--any-status] [--all|--project P]`** lists the open ones, or all of them with `--any-status` (for P, the default project, or every project), with their source, and `revisit_when` on a line below. The lead runs it at intake and raises any whose title or `revisit_when` touches the task.
 - **`crew promote`** turns an `open` or `deferred` proposal into a draft task. The task's Context names the proposal and who wrote it, its `revisit_when`, and whichever of Why it matters, Proposal and First step have text (`Proposal.TaskContext`).
 
 ### Public and private repos

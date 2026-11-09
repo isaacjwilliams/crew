@@ -22,9 +22,9 @@ complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a re
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
-complete -c crew -n "__fish_seen_subcommand_from status list sync" -l all -d 'Every project, not just this one'
+complete -c crew -n "__fish_seen_subcommand_from status list sync proposals" -l all -d 'Every project, not just this one'
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/abandoned'
-complete -c crew -n "__fish_seen_subcommand_from proposals" -l all -d 'Every status, not just open'
+complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r
 complete -c crew -n "__fish_seen_subcommand_from gardener" -l all
 complete -c crew -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from goal" -l goal -x -d 'Make it one of this goal\'s tasks' \

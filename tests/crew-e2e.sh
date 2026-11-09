@@ -588,6 +588,8 @@ check "propose refuses a worker source that names no task" '! crew propose "Orph
 ST=$(crew promote "$SP" --branch pricing-strategy)
 check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" status) == draft && $(crew get "$SP" status) == accepted && $(crew get "$SP" task) == $(basename "$ST" .md) ]]'
 check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
+out=$(crew proposals --project "$PJ"); all_out=$(crew proposals --any-status --project "$PJ")
+check "proposals lists the open ones, and --any-status the rest too" '[[ $out != *"$(basename "$SP" .md)"* && $all_out == *"$(basename "$SP" .md)"*" accepted "* ]]'
 
 # Project scope: a command works on --project, else CREW_PROJECT (which `lead` and
 # crew's own sessions set), else the current directory's repo, else every project.
@@ -615,6 +617,8 @@ out=$(CREW_PROJECT=nope crew status 2>&1)
 check "an unknown CREW_PROJECT fails clearly" '[[ $out == *"CREW_PROJECT is '"'"'nope'"'"', which isn'"'"'t a project registered with crew"* ]]'
 out=$(cd "$HOME" && crew list --project "$P2")
 check "list takes --project" '[[ $out == *001-shop-checkout* && $out != *saved-search* ]]'
+PP=$(crew propose "Ship to Canada" --project "$P2")
+check "proposals --all is every project" '[[ $(crew proposals --all) == *"$(basename "$PP" .md)"* && $(crew proposals) != *"$(basename "$PP" .md)"* ]]'
 check "sync and cleanup --merged take --project" '(cd "$HOME" && crew sync --project "$P2" >/dev/null && [[ $(crew cleanup --merged --project "$P2") == "Nothing to clean up." ]])'
 fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 (cd "$HOME" && CREW_PROJECT=$PJ crew dispatch "$S1" >/dev/null 2>&1)
