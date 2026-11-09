@@ -262,27 +262,3 @@ func (c *Crew) ledgerChanges() []string {
 	}
 	return changed
 }
-
-// crew proposals [--all]
-func cmdProposals(c *Crew, args []string) error {
-	all := len(args) > 0 && args[0] == "--all"
-	p, _ := c.projectFromCwd()
-	n := 0
-	for _, f := range c.files("proposals", p) {
-		d := Doc{f}
-		st := d.Get("status")
-		if !all && st != "open" {
-			continue
-		}
-		fmt.Printf("%-44s %-9s %-3s %s\n", cut(d.ID(), 44), st, d.Get("size"), d.Get("title"))
-		n++
-	}
-	if n == 0 {
-		if all {
-			fmt.Fprintln(os.Stderr, "No proposals.")
-		} else {
-			fmt.Fprintln(os.Stderr, "No open proposals.")
-		}
-	}
-	return nil
-}
