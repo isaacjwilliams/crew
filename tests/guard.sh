@@ -96,15 +96,24 @@ done
 for f in "$LS" "$C/worker-settings.json"; do
   check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit, Write or Bash call" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit|Bash\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
 done
-for f in "$LS" "$C/worker-settings.json" "$C/readonly-settings.json"; do
+for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json" "$C/readonly-settings.json"; do
   # Bash(git -C * show *) would also approve git -C . -c core.pager=<script> show.
   check "${f#"$REPO_DIR"/}: no allow rule has a * before the subcommand, where it would let any option through" \
     "jq -e >/dev/null '[.permissions.allow[] | select(test(\"^Bash\\\\(.*\\\\* [^)]\"))] == []' $f"
 done
+# --- project memory loads at every session start for the agents crew starts, but not for crew observe's casual observer
+for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json"; do
+  check "${f#"$REPO_DIR"/} loads project memory when a session starts, resumes or compacts (no matcher)" \
+    "jq -e >/dev/null '.hooks.SessionStart | length == 1 and (.[0] | has(\"matcher\") | not) and .[0].hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" memory --hook\"' $f"
+done
+check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '.hooks == null' $C/readonly-settings.json"
+check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
+check "the gardener's allow list is the read-only one, plus crew remember" \
+  "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
 check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'o.del(\"agent\")' <<<\"\$SRC\""
-for f in worker readonly; do
+for f in worker gardener readonly; do
   check "$f: network left open" "jq -e >/dev/null '.permissions.allow | index(\"WebFetch(domain:*)\")' $C/$f-settings.json"
 done
 check "lead and workers default to auto mode" \

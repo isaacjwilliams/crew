@@ -50,6 +50,7 @@ check "local.env isn't committed, project.env is" '[[ -z $(git -C "$L" ls-files 
 check "crew config --project reads a project from anywhere" '[[ $(cd "$HOME" && crew config REPO --project "$P") == "$SB/webapp" ]]'
 doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)   # it checks claude --version, not a session
 check "crew doctor finds this machine's clone" '[[ $doctor_out == *"ok   $P: cloned on this machine"* ]]'
+check "crew doctor checks that the lead, workers and gardener load project memory" '[[ $(grep -c "ok   .* loads project memory (crew memory --hook)" <<<"$doctor_out") == 3 ]]'
 mv "$PD/local.env" "$HOME/local.env.saved"
 out=$(crew new "No clone here" --project "$P" 2>&1)
 check "a project with no clone on this machine fails clearly" '[[ $out == *"no clone of $P on this machine"* ]]'
@@ -625,6 +626,10 @@ fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 check "a worker runs with its task's project, not the caller's" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
 (cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
 check "the gardener runs with its project" '[[ $(grep -- "--agent gardener" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
+check "the gardener runs with its own settings, which load project memory" '[[ $(cat "$HOME/claude-settings.last") == "$L/config/gardener-settings.json" ]]'
+(cd "$SB/shop" && CREW_PROJECT=$P2 crew observe >/dev/null 2>&1)
+check "crew observe runs with the read-only settings and no project, so its observer gets no project memory" \
+  '[[ $(cat "$HOME/claude-settings.last") == "$L/config/readonly-settings.json" && $(grep -- "--agent casual-observer" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
 check "gardener takes --project, not a bare project name" '! crew gardener "$P2" 2>/dev/null'
 
 # Project memory: agents suggest facts with crew remember; the lead moves the ones
@@ -650,7 +655,8 @@ printf '# Project memory: %s\n\n- **Dashboard columns are unlimited** The user c
 out=$(cd "$HOME" && crew memory --project "$PJ")
 check "memory prints a line naming the file, the rule for weighing it, then the file" \
   '[[ $out == "Project memory for $PJ ($L/projects/$PJ/memory.md): facts the user approved.$NL""Where it disagrees with the code or the ledger, they win"*"$NL$NL$(cat "$L/projects/$PJ/memory.md")" ]]'
-check "the SessionStart hook prints the memory of the session's project" '[[ $(cd "$HOME" && CREW_PROJECT=$PJ crew memory --hook </dev/null) == "$out" ]]'
+check "the SessionStart hook, run as a worker's settings give it, prints the memory of the session's project" \
+  '[[ $(cd "$HOME" && CREW_PROJECT=$PJ bash -c "$(jq -r ".hooks.SessionStart[0].hooks[0].command" "$L/config/worker-settings.json")" </dev/null) == "$out" ]]'
 check "the hook prints nothing for a session on every project, on none, or on one without memory" \
   '[[ -z $(CREW_PROJECT=all crew memory --hook) && -z $(cd "$HOME" && env -u CREW_PROJECT crew memory --hook) && -z $(CREW_PROJECT=$P2 crew memory --hook) ]]'
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \

@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(crew remember *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git shortlog *)",
+      "Bash(git blame *)",
+      "Bash(git ls-files *)",
+      "Bash(git merge-base *)",
+      "Bash(git rev-parse *)",
+      "Bash(git grep *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(head *)",
+      "Bash(wc *)",
+      "WebFetch(domain:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew\" memory --hook"
+          }
+        ]
+      }
+    ]
+  }
+}
