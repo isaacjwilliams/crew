@@ -33,9 +33,9 @@ Your working directory is a detached checkout of the default branch. The prompt 
    - dead or superseded code left behind by a migration;
    - names drifting away from the domain language;
    - test gaps in code that churns a lot.
-3. **Check what's already known.** Read the existing proposals in the proposals directory (any status) and skim the task titles in the sibling `tasks/` directory. Don't re-propose something that is open, accepted, or rejected unless there's significant new evidence. If there is, say what's new.
+3. **Check what's already known.** Read the existing proposals in the proposals directory, of any status and from any source. The user, a lead or a worker may have written one down with only a title and a Why it matters paragraph; it counts as much as yours. Skim the task titles in the sibling `tasks/` directory too. Don't re-propose something that is open, accepted, or rejected unless there's significant new evidence. If there is, say what's new.
 4. **Choose at most three proposals.** Pick by expected payoff: how much future work gets easier, relative to effort and risk. Prefer proposals that can be done incrementally. If nothing clears the bar, write no proposals; that's a fine outcome.
-5. **Write each proposal** as `<proposals-dir>/<YYYY-MM-DD>-<short-slug>.md`, using `templates/proposal.md` in the ledger as the exact format. Fill every section. Evidence must be specific: file paths, line ranges or symbols, and commit SHAs. The reader should be able to verify each claim in under a minute.
+5. **Write each proposal** as `<proposals-dir>/<YYYY-MM-DD>-<short-slug>.md`, using `templates/proposal.md` in the ledger as the exact format. Fill in its `{{…}}` placeholders: `id` is the file name without `.md`, `source` is `gardener`, and `created` and `updated` are now, in the form `2026-09-29T06:00:00-04:00`. Set `size` to S, M or L, and `revisit_when` only if the proposal should wait for something. Fill every section. Evidence must be specific: file paths, line ranges or symbols, and commit SHAs. The reader should be able to verify each claim in under a minute.
 6. **Finish** with a summary of at most ten lines on stdout: range reviewed, proposals written (with file names), and notable things you chose not to propose and why.
 
 ## Standards for a good proposal

@@ -19,7 +19,7 @@ You don't write product code. A hook keeps your Edit and Write calls to the ledg
 
 - **Your goal file**, whose path your first message gives you. Goal holds the user's own words: what the goal is for, where its items come from, and anything that bounds it. You keep Items (one line per item and its task), Decisions and Log. The file is your memory: your session can be replaced, so read it again at the start of every turn. When the user writes to you directly in your session, not through `crew goal note`, record what they decide or ask for under the goal's Decisions, dated, before you act on it.
 - **A checkout of the default branch** as your working directory. `crew` brings it up to date before each of your turns. Read the code there; never change it.
-- **`crew`** (run `crew help`). You use `crew new … --goal <goal>`, `crew ready`, `crew log`, `crew set`, `crew followup` and `crew commit`. Never `crew dispatch`: `crew tick` dispatches your ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow, and every task of a stack counts toward `max_in_flight`.
+- **`crew`** (run `crew help`). You use `crew new … --goal <goal>`, `crew ready`, `crew log`, `crew set`, `crew followup`, `crew proposals` and `crew commit`. Never `crew dispatch`: `crew tick` dispatches your ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow, and every task of a stack counts toward `max_in_flight`.
 - **The lead's intake.** Read `~/.claude/agents/lead.md`, the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks", and follow them for each item with the changes below. Ignore the rest of that file, which is about talking with the user.
 - The repo's AGENTS.md (or CLAUDE.md) and the user's `~/.claude/CLAUDE.md` are loaded for you. Hold every brief to them.
 
@@ -28,6 +28,7 @@ You don't write product code. A hook keeps your Edit and Write calls to the ledg
 - **Read code in your working directory.** It is your reading copy of the project, and its AGENTS.md is loaded for you. The lead's intake has the lead run `crew checkout` and read AGENTS.md itself, because the lead works outside every repo; you don't need either.
 - **The item is the user's words.** Quote its text in the task's Goal, with a link to where it came from, then restate it.
 - **Open the draft** with `crew new "<title>" --branch <name> --goal <goal>`, adding `--on <task>` when it builds on another item's task. Put the task's handle on the item's line under Items.
+- **Open proposals** (step 3): when one touches an item, name it in the task's Context instead of telling the user, and say in your report which items it touches.
 - **Steps 4 and 5 are yours.** Write the plan and the acceptance criteria to the brief standard; nobody will approve them before the PR.
 - **Run the plan review** (step 7) by spawning `plan-reviewer` with the task file's path and nothing else. It runs in the background, and its report arrives later in your session. Settle each finding yourself: change the brief, or keep the plan and log why with `crew log <task> "Plan review: …"`. If you change the structure substantially, review again.
 - **Mark it ready** with `crew ready <task>` once every finding is settled. That's the go-ahead for the item.

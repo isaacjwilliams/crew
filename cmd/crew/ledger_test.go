@@ -298,3 +298,33 @@ echo '[{"id":"a1","state":"working","pid":4242,"status":"busy","sessionId":"a1-s
 		t.Errorf("agents = %+v", as)
 	}
 }
+
+func TestProposalAuthor(t *testing.T) {
+	for source, want := range map[string]string{
+		"gardener": "the gardener", "user": "the user", "lead": "a lead",
+		"worker:007-saved-filters": "the worker on 007-saved-filters", "": "", "bob": "",
+	} {
+		pr := Proposal{docWith(t, "---\nsource: "+source+"\n---\n## Log\n")}
+		if got := pr.Author(); got != want {
+			t.Errorf("Author for source %q = %q, want %q", source, got, want)
+		}
+	}
+}
+
+func TestProposalTaskContext(t *testing.T) {
+	short := Proposal{docWith(t, "---\nsource: user\nrevisit_when: a second rule varies by place\n---\n# T\n\n"+
+		"## Evidence\n<!-- bullets -->\n\n## Why it matters\nRules vary by place.\n\n## Proposal\n<!-- target -->\n\n## First step\n\n## Log\n")}
+	want := "From proposal `001-a.md` (" + short.Path + "), written by the user. Run normal intake: confirm the plan with the user.\n" +
+		"\nRevisit when: a second rule varies by place\n" +
+		"\nWhy it matters:\nRules vary by place.\n"
+	if got := short.TaskContext(); got != want {
+		t.Errorf("a short proposal's context:\n%s\nwant:\n%s", got, want)
+	}
+
+	full := Proposal{docWith(t, "---\nid: 1\n---\n# T\n\n## Why it matters\nw\n\n## Proposal\np\n\n## First step\nf\n\n## Log\n")}
+	want = "From proposal `001-a.md` (" + full.Path + "). Run normal intake: confirm the plan with the user.\n" +
+		"\nWhy it matters:\nw\n\nProposal:\np\n\nFirst step:\nf\n"
+	if got := full.TaskContext(); got != want {
+		t.Errorf("a proposal without a source:\n%s\nwant:\n%s", got, want)
+	}
+}

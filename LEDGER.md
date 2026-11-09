@@ -19,7 +19,7 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     worker-settings.json optional: settings added to this project's workers (add-only)
     tasks/NNN-<name>.md  one file per task; <name> is the branch name without BRANCH_PREFIX
     goals/NNN-<slug>.md  one file per goal: a batch of items a goal lead works through
-    proposals/*.md       gardener proposals
+    proposals/*.md       ideas worth keeping that aren't tasks yet (see Proposals)
     gardener.last        last commit the gardener reviewed
   reports/               free-form notes the lead keeps
   host                   the machine that runs the crew; `crew host up` claims it
@@ -69,6 +69,19 @@ A goal is a batch of items, listed in its file or on a tracker, that the user ha
 Front-matter keys: `id`, `title`, `project`, `status`, `checkout` (the goal lead's working directory), `lead_name`, `lead_job`, `lead_session` (its session, like a worker's three identifiers), `unsent_notes` (your notes the goal lead hasn't been sent yet; written by `crew` only), `max_in_flight` (how many of its tasks may be in flight at once; empty means `GOAL_MAX_IN_FLIGHT`; set by `crew goal new --max-in-flight` and `crew goal cap`), `created`, `updated`. Sections: Goal (your words, including where the items come from), Items (written by the goal lead), Decisions (your notes from `crew goal note`, and the goal lead's own calls), Log.
 
 The goal lead hears about two things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, and new questions from its tasks' workers. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
+
+## Proposals
+
+A proposal is an idea worth keeping that isn't ready to be a task, in `proposals/<YYYY-MM-DD>-<slug>.md`. The gardener writes refactor proposals on its schedule; the user, a lead or a worker writes one with `crew propose "<title>" --why "<a paragraph>"`. A proposal stays out of the task list, so it doesn't look like work in progress. The lead raises an open one at intake when it touches the task's area, and `crew promote` turns one into a draft task.
+
+| status | meaning | set by |
+|---|---|---|
+| `open` | kept, not acted on yet | `crew propose`, or the gardener |
+| `deferred` | set aside for now; can still be promoted | you or the lead via `crew set` |
+| `accepted` | promoted; `task` names the draft task it became | `crew promote` |
+| `rejected` | not wanted; the Log says why | you or the lead via `crew set` |
+
+Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener fills them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
 
 ## Stacked tasks
 

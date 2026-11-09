@@ -96,7 +96,7 @@ func (s *statusView) project(name string) {
 		}
 	}
 	if open > 0 {
-		fmt.Printf("  open gardener proposals: %d  (crew proposals)\n", open)
+		fmt.Printf("  open proposals: %d  (crew proposals)\n", open)
 	}
 }
 

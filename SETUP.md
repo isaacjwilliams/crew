@@ -381,6 +381,14 @@ tail ~/crew/logs/crew-gardener.log    # on a Mac
 
 If your `origin` uses SSH with a passphrase-protected key, the Linux timer won't have your ssh-agent. (A Mac's jobs run in your login session, so they should reach it; that's still to be checked live.) The gardener then warns and reviews your last-fetched `origin/<default>`. Either live with that, or use an HTTPS remote with `gh auth setup-git`.
 
+Proposals aren't only the gardener's. They hold any idea worth keeping that isn't ready to be a task, so it doesn't sit in `crew status` as a draft. Tell the lead "keep this for later: …" and it writes one down; workers do the same with the follow-ups they find. `crew proposals` shows who wrote each one and, when it's set, what would make it worth acting on. The lead mentions an open proposal when you start a task it touches.
+
+```fish
+crew propose "Give each tax jurisdiction a PricingStrategy" --project isaac-webapp --source user \
+  --why "Tax inclusion, currency and receipt fields all vary by place; a strategy would keep each place's rules in one class." \
+  --revisit-when "a second pricing rule beyond the tax rate varies by place"
+```
+
 ## 8. Safety model
 
 The crew enforces **where agents edit files** mechanically. For shell commands it gives the lead and workers the same trust as your own sessions in auto mode, and it relies on **instructions** for what they do on GitHub.

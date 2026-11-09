@@ -1,14 +1,16 @@
 ---
-id: YYYY-MM-DD-short-slug
-title: "Short imperative title"
-project: <project>
+id: {{ID}}
+title: "{{TITLE}}"
+project: {{PROJECT}}
 status: open
-size: S
+source: {{SOURCE}}
+revisit_when:
+size:
 task:
-created: YYYY-MM-DDTHH:MM:SS-04:00
-updated: YYYY-MM-DDTHH:MM:SS-04:00
+created: {{NOW}}
+updated: {{NOW}}
 ---
-# Short imperative title
+# {{TITLE}}
 
 ## Friction observed
 <!-- What is getting harder, in one paragraph. -->
