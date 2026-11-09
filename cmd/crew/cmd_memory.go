@@ -62,8 +62,9 @@ func cmdRemember(c *Crew, args []string) error {
 	return nil
 }
 
-// memorySuggestion is a suggestion's line: an unchecked item holding the entry
-// exactly as it goes into memory.md, so approving it moves the text unchanged.
+// memorySuggestion is a suggestion's line: an unchecked item holding the entry,
+// source and date included, exactly as it goes into memory.md, so approving it
+// moves the text unchanged.
 func memorySuggestion(fact, why, source string, day time.Time) string {
 	return fmt.Sprintf("- [ ] **%s** %s. (%s, %s)", fact, strings.TrimSuffix(why, "."), source, day.Format("2006-01-02"))
 }

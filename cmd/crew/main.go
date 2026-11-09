@@ -83,9 +83,10 @@ func run(args []string) int {
 	if err == nil {
 		err = cmd(c, args)
 	}
-	// A hook must never fail what runs it: crew commit --hook an agent's every
-	// edit, crew memory --hook its session's start. Not even when the home's
-	// settings can't be read. So a hook's errors are dropped, unreported.
+	// `crew <command> --hook` is always a hook's entry point (crew commit --hook
+	// after an agent's every edit, crew memory --hook at its session's start), and
+	// a hook must never fail what runs it, not even when the home's settings can't
+	// be read. So its errors are dropped, unreported. Keep --hook for hooks.
 	if len(args) > 0 && args[0] == "--hook" {
 		return 0
 	}

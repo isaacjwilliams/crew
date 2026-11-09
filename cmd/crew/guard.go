@@ -99,6 +99,8 @@ func (g guard) check(input []byte) error {
 	}
 	if under(path, home) {
 		// Only the lead writes a project's memory, and only on the user's say-so.
+		// It's in projects/, a state path, so this comes before the check below,
+		// which allows them all. The pattern is fixed, so Match can't fail.
 		if memory, _ := filepath.Match(filepath.Join(home, "projects", "*", "memory.md"), path); memory && g.role != "lead" {
 			return fmt.Errorf("%s holds the facts the user approved, and only the lead edits it. Suggest a fact with 'crew remember' instead.", path)
 		}
