@@ -217,4 +217,17 @@ check "goal-lead parks a question the way crew counts open questions, and logs o
 check "goal leads may read the installed lead.md without a prompt" "jq -e >/dev/null '.permissions.allow | index(\"Read(~/.claude/agents/lead.md)\")' $LS"
 check "goal-lead never dispatches; crew tick does" "grep -q 'Never .crew dispatch.: .crew tick. dispatches your ready tasks' $A/goal-lead.md"
 
+# --- project memory: every agent but the casual observer knows how to suggest to it, and none restates the rule crew prints with it
+check "the rule for weighing project memory is written once, in crew, and in no agent profile" \
+  "grep -q '^const memoryRule = ' <<<\"\$SRC\" && ! grep -qi 'auto memory' $A/*.md"
+for f in implementer:'--source worker:<task>' gardener:'--source gardener' goal-lead:'crew remember "<fact>" --why "<reason>"`' lead:'--source user'; do
+  a=${f%%:*} src=${f#*:}
+  check "$a suggests project memory with crew remember ($src), and checks the suggestions first" \
+    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'memory-suggestions.md' $A/$a.md"
+done
+check "the plan reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/plan-reviewer.md"
+check "the casual observer knows nothing of project memory" "! grep -qi 'memory' $A/casual-observer.md"
+check "the lead copies an approved suggestion into memory.md unchanged and ticks it with the outcome" \
+  "grep -q 'copy the text after the checkbox into .memory.md. unchanged' $A/lead.md && grep -q '→ kept' $A/lead.md && grep -q '→ declined: <reason>' $A/lead.md"
+
 summary guard
