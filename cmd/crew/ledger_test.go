@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The expected outputs below are what the bash crew's fm_set, section_body,
@@ -326,5 +327,52 @@ func TestProposalTaskContext(t *testing.T) {
 		"\nWhy it matters:\nw\n\nProposal:\np\n\nFirst step:\nf\n"
 	if got := full.TaskContext(); got != want {
 		t.Errorf("a proposal without a source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMemorySuggestion(t *testing.T) {
+	day := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	for why, want := range map[string]string{
+		"The user decided in 042":  "- [ ] **Columns are unlimited** The user decided in 042. (worker:042-columns, 2026-11-09)",
+		"The user decided in 042.": "- [ ] **Columns are unlimited** The user decided in 042. (worker:042-columns, 2026-11-09)",
+	} {
+		if got := memorySuggestion("Columns are unlimited", why, "worker:042-columns", day); got != want {
+			t.Errorf("suggestion with --why %q:\n%s\nwant:\n%s", why, got, want)
+		}
+	}
+}
+
+func TestMemorySuggestionsCountsOnlyUnsettledOnes(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	if n := c.memorySuggestions("p"); n != 0 {
+		t.Errorf("no suggestions file: %d unsettled", n)
+	}
+	os.MkdirAll(c.path("projects", "p"), 0o755)
+	os.WriteFile(c.path("projects", "p", "memory-suggestions.md"), []byte("# Memory suggestions: p\n\n"+
+		"- [ ] **A** a. (lead, 2026-11-09)\n- [x] **B** b. (lead, 2026-11-09) → kept\n"+
+		"- [x] **C** c. (user, 2026-11-09) → declined: not settled\n- [ ] **D** d. (gardener, 2026-11-09)\n"), 0o644)
+	if n := c.memorySuggestions("p"); n != 2 {
+		t.Errorf("two unsettled suggestions: counted %d", n)
+	}
+}
+
+func TestSessionMemoryIsSilentWithoutOneProjectsMemory(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	os.MkdirAll(c.path("projects", "p"), 0o755)
+	os.MkdirAll(c.path("projects", "q"), 0o755)
+	os.MkdirAll(c.path("projects", "all"), 0o755)
+	for _, p := range []string{"p", "all"} {
+		os.WriteFile(c.path("projects", p, "memory.md"), []byte("# Project memory: "+p+"\n\n- **Fact** why. (lead, 2026-11-09)\n"), 0o644)
+	}
+	for _, crewProject := range []string{"", "all", "q", "nope"} {
+		if got := c.sessionMemory(crewProject); got != "" {
+			t.Errorf("CREW_PROJECT=%q printed:\n%s", crewProject, got)
+		}
+	}
+	got := c.sessionMemory("p")
+	want := "Project memory for p (" + c.path("projects", "p", "memory.md") + "): facts the user approved.\n" + memoryRule +
+		"\n\n# Project memory: p\n\n- **Fact** why. (lead, 2026-11-09)\n"
+	if got != want {
+		t.Errorf("CREW_PROJECT=p printed:\n%s\nwant:\n%s", got, want)
 	}
 }

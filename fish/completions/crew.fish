@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack reply status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote goal
+set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack reply status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 complete -c crew -f
@@ -7,11 +7,13 @@ complete -c crew -n "__fish_seen_subcommand_from ready dispatch feedback followu
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__fish_seen_subcommand_from new propose proposals status list sync cleanup gardener config" -l project -x -d 'Work on this project' \
+complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status list sync cleanup gardener config" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea, and why it is worth keeping'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
-complete -c crew -n "__fish_seen_subcommand_from propose" -l source -x -a 'lead user gardener worker:' -d 'Who wrote it'
+complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener worker:' -d 'Who wrote it'
+complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
+complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'

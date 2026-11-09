@@ -627,4 +627,33 @@ check "a worker runs with its task's project, not the caller's" '[[ $(grep -- "-
 check "the gardener runs with its project" '[[ $(grep -- "--agent gardener" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
 check "gardener takes --project, not a bare project name" '! crew gardener "$P2" 2>/dev/null'
 
+# Project memory: agents suggest facts with crew remember; the lead moves the ones
+# the user approves into memory.md, which every agent of the project loads.
+MS=$L/projects/$PJ/memory-suggestions.md
+out=$(cd "$HOME" && crew remember "Dashboard columns are unlimited" --why "The user chose it over a cap of 12." --project "$PJ")
+check "remember creates the suggestions file and prints its path" '[[ $out == "$MS" && $(head -1 "$MS") == "# Memory suggestions: $PJ" ]]'
+check "remember suggests the fact as an unchecked item in the shape of an entry, from the lead by default" '[[ $(tail -1 "$MS") == "- [ ] **Dashboard columns are unlimited** The user chose it over a cap of 12. (lead, $(date +%F))" ]]'
+(cd "$HOME" && crew remember "PR screenshots go in Dropbox" --why "Collaborators can't see them" --source worker:7 --project "$PJ" >/dev/null)
+check "remember appends, and names a worker's task by full id" '[[ $(grep -c "^- \[ \]" "$MS") == 2 && $(tail -1 "$MS") == "- [ ] **PR screenshots go in Dropbox** Collaborators can'"'"'t see them. (worker:007-contestant-type-on-update, $(date +%F))" ]]'
+check "remember commits the suggestion" '[[ -z $(git -C "$L" status --porcelain -- "$MS") && $(git -C "$L" log -1 --format=%s) == "remember $PJ" ]]'
+check "remember refuses a bad source, an empty fact and a missing --why" \
+  '! crew remember "X" --why "Y" --source bob --project "$PJ" 2>/dev/null && ! crew remember "" --why "Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
+out=$(crew status --project "$PJ")
+check "status counts a project's memory suggestions waiting on the user" '[[ $out == *"  memory suggestions: 2  (projects/$PJ/memory-suggestions.md)"* ]]'
+out=$(crew status --project "$P2")
+check "status counts memory suggestions among what waits on you in other projects" '[[ $out == *"waiting on you in other projects"*"$PJ: "*"2 memory suggestion(s)"* ]]'
+sed -i 's/^- \[ \] \(.*\)$/- [x] \1 → kept/' "$MS"
+check "status leaves out settled suggestions" '[[ $(crew status --project "$PJ") != *"memory suggestions"* && $(crew status --project "$P2") != *"memory suggestion"* ]]'
+out=$(crew memory --project "$PJ" 2>&1)
+check "memory says so when the project has none yet" '[[ $out == "No project memory for $PJ yet." ]]'
+printf '# Project memory: %s\n\n- **Dashboard columns are unlimited** The user chose it over a cap of 12. (lead, %s)\n' "$PJ" "$(date +%F)" >"$L/projects/$PJ/memory.md"
+out=$(cd "$HOME" && crew memory --project "$PJ")
+check "memory prints a line naming the file, the rule for weighing it, then the file" \
+  '[[ $out == "Project memory for $PJ ($L/projects/$PJ/memory.md): facts the user approved.$NL""Where it disagrees with the code or the ledger, they win"*"$NL$NL$(cat "$L/projects/$PJ/memory.md")" ]]'
+check "the SessionStart hook prints the memory of the session's project" '[[ $(cd "$HOME" && CREW_PROJECT=$PJ crew memory --hook </dev/null) == "$out" ]]'
+check "the hook prints nothing for a session on every project, on none, or on one without memory" \
+  '[[ -z $(CREW_PROJECT=all crew memory --hook) && -z $(cd "$HOME" && env -u CREW_PROJECT crew memory --hook) && -z $(CREW_PROJECT=$P2 crew memory --hook) ]]'
+check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
+  'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
+
 summary crew-e2e
