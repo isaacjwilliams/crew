@@ -95,24 +95,37 @@ func (p *Project) Repo() string          { return p.Settings["REPO"] }
 func (p *Project) DefaultBranch() string { return p.Settings["DEFAULT_BRANCH"] }
 func (p *Project) WorkRoot() string      { return p.Settings["WORK_ROOT"] }
 
+// loadProject is a project that's cloned on this machine, with its settings.
 func (c *Crew) loadProject(name string) (*Project, error) {
-	p := &Project{Name: name, Dir: c.path("projects", name), Home: c.Home, Settings: c.Settings.clone()}
-	env := filepath.Join(p.Dir, "project.env")
-	if !isFile(env) {
-		return nil, fail("unknown project '%s' (run 'crew project add' in the repo)", name)
-	}
-	if err := readEnvFile(env, p.Settings); err != nil {
+	s, err := c.projectSettings(name)
+	if err != nil {
 		return nil, err
 	}
-	if local := filepath.Join(p.Dir, "local.env"); isFile(local) {
-		if err := readEnvFile(local, p.Settings); err != nil {
-			return nil, err
-		}
-	}
+	p := &Project{Name: name, Dir: c.path("projects", name), Home: c.Home, Settings: s}
 	if p.Repo() == "" || !isDir(p.Repo()) {
 		return nil, fail("no clone of %s on this machine (crew host up makes one, or run 'crew project add' in your clone of it)", name)
 	}
 	return p, nil
+}
+
+// projectSettings is a project's settings: the shared ones, then its
+// project.env, then its local.env. Unlike loadProject, it doesn't need the
+// project cloned here.
+func (c *Crew) projectSettings(name string) (Settings, error) {
+	s, dir := c.Settings.clone(), c.path("projects", name)
+	env := filepath.Join(dir, "project.env")
+	if !isFile(env) {
+		return nil, fail("unknown project '%s' (run 'crew project add' in the repo)", name)
+	}
+	if err := readEnvFile(env, s); err != nil {
+		return nil, err
+	}
+	if local := filepath.Join(dir, "local.env"); isFile(local) {
+		if err := readEnvFile(local, s); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
 }
 
 // allProjects is the CREW_PROJECT of a session that works on every project.
