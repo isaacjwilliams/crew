@@ -10,6 +10,10 @@ function lead --description 'Talk to the crew lead: lead [--project P] [claude o
     # that project's repo; crew's commands then default to that project. Otherwise
     # it works on every project. CREW_PROJECT carries the choice to the session.
     # conf.d/agent-crew.fish sets CREW_HOME.
+    #
+    # Every lead loads lead/.mcp.json, every project's own MCP servers, which crew
+    # mcp sync brings up to date first. A lead for one project starts with settings
+    # that switch off the other projects' servers.
     set -l project
     if set -l i (contains -i -- --project $argv)
         if test $i -eq (count $argv)
@@ -28,7 +32,13 @@ function lead --description 'Talk to the crew lead: lead [--project P] [claude o
         set project all
     end
     set -lx CREW_PROJECT $project
+    crew mcp sync
+    set -l mcp
+    if test $project != all
+        set -l settings (crew mcp lead-settings --project $project); or return 1
+        set mcp --settings $settings
+    end
     pushd $CREW_HOME/lead; or return 1
-    claude --name $name --permission-mode (crew config LEAD_PERMISSION_MODE) $argv
+    claude --name $name --permission-mode (crew config LEAD_PERMISSION_MODE) $mcp $argv
     popd
 end

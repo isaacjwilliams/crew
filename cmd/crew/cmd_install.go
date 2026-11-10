@@ -107,6 +107,7 @@ func cmdInstall(c *Crew, args []string) error {
 	in.mergeSettings(func(o *object) { o.child("env").set("CREW_HOME", c.Home) })
 	os.MkdirAll(c.Settings["WORK_ROOT"], 0o755)
 	in.writeLeadLocalSettings()
+	c.syncMCP()
 
 	if fish {
 		say("Installing fish integration → ~/.config/fish/")
@@ -370,13 +371,17 @@ func agentsMDOn(home string) bool {
 
 // writeLeadLocalSettings writes the lead's settings for this machine, in the home
 // but gitignored: it reads the ledger and the project checkouts as extra
-// directories, and leaves out the home's CLAUDE.md, which is for developing crew.
-// It's rewritten only when it changes.
+// directories, leaves out the home's CLAUDE.md, which is for developing crew, and
+// approves the MCP servers crew writes to lead/.mcp.json. It's rewritten only
+// when it changes.
 func (in *installer) writeLeadLocalSettings() {
 	f := in.path("lead/.claude/settings.local.json")
 	o := newObject()
 	o.child("permissions").set("additionalDirectories", []any{in.Home, in.Settings["WORK_ROOT"]})
 	o.set("claudeMdExcludes", []any{in.Home + "/CLAUDE.md"})
+	// Not in lead/.claude/settings.json: goal leads get that file in a project's
+	// checkout, where this would approve the repo's own .mcp.json.
+	o.set("enableAllProjectMcpServers", true)
 	out := encodeJSON(o, true)
 	if cur, err := os.ReadFile(f); err == nil && string(cur) == out {
 		return

@@ -119,6 +119,10 @@ func goalCheckout(p *Project, g Goal) string {
 // settings.local.json: a goal lead works in its own checkout.
 func (c *Crew) launchGoalLead(p *Project) launcher {
 	return func(d Doc, wt, prompt string, resume bool) (launch, error) {
+		mcp, err := c.refreshMCPConfig(p)
+		if err != nil {
+			return launch{}, err
+		}
 		settings := ""
 		if !resume {
 			b, err := os.ReadFile(c.path("lead/.claude/settings.json"))
@@ -133,8 +137,9 @@ func (c *Crew) launchGoalLead(p *Project) launcher {
 			o.del("agent")
 			settings = encodeJSON(o, false)
 		}
-		return c.launchSession(d, "lead", wt, prompt, resume, "--agent", "goal-lead",
-			"--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings)
+		// The MCP flags go first: see refreshMCPConfig.
+		flags := append(mcp, "--agent", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings)
+		return c.launchSession(d, "lead", wt, prompt, resume, flags...)
 	}
 }
 

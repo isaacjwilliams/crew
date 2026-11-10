@@ -126,6 +126,15 @@ Project memory  (facts about a project you approved, which its agents load)
                                    hook (nothing for no project or all; always
                                    exits 0)
 
+MCP servers  (a project's own, from projects/<p>/mcp.json)
+  crew mcp sync                    Rebuild each project's mcp.local.json and the
+                                   leads' lead/.mcp.json now (crew tick does it too),
+                                   and report any problem
+  crew mcp lead-settings --project P
+                                   Print the settings a lead for P starts with, which
+                                   switch off every other project's servers (run by
+                                   the lead function)
+
 Other
   crew push                        Push the ledger to origin now (crew pushes it in
                                    the background after every change)

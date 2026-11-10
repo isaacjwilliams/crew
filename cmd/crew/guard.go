@@ -98,13 +98,21 @@ func (g guard) check(input []byte) error {
 		return fmt.Errorf("can't work out where the crew home %s is (%v)", g.home, err)
 	}
 	if under(path, home) {
-		// Only the lead writes a project's memory, and only on the user's say-so.
-		// It's in projects/, a state path, so this comes before the check below,
-		// which allows them all. The name is compared ignoring case: on a Mac,
-		// Memory.md is the same file.
-		inProject := filepath.Dir(filepath.Dir(path)) == filepath.Join(home, "projects")
-		if inProject && strings.EqualFold(filepath.Base(path), "memory.md") && g.role != "lead" {
-			return fmt.Errorf("%s holds the facts the user approved, and only the lead edits it. Suggest a fact with 'crew remember' instead.", path)
+		// A few of a project's files are the user's to change. They're in projects/,
+		// a state path, so this comes before the check below, which allows them all.
+		// Names are compared ignoring case: on a Mac, Memory.md is the same file.
+		if filepath.Dir(filepath.Dir(path)) == filepath.Join(home, "projects") {
+			switch strings.ToLower(filepath.Base(path)) {
+			case "memory.md":
+				// Only the lead writes it, and only on the user's say-so.
+				if g.role != "lead" {
+					return fmt.Errorf("%s holds the facts the user approved, and only the lead edits it. Suggest a fact with 'crew remember' instead.", path)
+				}
+			case "mcp.json", "mcp.local.json":
+				// Every lead starts the servers in them without asking, so no agent
+				// edits them, the lead included: goal leads share its role.
+				return fmt.Errorf("%s gives the project's sessions and every lead their MCP servers, so only the user edits mcp.json. Ask them to make the change.", path)
+			}
 		}
 		for _, s := range statePaths {
 			if under(path, filepath.Join(home, s)) {

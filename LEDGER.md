@@ -12,11 +12,14 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
   config/defaults.env    every setting, its default and what it does (from upstream)
   config/crew.env        your own settings, over the defaults (caps, branch prefix, PR mode, ...)
   config/*-settings.json permission rules passed to sessions with --settings
+  lead/.mcp.json         every project's MCP servers, for the leads; written by crew (not committed)
   templates/             task.md, goal.md and proposal.md
   projects/<project>/
     project.env          REMOTE, DEFAULT_BRANCH, per-project overrides (e.g. WORKTREE_TOOL)
     local.env            REPO: this machine's clone of the project (not committed)
     worker-settings.json optional: settings added to this project's workers (add-only)
+    mcp.json             optional: MCP servers for this project's sessions, secrets as ${NAME} (see SETUP.md)
+    mcp.local.json       written by crew from mcp.json, values filled in; never edit (not committed)
     tasks/NNN-<name>.md  one file per task; <name> is the branch name without BRANCH_PREFIX
     goals/NNN-<slug>.md  one file per goal: a batch of items a goal lead works through
     proposals/*.md       ideas worth keeping that aren't tasks yet (see Proposals)
