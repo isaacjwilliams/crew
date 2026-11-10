@@ -13,7 +13,7 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
   config/crew.env        your own settings, over the defaults (caps, branch prefix, PR mode, ...)
   config/*-settings.json permission rules passed to sessions with --settings
   lead/.mcp.json         every project's MCP servers, for the leads; written by crew (not committed)
-  templates/             task.md, goal.md and proposal.md
+  templates/             task.md, goal.md, proposal.md and review-comment.md
   projects/<project>/
     project.env          REMOTE, DEFAULT_BRANCH, per-project overrides (e.g. WORKTREE_TOOL)
     local.env            REPO: this machine's clone of the project (not committed)
@@ -119,6 +119,19 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 | `worker_name` | `crew-<project>-<task-id>` | shows in agent view; the `SendMessage` target while the session is busy (mid-turn, or holding a prompt open). A copy gets a different name |
 | `worker_job` | short ID | used by `claude attach`, `claude logs`, and `claude stop`; `MAX_WORKERS` counts these |
 | `worker_session` | full UUID | used by `claude --resume` |
+
+## Decisions
+
+A task's `## Decisions` holds one dated line per decision about the task: your answers and instructions, and the leads' and the worker's own calls. Each line ends with whose call it was: `(user)` when it records your own words or answer, otherwise `(lead)` or `(worker)`. Only a `(user)` line counts as yours: a worker's automated review gives its reviewer those lines as your decisions, and no others.
+
+## Automated reviews
+
+After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUTO_REVIEWS` times, and records each review in the task file, under `## Automated reviews` (just before `## Review rounds`), as `### Automated review N`. The record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it:
+
+- the range reviewed, the reviewer (marked `failed` when it didn't report), its derived intent and its reading of the stated intent;
+- every finding the reviewer raised, as a `####` heading with its severity, and lines for who raised it, the finding (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. The worker fills in the outcome once it has acted: `fixed in <sha>`, `proposal <file name>`, `recorded` (a nitpick outside the PR's lines) or `left for the user`;
+- the reviewer's conclusion and what it couldn't check;
+- `Summary posted`, under the newest review, once the worker has posted the PR's one summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary -->`, so a second `crew review-summary` edits it instead of posting another.
 
 ## Review rounds
 

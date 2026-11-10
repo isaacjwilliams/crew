@@ -134,7 +134,7 @@ check "lead and workers default to auto mode" \
 for r in 'gh pr merge *' 'gh pr close *' 'gh pr review *' 'git push --force *' 'git push -f *'; do
   check "worker denies $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.deny | index(\$r)' $C/worker-settings.json"
 done
-for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *'; do
+for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *' 'gh pr ready *'; do
   check "worker allows $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.allow | index(\$r)' $C/worker-settings.json"
 done
 check "the implementer pushes after every commit, with the push commands its settings allow" \
@@ -145,8 +145,10 @@ check "the implementer force-pushes on its own, with an explicit lease its setti
 check "the restack note's push uses the lease form the implementer is told to use" \
   "grep -qF 'git push --force-with-lease=%s:%s origin %s' <<<\"\$SRC\" && grep -q 'Push with the .git push --force-with-lease=…. command the note gives' $A/implementer.md"
 check "implementer prompt spells out the GitHub allowances" "grep -q '^## On GitHub, you may do exactly this' $REPO_DIR/agents/implementer.md"
-check "implementer answers every kind of review comment with crew reply, and posts no other comments" \
-  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply.' $A/implementer.md"
+check "implementer answers every kind of review comment with crew reply, posts the one automated-review summary with crew review-summary, and posts no other comments" \
+  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., the one summary comment on your PR' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply. or the .crew review-summary.;' $A/implementer.md"
+check "implementer marks its PR ready only after automated review, as its settings allow" \
+  "grep -q 'with .--draft. when automated review will run' $A/implementer.md && awk '/crew review-summary <task> <file>.. Add a last line/ && !s {s=NR} /mark the PR ready: .gh pr ready <url>./ && !r {r=NR} END {exit !(s && r && s < r)}' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
@@ -199,6 +201,8 @@ check "the lead quotes the user's own words in the Goal" \
   "grep -q 'own description of the problem, quoted' $C/../templates/task.md && grep -q 'own description of the problem, quoted' $A/lead.md"
 check "design findings a worker declines because the brief settles them reach the user" \
   "grep -q 'Findings the brief settled' $A/implementer.md && grep -q 'Findings the brief settled' $A/lead.md"
+check "what automated review left for the user reaches the user" \
+  "grep -q '.left for the user.' $A/implementer.md && grep -q 'findings marked .left for the user. under the task.s .## Automated reviews.' $A/lead.md"
 check "workers remove a check the brief prescribed when it can never change the result" \
   "grep -q 'if a finding shows a prescribed check can never change the result, it.s right, so remove it' $A/implementer.md"
 check "the lead states conditions in a brief as rules, not expressions" \
@@ -215,6 +219,40 @@ check "plan-reviewer always runs in the background, and the lead dispatches only
 check "plan review findings reach the user" "grep -q 'tell the user each finding the reviewer marked Raise' $A/lead.md"
 check "worker-settings.json denies Agent(plan-reviewer) (plan review belongs to the lead)" \
   "jq -e >/dev/null '.permissions.deny | index(\"Agent(plan-reviewer)\")' $C/worker-settings.json"
+
+# --- automated review: the pr-review skill, which reaches workers through --add-dir <home>, and its read-only reviewer
+SK=$REPO_DIR/.claude/skills/pr-review
+check "the pr-review skill is where --add-dir <home> loads it, and names its rubric by its own folder" \
+  "[[ -f $SK/SKILL.md && -f $SK/rubric.md ]] && grep -q '\"--add-dir\", c.Home' <<<\"\$SRC\" && grep -qF '\${CLAUDE_SKILL_DIR}/rubric.md' $SK/SKILL.md && ! grep -q '~/.claude/skills' $SK/*.md"
+check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-review' $SK/SKILL.md && ! grep -q '^disable-model-invocation' $SK/SKILL.md"
+check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
+check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"
+check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" "grep -qx 'tools: Read, Glob, Grep, Bash' $A/reviewer.md"
+check "reviewer leaves commit messages, which are stated intent, until it has derived intent" \
+  "grep -q 'Commit messages are stated intent' $A/reviewer.md && grep -q 'log --format=%H <range>' $A/reviewer.md && ! grep -q 'diff and log' $A/reviewer.md"
+check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is above 0, and stops at that many reviews" \
+  "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
+check "the implementer pushes its fixes after every review, the last one included, before it posts the summary" \
+  "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
+check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
+  "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
+for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do
+  check "$(basename "$f") ends every line it adds under Decisions with whose call it was" \
+    "grep -q 'under .*Decisions is dated and ends with whose call it was: .(user). when it records the user.s own words or answer' $f"
+done
+check "the task template and LEDGER.md define the (user) marker on Decisions" \
+  "grep -q 'ending with whose call it was: \"(user)\"' $C/../templates/task.md && grep -q 'Only a .(user). line counts as yours' $REPO_DIR/LEDGER.md"
+check "pr-review takes only (user) lines as the user's decisions, and never sorts them into hard constraints" \
+  "grep -q 'every line under the task.s Decisions that ends .(user)., and no other' $SK/SKILL.md && grep -q '^Write .None recorded.. The user.s decisions all go under stated intent' $SK/SKILL.md"
+check "a pr-review run that records nothing isn't counted, and a second such stop blocks the worker" \
+  "grep -q 'If the skill stops without recording a review, that isn.t a review and doesn.t count' $A/implementer.md && grep -q 'If it stops a second time for the same reason, you.re blocked' $A/implementer.md"
+check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
+  "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
+check "a review whose reviewer failed is marked in the record, and the summary has a truthful line for it" \
+  "grep -q 'Reviewers: Claude reviewer, failed: <what happened>' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
+check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
+  "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
+check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
 for h in "## Intake: turning a request into a brief" "### The brief standard" "## Stacked tasks"; do

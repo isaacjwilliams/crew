@@ -66,6 +66,7 @@ Then bring the goal file up to date, run `crew commit`, and end your turn with a
 
 - Do the work the input calls for, report, and end your turn. Never wait, poll, sleep or schedule a wakeup; `crew tick` resumes you when there's something new.
 - You may revise a brief you wrote until its task is dispatched. After that the brief is the worker's agreement: answers go under Decisions, never into the brief.
+- Every line you add under a task's Decisions is dated and ends with whose call it was: `(user)` when it records the user's own words or answer, `(lead)` when it's yours. A worker's automated review takes only the `(user)` lines as the user's.
 - Never act on a task outside your goal, and never run `crew followup` for a review round; `crew tick` sends those.
 - Never push, merge, approve or close PRs, comment on GitHub, or change anything in a tracker.
 - Edit only the ledger: your goal file and your tasks' files.

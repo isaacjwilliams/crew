@@ -69,6 +69,10 @@ echo 'MAX_WORKERS=7' >"$L/config/crew.env"
 check "crew.env overrides the defaults" '[[ $(crew config MAX_WORKERS) == 7 && $(crew config GOAL_MAX_IN_FLIGHT) == 3 ]]'
 echo 'MAX_WORKERS=2' >>"$PE"
 check "project.env overrides crew.env" '[[ $(crew config MAX_WORKERS) == 2 ]]'
+check "automated review runs up to 3 times by default, and crew config lists it" '[[ $(crew config AUTO_REVIEWS) == 3 ]] && crew config | grep -qx AUTO_REVIEWS=3'
+echo 'AUTO_REVIEWS=0' >>"$PE"
+check "a project can turn automated review off" '[[ $(cd "$HOME" && crew config AUTO_REVIEWS --project "$P") == 0 ]]'
+sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'
@@ -186,6 +190,19 @@ check "reply to a review summary posts a PR comment that quotes it" '[[ $out == 
 rm -f "$HOME/gh-last-body"
 check "reply refuses a comment on another PR" '! crew reply 1 116 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 check "reply refuses an ID that is no comment or review on the PR" '! crew reply 1 999 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
+printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1); body=$(cat "$HOME/gh-last-body")
+want=$'Automated review\n\nNothing found.\n\n<!-- crew review-summary -->\n<!-- crew -->'
+check "review-summary posts the file on the task's PR, tagged as the summary and as crew's" '[[ $out == "posted the automated-review summary on PR #12" && $body == "$want" ]] && grep -q "issues/12/comments -f body=Automated review" "$HOME/gh-calls.log"'
+printf 'Automated review\n\nOne fixed.\n' >"$HOME/summary.md"; posts=$(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log")
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
+check "a second summary edits the first instead of posting another" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summary") == "Automated review"*"One fixed."* && $(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log") == "$posts" ]] && grep -q "PATCH repos/{owner}/{repo}/issues/comments/120 " "$HOME/gh-calls.log"'
+out=$(crew feedback 1 --since 1970-01-01T00:00:00Z)
+check "crew feedback doesn't read the summary back" '[[ $out == *"comment 115"* && $out != *"comment 120"* ]] && ! grep -q "One fixed" "$F1"'
+rm -f "$HOME/gh-last-body" "$HOME/gh-summary"
+check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew review-summary 2 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
+: >"$HOME/summary.md"
+check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
 setstate "done" null; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null

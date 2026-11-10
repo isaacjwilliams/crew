@@ -7,7 +7,7 @@
 isolate_home "$(new_sandbox host)/home"
 H=$HOME/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
-check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md ]]'
+check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
 check "fish files installed" '[[ -f $HOME/.config/fish/conf.d/agent-crew.fish && -f $HOME/.config/fish/functions/lead.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
 check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q "user enable" "$HOME/systemctl-calls.log"'

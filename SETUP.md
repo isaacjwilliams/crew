@@ -1,6 +1,6 @@
 # Agent crew: setup and usage
 
-Six Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
+Seven Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
 
 Everything lives in one private git repo of yours, your **crew home**, cloned to `~/crew`: the crew's code, your settings, and the ledger. It's a copy of the public crew repo, [isaacjwilliams/crew](https://github.com/isaacjwilliams/crew), and pulls new versions from it. Any machine with a clone can run the crew, one at a time.
 
@@ -15,7 +15,8 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │      implementer workers   (background sessions, one per task,
            │                    │         each in ~/agent-work/<project>/<task>)
            │                    │  ├─ casual-observer pass before the PR
-           │                    ▼  └─ push branch, open draft PR
+           │                    │  ├─ push branch, open draft PR
+           │                    ▼  └─ automated review of the PR, fixes, one summary comment
            └── review/merge ── GitHub PRs
                                    ▲
        gardener (weekly timer) ────┘ reads merged commits → proposals in the ledger
@@ -26,7 +27,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 
 **How the lead talks to the right worker.** Every task file records its worker's session name, job ID, and session ID. "Address my comments on #42" becomes: find the task whose `pr` is #42, append your new comments to it as a review round, then resume *that* session in *that* worktree. The lead never has to remember anything. If the session no longer exists, a fresh worker picks up from the task file and the branch.
 
-**What your collaborators see:** branches pushed under your `BRANCH_PREFIX` (a worker pushes after every commit, so a repo whose CI runs on every push runs it on those branches too), draft PRs, and (optionally) one-line replies to your own review comments, all under your GitHub account. Nothing else: no labels, no other comments, no files in the repo. `crew project add` only adds two lines to `.git/info/exclude`, which is local to your clone.
+**What your collaborators see:** branches pushed under your `BRANCH_PREFIX` (a worker pushes after every commit, so a repo whose CI runs on every push runs it on those branches too), draft PRs, one comment per PR summing up its automated review, and (optionally) one-line replies to your own review comments, all under your GitHub account. Nothing else: no labels, no other comments, no files in the repo. `crew project add` only adds two lines to `.git/info/exclude`, which is local to your clone.
 
 ---
 
@@ -63,7 +64,7 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 | Installed to | What |
 |---|---|
-| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,gardener,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
+| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
 | `~/.config/fish/conf.d/agent-crew.fish` | Puts `crew` on your `PATH` |
 | `~/.config/fish/functions/lead.fish` | The `lead` command |
 | `~/.config/fish/completions/crew.fish` | Tab completion, including task IDs |
@@ -323,6 +324,12 @@ crew status        # the project whose repo you're in, or all of them elsewhere 
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
 
+### Automated review, before yours
+
+Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (shipped in the crew home, so the crew's sessions load it and your other Claude Code sessions don't) has an independent reviewer agent read the PR cold, with only your words about the change: your request as the task's Goal quotes it, your decisions (the lines under Decisions marked `(user)`), the PR text and the commit messages. The worker then checks each finding against the code. It fixes the ones it agrees must or should be fixed, writes up the ones that belong outside this PR as proposals, and leaves the ones it disputes or can't settle for you. Then it reviews again, until a review comes back clean or `AUTO_REVIEWS` reviews have run (3 by default). Every finding and what became of it is recorded in the task file, under `## Automated reviews`.
+
+Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done, and the lead's report of the PR repeats what was left for you.
+
 ### Review and send feedback
 
 Review in GitHub as you normally would: submit a review, or leave a PR comment. With the tick timer on (below), that's all: within a few minutes `crew tick` records your comments as "Round N" in the task and resumes the worker that wrote the PR, as soon as it's idle. Without the timer, tell the lead "I reviewed #42", or run `crew tick` yourself. The two steps it does are also commands of their own:
@@ -420,7 +427,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
-| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs and edit them | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
+| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post one automated-review summary on each, and mark it ready after that review | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
 | Your review capacity isn't exceeded | `crew dispatch` enforces `MAX_WORKERS`, and a goal's `max_in_flight` for its tasks, for the lead and for `crew tick` alike |
@@ -446,6 +453,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready`, or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds (the plan may need a rethink) |
+| `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
 | `WORKTREE_COPY` | empty | Gitignored files copied into each new worktree |
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
@@ -532,7 +540,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 ```fish
 crew host down                       # releases the lease and turns the services off; if it refuses
                                      # over unpushed work, push it, or use --force to drop it
-rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,gardener,goal-lead}.md
+rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md
 rm ~/.config/fish/conf.d/agent-crew.fish ~/.config/fish/functions/lead.fish ~/.config/fish/completions/crew.fish
 rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer} ~/.config/systemd/user/crew-lead.service
 rm ~/Library/LaunchAgents/crew-{tick,gardener,lead}.plist      # on a Mac, instead

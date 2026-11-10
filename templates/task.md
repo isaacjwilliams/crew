@@ -59,7 +59,12 @@ updated: {{NOW}}
      Decisions ticks the item. -->
 
 ## Decisions
-<!-- Dated decisions made after dispatch. -->
+<!-- Dated decisions made after dispatch, each ending with whose call it was: "(user)" for the
+     user's own words or answer, otherwise "(lead)" or "(worker)". -->
+
+## Automated reviews
+<!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker
+     adds each finding's outcome. -->
 
 ## Review rounds
 <!-- Appended by `crew feedback`. -->
