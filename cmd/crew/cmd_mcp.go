@@ -86,16 +86,16 @@ func (c *Crew) syncMCP() bool {
 }
 
 // refreshMCPConfig rebuilds a project's mcp.local.json, and returns the flags that
-// give a fresh session its servers: --mcp-config and that file, or none when the
-// project has no mcp.json. A project without one still gets the file, empty.
-// Its launchers call it before a resume too, which takes no flags, so the file a
-// session started with is current when it resumes.
+// give a fresh session its servers: --mcp-config and that file. Its launchers
+// call it before a resume too, which takes no flags, so the file a session
+// started with is current when it resumes. Every session gets the file, empty
+// while the project has no mcp.json, so servers added later reach it too.
 //
 // The launchers put these flags before their others: --mcp-config takes more than
 // one value, and launchSession puts the prompt right after the last flag.
 func (c *Crew) refreshMCPConfig(p *Project) ([]string, error) {
 	f, err := c.writeProjectMCP(p.Name, p.Settings)
-	if err != nil || !isFile(filepath.Join(p.Dir, "mcp.json")) {
+	if err != nil {
 		return nil, err
 	}
 	return []string{"--mcp-config", f}, nil

@@ -508,7 +508,7 @@ check "goal start refuses a goal without the user's words" '! crew goal start 1 
 sed -i '/^## Goal$/a "Ship every card in the Season column." (tracker: the Season column)' "$GF"
 out=$(crew goal start 1); GJ=$(gget "$GF" lead_job); CO=$(gget "$GF" checkout)
 gl=$(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1)
-check "goal start launches the goal lead with the home as an extra directory" '[[ $(gget "$GF" status) == running && -n $GJ && $gl == *"--add-dir $L --bg --agent goal-lead --permission-mode auto --settings {"*"} You are the goal lead for goal $G "* ]]'
+check "goal start launches the goal lead with the home as an extra directory" '[[ $(gget "$GF" status) == running && -n $GJ && $gl == *"--add-dir $L --bg --mcp-config $L/projects/$(gget "$GF" project)/mcp.local.json --agent goal-lead --permission-mode auto --settings {"*"} You are the goal lead for goal $G "* ]]'
 check "the goal lead gets the lead's settings, all but their agent" '[[ $(cat "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null'
 check "the goal lead works in a detached checkout of the default branch" '[[ $(jq -r --arg id "$GJ" ".[] | select(.id == \$id) | .cwd" "$HOME/agents.json") == "$CO" && -z $(git -C "$CO" branch --show-current) && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) ]]'
 GT1=$(crew new "Season header" --goal 1); T1=$(basename "$GT1" .md)
@@ -681,8 +681,9 @@ doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)   # it checks claude --
 check "crew doctor reports it" '[[ $doctor_out == *"FAIL $P2: mcp.json reads, and every \${NAME} in it is set — $M2"*"SHOP_TOKEN"* ]]'
 PT=$(crew new "Plain task" --project "$PJ"); fill "$PT"; crew ready "$PT" >/dev/null; setstate "done" null
 crew dispatch "$PT" >/dev/null 2>&1
-check "it doesn't hold back another project's dispatch, whose worker gets no --mcp-config" \
-  '[[ $(crew get "$PT" status) == working && $(grep -- "--name crew-$PJ-$(basename "$PT" .md)" "$HOME/claude-calls.log") != *--mcp-config* ]]'
+MLJ=$L/projects/$PJ/mcp.local.json
+check "it doesn't hold back another project's dispatch, whose worker starts with its own mcp.local.json, empty" \
+  '[[ $(crew get "$PT" status) == working && $(grep -- "--name crew-$PJ-$(basename "$PT" .md)" "$HOME/claude-calls.log") == *" --bg --mcp-config $MLJ --agent implementer "* && $(jq -c . "$MLJ") == "{\"mcpServers\":{}}" ]]'
 echo 'SHOP_TOKEN="s3cret"' >>"$L/projects/$P2/local.env"; setstate "done" null
 crew dispatch "$S2" >/dev/null 2>&1
 check "a worker for a project with mcp.json starts with --mcp-config and its mcp.local.json" \
@@ -700,5 +701,10 @@ check "a goal lead for the project starts with --mcp-config too" '[[ $(grep -- "
 git -C "$L" rm -q "$M2"; git -C "$L" commit -qm "no mcp.json for $P2"; setstate "done" null
 out=$(crew followup "$S2" --note "servers gone" 2>&1)
 check "once the project drops its mcp.json, a resume finds its mcp.local.json empty but valid" '[[ $out == *"(resume)"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
+echo '{"mcpServers": {"wiki": {"type": "http", "url": "https://wiki.example/mcp"}}}' >"$L/projects/$PJ/mcp.json"
+git -C "$L" add "$L/projects/$PJ/mcp.json"; git -C "$L" commit -qm "mcp.json for $PJ"; setstate "done" null
+out=$(crew followup "$PT" --note "a wiki now" 2>&1)
+check "a worker started before its project had an mcp.json finds its servers when it resumes" \
+  '[[ $out == *"(resume)"* && $(grep -- "--name crew-$PJ-$(basename "$PT" .md)" "$HOME/claude-calls.log") == *"--mcp-config $MLJ "* && $(jq -r ".mcpServers[\"${PJ}_wiki\"].url" "$MLJ") == https://wiki.example/mcp ]]'
 
 summary crew-e2e
