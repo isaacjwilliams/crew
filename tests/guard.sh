@@ -134,7 +134,7 @@ check "lead and workers default to auto mode" \
 for r in 'gh pr merge *' 'gh pr close *' 'gh pr review *' 'git push --force *' 'git push -f *'; do
   check "worker denies $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.deny | index(\$r)' $C/worker-settings.json"
 done
-for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *'; do
+for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *' 'gh pr ready *'; do
   check "worker allows $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.allow | index(\$r)' $C/worker-settings.json"
 done
 check "the implementer pushes after every commit, with the push commands its settings allow" \
@@ -145,8 +145,10 @@ check "the implementer force-pushes on its own, with an explicit lease its setti
 check "the restack note's push uses the lease form the implementer is told to use" \
   "grep -qF 'git push --force-with-lease=%s:%s origin %s' <<<\"\$SRC\" && grep -q 'Push with the .git push --force-with-lease=…. command the note gives' $A/implementer.md"
 check "implementer prompt spells out the GitHub allowances" "grep -q '^## On GitHub, you may do exactly this' $REPO_DIR/agents/implementer.md"
-check "implementer answers every kind of review comment with crew reply, and posts no other comments" \
-  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply.' $A/implementer.md"
+check "implementer answers every kind of review comment with crew reply, posts the one automated-review summary with crew review-summary, and posts no other comments" \
+  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., the one summary comment on your PR' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply. or the .crew review-summary.;' $A/implementer.md"
+check "implementer marks its PR ready only after automated review, as its settings allow" \
+  "grep -q 'with .--draft. when automated review will run' $A/implementer.md && awk '/crew review-summary <task> <file>.. Add a last line/ && !s {s=NR} /mark the PR ready: .gh pr ready <url>./ && !r {r=NR} END {exit !(s && r && s < r)}' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
@@ -199,6 +201,8 @@ check "the lead quotes the user's own words in the Goal" \
   "grep -q 'own description of the problem, quoted' $C/../templates/task.md && grep -q 'own description of the problem, quoted' $A/lead.md"
 check "design findings a worker declines because the brief settles them reach the user" \
   "grep -q 'Findings the brief settled' $A/implementer.md && grep -q 'Findings the brief settled' $A/lead.md"
+check "what automated review left for the user reaches the user" \
+  "grep -q '.left for the user.' $A/implementer.md && grep -q 'findings marked .left for the user. under the task.s .## Automated reviews.' $A/lead.md"
 check "workers remove a check the brief prescribed when it can never change the result" \
   "grep -q 'if a finding shows a prescribed check can never change the result, it.s right, so remove it' $A/implementer.md"
 check "the lead states conditions in a brief as rules, not expressions" \
@@ -224,6 +228,10 @@ check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-rev
 check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
 check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"
 check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" "grep -qx 'tools: Read, Glob, Grep, Bash' $A/reviewer.md"
+check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is above 0, and stops at that many reviews" \
+  "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
+check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
+  "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
