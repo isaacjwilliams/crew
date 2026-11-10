@@ -446,7 +446,7 @@ It's called from the agents' frontmatter hooks, and from the hooks in `lead/.cla
 
 The target path is structured input, so this needs no shell parsing. Bash commands aren't checked: shell parsing can never be complete.
 
-On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home `~/crew`'s ledger, but the guard compares paths as spelled, so it blocks that edit. That errs only one way: it never allows an edit it should block. Paths aren't lowercased to "fix" it, since a case-sensitive volume would then be judged wrongly.
+On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home `~/crew`'s ledger, but the guard compares paths as spelled, so it blocks that edit. That errs only one way: it never allows an edit it should block. Paths aren't lowercased to "fix" it, since a case-sensitive volume would then be judged wrongly. The one exception errs the same way: a project's `memory.md` is matched ignoring case, so `Memory.md` is blocked too, on any volume.
 
 Why the hook is in two places:
 

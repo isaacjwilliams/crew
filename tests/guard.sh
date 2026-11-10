@@ -36,6 +36,7 @@ w allow gardener "$W" "$L/projects/p/proposals/x.md"
 # --- only the lead edits a project's memory; the others suggest with crew remember
 w block worker "$W" "$L/projects/p/memory.md"
 w block gardener "$W" "$L/projects/p/memory.md"
+w block worker "$W" "$L/projects/p/Memory.md"
 w allow lead "$M" "$L/projects/p/memory.md"
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
