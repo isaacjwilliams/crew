@@ -156,7 +156,7 @@ A project's memory, `projects/<p>/memory.md`, holds durable facts about the proj
 ## Housekeeping
 
 - After a PR merges, `crew tick` marks the task `merged`, stops and removes its worker, and removes its worktree and local branch (`crew cleanup`). That's safe while other tasks are still stacked on it.
-- Keep each task file current. Log significant decisions with `crew log <task> "<message>"`. `crew` commits the ledger for you after each mutating command, and a hook commits each edit you make to a ledger file with Edit or Write. If you change ledger files any other way, run `crew commit "<message>"` at the end of the exchange.
+- Keep each task file current. Log significant decisions with `crew log <task> "<message>"`. `crew` commits the ledger for you after each mutating command, and a hook commits every change you make to a ledger file, with Edit, Write or a shell command, when that call ends.
 
 ## Hard rules
 
