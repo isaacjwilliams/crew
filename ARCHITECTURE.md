@@ -4,12 +4,13 @@ This document is for anyone changing the crew, human or Claude Code. `SETUP.md` 
 
 ## What the system is
 
-Six Claude Code agents run on one machine at a time (principle 8):
+Seven Claude Code agents run on one machine at a time (principle 8):
 
 - **lead**: the only agent you talk to, for every project, from a terminal or from Claude Mobile. It turns requests into briefs, dispatches work, routes PR feedback, and reports status.
 - **implementer**: one background session per task, each in its own git worktree and branch. It opens a PR and addresses review rounds.
 - **casual-observer**: a read-only readability review, spawned by workers before a PR (or used ad hoc).
 - **plan-reviewer**: a read-only review of a finished brief's structure, spawned by the lead before the user approves it.
+- **reviewer**: a read-only, adversarial review of a worker's open PR, spawned by the `pr-review` skill the worker runs after opening it.
 - **gardener**: runs on a schedule and turns merged commits into refactor *proposals*, never code. A proposal is any idea worth keeping that isn't a task yet; the user, a lead or a worker can write one too.
 - **goal-lead**: one background session per goal the user starts. It does the lead's intake for every item of the goal, without the user.
 
@@ -20,11 +21,12 @@ They coordinate through the **ledger**: Markdown files under `projects/` in the 
 These are invariants. Breaking one changes the design, not just the implementation.
 
 1. **Nothing coordination-related touches the shared repo.**
-   - No labels, comments other than the replies below, committed config, or files in the working tree. The repo belongs to other people too.
+   - No labels, comments other than the ones below, committed config, or files in the working tree. The repo belongs to other people too.
    - The only repo-side footprints are:
      - task branches pushed under `BRANCH_PREFIX`, after every commit;
      - the PRs workers open;
      - optional one-line replies to the user's own review comments: in the thread for an inline comment, otherwise as a PR comment that quotes the one it answers;
+     - one comment per PR summing up its automated review (`crew review-summary`), which a worker edits rather than posting a second;
      - two lines in `.git/info/exclude`, which is local to the clone.
 2. **The ledger is the single source of truth, it's plain text, and it's pushed to the person's private remote.**
    - Every change is committed at once and pushed in the background, normally within seconds, so another machine can take over with what this one knew. A push that fails is retried by the next commit, and by every `crew tick`.
@@ -42,7 +44,7 @@ These are invariants. Breaking one changes the design, not just the implementati
    - A goal's `max_in_flight` (`GOAL_MAX_IN_FLIGHT` unless set) limits its dispatched-but-unmerged tasks, including open PRs and every task of a stack. Goals are where work outruns review: a goal lead readies tasks with nobody watching, and a stack it builds on a wrong turn has to be undone PR by PR. The lead's own tasks need no such cap, since the user approves each dispatch.
    - `crew dispatch` enforces both under the ledger lock.
 6. **The user is the only one who merges.**
-   - The agent prompts say exactly what each agent may do on GitHub. For workers that is: push their own task branch (with `--force-with-lease` allowed after a rebase), open a PR, and edit it. Merging stays with the user.
+   - The agent prompts say exactly what each agent may do on GitHub. For workers that is: push their own task branch (with `--force-with-lease` allowed after a rebase), open a PR, edit it, post its automated-review summary, and mark it ready after that review. Merging stays with the user.
    - We rely on the prompts for GitHub behaviour and don't try to parse shell commands for it; that approach can't be made complete. `deny` rules in the settings files catch the obvious mistakes (`gh pr merge`, `git push --force`). Branch protection, where the repo allows it, is the real backstop.
    - File edits are enforced mechanically: `crew guard` checks Edit/Write paths. Bash isn't sandboxed (see [Bash](#bash-no-sandbox)). Workers run it in auto mode, the same trust you give your own sessions, and the gardener only runs its read-only allow list and `crew remember`.
 7. **Project-agnostic agents, project-specific conventions.**
@@ -66,6 +68,8 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `agents/lead.md` | `~/.claude/agents/` | Lead system prompt, tool denylist, `initialPrompt` briefing (terminal sessions only; cut to what needs input when a request follows it), write-guard hook (role `lead`) |
 | `agents/implementer.md` | `~/.claude/agents/` | Worker prompt: first-run and review-round workflows, stop-and-ask rules; GitHub allowances; tool denylist; write-guard hook (role `worker`) |
 | `agents/casual-observer.md` | `~/.claude/agents/` | Read-only reviewer: context budget, what to flag, output format; Sonnet, medium effort |
+| `agents/reviewer.md` | `~/.claude/agents/` | Read-only PR reviewer: gets a scope line, the rubric's path and the briefing's path; derives intent from the code before reading the stated intent; Opus, high effort |
+| `.claude/skills/pr-review/` | — | The `pr-review` skill (`SKILL.md`) and its generic rubric (`rubric.md`): one automated review of a worker's PR. Not installed: every worker and goal lead loads skills from the home through its `--add-dir`, and leads load them as the home's project skills |
 | `agents/plan-reviewer.md` | `~/.claude/agents/` | Read-only plan reviewer: gets only the task file path; reads the code at the task's base on `origin`; runs in the background (`background: true`); the structural questions, report format; Opus, high effort |
 | `agents/goal-lead.md` | `~/.claude/agents/` | Goal lead prompt: intake without the user (it reads the intake sections of the installed `lead.md`), parking rules, the new-goal and new-input workflows; tool denylist; write-guard hook (role `lead`) |
 | `agents/gardener.md` | `~/.claude/agents/` | Proposal writer: survey process, dedup against open proposals from any source, max 3 proposals; write-guard hook (role `gardener`) |
@@ -82,6 +86,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `config/{worker,gardener,readonly}-settings.json` | — | Passed with `--settings`: permission `allow`/`deny` rules for workers (`worker`), the gardener (`gardener`: the read-only list plus `crew remember`) and `crew observe` (`readonly`, which has no hooks). The worker and gardener files load project memory at session start (`crew memory --hook`); the worker file also hooks `crew-guard`, which covers their subagents |
 | `templates/task.md` | — | Task file shape: front matter and sections |
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
+| `templates/review-comment.md` | — | The automated-review summary a worker fills in from its task's `## Automated reviews` and posts with `crew review-summary` |
 | `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
@@ -175,7 +180,21 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
 ```
 
 ### Worker first run
-The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default), and records the result with `crew set TASK pr …`, `crew set TASK status pr-open` and `crew log`. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
+The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run), and records the PR with `crew set TASK pr …` and `crew log`.
+
+Then, unless `AUTO_REVIEWS` is 0, it reviews its own PR:
+```
+worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
+          ├─ range: fork point of the PR's baseRefOid and HEAD
+          ├─ briefing (Scope, How to verify, Hard constraints, Stated intent) in a temp dir
+          ├─ reviewer subagent: the range, the rubric's path, the briefing's path
+          └─ checks each finding, appends "### Automated review N" under "## Automated reviews"
+        → per finding, by agreed severity: fix and push / crew propose / left for the user → its Outcome line
+        → again, until a review is clean or AUTO_REVIEWS have run
+        → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
+        → gh pr ready (pr_mode ready) → crew set TASK status pr-open
+```
+The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
 ### Review feedback
 ```
@@ -549,7 +568,11 @@ Changing any of these means updating every side listed.
 | Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
-| `<!-- crew -->` marker on worker replies | `crew reply` → the `crew feedback` filter |
+| `<!-- crew -->` marker on worker replies and the automated-review summary | `crew reply`, `crew review-summary` → the `crew feedback` filter |
+| `<!-- crew review-summary -->` marker on the automated-review summary, found on the user's own comments | `crew review-summary` (posts, or edits the comment that has it) |
+| The briefing: first line `Code review`, then exactly `## Scope`, `## How to verify`, `## Hard constraints`, `## Stated intent`, stated intent last; the reviewer reads up to `## Stated intent` and derives intent first | `pr-review` `SKILL.md` step 3 → `reviewer.md`, `rubric.md` ("Derived intent vs. stated intent") |
+| The rubric is `rubric.md` beside `SKILL.md`, passed to the reviewer by path (`${CLAUDE_SKILL_DIR}/rubric.md`), with severities `must fix`, `should fix`, `fix later`, `nitpick` and its report format | `pr-review` → `reviewer.md`; checked in `tests/guard.sh` |
+| The record: `### Automated review N` under `## Automated reviews` (before `## Review rounds`), each finding a `####` heading with `Raised by`, `Finding`, `Verdict`, `Agreed severity` and `Outcome` lines, and `Summary posted` under the newest review once the summary is up | `pr-review` step 6 → implementer "Workflow: first run" step 9 (outcomes, resuming) → `templates/review-comment.md` → lead (what was left for the user); `templates/task.md`, `LEDGER.md` |
 | An unchecked item (`- [ ]`) under Open questions is a question waiting on the user; whoever records its answer under Decisions ticks it | `crew feedback` (collaborators' comments), implementer "When you're blocked" → `OpenQuestions` (`crew tick` marks the task `needs-input`), lead (relays and ticks); checked in `tests/guard.sh` |
 | Who a comment is from: the user (`gh api user`), a collaborator (`author_association` OWNER, MEMBER or COLLABORATOR, `user.type` not `Bot`), or anyone else | GitHub REST API → `crew feedback` |
 | GitHub comment lookups: `pulls/comments/<id>` has `pull_request_url` and `in_reply_to_id`, `issues/comments/<id>` has `issue_url`, and both and `pulls/<n>/reviews/<id>` have `html_url` and `body` | GitHub REST API → `crew reply` (which PR a comment is on, the thread root, the quote) |
@@ -559,7 +582,7 @@ Changing any of these means updating every side listed.
 | Hook command path `${CREW_HOME:-$HOME/crew}/bin/crew-guard` and role names. `~/crew` is the usual home; `crew install` sets `env.CREW_HOME` in `~/.claude/settings.json`, so hooks find a home anywhere | agent frontmatter, `lead/.claude/settings.json` and `config/worker-settings.json` → `bin/crew-guard` (which runs `crew guard`), `crew doctor`; checked in `tests/guard.sh` |
 | A home other than `~/crew` is written into the line `set -q CREW_HOME; or set -gx CREW_HOME …` of `fish/conf.d/agent-crew.fish`, and into the `%h/crew` paths and the `# Environment=CREW_HOME=` line of `systemd/*.service`. Every `launchd/*.plist` is rendered: `%h/crew` is the home, any other `%h` the user's home | those files → `renderLines`, `renderUnit` and `renderPlist` in `crew install`; checked in `tests/host.sh` and `services_test.go` |
 | Each `launchd/<label>.plist` is the twin of `systemd/<label>.service`: the same command, the unit's `PATH` entries within its own, the same `Nice`, `AbandonProcessGroup` where the unit has `KillMode=process`; `Label` is the file's name, `Disabled` is true, `CREW_HOME` is `%h/crew`, output goes to `%h/crew/logs/<label>.log` | `systemd/` ↔ `launchd/`; checked in `services_test.go` |
-| What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
+| What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`; automated review adds `crew review-summary` and `gh pr ready`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
 | Locks: `.crew.lock` (every mutation), `.crew-tick.lock` (one `crew tick` at a time) and `.crew-push.lock` (one ledger push at a time), taken with `flock(2)`; Go opens them close-on-exec, so a session or background push crew starts never holds one | `crew` → `claude`; checked by `tests/stubs/claude` (no open fd on a `.crew*.lock` file) and `tests/crew-e2e.sh` |
 | `CREW_PROJECT` is a registered project or `all`, set for every session: by `lead` (`--project P`, the repo it's run in, or `all`) and by crew for the sessions it starts | `fish/functions/lead.fish`, `launchSession`, `crew gardener`, `crew serve` → `defaultProject`; checked in `tests/crew-e2e.sh` and `tests/host.sh` |
 | `crew` on PATH for agents | `conf.d` and the units' `PATH` (the lead, through `lead` and `crew serve`, which also prepends it), `claude` (in `sessions.go`) prepending PATH (workers, goal leads, gardener) |
@@ -585,6 +608,7 @@ Changing any of these means updating every side listed.
 | Change coding standards | The user's `~/.claude/CLAUDE.md` (taste) or the repo's `AGENTS.md` (project conventions). `implementer.md` holds no standards of its own; it relies on those loading |
 | Change the PR-body format | `implementer.md` (first run, step 7) |
 | Tune the readability review | `casual-observer.md` (budget, checklist, severity, model) |
+| Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is implementer step 9; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS` |
 | Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 7 of `lead.md` |
 | Tune the gardener | `gardener.md`; the range and turn limit are in `config/defaults.env` (set them in `config/crew.env`) |
 | Allow or deny a command | `config/*-settings.json` (`allow` for fewer prompts, `deny` as a tripwire); what an agent may do on GitHub goes in its prompt |
@@ -661,6 +685,7 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
   - Claude Code reads `.mcp.json` from `lead/`, the session's folder, not from the home's git root, and `enableAllProjectMcpServers` in `lead/.claude/settings.local.json` approves those servers, with no prompt. The docs list that setting as settable in any file. Check: `lead`, and the `crew serve` session, list the servers in `/mcp` without asking to approve them.
   - `disabledMcpjsonServers` passed with `--settings` keeps those servers from connecting, over `enableAllProjectMcpServers`, with no approval prompt. The `mcp` docs say it "blocks it in every permission mode"; that it wins over `enableAllProjectMcpServers` is assumed. Check: with servers for two projects, `lead --project Q` has only Q's tools, and `/mcp` shows the other project's disabled or absent. If not, the fallback is a lead folder per project.
   - An OAuth login made in one session serves background sessions. The `mcp` docs say Claude Code keeps sign-ins per endpoint, so a login for a server's URL is assumed to serve every server with that URL, the one in `lead/.mcp.json` and the one in a worker's `mcp.local.json` alike. Check: sign in once with `/mcp` in `lead --project <p>`, then a dispatched worker for `<p>` uses the server.
+- **Skills from `--add-dir`** (not confirmed live): the skills docs say Claude Code loads `.claude/skills/` from a directory passed with `--add-dir`, and watches it for changes. Workers and goal leads get `pr-review` that way, from the home; a plain `claude` session elsewhere doesn't. A skill there whose name clashes with one of the repo's own is run as `/<prefix>:pr-review` (2.1.309 and later). `${CLAUDE_SKILL_DIR}` in a skill's text is its own folder. To check: after `crew upgrade`, `/pr-review` is offered in a worker session and not in a `claude` session outside the home.
 - **Tool inheritance:** an agent without `tools:` inherits every tool in its session, MCP servers included, also when it runs as the main session with `--agent`. `disallowedTools` names that don't resolve are assumed to be ignored. Neither has been confirmed by a live run.
 - **SessionStart hooks** from `--settings` and from `lead/.claude/settings.json` are assumed to fire for `--bg` sessions, for their resumes (`crew followup`), after compaction, and in `claude -p` (the gardener), and not for subagents. The `hooks` docs list the sources (startup, resume, clear, compact, fork), say plain stdout reaches the context, and cap it at 10,000 characters; the rest is inferred, and none of it has been confirmed by a live run. Whether each resume adds another full copy to the context, beside the one already in the transcript, is also unchecked.
 - **Hooks from `--settings`** fire for tool calls in subagents, with `agent_type` set, while frontmatter hooks run only for their own agent. `Agent(<name>)` deny rules block one subagent type. Neither has been confirmed by a live run.

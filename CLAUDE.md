@@ -1,6 +1,6 @@
 # agent-crew
 
-Source for a personal Claude Code agent setup: six agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, gardener), the `crew` CLI (Go, in `cmd/crew/`) with its write guard, fish integration, systemd units and their launchd twins for a Mac, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
+Source for a personal Claude Code agent setup: seven agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, reviewer, gardener), the `pr-review` skill in `.claude/skills/`, the `crew` CLI (Go, in `cmd/crew/`) with its write guard, fish integration, systemd units and their launchd twins for a Mac, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
 
 Read `ARCHITECTURE.md` before any structural change. It has the design principles, the flows, and the **Contracts** table of cross-file dependencies. `SETUP.md` is the user-facing guide; `tests/README.md` explains the test harness.
 
