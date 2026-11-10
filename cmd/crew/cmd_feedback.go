@@ -1,6 +1,7 @@
 package main
 
-// PR comments: crew feedback reads them into the task, crew reply answers them.
+// PR comments: crew feedback reads them into the task, crew reply answers them,
+// and crew review-summary posts the one summary of automated review.
 
 import (
 	"bytes"
@@ -414,5 +415,63 @@ func cmdReply(c *Crew, args []string) error {
 		return quietly(err)
 	}
 	fmt.Printf("replied to %s %s on PR #%s\n", strings.ToLower(kind), cid, num)
+	return nil
+}
+
+// summaryMarker tags the automated-review summary a worker posts on its PR, so
+// crew review-summary finds it again and edits it rather than posting another.
+const summaryMarker = "<!-- crew review-summary -->"
+
+// crew review-summary TASK FILE: posts FILE as the automated-review summary on
+// the task's own PR. A PR has one: if the user's account posted one already, it
+// is edited to FILE instead.
+func cmdReviewSummary(c *Crew, args []string) error {
+	if err := need("gh"); err != nil {
+		return err
+	}
+	if len(args) != 2 {
+		return usage("crew review-summary TASK FILE")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	text, err := os.ReadFile(args[1])
+	if err != nil {
+		return fail("can't read %s: %v", args[1], err)
+	}
+	if strings.TrimSpace(string(text)) == "" {
+		return fail("%s is empty", args[1])
+	}
+	if t.PR() == "" {
+		return fail("task has no PR")
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	me, err := c.ghLogin()
+	if err != nil {
+		return err
+	}
+	repo, num := p.Repo(), t.PRNumber()
+	body := strings.TrimRight(string(text), "\n") + "\n\n" + summaryMarker + "\n" + replyMarker
+	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
+	if err != nil {
+		return err
+	}
+	for _, cm := range comments {
+		if cm.whose(me) == "me" && strings.Contains(cm.Body, summaryMarker) {
+			if _, err := gh(repo, "api", "--silent", "--method", "PATCH", "repos/{owner}/{repo}/issues/comments/"+cm.ID.String(), "-f", "body="+body); err != nil {
+				return quietly(err)
+			}
+			fmt.Printf("updated the automated-review summary on PR #%s\n", num)
+			return nil
+		}
+	}
+	if _, err := gh(repo, "api", "--silent", "repos/{owner}/{repo}/issues/"+num+"/comments", "-f", "body="+body); err != nil {
+		return quietly(err)
+	}
+	fmt.Printf("posted the automated-review summary on PR #%s\n", num)
 	return nil
 }

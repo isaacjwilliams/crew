@@ -59,6 +59,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    --again resends a restack the worker already has
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
+  crew review-summary TASK FILE    Post FILE as the automated-review summary on the
+                                   task's PR, or edit the one there (used by workers)
   crew status [--done] [--all|--project P]
                                    Tasks with worker state; stacked tasks are listed
                                    under their parent. For one project, it ends with

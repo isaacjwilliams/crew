@@ -12,6 +12,8 @@
 #   117  isaac's conversation reply tagged <!-- crew --> (a worker reply; never pulled)
 #   118  carol, conversation comment, no write access (NONE; never pulled)
 #   119  a bot with write access, conversation comment (never pulled)
+#   120  isaac's automated-review summary, once one is posted to #12; its body is
+#        $HOME/gh-summary (tagged <!-- crew -->, so never pulled)
 # `repo create NAME --private --source . --remote origin` makes a bare repo at
 # $HOME/remotes/NAME.git and adds it as origin, or fails if that repo exists.
 # Looking up any other comment or review ID fails, like a 404. The body of the latest
@@ -56,9 +58,15 @@ case "$*" in
     echo '{"id":114,"pull_request_review_id":901,'"$isaac"',"path":"a.ts","line":1,"body":"draft in pending review","html_url":"u114","created_at":"2026-09-25T21:10:00Z"}' ;;
   *issues/comments/115) echo "$c115" ;;
   *issues/comments/116) echo "$c116" ;;
+  *"--method PATCH "*issues/comments/120\ -f\ body=*) [[ -e $HOME/gh-summary ]] && cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;
   *issues/comments/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  *issues/12/comments\ -f\ body=*"<!-- crew review-summary -->"*) cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;
   *issues/12/comments\ -f\ body=*) : ;;
-  *issues/12/comments*) echo "$c115"; echo "$c117"; echo "$c118"; echo "$c119" ;;
+  *issues/12/comments*)
+    echo "$c115"; echo "$c117"; echo "$c118"; echo "$c119"
+    if [[ -e $HOME/gh-summary ]]; then
+      jq -cn --rawfile b "$HOME/gh-summary" '{id:120, user:{login:"isaac",type:"User"}, author_association:"OWNER", body:$b, html_url:"u120", created_at:"2026-09-25T21:30:00Z", issue_url:"https://api.github.com/repos/isaac/webapp/issues/12"}'
+    fi ;;
   "pr list"*) echo "https://github.com/isaac/webapp/pull/12" ;;
   "pr view"*) echo "{\"state\":\"$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"updatedAt\":\"$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)\"}" ;;
   "auth status") exit 0 ;;
