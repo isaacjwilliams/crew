@@ -659,6 +659,12 @@ check "the SessionStart hook, run as a worker's settings give it, prints the mem
   '[[ $(cd "$HOME" && CREW_PROJECT=$PJ bash -c "$(jq -r ".hooks.SessionStart[0].hooks[0].command" "$L/config/worker-settings.json")" </dev/null) == "$out" ]]'
 check "the hook prints nothing for a session on every project, on none, or on one without memory" \
   '[[ -z $(CREW_PROJECT=all crew memory --hook) && -z $(cd "$HOME" && env -u CREW_PROJECT crew memory --hook) && -z $(CREW_PROJECT=$P2 crew memory --hook) ]]'
+{ printf '# Project memory: %s\n\n' "$P2"; head -c 10000 /dev/zero | tr '\0' x; echo; } >"$L/projects/$P2/memory.md"
+out=$(CREW_PROJECT=$P2 crew memory --hook)
+check "a memory too long for Claude Code to pass on whole makes the hook say to read the file instead" \
+  '[[ $out == "Project memory for $P2"*"Read $L/projects/$P2/memory.md in full now"* && $(wc -m <<<"$out") -le 10000 ]]'
+check "crew memory still prints a memory that long whole" '[[ $(crew memory --project "$P2" | tail -1) == "$(tail -1 "$L/projects/$P2/memory.md")" ]]'
+rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 

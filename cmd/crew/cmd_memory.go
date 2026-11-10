@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // memoryRule is how an agent weighs project memory. It's printed with the
@@ -17,6 +18,11 @@ import (
 const memoryRule = "Where it disagrees with the code or the ledger, they win: suggest a correction with `crew remember`. " +
 	"Claude's auto memory ranks below this memory, and below the code and the ledger. " +
 	"To add a fact, suggest it with `crew remember`; only the lead edits this file, when the user approves."
+
+// hookOutputCap is the most of a hook's output that Claude Code adds to a
+// session's context, in characters. Past it, the session gets a file path and a
+// short preview, and isn't told to read the file.
+const hookOutputCap = 10000
 
 // crew remember "<fact>" --why TEXT [--source S] [--project P]
 func cmdRemember(c *Crew, args []string) error {
@@ -100,25 +106,37 @@ func cmdMemory(c *Crew, args []string) error {
 	return nil
 }
 
-// memory is what crew memory prints for a project: a line naming its memory.md
-// and the rule for weighing it, then the file. It's empty when there's no file.
+// memory is what crew memory prints for a project: its header, then its
+// memory.md. It's empty when there's no file.
 func (c *Crew) memory(proj string) string {
 	f := c.path("projects", proj, "memory.md")
 	b, err := os.ReadFile(f)
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("Project memory for %s (%s): facts the user approved.\n%s\n\n%s", proj, f, memoryRule, b)
+	return memoryHeader(proj, f) + string(b)
+}
+
+// memoryHeader is a line naming a project's memory.md, then the rule for
+// weighing it.
+func memoryHeader(proj, file string) string {
+	return fmt.Sprintf("Project memory for %s (%s): facts the user approved.\n%s\n\n", proj, file, memoryRule)
 }
 
 // sessionMemory is what the SessionStart hook prints for a session's
 // CREW_PROJECT: its project's memory, or nothing for a session on every project
-// or on none.
+// or on none. A memory too long for Claude Code to pass on whole gets its
+// header and an instruction to read the file instead.
 func (c *Crew) sessionMemory(crewProject string) string {
 	if crewProject == "" || crewProject == allProjects {
 		return ""
 	}
-	return c.memory(crewProject)
+	m := c.memory(crewProject)
+	if utf8.RuneCountInString(m) <= hookOutputCap {
+		return m
+	}
+	f := c.path("projects", crewProject, "memory.md")
+	return memoryHeader(crewProject, f) + "This memory is too long to load at session start. Read " + f + " in full now, before anything else.\n"
 }
 
 // memorySuggestions counts a project's suggestions still waiting on the user.

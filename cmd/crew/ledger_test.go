@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // The expected outputs below are what the bash crew's fm_set, section_body,
@@ -374,5 +375,27 @@ func TestSessionMemoryIsSilentWithoutOneProjectsMemory(t *testing.T) {
 		"\n\n# Project memory: p\n\n- **Fact** why. (lead, 2026-11-09)\n"
 	if got != want {
 		t.Errorf("CREW_PROJECT=p printed:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Claude Code passes on at most hookOutputCap characters of a hook's output, so
+// a longer memory is replaced by an instruction to read it. Characters, not
+// bytes: é is two bytes.
+func TestSessionMemoryTooLongToLoad(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	os.MkdirAll(c.path("projects", "p"), 0o755)
+	f := c.path("projects", "p", "memory.md")
+	room := hookOutputCap - utf8.RuneCountInString(memoryHeader("p", f))
+
+	atCap := strings.Repeat("é", room-1) + "\n"
+	os.WriteFile(f, []byte(atCap), 0o644)
+	if got := c.sessionMemory("p"); got != memoryHeader("p", f)+atCap {
+		t.Errorf("a memory of exactly %d characters, header included, wasn't printed whole", hookOutputCap)
+	}
+
+	os.WriteFile(f, []byte("é"+atCap), 0o644)
+	got := c.sessionMemory("p")
+	if want := memoryHeader("p", f) + "This memory is too long to load at session start. Read " + f + " in full now, before anything else.\n"; got != want {
+		t.Errorf("a memory one character over the cap printed:\n%.300s\nwant:\n%s", got, want)
 	}
 }
