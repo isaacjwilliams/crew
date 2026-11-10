@@ -77,7 +77,8 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `config/defaults.env` | — | Every setting, its default and its comment; read by `crew` |
 | `templates/crew.env` | — | The short starting point for a person's `config/crew.env` (their overrides of `defaults.env`) |
 | `lead/.claude/settings.json` | — | The lead's session, in `lead/`: `"agent": "lead"`, its permission `allow`/`deny` rules, the `crew-guard` hook (role `lead`), which covers its subagents, and the SessionStart hook that loads project memory. Goal leads get the same file without `agent`, as a JSON string to `--settings` |
-| — | `lead/.claude/settings.local.json` | Written per machine by `crew install`, gitignored: `permissions.additionalDirectories` (the home and `WORK_ROOT`) and `claudeMdExcludes` (the home's `CLAUDE.md`, which is for developing crew) |
+| — | `lead/.claude/settings.local.json` | Written per machine by `crew install`, gitignored: `permissions.additionalDirectories` (the home and `WORK_ROOT`), `claudeMdExcludes` (the home's `CLAUDE.md`, which is for developing crew) and `enableAllProjectMcpServers`, which approves `lead/.mcp.json`. Not in `lead/.claude/settings.json`: goal leads load that file in a project's checkout, where it would approve the repo's own `.mcp.json` |
+| — | `lead/.mcp.json` | Every project's MCP servers, which the leads load as their folder's; written by `crew mcp sync`, gitignored (see [MCP servers for one project](#mcp-servers-for-one-project)) |
 | `config/{worker,gardener,readonly}-settings.json` | — | Passed with `--settings`: permission `allow`/`deny` rules for workers (`worker`), the gardener (`gardener`: the read-only list plus `crew remember`) and `crew observe` (`readonly`, which has no hooks). The worker and gardener files load project memory at session start (`crew memory --hook`); the worker file also hooks `crew-guard`, which covers their subagents |
 | `templates/task.md` | — | Task file shape: front matter and sections |
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
@@ -85,9 +86,9 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
 | `projects/.gitkeep` | — | Where the ledger goes |
-| `.gitignore` | — | Ignores what crew keeps per machine: `bin/release/`, `logs/`, the `.crew*.lock` files, and `tests/.tmp/` |
+| `.gitignore` | — | Ignores what crew keeps per machine: `bin/release/`, `logs/`, the `.crew*.lock` files, each project's `local.env` and `mcp.local.json`, the lead's `settings.local.json` and `.mcp.json`, and `tests/.tmp/` |
 | `fish/conf.d/agent-crew.fish` | `~/.config/fish/conf.d/` | Sets `CREW_HOME` and puts `crew` on PATH |
-| `fish/functions/lead.fish` | `~/.config/fish/functions/` | `lead [--project P]` = `claude --name lead[-<p>] --permission-mode <LEAD_PERMISSION_MODE> …` in `$CREW_HOME/lead`, with `CREW_PROJECT` set to P, the project whose repo you're in, or `all`; the agent and settings come from that directory |
+| `fish/functions/lead.fish` | `~/.config/fish/functions/` | `lead [--project P]` = `claude --name lead[-<p>] --permission-mode <LEAD_PERMISSION_MODE> …` in `$CREW_HOME/lead`, with `CREW_PROJECT` set to P, the project whose repo you're in, or `all`; the agent and settings come from that directory. It runs `crew mcp sync` first, and for one project adds `--settings` from `crew mcp lead-settings`, which switches off the other projects' MCP servers |
 | `fish/completions/crew.fish` | `~/.config/fish/completions/` | Subcommand, task-ID and proposal-ID completion |
 | `fish/completions/lead.fish` | `~/.config/fish/completions/` | `lead --project` completion |
 | `systemd/crew-gardener.{service,timer}` | `~/.config/systemd/user/` | Weekly `crew gardener --all` (installed but not enabled) |
@@ -117,12 +118,15 @@ This repo is the public one, and never contains state: nothing under `projects/`
     project.env                         REMOTE, DEFAULT_BRANCH, per-project overrides of the settings
     local.env                           REPO, this machine's clone; not committed
     worker-settings.json                optional, hand-written: settings added to workers' (add-only)
+    mcp.json                            optional, hand-written: MCP servers for the project's sessions
+    mcp.local.json                      written from mcp.json, ${NAME}s filled in, mode 0600; not committed
     tasks/NNN-<branch-name>.md          one task each (`crew new --branch`, else from the title)
     goals/NNN-<slug>.md                 one goal each (`crew goal new`)
     proposals/YYYY-MM-DD-slug.md        one idea each, from the gardener or `crew propose`
     memory.md                           project memory: facts the user approved, written by the lead
     memory-suggestions.md               facts suggested for memory.md (`crew remember`), each waiting on the user
     gardener.last                       last commit the gardener reviewed
+  lead/.mcp.json                        every project's mcp.local.json servers, for the leads, mode 0600; not committed
   logs/gardener-*.log                   not committed
   logs/worktree-<p>-<id>.log            Worktrunk hook output from dispatch/cleanup; not committed
   .crew.lock                            flock target, not committed
@@ -238,6 +242,7 @@ crew tick
   │      lost/<host>-<time>, home reset to origin, services disabled; nothing else happens
   ├─ require_host: this machine holds the lease, or the tick stops
   ├─ crew sync --all
+  ├─ crew mcp sync: every project's mcp.local.json, then lead/.mcp.json
   ├─ for each task:
   │    ready, its goal running                   → crew dispatch (exit 4, a dispatch that has to wait: nothing said)
   │    merged, worktree still recorded           → crew cleanup
@@ -323,6 +328,25 @@ session start, resume, clear, compaction: SessionStart hook → crew memory --ho
 - **casual-observer gets none**, on purpose: its value is the read of a teammate who knows little. `crew observe` runs it with `readonly-settings.json`, which has no hooks, and without `CREW_PROJECT`.
 - **The whole file is loaded**, and Claude Code passes on at most 10,000 characters of a hook's output, so the lead keeps `memory.md` under 9,000. Past the cap, Claude Code would replace the output with a 2,000-character preview and a file path, without asking the agent to read it, so `crew memory --hook` prints its header and an instruction to read the file instead (`hookOutputCap`). Loading an index and fetching entries on demand is the next step once a memory nears that.
 
+### MCP servers for one project
+A project's MCP servers, a tracker say, go in `projects/<p>/mcp.json`, the same shape as a repo's `.mcp.json`. A repo's `.mcp.json` doesn't fit: collaborators see it, and the lead, which doesn't run in the repo, never reads it. User scope doesn't either: it reaches every session in every project.
+
+```
+projects/<p>/mcp.json  (committed; a secret only as ${NAME}, a setting from the project's settings files, local.env for a secret)
+  → projects/<p>/mcp.local.json   each server named <p>_<server>, ${NAME}s filled in
+       → workers and goal leads of <p>: claude --mcp-config <it>   (rebuilt before every launch, resumes too)
+  → lead/.mcp.json                every project's mcp.local.json servers
+       → every lead, as the servers of its folder, approved by enableAllProjectMcpServers
+       → a lead for Q: --settings {"disabledMcpjsonServers": [every server not in Q's mcp.local.json]}
+```
+
+- **crew fills in the values,** not Claude Code, so the rule is the same for every kind of session and no secret goes in a session's environment or on a command line. A value comes only from crew's settings files, never the environment, so a worker the timer dispatches gets what one dispatched from your shell gets.
+- **Names are `<project>_<server>`** in both generated files. A project's name is `[a-z0-9-]`, so names can't clash between projects, or with a repo's own servers, and one permission rule or `AGENTS.md` line works in every kind of session.
+- **A resume takes no flags,** so a resumed worker keeps the `--mcp-config` path it started with. The launchers rebuild the file first, so it's current. Generated files are never deleted: a project that drops its `mcp.json` gets one with no servers, which a resumed session can still load.
+- **A lead for one project switches the others off** by exact name, from its own project's `mcp.local.json`, never by parsing names. It reads `lead/.mcp.json` as it is on disk, the file the session loads, so a server the last sync left there is switched off too. `claude remote-control` takes no `--mcp-config`, which is why leads get their servers from a file in `lead/`. The fallback, if `disabledMcpjsonServers` doesn't work as assumed, is a lead folder per project.
+- **Keeping it current:** `crew tick` runs `crew mcp sync`, and so does the `lead` function before it starts. `crew install` and `crew serve` call the same code. Building one project's file, as a dispatch does, never reads another project's.
+- **A broken `mcp.json`** stops its project's dispatches and followups before anything starts, with an error naming the file and the setting, and `crew doctor` reports it. `crew mcp sync` reports it and leaves that project's `mcp.local.json` as it was.
+
 ### Public and private repos
 ```
 public crew repo (code, no state)
@@ -380,7 +404,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - The release URL is written into it; a fork changes that one line.
 - **Home and config (`home.go`, `env.go`):**
   - `CREW_HOME`, exported, so the sessions, hooks and `wt` runs crew starts see it.
-  - The settings are `config/defaults.env`, which sets every key, then `config/crew.env` if it exists. `loadProject` adds `projects/<p>/project.env` (committed: `REMOTE`, `DEFAULT_BRANCH`, overrides), then `projects/<p>/local.env` (this machine's `REPO`, gitignored), starting from the shared settings for each project, so one project's values never reach the next. It fails when this machine has no clone.
+  - The settings are `config/defaults.env`, which sets every key, then `config/crew.env` if it exists. `projectSettings` adds `projects/<p>/project.env` (committed: `REMOTE`, `DEFAULT_BRANCH`, overrides), then `projects/<p>/local.env` (this machine's `REPO`, gitignored), starting from the shared settings for each project, so one project's values never reach the next. `loadProject` builds on it, and fails when this machine has no clone; `crew mcp sync` needs no clone, so it reads only the settings.
   - The settings files are shell-style but parsed, not sourced. A line is blank, a `#` comment, or `KEY=value`, where the value is one shell word: plain, `'single-quoted'` and `"double-quoted"` parts, with `$VAR` and `${VAR}` taken from the settings read so far or the environment, then an optional `# comment`. Anything else, a command substitution or an unset variable say, is an error naming the file and line.
   - `crew config [KEY] [--project P]` prints the effective value, for P or the default project.
 - **Project scope (`home.go`):** a command works on the project `--project` names, else the default project (`defaultProject`): `CREW_PROJECT` when it's set, else the project whose repo the current directory is in. `--project all`, `--all` or `CREW_PROJECT=all` is every project, and so is no project at all for the commands that list (`scope`). Commands that write to one project fail without one (`oneProject`).
@@ -390,6 +414,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Locks (`lock.go`):** `flock(2)` on files in the home, the same lock util-linux `flock` takes. `lock` takes `.crew.lock` (30 s timeout) for the rest of the process, or until `unlock`, and then checks the lease (`requireHost`). `takeLock` is the lock alone, for the commands that move the lease. `.crew-tick.lock` lets one `crew tick` run at a time, and `.crew-push.lock` one ledger push. Go opens files close-on-exec, so the sessions and processes crew starts never hold a lock. `crew dispatch` unlocks while it creates the worktree, since Worktrunk hooks can take minutes and workers' `crew log` calls would otherwise time out; it repeats its checks once it has the lock again.
 - **Running claude (`sessions.go`):** `claude` runs it with `$CREW_HOME/bin` first on `PATH` and `CLAUDECODE` unset, so it can be launched from inside a Claude session, and without the caller's `CREW_PROJECT`, which the caller sets for its own session (see Project scope).
 - **Ledger commits (`push.go`):** `commit` adds and commits the state paths (`statePaths`: `projects/`, `reports/`) and nothing else in the home, but only if `$CREW_HOME` is its own repo toplevel. It never fails the command. After a commit it calls `pushSoon`.
+- **MCP servers (`cmd_mcp.go`):** everything about a project's `mcp.json`: reading it (`readMCPFile`), naming and filling in its servers (`projectMCPServers`, `expandSettings`), writing `mcp.local.json` and `lead/.mcp.json` (`writeMCPFile`: a temporary file renamed into place, mode 0600), `crew mcp sync` (`syncMCP`, which tick, install and serve use too), `crew mcp lead-settings` (`leadMCPSettings`) and the flags the launchers add (`mcpConfigFlags`). Other files only call it.
 - **Project memory (`cmd_memory.go`):** `crew remember` appends a suggestion to `memory-suggestions.md` under the ledger lock (`memorySuggestion`), and `crew memory` prints `memory.md` after its header and `memoryRule`. `crew memory --hook` takes the project from `CREW_PROJECT` (`sessionMemory`), and for a memory longer than Claude Code passes on (`hookOutputCap`) prints only the header and an instruction to read the file. `memorySuggestions` counts the unchecked items for `crew status`. A hook never fails: `main` exits 0 for any command run with `--hook` first, whatever went wrong.
 - **Agents' own edits:** `crew commit --hook` is a PostToolUse hook on Edit, Write, NotebookEdit and Bash, in `lead/.claude/settings.json` and `config/worker-settings.json`. It ignores the hook JSON and asks git what changed under the state paths (`ledgerChanges`), since agents often edit the ledger with a script run through Bash. It commits any change as `edit <path>`, or `edit <n> files`, which pushes it. A call that changed nothing in the ledger costs one `git status` (about 4 ms on a home with a few hundred task files). It always exits 0, so it never fails the tool call.
 - **Public and private repos:** `cmdSetup` and `cmdUpgrade` (see [Public and private repos](#public-and-private-repos) and [Upgrading](#upgrading)). `crew setup` refuses when `config/crew.env` exists, when there's no `origin`, or when `gh` isn't signed in. `crew upgrade` never resolves a conflict itself.
@@ -423,6 +448,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - `removeSession` stops a listed job whose process is open, busy or not, then runs `claude rm` on it. It fails only if the process won't close.
   - `launchSession` starts or resumes the background session a ledger file records (`<role>_name`, `<role>_session`) and confirms it started (`waitForLaunch`). It strips color codes from `claude`'s output before reading the job ID, and fails rather than record an ID that doesn't look like one. A resume passes only the session and the prompt. `relaunch` falls back to a fresh session when a resume didn't start one (`errNotStarted`).
   - `launchWorker` is the only place a worker command line is built, on top of `launchSession`. A fresh worker gets `--agent`, `--permission-mode`, `--add-dir`, `--autocompact` (`WORKER_AUTOCOMPACT_WINDOW`, 400k by default, so a worker carried through several review rounds compacts long before its 1M window fills) and `workerSettings`: `config/worker-settings.json`, or, when `projects/<p>/worker-settings.json` exists, the two merged into a JSON string. The merge is add-only (`addOnly` in `json.go`): objects merge, arrays append new entries, and any value the base sets wins, so a project can add `allow` rules or `env` but can't drop a `deny` rule.
+  - `launchWorker` and `launchGoalLead` both start with `mcpConfigFlags`, before a fresh start and a resume alike: it rebuilds the project's `mcp.local.json`, and gives a fresh session `--mcp-config <file>` when the project has an `mcp.json`. `--mcp-config` is variadic, so it goes first, never right before the prompt.
 - **JSON (`json.go`):** the settings crew writes keep their keys in the order their files have them, as jq's output did: the user's `~/.claude/settings.json`, merged worker settings, and a goal lead's settings.
 - **Stacks (`stacks.go`):** `Branches` indexes a project's task files by branch, and `parentOf`, `effectiveBase`, `restackReason` and `noteBaseSHA` build on it (see [Stacked tasks](#stacked-tasks)). They read git only through `REPO`, whose refs the task worktrees share, and never touch its working tree.
 - **Goals (`cmd_goal.go`):** `goalTasks` finds a goal's tasks by their `goal` key; `goalFinished`, `workerQuestions` and `unroutedQuestions` build on it. `questions_routed` is a POSIX `cksum` of the questions (`cksum`), so ledgers the bash crew wrote keep working. `launchGoalLead` is the only place a goal lead command line is built, on top of `launchSession`, and `relaunch` gives it the same resume-or-fresh fallback as `crew followup`. `retireGoal` ends a goal for `crew goal done` and `abandon`.
@@ -450,7 +476,7 @@ On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home
 
 Why the hook is in two places:
 
-- The lead and the implementer have no `tools:` allowlist, only `disallowedTools`. A `tools:` list can name MCP servers only one by one, so a shared allowlist would hide every repo's servers or leak one repo's into all of them. Without it, each session gets the MCP servers configured for its repo.
+- The lead and the implementer have no `tools:` allowlist, only `disallowedTools`. A `tools:` list can name MCP servers only one by one, so a shared allowlist would hide every repo's servers or leak one repo's into all of them. Without it, each session gets the MCP servers configured for its repo, and those its project declares in `mcp.json`.
 - They can also spawn any subagent, apart from the crew's own agents (`Agent(lead)`, `Agent(implementer)`, `Agent(gardener)` and `Agent(goal-lead)` are denied in their settings).
 - A frontmatter hook runs only while its own agent runs, so it doesn't guard a `general-purpose` subagent's edits. The settings hook does: settings hooks fire for subagent tool calls too.
 - The frontmatter copy stays for a session started without its settings file, or with an edited one that dropped the hook (`crew doctor` flags that).
@@ -544,6 +570,9 @@ Changing any of these means updating every side listed.
 | Project memory is `projects/<p>/memory.md` (the lead's: `- **<fact>** <reason>. (<source>, <date>)` per entry) and `projects/<p>/memory-suggestions.md` (`crew remember`'s: the same text after `- [ ] `, ticked `→ kept` or `→ declined: <reason>`) | `crew remember` → `crew status` (`memorySuggestions`), `crew memory`, `lead.md` "Project memory", the guard, `LEDGER.md` |
 | The SessionStart hook `"${CREW_HOME:-$HOME/crew}/bin/crew" memory --hook`, with no matcher; it reads nothing from its JSON | `lead/.claude/settings.json`, `config/worker-settings.json`, `config/gardener-settings.json` → `crew memory --hook`, `crew doctor`; checked in `tests/guard.sh` |
 | A SessionStart hook's stdout, on exit 0, is added to the session's context, up to 10,000 characters; longer output becomes a file path and a preview | Claude Code → `crew memory --hook` (`hookOutputCap`), the 9,000-character budget in `lead.md` and `LEDGER.md` |
+| A project's `mcp.json` is `{"mcpServers": {…}}` with server names of `[A-Za-z0-9_-]`; crew names each `<project>_<server>` in `mcp.local.json` and `lead/.mcp.json`, and fills in `${NAME}` from the project's settings files only | `projects/<p>/mcp.json` → `cmd_mcp.go` → `launchWorker`, `launchGoalLead`, `lead/.mcp.json`, `crew mcp lead-settings`, `crew doctor`, `SETUP.md`, `lead.md`, `implementer.md`; checked in `cmd_mcp_test.go` and `tests/crew-e2e.sh` |
+| `--mcp-config` is variadic, so it's never placed right before the prompt | `launchWorker`, `launchGoalLead`; checked by `tests/stubs/claude` |
+| `crew mcp lead-settings --project Q` prints one line of settings JSON for `claude --settings`; `crew mcp sync` prints nothing and exits 1 after reporting any problem | `cmd_mcp.go` → `fish/functions/lead.fish`, `crew tick`; checked in `tests/host.sh` |
 | Every tool `crew` needs (`deps` in `crew doctor`) is on the `PATH` its services set | `systemd/*.service`, `launchd/*.plist` (read from the installed copy) → `crew doctor`, for enabled services (`crewServices`) |
 | `wt switch … --format json` prints `{"action", "path", …}`; `--config-set worktree-path=<TOML string>` sets the path; unapproved hooks fail when stdin isn't a terminal | Worktrunk → `worktreeCreate`; mirrored in `tests/stubs/wt` |
 
@@ -561,6 +590,7 @@ Changing any of these means updating every side listed.
 | Add a `crew` subcommand | A new `cmd…` function in `cmd/crew/`, its entry in `commands` (`main.go`), the help text (`help.go`), `fish/completions/crew.fish` |
 | Change how stacks behave | `cmd/crew/stacks.go`; the restack note and the two implementer sections are one contract (above) |
 | Give workers MCP tools (e.g. Playwright) | Nothing: configure the server for the repo (`.mcp.json`, or `claude mcp add`). To keep one project's workers off a server, add a `deny` rule to `projects/<p>/worker-settings.json` |
+| Give a project's lead, goal leads and workers an MCP server (its tracker) | `projects/<p>/mcp.json` in the ledger, secrets in its `local.env` as `${NAME}` (see `cmd_mcp.go`) |
 | Add worker settings for one project (`allow` rules, `env`) | `projects/<p>/worker-settings.json` in the ledger (user-owned, add-only merge; see `workerSettings`) |
 | Support another worktree tool | A new `WORKTREE_TOOL` case in `worktreeCreate`/`worktreeRemove` (`worktree.go`), a stub in `tests/stubs/`, `crew doctor`, `config/defaults.env` |
 | Change how a goal lead works | `goal-lead.md` (parking rules, workflows); its intake is the lead's (`lead.md`), so a change there reaches both |
@@ -623,6 +653,12 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
 - **Worktrunk** (built against `wt` 0.78): the `switch`/`remove` flags and JSON shape in the Contracts table. Run `wt switch --help` after upgrading it.
 - **Frontmatter hooks** in `~/.claude/agents/` run without a workspace-trust prompt; project-level agent hooks would need trust.
 - **Workspace trust** covers the folders below the one it was accepted in. Seen live on 2026-10-21: trust accepted in `~/crew/lead` was recorded in `~/.claude.json` for the repo's top level, `~/crew`, and `claude` in `~/crew/lead` then didn't ask again. `crew doctor` counts a folder above as trust for that reason. Background sessions are assumed to inherit it the same way from `~/agent-work`; that hasn't been confirmed by a live run.
+- **MCP servers for one project** (not confirmed live; checks (a)–(f) in the PR that added them):
+  - Claude Code reads `.mcp.json` from `lead/`, the session's folder, not from the home's git root.
+  - `enableAllProjectMcpServers` in `lead/.claude/settings.local.json` approves those servers, with no prompt. The docs list it as settable in any file.
+  - `disabledMcpjsonServers` passed with `--settings` keeps those servers from connecting, over `enableAllProjectMcpServers`, with no approval prompt. The `mcp` docs say it "blocks it in every permission mode"; that it wins over `enableAllProjectMcpServers` is assumed.
+  - A session resumed without flags keeps its `--mcp-config` and reads the file again.
+  - An OAuth login made in one session serves background sessions. The `mcp` docs say Claude Code keeps sign-ins per endpoint, so a login for a server's URL is assumed to serve every server with that URL, the one in `lead/.mcp.json` and the one in a worker's `mcp.local.json` alike.
 - **Tool inheritance:** an agent without `tools:` inherits every tool in its session, MCP servers included, also when it runs as the main session with `--agent`. `disallowedTools` names that don't resolve are assumed to be ignored. Neither has been confirmed by a live run.
 - **SessionStart hooks** from `--settings` and from `lead/.claude/settings.json` are assumed to fire for `--bg` sessions, for their resumes (`crew followup`), after compaction, and in `claude -p` (the gardener), and not for subagents. The `hooks` docs list the sources (startup, resume, clear, compact, fork), say plain stdout reaches the context, and cap it at 10,000 characters; the rest is inferred, and none of it has been confirmed by a live run. Whether each resume adds another full copy to the context, beside the one already in the transcript, is also unchecked.
 - **Hooks from `--settings`** fire for tool calls in subagents, with `agent_type` set, while frontmatter hooks run only for their own agent. `Agent(<name>)` deny rules block one subagent type. Neither has been confirmed by a live run.
