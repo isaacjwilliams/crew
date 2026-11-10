@@ -61,6 +61,10 @@ updated: {{NOW}}
 ## Decisions
 <!-- Dated decisions made after dispatch. -->
 
+## Automated reviews
+<!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker
+     adds each finding's outcome. -->
+
 ## Review rounds
 <!-- Appended by `crew feedback`. -->
 

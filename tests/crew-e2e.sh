@@ -69,6 +69,10 @@ echo 'MAX_WORKERS=7' >"$L/config/crew.env"
 check "crew.env overrides the defaults" '[[ $(crew config MAX_WORKERS) == 7 && $(crew config GOAL_MAX_IN_FLIGHT) == 3 ]]'
 echo 'MAX_WORKERS=2' >>"$PE"
 check "project.env overrides crew.env" '[[ $(crew config MAX_WORKERS) == 2 ]]'
+check "automated review runs up to 3 times by default, and crew config lists it" '[[ $(crew config AUTO_REVIEWS) == 3 ]] && crew config | grep -qx AUTO_REVIEWS=3'
+echo 'AUTO_REVIEWS=0' >>"$PE"
+check "a project can turn automated review off" '[[ $(cd "$HOME" && crew config AUTO_REVIEWS --project "$P") == 0 ]]'
+sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'
