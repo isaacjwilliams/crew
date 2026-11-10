@@ -3,6 +3,7 @@ package main
 import (
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // machineName is this machine's name in the lease when CREW_HOST isn't set: its
@@ -20,3 +21,6 @@ func machineName() string {
 // installTools is how crew install suggests installing the tools it's missing.
 // macOS comes with curl.
 const installTools = "with Homebrew: brew install git gh fish"
+
+// ioctlGetTermios is the ioctl that reads a terminal's settings, for stdinIsTerminal.
+const ioctlGetTermios = syscall.TIOCGETA
