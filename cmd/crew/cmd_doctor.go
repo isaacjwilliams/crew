@@ -96,6 +96,17 @@ func cmdDoctor(c *Crew, args []string) error {
 			_, err := parseJSON(b)
 			d.check(p+": worker-settings.json is valid JSON", err == nil, "fix it; dispatch refuses to start workers until then")
 		}
+		if isFile(filepath.Join(pd, "mcp.json")) {
+			s, err := c.projectSettings(p)
+			if err == nil {
+				_, err = c.projectMCPServers(p, s)
+			}
+			hint := ""
+			if err != nil {
+				hint = err.Error() + "; dispatch refuses to start workers until it's fixed"
+			}
+			d.check(p+": mcp.json reads, and every ${NAME} in it is set", err == nil, hint)
+		}
 	}
 	fmt.Println("Trust (workers start in worktrees under WORK_ROOT; the lead in the home's lead/)")
 	for _, dir := range []string{c.Settings["WORK_ROOT"], c.path("lead")} {
