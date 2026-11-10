@@ -51,13 +51,15 @@ git clone https://github.com/isaacjwilliams/crew ~/crew
 ~/crew/bin/crew setup
 ```
 
-`crew setup` makes a private GitHub repo, `<you>/crew` (`--name` for another name, if you have a `crew` already), and turns the clone into yours: the private repo becomes `origin`, where your ledger is pushed, and the public one `upstream`, where new versions come from. Pushing to `upstream` is disabled, so your ledger can never reach the public repo. It writes your settings file, `config/crew.env`, from `templates/crew.env`, then runs `crew host up`, which puts this machine's files in place with `crew install` (below) and runs the crew here: it claims the lease and enables the timers and the lead's service.
+`crew setup` makes a private GitHub repo, `<you>/crew` (`--name` for another name, if you have a `crew` already), and turns the clone into yours: the private repo becomes `origin`, where your ledger is pushed, and the public one `upstream`, where new versions come from. Pushing to `upstream` is disabled, so your ledger can never reach the public repo. It writes your settings file, `config/crew.env`, from `templates/crew.env`, then runs `crew host up`, which puts this machine's files in place with `crew install` (below) and runs the crew here: it claims the lease and enables the timers and the lead's service. Before it enables them, it opens Claude Code in `~/agent-work`, where workers run, for you to trust that folder: accept the trust dialog, then type `/exit`. It does this once, and only when it has a terminal.
+
+Then open a new terminal, so `crew` is on your `PATH`, and run `lead`. The first time, it asks you to trust its own folder, and offers to add your first repo.
 
 ### Another machine of yours
 
 Clone your private repo, not the public one: `git clone <your private repo> ~/crew`. Then:
 
-- to have it run the crew, from now on: `~/crew/bin/crew host up --take`. Use this when the first machine is down. For a planned move, run `crew host down` on the old machine first, then `crew host up` (no `--take`) here. See [Which machine runs the crew](#which-machine-runs-the-crew);
+- to have it run the crew, from now on: `~/crew/bin/crew host up --take`. Like `crew setup`, it has you trust `~/agent-work` on this machine first. Use this when the first machine is down. For a planned move, run `crew host down` on the old machine first, then `crew host up` (no `--take`) here. See [Which machine runs the crew](#which-machine-runs-the-crew);
 - to only read it, the ledger and the lead's briefs, say: `~/crew/bin/crew install`. That installs the agents and the fish files and leaves the timers off, and `crew status` there shows what the other machine is doing.
 
 ### What `crew install` does
@@ -107,7 +109,7 @@ Open a new fish shell afterwards.
 
 Two first-time prompts need a terminal on that machine, once. Until they're answered the service can't start the lead, and it's tried again every 30 seconds:
 
-1. Trust the lead's folder: `cd ~/crew/lead; and claude`, accept the trust dialog, `/exit`.
+1. Trust the lead's folder: run `lead` once and accept the trust dialog.
 2. Enable Remote Control, if you never have on this machine: run `crew serve` yourself, answer its question with `y`, then Ctrl+C and restart the service: `systemctl --user restart crew-lead.service` on Linux, `launchctl kickstart -k gui/(id -u)/crew-lead` on a Mac. If the service shows as running after step 1 (`systemctl --user status crew-lead`, or on a Mac `launchctl print gui/(id -u)/crew-lead`, whose `state` says `running`), it's enabled already, and `crew serve` would be refused while the service runs.
 
 ### On a Mac
@@ -139,12 +141,11 @@ crew host down          # hand over: stop the crew here and release the lease
    - Set `BRANCH_PREFIX`, e.g. `isaac/`. These branches land on the shared remote.
    - Check `MAX_WORKERS` (concurrent sessions) and `GOAL_MAX_IN_FLIGHT` (how many of a goal's tasks may be dispatched but unmerged at once, open PRs included). A goal can set its own; see [Goals](#goals). Start low; raise them once the loop feels trustworthy.
    - If the app needs untracked files like `.env.local` to run tests, list them in `WORKTREE_COPY`.
-2. **Trust two folders once.** Background sessions check workspace trust before starting, and so does the lead:
+2. **Trust two folders once.** Background sessions check workspace trust before starting, and so does the lead. `crew host up` (which `crew setup` runs) has you trust `~/agent-work`, and the first `lead` asks you to trust its own folder. If setup ran without a terminal, `crew doctor` flags `~/agent-work`; trust it yourself:
    ```fish
    cd ~/agent-work; and claude     # accept, then /exit
-   cd ~/crew/lead; and claude      # accept, then /exit
    ```
-3. **Register your repo:**
+3. **Register your repo.** Ask the lead to add it, as the first `lead` offers to, or do it yourself:
    ```fish
    cd ~/code/webapp
    crew project add

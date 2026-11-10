@@ -383,7 +383,8 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 1. `crew install`.
 2. Pull, write this machine's name in `host`, commit, push. A rejected push means another machine moved first: drop the claim and look again. Without `--take`, a lease another machine holds is refused.
 3. Clone each project this machine has no clone of into `$WORK_ROOT/<p>/repo`, and record it in `local.env`.
-4. Enable the services (`crewServices`: `crew-tick.timer`, `crew-gardener.timer` and `crew-lead.service`, or on a Mac the jobs `crew-tick`, `crew-gardener` and `crew-lead`), and run `crew doctor`.
+4. If `$WORK_ROOT` isn't trusted yet, open Claude Code there for the user to accept the trust dialog (`trustWorkRoot`), since workers' background sessions can't show it. Without a terminal, `crew doctor` says how.
+5. Enable the services (`crewServices`: `crew-tick.timer`, `crew-gardener.timer` and `crew-lead.service`, or on a Mac the jobs `crew-tick`, `crew-gardener` and `crew-lead`), and run `crew doctor`.
 
 **Holding it:** every change takes `lock`, which runs `requireHost`: `host` must name this machine, and `.crew-lease-lost` must not exist. Every ledger commit starts a background push (`pushSoon`).
 
@@ -439,7 +440,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Public and private repos:** `cmdSetup` and `cmdUpgrade` (see [Public and private repos](#public-and-private-repos) and [Upgrading](#upgrading)). `crew setup` refuses when `config/crew.env` exists, when there's no `origin`, or when `gh` isn't signed in. `crew upgrade` never resolves a conflict itself.
 - **Lease (`lease.go`, `cmd_host.go`):** one machine runs the crew at a time, the one the home's `host` file names (`CREW_HOST`, from the environment, default `machineName()`: the short hostname on Linux, `scutil --get LocalHostName` on a Mac, since a Mac's hostname can change with the network).
   - `requireHost` fails unless `host` names this machine and `.crew-lease-lost` doesn't exist, with a message naming the holder. `lock` runs it after taking the flock, so every mutation is refused elsewhere, and `crew dispatch`, `crew gardener` and `crew tick` run it before they start a session. Reads work anywhere, and `crew status` on another machine pulls first and says it's read-only.
-  - `crew host up` claims the lease by a push (`commitHost`), so a rejected push means another machine moved first: it resets and looks again. `--take` claims it from another machine. It also runs `crew install`, clones each project this machine has no `local.env` for into `$WORK_ROOT/<p>/repo`, enables `crewServices` and runs `crew doctor`.
+  - `crew host up` claims the lease by a push (`commitHost`), so a rejected push means another machine moved first: it resets and looks again. `--take` claims it from another machine. It also runs `crew install`, clones each project this machine has no `local.env` for into `$WORK_ROOT/<p>/repo`, has the user trust `$WORK_ROOT` (`trustWorkRoot`), enables `crewServices` and runs `crew doctor`.
   - `crew host down` refuses while a task worktree has commits its remote branch lacks (or no remote branch), unless `--force`. It disables the units, stops every `crew-*` session (`stopCrewJobs`), pushes, and pushes an empty `host`.
   - A background push that origin rejects, and that finds origin's `host` names another machine, creates `.crew-lease-lost` instead of rebasing. The next `crew tick` stands down (`standDown`).
 - **Push (`push.go`):** the ledger goes to the home's `origin`, the person's private repo, soon after each commit.
