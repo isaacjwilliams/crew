@@ -58,6 +58,7 @@ case "$*" in
     echo '{"id":114,"pull_request_review_id":901,'"$isaac"',"path":"a.ts","line":1,"body":"draft in pending review","html_url":"u114","created_at":"2026-09-25T21:10:00Z"}' ;;
   *issues/comments/115) echo "$c115" ;;
   *issues/comments/116) echo "$c116" ;;
+  # An edit to the summary: its new body is already in gh-last-body (above).
   *"--method PATCH "*issues/comments/120\ -f\ body=*) [[ -e $HOME/gh-summary ]] && cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;
   *issues/comments/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
   *issues/12/comments\ -f\ body=*"<!-- crew review-summary -->"*) cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;

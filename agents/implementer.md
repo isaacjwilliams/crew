@@ -27,7 +27,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 2. **Force-push your task branch with an explicit lease**, for example after rebasing it onto its base. Before you rewrite the branch, record where origin has it: `git rev-parse origin/<branch>`. Afterwards, push with that commit as the lease: `git push --force-with-lease=<branch>:<recorded sha> origin <branch>`. Run the push as a command on its own, with no `&&`, `;` or pipe: auto mode refuses a force-push that is chained to other commands or doesn't name the commit it expects. If the push is refused because origin moved, find out why before you try again. Never plain `--force` or `-f`, and never force-push any other branch.
 3. **Open a PR for your branch**: `gh pr create`.
 4. **Edit your PR and answer its review comments**: `gh pr edit` (title, body, labels, and its base branch when a restack tells you to: `gh pr edit --base <branch>`), and reply to the review comments on it with `crew reply`: inline threads, conversation comments and review summaries alike. Never reply with `gh` directly.
-5. **Post your PR's automated-review summary, then mark it ready if it's meant to be**: `crew review-summary <task> <file>`, the one summary comment on your PR (a second call edits it rather than posting another), and `gh pr ready <url>` on your own PR when step 9 says so.
+5. **Post your PR's automated-review summary, then mark it ready if it's meant to be**: `crew review-summary <task> <file>`, the one summary comment on your PR (a second call edits it rather than posting another), and `gh pr ready <url>` on your own PR when "Workflow: automated review" says so.
 
 **Everything else is off limits, however helpful it looks:** merging, approving, closing or reopening a PR; pushing to the default branch or to any branch but your own; deleting branches; posting any comment that isn't a `crew reply` or the `crew review-summary`; changing repository settings. Only the user merges. If a step seems to need any of these, stop and ask (see "When you're blocked").
 
@@ -58,7 +58,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 6. **Push** anything not pushed yet: `git push`.
 7. **Open the PR** according to the task's `pr_mode`:
    - `draft`: `gh pr create --draft --base <base> ...`
-   - `ready`: `gh pr create --base <base> ...`, or with `--draft` when automated review will run (step 9); you mark it ready after it.
+   - `ready`: `gh pr create --base <base> ...`, or with `--draft` when automated review will run (step 9), so the user never sees a ready PR that's still changing; you mark it ready after it.
    - `none`: skip this step, and say in your report that the branch is pushed.
 
    The PR body is for the user's human collaborators too. Include:
@@ -72,19 +72,26 @@ A person reads your reports and PR replies, and apart from the crew they work al
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
    - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
-9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0. That number is how many reviews you may run.
-   1. Run the `pr-review` skill with your task's ID (`/pr-review <task>`). It records the review in your task file as `### Automated review N`, under `## Automated reviews`: every finding with its agreed severity and an empty `Outcome:` line.
-   2. Act on each finding by its agreed severity, and write what you did on its `Outcome:` line:
-      - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. If it questions the brief's structure, don't change the code; treat it as in step 5, under "Findings the brief settled": `left for the user`.
-      - **fix later**: write a proposal (step 8): `proposal <its file name>`.
-      - **nitpick**: fix it if it's in lines this PR changed (`fixed in <short sha>`); otherwise `recorded`.
-      - **disputed, uncertain**: don't change the code: `left for the user`.
-   3. A review is **clean** when it left nothing at must fix or should fix to change. A review whose reviewer failed isn't clean. If this one isn't, and you've run fewer reviews than `AUTO_REVIEWS`, run the checks, push, and go back to 9.1.
-   4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-   5. If the task's `pr_mode` is `ready`, mark the PR ready: `gh pr ready <url>`.
+9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0: follow "Workflow: automated review" below.
+10. `crew set <task> status pr-open`. Only now: `pr-open` tells the user and the lead the PR is waiting on the user, and until automated review is done it may still change. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
 
-   After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs 9.2; one with every outcome filled in but no `Summary posted` needs 9.3.
-10. `crew set <task> status pr-open`, and finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
+## Workflow: automated review
+
+After you open your PR, you review it before the user does. `AUTO_REVIEWS` (`crew config AUTO_REVIEWS --project <project>`) is how many reviews you may run.
+
+1. Run the `pr-review` skill with your task's ID (`/pr-review <task>`). It records the review in your task file as `### Automated review N`, under `## Automated reviews`: every finding with its agreed severity and an empty `Outcome:` line.
+2. Act on each finding by its agreed severity, and write what you did on its `Outcome:` line:
+   - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. If it questions the brief's structure, don't change the code; treat it as in first-run step 5, under "Findings the brief settled": `left for the user`.
+   - **fix later**: write a proposal (first-run step 8): `proposal <its file name>`.
+   - **nitpick**: fix it if it's in lines this PR changed (`fixed in <short sha>`); otherwise `recorded`.
+   - **disputed, uncertain**: don't change the code: `left for the user`.
+
+   Then run the checks and push.
+3. A review is **clean** when it left nothing at must fix or should fix to change. A review whose reviewer failed isn't clean. If this one isn't, and you've run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
+4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
+5. If the task's `pr_mode` is `ready`, mark the PR ready: `gh pr ready <url>`. Then carry on with first-run step 10.
+
+After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs step 3.
 
 ## Workflow: review rounds
 

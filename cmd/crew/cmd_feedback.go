@@ -423,8 +423,8 @@ func cmdReply(c *Crew, args []string) error {
 const summaryMarker = "<!-- crew review-summary -->"
 
 // crew review-summary TASK FILE: posts FILE as the automated-review summary on
-// the task's own PR. A PR has one: if the user's account posted one already, it
-// is edited to FILE instead.
+// the task's own PR. A PR has one: if a summary from this GitHub account is
+// there already, it is edited to FILE instead.
 func cmdReviewSummary(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -455,6 +455,8 @@ func cmdReviewSummary(c *Crew, args []string) error {
 		return err
 	}
 	repo, num := p.Repo(), t.PRNumber()
+	// summaryMarker finds this comment again; replyMarker keeps crew feedback from
+	// reading it back as the user's feedback.
 	body := strings.TrimRight(string(text), "\n") + "\n\n" + summaryMarker + "\n" + replyMarker
 	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
 	if err != nil {

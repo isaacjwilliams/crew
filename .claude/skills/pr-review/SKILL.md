@@ -6,8 +6,8 @@ argument-hint: "<task id>"
 
 # PR review
 
-One automated review of a crew task's open PR. An independent reviewer reads the PR cold. You check every finding it
-raises against the code and record each one, with your verdict, in the task file.
+One automated review of a crew task's open PR. You are the worker that wrote it. An independent reviewer reads the PR
+cold. You check every finding it raises against the code and record each one, with your verdict, in the task file.
 
 This skill reviews; it does not fix. Deciding what to do about each finding, and doing it, is the worker's job once
 this skill has recorded the review.
@@ -164,7 +164,8 @@ is real; your verdict is annotation, not a filter.
 **Verification limits:** <what the reviewer couldn't check, and a reviewer that failed or stalled; or "none">
 ```
 
-Leave every `Outcome:` empty: the worker fills it in once it has acted on the finding. A review with no findings says
-`No findings.` in place of the numbered ones.
+Leave every `Outcome:` empty: you fill it in once you have acted on the finding, after this skill. A review with no
+findings says `No findings.` in place of the numbered ones. Once the PR's summary comment is posted, the newest review
+gets a last line, `Summary posted`; that isn't this skill's either.
 
 Finish with one line: the review's number, and how many findings it recorded at each agreed severity.
