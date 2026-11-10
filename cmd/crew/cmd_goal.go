@@ -9,7 +9,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -108,7 +107,8 @@ func goalCheckout(p *Project, g Goal) string {
 // lead's command line is built. A goal lead runs with the lead's settings,
 // lead/.claude/settings.json, all but their "agent": the lead's session takes its
 // agent from that file, a goal lead from --agent. Not the lead's
-// settings.local.json: a goal lead works in its own checkout.
+// settings.local.json: a goal lead works in its own checkout. Its settings carry
+// its project, as every session's do (sessionSettings).
 func (c *Crew) launchGoalLead(p *Project) launcher {
 	return func(d Doc, wt, prompt string, resume bool) (launch, error) {
 		mcp, err := c.refreshMCPConfig(p)
@@ -117,17 +117,12 @@ func (c *Crew) launchGoalLead(p *Project) launcher {
 		}
 		settings := ""
 		if !resume {
-			b, err := os.ReadFile(c.path("lead/.claude/settings.json"))
-			var v any
-			if err == nil {
-				v, err = parseJSON(b)
+			lead, err := readSettings(c.path("lead/.claude/settings.json"))
+			if err != nil {
+				return launch{}, err
 			}
-			o, ok := v.(*object)
-			if err != nil || !ok {
-				return launch{}, fail("can't read %s", c.path("lead/.claude/settings.json"))
-			}
-			o.del("agent")
-			settings = encodeJSON(o, false)
+			lead.del("agent")
+			settings = c.sessionSettings(lead, p)
 		}
 		// The MCP flags go first: see refreshMCPConfig.
 		flags := append(mcp, "--agent", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings)

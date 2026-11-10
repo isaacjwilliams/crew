@@ -42,6 +42,9 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
+# The latest --settings sets CREW_PROJECT to project $1 and CREW_HOME to the home: a
+# background session takes its environment from Claude Code's daemon, not from crew.
+session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h' "$HOME/claude-settings.last" >/dev/null; }
 
 crew project add >/dev/null
 PE=$(ls "$L"/projects/*/project.env); PD=$(dirname "$PE"); P=$(basename "$PD")
@@ -125,7 +128,8 @@ check "worktree is on the task branch" '[[ $(git -C "$WT" branch --show-current)
 check "session id recorded, starting with the job id" '[[ $(crew get 1 worker_session) == "$(crew get 1 worker_job)"-* ]]'
 check "job id recorded without color codes" '[[ $(crew get 1 worker_job) =~ ^[0-9a-f]{8}$ ]]'
 check "workers start with the configured auto-compact window" 'grep -- "--agent implementer" "$HOME/claude-calls.log" | tail -1 | grep -q -- " --autocompact 400k "'
-check "workers get the shipped settings file when the project adds none" '[[ $(cat "$HOME/claude-settings.last") == "$L/config/worker-settings.json" ]]'
+check "workers get the shipped settings, with their project and the home, when the project adds none" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P"'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
@@ -277,7 +281,7 @@ echo '{"permissions": {' >"$PD/worker-settings.json"
 check "invalid project worker settings stop the dispatch" '! crew dispatch 5 >/dev/null 2>&1 && [[ ! -d $HOME/agent-work/$(basename "$PD")/$(basename "$F5" .md) ]]'
 cat >"$PD/worker-settings.json" <<'EOF'
 {"permissions": {"allow": ["Bash(bin/rspec *)", "Bash(git push)"], "deny": [], "defaultMode": "bypassPermissions"},
- "env": {"PGHOST": "/run/postgresql"}}
+ "env": {"PGHOST": "/run/postgresql", "CREW_PROJECT": "elsewhere"}}
 EOF
 # A value the shipped file sets always wins; give the test ledger's copy one to defend.
 jq '.permissions.defaultMode = "default"' "$L/config/worker-settings.json" >"$HOME/ws" && mv "$HOME/ws" "$L/config/worker-settings.json"
@@ -287,6 +291,7 @@ S=$(cat "$HOME/claude-settings.last")
 check "project settings add allow rules without duplicates" 'jq -e ".permissions.allow | (index(\"Bash(bin/rspec *)\") != null) and (map(select(. == \"Bash(git push)\")) | length == 1)" <<<"$S" >/dev/null'
 check "per-project WORKER_AUTOCOMPACT_WINDOW is honoured" 'grep -- "--agent implementer" "$HOME/claude-calls.log" | tail -1 | grep -q -- " --autocompact 250k "'
 check "project settings add new keys" 'jq -e ".env.PGHOST == \"/run/postgresql\"" <<<"$S" >/dev/null'
+check "project settings can't change the worker's project" 'session_env "$(basename "$PD")"'
 check "project settings can't override a value the shipped file sets" 'jq -e ".permissions.defaultMode == \"default\"" <<<"$S" >/dev/null'
 check "project settings can't drop deny rules" 'jq -e ".permissions.deny | index(\"Bash(gh pr merge *)\") != null" <<<"$S" >/dev/null'
 P=$(ls -d "$L"/projects/*)/proposals/2026-09-25-x.md
@@ -530,7 +535,8 @@ sed -i '/^## Goal$/a "Ship every card in the Season column." (tracker: the Seaso
 out=$(crew goal start 1); GJ=$(gget "$GF" lead_job); CO=$(gget "$GF" checkout)
 gl=$(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1)
 check "goal start launches the goal lead with the home as an extra directory" '[[ $(gget "$GF" status) == running && -n $GJ && $gl == *"--add-dir $L --bg --mcp-config $L/projects/$(gget "$GF" project)/mcp.local.json --agent goal-lead --permission-mode auto --settings {"*"} You are the goal lead for goal $G "* ]]'
-check "the goal lead gets the lead's settings, all but their agent" '[[ $(cat "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null'
+check "the goal lead gets the lead's settings, all but their agent, with its project and the home" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null && session_env "$(gget "$GF" project)"'
 check "the goal lead works in a detached checkout of the default branch" '[[ $(jq -r --arg id "$GJ" ".[] | select(.id == \$id) | .cwd" "$HOME/agents.json") == "$CO" && -z $(git -C "$CO" branch --show-current) && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) ]]'
 GT1=$(crew new "Season header" --goal 1); T1=$(basename "$GT1" .md)
 GT2=$(crew new "Season standings" --goal 1); T2=$(basename "$GT2" .md)
@@ -647,10 +653,13 @@ check "proposals --all is every project" '[[ $(crew proposals --all) == *"$(base
 check "sync and cleanup --merged take --project" '(cd "$HOME" && crew sync --project "$P2" >/dev/null && [[ $(crew cleanup --merged --project "$P2") == "Nothing to clean up." ]])'
 fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 (cd "$HOME" && CREW_PROJECT=$PJ crew dispatch "$S1" >/dev/null 2>&1)
-check "a worker runs with its task's project, not the caller's" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
+check "a worker's settings name its task's project, not the caller's" 'session_env "$P2"'
+check "a worker's launch sets no CREW_PROJECT, which its session wouldn't get" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
 (cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
-check "the gardener runs with its project" '[[ $(grep -- "--agent gardener" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
-check "the gardener runs with its own settings, which load project memory" '[[ $(cat "$HOME/claude-settings.last") == "$L/config/gardener-settings.json" ]]'
+check "the gardener runs with its own settings, which load project memory, and its project" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2"'
+(cd "$HOME" && CREW_PROJECT=$P2 crew gardener --project "$PJ" >/dev/null 2>&1)
+check "the gardener of another project gets that project" 'session_env "$PJ"'
 (cd "$SB/shop" && CREW_PROJECT=$P2 crew observe >/dev/null 2>&1)
 check "crew observe runs with the read-only settings and no project, so its observer gets no project memory" \
   '[[ $(cat "$HOME/claude-settings.last") == "$L/config/readonly-settings.json" && $(grep -- "--agent casual-observer" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
@@ -724,6 +733,7 @@ check "a resume passes no --mcp-config, and the file it started with is rebuilt 
 G2F=$(crew goal new "Shop season" --project "$P2"); sed -i '/^## Goal$/a "Ship the shop."' "$G2F"
 crew goal start "$G2F" >/dev/null
 check "a goal lead for the project starts with --mcp-config too" '[[ $(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1) == *" --bg --mcp-config $ML2 --agent goal-lead "* ]]'
+check "a goal lead's settings name its own project" 'session_env "$P2"'
 git -C "$L" rm -q "$M2"; git -C "$L" commit -qm "no mcp.json for $P2"; setstate "done" null
 out=$(crew followup "$S2" --note "servers gone" 2>&1)
 check "once the project drops its mcp.json, a resume finds its mcp.local.json empty but valid" '[[ $out == *"(resume)"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'

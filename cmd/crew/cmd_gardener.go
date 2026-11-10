@@ -90,6 +90,10 @@ func (c *Crew) garden(name string) error {
 	}
 	prompt := fmt.Sprintf("Project: %s\nProposals directory: %s\nTasks directory: %s\nProposal template: %s\nCommit range to review: %s (%s commits on origin/%s)\nToday's date: %s\nFollow your process and write proposals only into the proposals directory.",
 		name, filepath.Join(p.Dir, "proposals"), filepath.Join(p.Dir, "tasks"), c.path("templates/proposal.md"), rng, count, p.DefaultBranch(), time.Now().Format("2006-01-02"))
+	settings, err := readSettings(c.path("config/gardener-settings.json"))
+	if err != nil {
+		return err
+	}
 	logf := c.path("logs", "gardener-"+name+"-"+time.Now().Format("20060102-1504")+".log")
 	fmt.Printf("%s: reviewing %s commits (%s) — log: %s\n", name, count, rng, logf)
 	log, err := os.Create(logf)
@@ -98,9 +102,8 @@ func (c *Crew) garden(name string) error {
 	}
 	cmd := c.claude("-p", "--add-dir", c.Home, "--agent", "gardener", "--permission-mode", "acceptEdits",
 		"--permission-prompts", "none", "--max-turns", p.Settings["GARDENER_MAX_TURNS"],
-		"--settings", c.path("config/gardener-settings.json"), prompt)
+		"--settings", c.sessionSettings(settings, p), prompt)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = wt, log, log
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+name)
 	runErr := cmd.Run()
 	log.Close()
 	tailTo(os.Stdout, logf, 15)
