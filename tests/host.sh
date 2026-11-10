@@ -131,7 +131,7 @@ check "nothing is changed before a machine runs the crew" '[[ $out == *"no machi
 out=$(tower "$TH/bin/crew" host up </dev/null 2>&1)
 check "host up claims the lease on origin" '[[ $(origin_host) == tower && $(cat "$TH/host") == tower && $out == *"crew runs on tower"* ]]'
 check "host up installs, and enables the timers and the lead service" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled" && grep -qx crew-lead.service "$SB/tower/systemctl-enabled"'
-check "without a terminal, host up starts no claude to trust the work root, and leaves it to doctor" '! grep -qx claude "$SB/tower/claude-calls.log" && [[ $out != *"Trusting"* && $out == *"FAIL $SB/tower/agent-work trusted"* ]]'
+check "without a terminal, host up starts no claude to trust the work root, and leaves it to doctor" '! grep -qx "claude " "$SB/tower/claude-calls.log" && [[ $out != *"Trusting"* && $out == *"FAIL $SB/tower/agent-work trusted"* ]]'
 rm -f "$TH/lead/.mcp.json"
 tower "$TH/bin/crew" serve >/dev/null 2>&1
 check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
