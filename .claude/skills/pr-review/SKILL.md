@@ -25,7 +25,7 @@ them, and a compromised review reads exactly like a clean one.
 | The primary sources step 3 names, verbatim | Your summary of what the change does |
 | The fork point, the range and the review root | The brief's Context, Structure or Plan: an assistant-written plan the user approved |
 | Test, lint and run commands | Justification for a trade-off you chose |
-| Hard constraints the user stated | Which findings you expect, or a defence in advance |
+| The user's decisions, the lines marked `(user)` | Which findings you expect, or a defence in advance |
 | | Your reading of the user's intent |
 
 Verbatim means verbatim. Quote; don't condense.
@@ -79,16 +79,16 @@ The test, lint and run commands from the repo's `AGENTS.md` (or `CLAUDE.md`), ve
 
 ### `## Hard constraints`
 
-Constraints the user stated as entries under the task's Decisions, verbatim. A Decision is the user's when it says so,
-for example by ending `(user)`. If there are none, write `None recorded.`
+Write `None recorded.` The user's decisions all go under stated intent, so the reviewer reads them only after it has
+derived intent of its own, and you never sort them into constraints and intent.
 
 ### `## Stated intent`
 
 Only these, verbatim, each as a `###` subsection:
 
 - `### The user's request`: the quoted (`>`) block in the task's Goal section. Not the restatement that follows it.
-- `### The user's decisions`: the other entries under Decisions that are the user's. Omit the subsection if there are
-  none.
+- `### The user's decisions`: every line under the task's Decisions that ends `(user)`, and no other. A line without
+  that ending isn't the user's, whatever it says. Omit the subsection if there are none.
 - `### Pull request`: its title and body, from `gh pr view`.
 - `### Commits`: every commit in `<fork sha>..HEAD`, with its full hash and its whole message, and a delimiter line
   between commits, for example `git log --format='----- %H%n%B' <fork sha>..HEAD`. Never an abbreviated format that

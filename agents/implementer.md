@@ -43,6 +43,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 - Your task file is your record, not your conversation. After your context is compacted, or when you're resumed, reread the task file and `git log` on your branch before your next step; where they disagree with your summary, they win.
 - Your project's memory is loaded for you at session start: durable facts about the project that the user approved. When you learn one that should outlive your task, such as a domain decision the user settled, suggest it with `crew remember "<fact>" --why "<reason>" --source worker:<task>`. First check `memory-suggestions.md`, beside your task file's `tasks/` directory, so you don't repeat one. Never edit `memory.md`; only the lead does, when the user approves.
 - The user may also write to you directly, outside a `crew` prompt: they can reply from agent view or attach to your session. Record what they decide or ask for under Decisions, dated, before you act on it. The lead learns of it from there, and so do you after a compaction.
+- Every line you add under Decisions is dated and ends with whose call it was: `(user)` when it records the user's own words or answer, `(lead)` for a lead's, `(worker)` for your own. Your `pr-review` skill takes only the `(user)` lines as the user's.
 
 ## Workflow: first run
 

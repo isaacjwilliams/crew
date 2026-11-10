@@ -120,6 +120,10 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 | `worker_job` | short ID | used by `claude attach`, `claude logs`, and `claude stop`; `MAX_WORKERS` counts these |
 | `worker_session` | full UUID | used by `claude --resume` |
 
+## Decisions
+
+A task's `## Decisions` holds one dated line per decision about the task: your answers and instructions, and the leads' and the worker's own calls. Each line ends with whose call it was: `(user)` when it records your own words or answer, otherwise `(lead)` or `(worker)`. Only a `(user)` line counts as yours: a worker's automated review gives its reviewer those lines as your decisions, and no others.
+
 ## Automated reviews
 
 After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUTO_REVIEWS` times, and records each review in the task file, under `## Automated reviews` (just before `## Review rounds`), as `### Automated review N`. The record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it:

@@ -236,6 +236,14 @@ check "the implementer pushes its fixes after every review, the last one include
   "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
 check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
   "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
+for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do
+  check "$(basename "$f") ends every line it adds under Decisions with whose call it was" \
+    "grep -q 'under .*Decisions is dated and ends with whose call it was: .(user). when it records the user.s own words or answer' $f"
+done
+check "the task template and LEDGER.md define the (user) marker on Decisions" \
+  "grep -q 'ending with whose call it was: \"(user)\"' $C/../templates/task.md && grep -q 'Only a .(user). line counts as yours' $REPO_DIR/LEDGER.md"
+check "pr-review takes only (user) lines as the user's decisions, and never sorts them into hard constraints" \
+  "grep -q 'every line under the task.s Decisions that ends .(user)., and no other' $SK/SKILL.md && grep -q '^Write .None recorded.. The user.s decisions all go under stated intent' $SK/SKILL.md"
 check "a pr-review run that records nothing isn't counted, and a second such stop blocks the worker" \
   "grep -q 'If the skill stops without recording a review, that isn.t a review and doesn.t count' $A/implementer.md && grep -q 'If it stops a second time for the same reason, you.re blocked' $A/implementer.md"
 check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
