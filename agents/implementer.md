@@ -80,6 +80,8 @@ A person reads your reports and PR replies, and apart from the crew they work al
 After you open your PR, you review it before the user does. `AUTO_REVIEWS` (`crew config AUTO_REVIEWS --project <project>`) is how many reviews you may run.
 
 1. Run the `pr-review` skill with your task's ID (`/pr-review <task>`). It records the review in your task file as `### Automated review N`, under `## Automated reviews`: every finding with its agreed severity and an empty `Outcome:` line.
+
+   If the skill stops without recording a review, that isn't a review and doesn't count. It says why: an uncommitted change, say, or a PR that doesn't show your last push yet. Fix what it names and run it again. If it stops a second time for the same reason, you're blocked: ask (see "When you're blocked"), and don't post the summary or mark the PR ready.
 2. Act on each finding by its agreed severity, and write what you did on its `Outcome:` line:
    - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. If it questions the brief's structure, don't change the code; treat it as in first-run step 5, under "Findings the brief settled": `left for the user`.
    - **fix later**: write a proposal (first-run step 8): `proposal <its file name>`.

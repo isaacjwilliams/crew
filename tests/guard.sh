@@ -236,6 +236,8 @@ check "the implementer pushes its fixes after every review, the last one include
   "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
 check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
   "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
+check "a pr-review run that records nothing isn't counted, and a second such stop blocks the worker" \
+  "grep -q 'If the skill stops without recording a review, that isn.t a review and doesn.t count' $A/implementer.md && grep -q 'If it stops a second time for the same reason, you.re blocked' $A/implementer.md"
 check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
   "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
