@@ -38,6 +38,13 @@ w block worker "$W" "$L/projects/p/memory.md"
 w block gardener "$W" "$L/projects/p/memory.md"
 w block worker "$W" "$L/projects/p/Memory.md"
 w allow lead "$M" "$L/projects/p/memory.md"
+# --- no agent edits a project's MCP servers, which every lead starts without asking; the user does
+for role in worker gardener lead; do
+  w block $role "$M" "$L/projects/p/mcp.json"
+  w block $role "$M" "$L/projects/p/mcp.local.json"
+done
+w block worker "$W" "$L/projects/p/MCP.json"
+w allow lead "$M" "$L/projects/p/tasks/mcp.json"   # only the project's own file, not one of that name in a task folder
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"

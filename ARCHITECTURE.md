@@ -469,10 +469,11 @@ It's called from the agents' frontmatter hooks, and from the hooks in `lead/.cla
 - `worker`: only paths inside the git toplevel of `$CLAUDE_PROJECT_DIR` (falling back to `cwd`), and never when that toplevel is the main checkout.
 - `lead` (the lead and goal leads), `gardener`: nothing else.
 - A project's `memory.md` takes edits only from the `lead` role: `worker` and `gardener` are told to suggest the fact with `crew remember` instead. It's a tripwire, like the rest of the guard: a goal lead shares the lead's role, so only its prompt keeps it out, and a Bash write isn't checked.
+- A project's `mcp.json` and `mcp.local.json` take edits from no role. Every lead starts their servers without asking, so they're the user's to change by hand. A goal lead shares the lead's role, which is why the lead is blocked too.
 
 The target path is structured input, so this needs no shell parsing. Bash commands aren't checked: shell parsing can never be complete.
 
-On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home `~/crew`'s ledger, but the guard compares paths as spelled, so it blocks that edit. That errs only one way: it never allows an edit it should block. Paths aren't lowercased to "fix" it, since a case-sensitive volume would then be judged wrongly. The one exception errs the same way: a project's `memory.md` is matched ignoring case, so `Memory.md` is blocked too, on any volume.
+On a Mac's usual case-insensitive APFS volume, `~/Crew/projects/…` is the home `~/crew`'s ledger, but the guard compares paths as spelled, so it blocks that edit. That errs only one way: it never allows an edit it should block. Paths aren't lowercased to "fix" it, since a case-sensitive volume would then be judged wrongly. The one exception errs the same way: a project's `memory.md`, `mcp.json` and `mcp.local.json` are matched ignoring case, so `Memory.md` is blocked too, on any volume.
 
 Why the hook is in two places:
 
