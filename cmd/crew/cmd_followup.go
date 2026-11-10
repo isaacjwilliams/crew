@@ -41,6 +41,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if _, err := c.workerSettings(p); err != nil {
 		return err
 	}
+	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
+		return err
+	}
 	job := t.WorkerJob()
 	if !t.Dispatched() {
 		return fail("%s has no worker yet; dispatch it first", t.ID())

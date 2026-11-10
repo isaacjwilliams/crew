@@ -668,4 +668,37 @@ rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 
+# MCP servers for one project: its mcp.json, expanded into its git-ignored
+# mcp.local.json, which its workers and goal leads start with.
+M2=$L/projects/$P2/mcp.json; ML2=$L/projects/$P2/mcp.local.json
+echo '{"mcpServers": {"tracker": {"command": "tracker-mcp", "env": {"TOKEN": "${SHOP_TOKEN}"}}}}' >"$M2"
+git -C "$L" add "$M2"; git -C "$L" commit -qm "mcp.json for $P2"
+S2=$(crew new "Shop refunds" --project "$P2"); fill "$S2"; crew ready "$S2" >/dev/null; setstate "done" null
+out=$(crew dispatch "$S2" 2>&1)
+check "an unset \${NAME} in mcp.json stops the dispatch before its worktree, with an error naming the file and the setting" \
+  '[[ $out == *"$M2: server"*"\${SHOP_TOKEN} isn"*"set"* && ! -d $HOME/agent-work/$P2/$(basename "$S2" .md) && $(crew get "$S2" status) == ready ]]'
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)   # it checks claude --version, not a session
+check "crew doctor reports it" '[[ $doctor_out == *"FAIL $P2: mcp.json reads, and every \${NAME} in it is set — $M2"*"SHOP_TOKEN"* ]]'
+PT=$(crew new "Plain task" --project "$PJ"); fill "$PT"; crew ready "$PT" >/dev/null; setstate "done" null
+crew dispatch "$PT" >/dev/null 2>&1
+check "it doesn't hold back another project's dispatch, whose worker gets no --mcp-config" \
+  '[[ $(crew get "$PT" status) == working && $(grep -- "--name crew-$PJ-$(basename "$PT" .md)" "$HOME/claude-calls.log") != *--mcp-config* ]]'
+echo 'SHOP_TOKEN="s3cret"' >>"$L/projects/$P2/local.env"; setstate "done" null
+crew dispatch "$S2" >/dev/null 2>&1
+check "a worker for a project with mcp.json starts with --mcp-config and its mcp.local.json" \
+  '[[ $(crew get "$S2" status) == working && $(grep -- "--name crew-$P2-$(basename "$S2" .md)" "$HOME/claude-calls.log") == *" --bg --mcp-config $ML2 --agent implementer "* ]]'
+check "mcp.local.json names each server for its project and fills in the setting from local.env" '[[ $(jq -r ".mcpServers[\"${P2}_tracker\"].env.TOKEN" "$ML2") == s3cret ]]'
+check "mcp.local.json is git-ignored and only you can read it" 'git -C "$L" check-ignore -q "$ML2" && [[ $(stat -c %a "$ML2") == 600 ]]'
+check "the secret is in no commit and no command line" '[[ -z $(git -C "$L" log -p -S s3cret --oneline -- projects) ]] && ! grep -q s3cret "$HOME/claude-calls.log"'
+sed -i 's/^SHOP_TOKEN=.*/SHOP_TOKEN="n3w"/' "$L/projects/$P2/local.env"; setstate "done" null
+crew followup "$S2" --note "token changed" >/dev/null 2>&1
+check "a resume passes no --mcp-config, and the file it started with is rebuilt first" \
+  '[[ $(grep -- "--resume" "$HOME/claude-calls.log" | tail -1) == "claude --resume $(crew get "$S2" worker_session) --bg New input"* && $(jq -r ".mcpServers[\"${P2}_tracker\"].env.TOKEN" "$ML2") == n3w ]]'
+G2F=$(crew goal new "Shop season" --project "$P2"); sed -i '/^## Goal$/a "Ship the shop."' "$G2F"
+crew goal start "$G2F" >/dev/null
+check "a goal lead for the project starts with --mcp-config too" '[[ $(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1) == *" --bg --mcp-config $ML2 --agent goal-lead "* ]]'
+git -C "$L" rm -q "$M2"; git -C "$L" commit -qm "no mcp.json for $P2"; setstate "done" null
+out=$(crew followup "$S2" --note "servers gone" 2>&1)
+check "once the project drops its mcp.json, a resume finds its mcp.local.json empty but valid" '[[ $out == *"(resume)"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
+
 summary crew-e2e

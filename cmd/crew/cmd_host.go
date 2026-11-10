@@ -227,6 +227,9 @@ func cmdServe(c *Crew, args []string) error {
 	if err := os.Chdir(c.path("lead")); err != nil {
 		return fail("%s is missing", c.path("lead"))
 	}
+	// Its sessions load lead/.mcp.json, so bring it up to date. A project's problem
+	// is reported and doesn't stop the lead.
+	c.syncMCP()
 	// Without --continue: it fails when no earlier server ran here, and serves only
 	// one session. A plain start brings back the last server's sessions, if it
 	// stopped in the last few hours. same-dir keeps sessions in lead/, not in

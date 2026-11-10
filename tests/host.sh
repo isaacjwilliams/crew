@@ -18,7 +18,8 @@ check "work root created" '[[ -d $HOME/agent-work ]]'
 check "install reports the home's version" '[[ $out == *"Done (crew $(cat "$H/VERSION"))"* ]]'
 check "install changes nothing tracked in the home" '[[ -z $(git -C "$H" status --porcelain) ]]'
 LL=$H/lead/.claude/settings.local.json
-check "the lead's settings for this machine add the home and work root, and leave out the home's CLAUDE.md" '[[ $(jq -c . "$LL") == "{\"permissions\":{\"additionalDirectories\":[\"$H\",\"$HOME/agent-work\"]},\"claudeMdExcludes\":[\"$H/CLAUDE.md\"]}" ]]'
+check "the lead's settings for this machine add the home and work root, leave out the home's CLAUDE.md, and approve lead/.mcp.json" '[[ $(jq -c . "$LL") == "{\"permissions\":{\"additionalDirectories\":[\"$H\",\"$HOME/agent-work\"]},\"claudeMdExcludes\":[\"$H/CLAUDE.md\"],\"enableAllProjectMcpServers\":true}" ]]'
+check "install writes the leads' MCP servers, none yet, git-ignored and private" '[[ $(jq -c . "$H/lead/.mcp.json") == "{\"mcpServers\":{}}" && $(stat -c %a "$H/lead/.mcp.json") == 600 ]] && git -C "$H" check-ignore -q "$H/lead/.mcp.json"'
 check "and they aren't committed" 'git -C "$H" check-ignore -q "$LL"'
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(cat "$H/VERSION") at $H"* ]]'
@@ -126,7 +127,9 @@ check "nothing is changed before a machine runs the crew" '[[ $out == *"no machi
 out=$(tower "$TH/bin/crew" host up </dev/null 2>&1)
 check "host up claims the lease on origin" '[[ $(origin_host) == tower && $(cat "$TH/host") == tower && $out == *"crew runs on tower"* ]]'
 check "host up installs, and enables the timers and the lead service" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled" && grep -qx crew-lead.service "$SB/tower/systemctl-enabled"'
+rm -f "$TH/lead/.mcp.json"
 tower "$TH/bin/crew" serve >/dev/null 2>&1
+check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
 check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/remote-control.cwd") == "$TH/lead" ]]'
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
@@ -137,9 +140,16 @@ lead_in() {
   (cd "$1" && tower env CREW_HOME="$TH" PATH="$TH/bin:$PATH" fish --no-config -c "source $SB/tower/.config/fish/functions/lead.fish; lead $2") >/dev/null 2>&1 || return
   tail -n 1 "$SB/tower/claude-env.log"
 }
-check "lead outside a repo works on every project" '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" ]]'
-check "lead in a project's repo works on that project" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto hello" ]]'
-check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto -c" ]]'
+# Two projects with MCP servers. The second needs no clone here, and is never committed.
+mkdir -p "$TH/projects/shop"; touch "$TH/projects/shop/project.env"
+echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/shop"}}}' >"$TH/projects/shop/mcp.json"
+echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/web"}}}' >"$TH/projects/$P/mcp.json"
+off="{\"disabledMcpjsonServers\":[\"shop_tracker\"]}"
+check "lead outside a repo works on every project, and gets every project's MCP servers" \
+  '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" && $(jq -c ".mcpServers | keys" "$TH/lead/.mcp.json") == "[\"${P}_tracker\",\"shop_tracker\"]" ]]'
+check "lead in a project's repo works on that project, with the other projects' servers off" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto --settings $off hello" ]]'
+check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto --settings $off -c" ]]'
+rm -r "$TH/projects/shop" "$TH/projects/$P/mcp.json"
 check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
 n=$(wc -l <"$SB/tower/claude-env.log")
 check "lead --project with an unknown project starts nothing" '! lead_in "$SB/tower" "--project nope" && ! lead_in "$SB/tower" "--project" && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'

@@ -5,6 +5,10 @@ logs/
 .crew-lease-lost
 projects/*/local.env
 lead/.claude/settings.local.json
+# MCP servers crew writes from each project's mcp.json, with its secrets, and
+# the temporary files it writes them through (mcp.local.json.<random>).
+projects/*/mcp.local.json*
+lead/.mcp.json*
 tests/.tmp/
 # What a stray `go build` leaves, at the root or in cmd/crew/; releases are built by
 # the workflow.
