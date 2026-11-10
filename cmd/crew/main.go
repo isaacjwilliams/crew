@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // version is stamped in at build time: -ldflags "-X main.version=X.Y.Z".
@@ -121,6 +122,30 @@ func notYet(format string, a ...any) error {
 func exitQuietly(code int) error { return &exitError{code, ""} }
 
 func usage(text string) error { return fail("usage: %s", text) }
+
+// parseText reads the arguments of a command that takes loose words and flags,
+// like crew propose: it sets each flag named in flags to the argument after it,
+// and returns the other arguments joined by spaces. An argument that starts with
+// "--" but isn't one of flags, or a flag with nothing after it, is a mistake, so
+// it fails with use rather than put the argument into the text. So the text can't
+// have a word that starts with "--".
+func parseText(args []string, flags map[string]*string, use string) (string, error) {
+	var words []string
+	for len(args) > 0 {
+		if flag := flags[args[0]]; flag != nil {
+			if len(args) == 1 {
+				return "", fail("%s needs a value; usage: %s", args[0], use)
+			}
+			*flag, args = args[1], args[2:]
+			continue
+		}
+		if strings.HasPrefix(args[0], "--") {
+			return "", fail("'%s' isn't an option here; usage: %s", args[0], use)
+		}
+		words, args = append(words, args[0]), args[1:]
+	}
+	return strings.Join(words, " "), nil
+}
 
 func warn(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "crew: "+format+"\n", a...)

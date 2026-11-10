@@ -22,28 +22,19 @@ func cmdNew(c *Crew, args []string) error {
 
 // newTask makes a draft task, prints its path when show is set, and returns it.
 func (c *Crew) newTask(args []string, show bool) (Task, error) {
-	var title, proj, name, on, goal string
-	for len(args) > 0 {
-		flag := map[string]*string{"--project": &proj, "--branch": &name, "--on": &on, "--goal": &goal}[args[0]]
-		if flag != nil && len(args) > 1 {
-			*flag, args = args[1], args[2:]
-			continue
-		}
-		if title == "" {
-			title = args[0]
-		} else {
-			title += " " + args[0]
-		}
-		args = args[1:]
+	const use = `crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]`
+	var proj, name, on, goal string
+	title, err := parseText(args, map[string]*string{"--project": &proj, "--branch": &name, "--on": &on, "--goal": &goal}, use)
+	if err != nil {
+		return Task{}, err
 	}
 	if title == "" {
-		return Task{}, usage(`crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]`)
+		return Task{}, usage(use)
 	}
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
 		return Task{}, fail("--branch '%s': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)", name)
 	}
-	proj, err := c.oneProject(proj)
-	if err != nil {
+	if proj, err = c.oneProject(proj); err != nil {
 		return Task{}, err
 	}
 	p, err := c.loadProject(proj)

@@ -14,20 +14,11 @@ import (
 // crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S] [--project P]
 func cmdPropose(c *Crew, args []string) error {
 	const use = `crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S] [--project P]`
-	var title, proj, why, revisitWhen string
+	var proj, why, revisitWhen string
 	source := "lead"
-	for len(args) > 0 {
-		flag := map[string]*string{"--project": &proj, "--why": &why, "--revisit-when": &revisitWhen, "--source": &source}[args[0]]
-		if flag != nil && len(args) > 1 {
-			*flag, args = args[1], args[2:]
-			continue
-		}
-		if title == "" {
-			title = args[0]
-		} else {
-			title += " " + args[0]
-		}
-		args = args[1:]
+	title, err := parseText(args, map[string]*string{"--project": &proj, "--why": &why, "--revisit-when": &revisitWhen, "--source": &source}, use)
+	if err != nil {
+		return err
 	}
 	if title == "" {
 		return usage(use)
@@ -37,8 +28,7 @@ func cmdPropose(c *Crew, args []string) error {
 	if slug == "" {
 		return fail("the title needs a letter or a digit, to name the proposal's file")
 	}
-	proj, err := c.oneProject(proj)
-	if err != nil {
+	if proj, err = c.oneProject(proj); err != nil {
 		return err
 	}
 	p, err := c.loadProject(proj)

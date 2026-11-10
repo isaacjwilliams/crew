@@ -55,27 +55,19 @@ func cmdGoal(c *Crew, args []string) error {
 
 // crew goal new "<title>" [--max-in-flight N] [--project P]
 func (c *Crew) goalNew(args []string) error {
-	var title, proj, maxInFlight string
-	for len(args) > 0 {
-		if flag := map[string]*string{"--project": &proj, "--max-in-flight": &maxInFlight}[args[0]]; flag != nil && len(args) > 1 {
-			*flag, args = args[1], args[2:]
-			continue
-		}
-		if title == "" {
-			title = args[0]
-		} else {
-			title += " " + args[0]
-		}
-		args = args[1:]
+	const use = `crew goal new "<title>" [--max-in-flight N] [--project P]`
+	var proj, maxInFlight string
+	title, err := parseText(args, map[string]*string{"--project": &proj, "--max-in-flight": &maxInFlight}, use)
+	if err != nil {
+		return err
 	}
 	if title == "" {
-		return usage(`crew goal new "<title>" [--max-in-flight N] [--project P]`)
+		return usage(use)
 	}
 	if _, ok := parseMaxInFlight(maxInFlight); maxInFlight != "" && !ok {
 		return fail("--max-in-flight must be a whole number, not '%s'", maxInFlight)
 	}
-	proj, err := c.oneProject(proj)
-	if err != nil {
+	if proj, err = c.oneProject(proj); err != nil {
 		return err
 	}
 	p, err := c.loadProject(proj)

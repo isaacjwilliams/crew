@@ -310,6 +310,9 @@ n=$(ls "$PD/tasks" | wc -l)
 for bad in "Contestant_Type" "agent/contestant-type" "trailing-" "$(printf 'x%.0s' {1..41})"; do
   check "--branch refuses '${bad:0:24}'" '! crew new "Bad branch" --branch "$bad" 2>/dev/null && [[ $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 done
+out=$(crew new "Stray flags" "--branch stray --on 7" 2>&1)
+check "new refuses an argument that looks like a flag but isn't one, and names it" '[[ $out == *"'"'"'--branch stray --on 7'"'"' isn'"'"'t an option here; usage: crew new"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+check "new refuses a flag with no value, rather than put it in the title" '! crew new "No branch" --branch 2>/dev/null && [[ $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 sed 's/^status: .*/status: open/' "$P" >"${P%x.md}y.md"
 check "promote refuses a bad --branch and leaves the proposal open" '! crew promote 2026-09-25-y --branch Nope 2>/dev/null && [[ $(crew proposals) == *2026-09-25-y* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 
@@ -518,6 +521,7 @@ check "goal new creates a draft goal" '[[ $GF == "$PD/goals/$G.md" && $(gget "$G
 check "goal new leaves max_in_flight to GOAL_MAX_IN_FLIGHT unless told" '[[ -z $(gget "$GF" max_in_flight) ]]'
 n=$(ls "$PD/goals" | wc -l)
 check "goal new refuses a --max-in-flight that isn't a whole number" '! crew goal new "Bad cap" --max-in-flight two 2>/dev/null && [[ $(ls "$PD/goals" | wc -l) == "$n" ]]'
+check "goal new refuses an unknown flag and a flag with no value" '! crew goal new "Stray" "--max-in-flight 2" 2>/dev/null && ! crew goal new "No cap" --max-in-flight 2>/dev/null && [[ $(ls "$PD/goals" | wc -l) == "$n" ]]'
 GF2=$(crew goal new "Capped goal" --max-in-flight 2)
 check "goal new --max-in-flight sets the goal's max_in_flight" '[[ $(gget "$GF2" max_in_flight) == 2 ]]'
 crew goal abandon "$GF2" >/dev/null
@@ -603,6 +607,9 @@ check "propose refuses an unknown source" '! crew propose "Something else" --pro
 WP=$(crew propose "Share the header partial" --project "$PJ" --source worker:7 --why "Two pages copy it.")
 check "a worker's proposal names its task by full id, and the source defaults to lead" '[[ $(crew get "$WP" source) == worker:007-contestant-type-on-update && $(crew get "$(crew propose "Lead idea" --project "$PJ")" source) == lead ]]'
 check "propose refuses a worker source that names no task" '! crew propose "Orphan idea" --project "$PJ" --source worker:999 2>/dev/null'
+n=$(ls "$(dirname "$SP")" | wc -l)
+check "propose refuses flags that arrive as one argument, rather than put them in the title" '! crew propose "Stray flags" "--project $PJ --source worker:7" 2>/dev/null && [[ $(ls "$(dirname "$SP")" | wc -l) == "$n" ]]'
+check "propose refuses a flag with no value" '! crew propose "No reason" --project "$PJ" --why 2>/dev/null && [[ $(ls "$(dirname "$SP")" | wc -l) == "$n" ]]'
 ST=$(crew promote "$SP" --branch pricing-strategy)
 check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" status) == draft && $(crew get "$SP" status) == accepted && $(crew get "$SP" task) == $(basename "$ST" .md) ]]'
 check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
@@ -660,6 +667,8 @@ check "remember appends, and names a worker's task by full id" '[[ $(grep -c "^-
 check "remember commits the suggestion" '[[ -z $(git -C "$L" status --porcelain -- "$MS") && $(git -C "$L" log -1 --format=%s) == "remember $PJ" ]]'
 check "remember refuses a bad source, an empty fact and a missing --why" \
   '! crew remember "X" --why "Y" --source bob --project "$PJ" 2>/dev/null && ! crew remember "" --why "Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
+check "remember refuses an unknown flag and a flag with no value" \
+  '! crew remember "X" "--why Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" --why 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
 out=$(crew status --project "$PJ")
 check "status counts a project's memory suggestions waiting on the user" '[[ $out == *"  memory suggestions: 2  (projects/$PJ/memory-suggestions.md)"* ]]'
 out=$(crew status --project "$P2")
