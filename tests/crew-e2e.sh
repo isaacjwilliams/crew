@@ -706,5 +706,13 @@ git -C "$L" add "$L/projects/$PJ/mcp.json"; git -C "$L" commit -qm "mcp.json for
 out=$(crew followup "$PT" --note "a wiki now" 2>&1)
 check "a worker started before its project had an mcp.json finds its servers when it resumes" \
   '[[ $out == *"(resume)"* && $(grep -- "--name crew-$PJ-$(basename "$PT" .md)" "$HOME/claude-calls.log") == *"--mcp-config $MLJ "* && $(jq -r ".mcpServers[\"${PJ}_wiki\"].url" "$MLJ") == https://wiki.example/mcp ]]'
+# crew tick rebuilds them all, and one project's broken mcp.json holds back no other.
+echo '{"mcpServers": {"wiki": {"type": "http", "url": "https://wiki.example/mcp"}, "docs": {"type": "http", "url": "https://docs.example/mcp"}}}' >"$L/projects/$PJ/mcp.json"
+echo '{"mcpServers": {"tracker": {"command": "tracker-mcp", "env": {"TOKEN": "${NOT_SET}"}}}}' >"$M2"
+git -C "$L" add "$L/projects/$PJ/mcp.json" "$M2"; git -C "$L" commit -qm "mcp.json edits"
+err=$(crew tick 2>&1 >/dev/null); rc=$?
+check "crew tick brings mcp.local.json and the leads' servers up to date" \
+  '[[ $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$MLJ") == https://docs.example/mcp && $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$L/lead/.mcp.json") == https://docs.example/mcp ]]'
+check "a project whose mcp.json is broken is reported, keeps the mcp.local.json it had, and the tick carries on" '[[ $rc == 0 && $err == *"$M2: server"*"\${NOT_SET} isn"*"set"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
 
 summary crew-e2e
