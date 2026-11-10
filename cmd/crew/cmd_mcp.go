@@ -126,9 +126,10 @@ func (c *Crew) projectMCPServers(proj string, s Settings) (*object, error) {
 }
 
 // expandSettings is v with each ${NAME} in its strings replaced by the setting
-// NAME. Only crew's settings files count, never the environment, so a session
-// gets the same servers whether the timer or your shell started it. An error
-// names the setting, never a value.
+// NAME. It looks only in the settings, not the environment, so the timer and
+// your shell give a session the same servers, as long as the settings files hold
+// the values themselves: a $VAR in one is still read from the environment. An
+// error names the setting, never a value.
 func expandSettings(v any, s Settings) (any, error) {
 	switch v := v.(type) {
 	case *object:
