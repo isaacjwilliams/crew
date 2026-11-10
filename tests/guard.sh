@@ -216,6 +216,16 @@ check "plan review findings reach the user" "grep -q 'tell the user each finding
 check "worker-settings.json denies Agent(plan-reviewer) (plan review belongs to the lead)" \
   "jq -e >/dev/null '.permissions.deny | index(\"Agent(plan-reviewer)\")' $C/worker-settings.json"
 
+# --- automated review: the pr-review skill, which reaches workers through --add-dir <home>, and its read-only reviewer
+SK=$REPO_DIR/.claude/skills/pr-review
+check "the pr-review skill is where --add-dir <home> loads it, and names its rubric by its own folder" \
+  "[[ -f $SK/SKILL.md && -f $SK/rubric.md ]] && grep -q '\"--add-dir\", c.Home' <<<\"\$SRC\" && grep -qF '\${CLAUDE_SKILL_DIR}/rubric.md' $SK/SKILL.md && ! grep -q '~/.claude/skills' $SK/*.md"
+check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-review' $SK/SKILL.md && ! grep -q '^disable-model-invocation' $SK/SKILL.md"
+check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
+check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"
+check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" "grep -qx 'tools: Read, Glob, Grep, Bash' $A/reviewer.md"
+check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
+
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
 for h in "## Intake: turning a request into a brief" "### The brief standard" "## Stacked tasks"; do
   check "goal-lead reads lead.md's \"${h#\#* }\", which still exists" "grep -qxF '$h' $A/lead.md && grep -qF '\"${h#\#* }\"' $A/goal-lead.md"
