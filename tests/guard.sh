@@ -234,6 +234,10 @@ check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is 
   "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
 check "the implementer pushes its fixes after every review, the last one included, before it posts the summary" \
   "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
+check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
+  "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
+check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
+  "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
   "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
