@@ -124,7 +124,7 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 
 After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUTO_REVIEWS` times, and records each review in the task file, under `## Automated reviews` (just before `## Review rounds`), as `### Automated review N`. The record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it:
 
-- the range reviewed, the reviewer's derived intent and its reading of the stated intent;
+- the range reviewed, the reviewer (marked `failed` when it didn't report), its derived intent and its reading of the stated intent;
 - every finding the reviewer raised, as a `####` heading with its severity, and lines for who raised it, the finding (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. The worker fills in the outcome once it has acted: `fixed in <sha>`, `proposal <file name>`, `recorded` (a nitpick outside the PR's lines) or `left for the user`;
 - the reviewer's conclusion and what it couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the PR's one summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary -->`, so a second `crew review-summary` edits it instead of posting another.

@@ -109,8 +109,8 @@ Spawn the `reviewer` subagent with this prompt, and nothing else. Write the fork
 > Review `<fork sha>..HEAD` in `<review root>`. Use the scope exactly as given; don't widen it or reconstruct it.
 > Follow the rubric at `${CLAUDE_SKILL_DIR}/rubric.md` and the briefing at `<briefing path>`.
 
-Wait for it to return. If it fails, stalls or returns no report, record the review with the failure and no findings
-(step 6). Never invent what the review would have said.
+Wait for it to return. If it fails, stalls or returns no report, record the review anyway (step 6), with no findings
+and `failed: <what happened>` on its Reviewers line. Never invent what the review would have said.
 
 ## 5. Reconcile
 
@@ -165,7 +165,8 @@ is real; your verdict is annotation, not a filter.
 ```
 
 Leave every `Outcome:` empty: you fill it in once you have acted on the finding, after this skill. A review with no
-findings says `No findings.` in place of the numbered ones. Once the PR's summary comment is posted, the newest review
+findings says `No findings.` in place of the numbered ones. When the reviewer didn't report, its line reads
+`- Reviewers: Claude reviewer, failed: <what happened>`. Once the PR's summary comment is posted, the newest review
 gets a last line, `Summary posted`; that isn't this skill's either.
 
 Finish with one line: the review's number, and how many findings it recorded at each agreed severity.

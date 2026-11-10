@@ -240,6 +240,8 @@ check "a pr-review run that records nothing isn't counted, and a second such sto
   "grep -q 'If the skill stops without recording a review, that isn.t a review and doesn.t count' $A/implementer.md && grep -q 'If it stops a second time for the same reason, you.re blocked' $A/implementer.md"
 check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
   "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
+check "a review whose reviewer failed is marked in the record, and the summary has a truthful line for it" \
+  "grep -q 'Reviewers: Claude reviewer, failed: <what happened>' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
   "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
