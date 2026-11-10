@@ -34,6 +34,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"new":       cmdNew,
 	"ready":     cmdReady,
 	"promote":   cmdPromote,
+	"remember":  cmdRemember,
+	"memory":    cmdMemory,
 	"status":    cmdStatus,
 	"project":   cmdProject,
 	"checkout":  cmdCheckout,
@@ -81,10 +83,11 @@ func run(args []string) int {
 	if err == nil {
 		err = cmd(c, args)
 	}
-	// crew commit --hook runs after an agent's every edit, and must never fail its
-	// tool call: not even when the home's settings can't be read. So its errors
-	// are dropped, unreported.
-	if name == "commit" && len(args) > 0 && args[0] == "--hook" {
+	// `crew <command> --hook` is always a hook's entry point (crew commit --hook
+	// after an agent's every edit, crew memory --hook at its session's start), and
+	// a hook must never fail what runs it, not even when the home's settings can't
+	// be read. So its errors are dropped, unreported. Keep --hook for hooks.
+	if len(args) > 0 && args[0] == "--hook" {
 		return 0
 	}
 	return exitCode(err)

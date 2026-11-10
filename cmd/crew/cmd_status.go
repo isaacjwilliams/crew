@@ -60,7 +60,7 @@ func cmdStatus(c *Crew, args []string) error {
 }
 
 // elsewhere lists the other projects with something waiting on the user: tasks
-// with open questions, and PRs to review.
+// with open questions, PRs to review, and memory suggestions.
 func (s *statusView) elsewhere(shown string) {
 	var lines []string
 	for _, p := range s.projects("") {
@@ -85,6 +85,9 @@ func (s *statusView) elsewhere(shown string) {
 		}
 		if prs > 0 {
 			waiting = append(waiting, fmt.Sprintf("%d PR(s) to review", prs))
+		}
+		if n := s.memorySuggestions(p); n > 0 {
+			waiting = append(waiting, fmt.Sprintf("%d memory suggestion(s)", n))
 		}
 		if len(waiting) > 0 {
 			lines = append(lines, fmt.Sprintf("  %s: %s", p, strings.Join(waiting, ", ")))
@@ -157,6 +160,9 @@ func (s *statusView) project(name string) {
 	}
 	if open > 0 {
 		fmt.Printf("  open proposals: %d  (crew proposals)\n", open)
+	}
+	if n := s.memorySuggestions(name); n > 0 {
+		fmt.Printf("  memory suggestions: %d  (projects/%s/memory-suggestions.md)\n", n, name)
 	}
 }
 

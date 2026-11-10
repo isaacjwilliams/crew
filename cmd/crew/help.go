@@ -115,6 +115,17 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew promote PROPOSAL [--branch NAME]
                                    Turn a proposal into a draft task
 
+Project memory  (facts about a project you approved, which its agents load)
+  crew remember "<fact>" --why TEXT [--source S] [--project P]
+                                   Suggest a fact for the project's memory; it waits
+                                   on you in memory-suggestions.md. S is lead (the
+                                   default), user, gardener or worker:TASK
+  crew memory [--project P]        Print the project's memory, after the rule for
+                                   weighing it
+  crew memory --hook               The same for CREW_PROJECT, from a SessionStart
+                                   hook (nothing for no project or all; always
+                                   exits 0)
+
 Other
   crew push                        Push the ledger to origin now (crew pushes it in
                                    the background after every change)

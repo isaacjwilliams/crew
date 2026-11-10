@@ -34,6 +34,16 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew\" memory --hook"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|NotebookEdit",

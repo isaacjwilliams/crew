@@ -136,9 +136,13 @@ func (d Doc) Section(heading string) string {
 
 // OpenQuestions counts the unchecked items under Open questions: each is a
 // question still waiting on the user.
-func (d Doc) OpenQuestions() int {
+func (d Doc) OpenQuestions() int { return unchecked(d.Section("## Open questions")) }
+
+// unchecked counts the lines of text that are unchecked items, "- [ ] …". In
+// the ledger, each is something waiting on the user.
+func unchecked(text string) int {
 	n := 0
-	for _, l := range strings.Split(d.Section("## Open questions"), "\n") {
+	for _, l := range strings.Split(text, "\n") {
 		if strings.HasPrefix(l, "- [ ]") {
 			n++
 		}

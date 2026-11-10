@@ -58,6 +58,11 @@ func TestGuard(t *testing.T) {
 		{false, "lead", main, home, ""},
 		{false, "gardener", wt, wt + "/a", ""},
 		{true, "gardener", wt, home + "/projects/p/proposals/x.md", ""},
+		{false, "worker", wt, home + "/projects/p/memory.md", ""},
+		{false, "gardener", wt, home + "/projects/p/memory.md", ""},
+		{false, "worker", wt, home + "/projects/p/Memory.md", ""},
+		{true, "lead", main, home + "/projects/p/memory.md", ""},
+		{true, "worker", wt, home + "/projects/p/memory-suggestions.md", ""},
 		{true, "lead", main, scratch + "/notes.md", ""},
 		// Judged by where a symlink leads, both ways.
 		{false, "worker", wt, wt + "/into-home/crew", ""},
@@ -70,6 +75,16 @@ func TestGuard(t *testing.T) {
 		err := g.check(hookInput(c.cwd, c.path))
 		if (err == nil) != c.allow {
 			t.Errorf("%s in %s editing %s: allowed=%v, want %v (%v)", c.role, c.cwd, c.path, err == nil, c.allow, err)
+		}
+	}
+
+	// A home whose path has glob characters in it guards its memory all the same.
+	for _, name := range []string{"crew[1]", "crew[x"} {
+		h := filepath.Join(sb, name)
+		os.MkdirAll(h+"/projects/p", 0o755)
+		g := guard{role: "worker", home: h, projectDir: wt}
+		if g.check(hookInput(wt, h+"/projects/p/memory.md")) == nil {
+			t.Errorf("a worker's edit of memory.md in the home %s was allowed", h)
 		}
 	}
 

@@ -33,6 +33,11 @@ w block lead "$M" "$M/a"
 w allow lead "$M" "$L/projects/p/tasks/001-x.md"
 w block gardener "$W" "$W/a"
 w allow gardener "$W" "$L/projects/p/proposals/x.md"
+# --- only the lead edits a project's memory; the others suggest with crew remember
+w block worker "$W" "$L/projects/p/memory.md"
+w block gardener "$W" "$L/projects/p/memory.md"
+w block worker "$W" "$L/projects/p/Memory.md"
+w allow lead "$M" "$L/projects/p/memory.md"
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"
@@ -96,15 +101,24 @@ done
 for f in "$LS" "$C/worker-settings.json"; do
   check "${f#"$REPO_DIR"/} commits the agent's ledger edits after each Edit, Write or Bash call" "jq -e >/dev/null '.hooks.PostToolUse[] | select(.matcher == \"Edit|Write|NotebookEdit|Bash\") | .hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" commit --hook\"' $f"
 done
-for f in "$LS" "$C/worker-settings.json" "$C/readonly-settings.json"; do
+for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json" "$C/readonly-settings.json"; do
   # Bash(git -C * show *) would also approve git -C . -c core.pager=<script> show.
   check "${f#"$REPO_DIR"/}: no allow rule has a * before the subcommand, where it would let any option through" \
     "jq -e >/dev/null '[.permissions.allow[] | select(test(\"^Bash\\\\(.*\\\\* [^)]\"))] == []' $f"
 done
+# --- project memory loads at every session start for the agents crew starts, but not for crew observe's casual observer
+for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json"; do
+  check "${f#"$REPO_DIR"/} loads project memory when a session starts, resumes or compacts (no matcher)" \
+    "jq -e >/dev/null '.hooks.SessionStart | length == 1 and (.[0] | has(\"matcher\") | not) and .[0].hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" memory --hook\"' $f"
+done
+check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '.hooks == null' $C/readonly-settings.json"
+check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
+check "the gardener's allow list is the read-only one, plus crew remember" \
+  "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
 check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'o.del(\"agent\")' <<<\"\$SRC\""
-for f in worker readonly; do
+for f in worker gardener readonly; do
   check "$f: network left open" "jq -e >/dev/null '.permissions.allow | index(\"WebFetch(domain:*)\")' $C/$f-settings.json"
 done
 check "lead and workers default to auto mode" \
@@ -203,5 +217,18 @@ check "goal-lead parks a question the way crew counts open questions, and logs o
   "grep -q 'as an unchecked item (.- \[ \] ….)' $A/goal-lead.md && grep -q 'For the user: <why>' $A/goal-lead.md && grep -q 'Log says \"For the user\"' $A/lead.md"
 check "goal leads may read the installed lead.md without a prompt" "jq -e >/dev/null '.permissions.allow | index(\"Read(~/.claude/agents/lead.md)\")' $LS"
 check "goal-lead never dispatches; crew tick does" "grep -q 'Never .crew dispatch.: .crew tick. dispatches your ready tasks' $A/goal-lead.md"
+
+# --- project memory: every agent but the casual observer knows how to suggest to it, and none restates the rule crew prints with it
+check "the rule for weighing project memory is written once, in crew, and in no agent profile" \
+  "grep -q '^const memoryRule = ' <<<\"\$SRC\" && ! grep -qi 'auto memory' $A/*.md"
+for f in implementer:'--source worker:<task>' gardener:'--source gardener' goal-lead:'crew remember "<fact>" --why "<reason>"`' lead:'--source user'; do
+  a=${f%%:*} src=${f#*:}
+  check "$a suggests project memory with crew remember ($src), and checks the suggestions first" \
+    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'memory-suggestions.md' $A/$a.md"
+done
+check "the plan reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/plan-reviewer.md"
+check "the casual observer knows nothing of project memory" "! grep -qi 'memory' $A/casual-observer.md"
+check "the lead copies an approved suggestion into memory.md unchanged and ticks it with the outcome" \
+  "grep -q 'copy the text after the checkbox into .memory.md. unchanged' $A/lead.md && grep -q '→ kept' $A/lead.md && grep -q '→ declined: <reason>' $A/lead.md"
 
 summary guard

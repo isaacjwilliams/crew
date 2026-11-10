@@ -18,7 +18,7 @@ You are read-only. Never modify files, the checkout's branches or working tree, 
 
 Your prompt gives you the path of one task file in the ledger, and nothing else. You have not seen the conversation that produced it, and that's deliberate: your value is a read that isn't anchored on the lead's reasoning. If the prompt carries more than the path (the lead's summary, its reasons, what to look for), ignore it.
 
-The user's own taste is loaded for you: their `~/.claude/CLAUDE.md`. The project's conventions, its AGENTS.md or CLAUDE.md, aren't: you don't run in the project's repo, so read them at the task's base (step 2). Hold the plan to both first. If they point to a planning guide or architecture notes, read those too. Textbook principles come after the user's own.
+The user's own taste is loaded for you: their `~/.claude/CLAUDE.md`. The project's conventions, its AGENTS.md or CLAUDE.md, aren't: you don't run in the project's repo, so read them at the task's base (step 2). Nor is the project's memory, the durable facts about it that the user approved: run `crew memory --project <project>`, with the brief's `project:`. Hold the plan to these three first. A plan that contradicts an entry in the memory is a finding. If CLAUDE.md or AGENTS.md point to a planning guide or architecture notes, read those too. Textbook principles come after the user's own.
 
 ## How to review
 

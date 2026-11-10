@@ -20,6 +20,8 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     tasks/NNN-<name>.md  one file per task; <name> is the branch name without BRANCH_PREFIX
     goals/NNN-<slug>.md  one file per goal: a batch of items a goal lead works through
     proposals/*.md       ideas worth keeping that aren't tasks yet (see Proposals)
+    memory.md            facts about the project the user approved (see Project memory)
+    memory-suggestions.md  facts suggested for memory.md, waiting on the user
     gardener.last        last commit the gardener reviewed
   reports/               free-form notes the lead keeps
   host                   the machine that runs the crew; `crew host up` claims it
@@ -82,6 +84,19 @@ A proposal is an idea worth keeping that isn't ready to be a task, in `proposals
 | `rejected` | not wanted; the Log says why | you or the lead via `crew set` |
 
 Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener fills them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
+
+## Project memory
+
+`memory.md` holds durable facts about a project that the user approved and every agent working on it should know: mostly settled domain decisions that outlive the task that made them, and private working facts collaborators shouldn't see. It isn't status, work (tasks and proposals), conventions collaborators follow too (the repo's AGENTS.md) or the user's taste across projects (their `~/.claude/CLAUDE.md`). Agents load all of it at session start through a SessionStart hook, `crew memory --hook`; `crew memory --project <p>` prints it anywhere. Neither file has front matter.
+
+- **Suggestions.** Anyone suggests a fact with `crew remember "<fact>" --why "<reason>" [--source S]`, which appends a line to `memory-suggestions.md` and creates the file, with a heading, the first time. `source` is as for proposals: `lead` (the default), `user`, `gardener` or `worker:<task id>`. Only `crew remember` adds lines; only the lead ticks them.
+
+  ```
+  - [ ] **Dashboard columns are unlimited** The user chose it over a cap of 12. (worker:042-dashboard-columns, 2026-11-09)
+  ```
+
+  An unchecked item waits on the user, like an open question, and `crew status` counts them. The lead settles each with the user and ticks it with the outcome: `- [x] … → kept` or `- [x] … → declined: <reason>`.
+- **Entries.** Only the lead writes `memory.md`, and only on the user's say-so; `crew guard` blocks workers' and the gardener's edits of it. It's the heading `# Project memory: <project>`, then one `- ` item per fact. An approved suggestion's text after the checkbox moves into it unchanged: `- **<fact>** <reason>. (<source>, <date>)`. Keep it under 9,000 characters (`wc -m`): every agent loads all of it at session start, and Claude Code passes on at most 10,000 characters of a hook's output. Past that, `crew memory --hook` prints only its header and an instruction to read the file.
 
 ## Stacked tasks
 

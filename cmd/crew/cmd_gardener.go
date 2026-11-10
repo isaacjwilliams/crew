@@ -98,7 +98,7 @@ func (c *Crew) garden(name string) error {
 	}
 	cmd := c.claude("-p", "--add-dir", c.Home, "--agent", "gardener", "--permission-mode", "acceptEdits",
 		"--permission-prompts", "none", "--max-turns", p.Settings["GARDENER_MAX_TURNS"],
-		"--settings", c.path("config/readonly-settings.json"), prompt)
+		"--settings", c.path("config/gardener-settings.json"), prompt)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = wt, log, log
 	cmd.Env = append(cmd.Env, "CREW_PROJECT="+name)
 	runErr := cmd.Run()

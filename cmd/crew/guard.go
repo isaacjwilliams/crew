@@ -98,6 +98,14 @@ func (g guard) check(input []byte) error {
 		return fmt.Errorf("can't work out where the crew home %s is (%v)", g.home, err)
 	}
 	if under(path, home) {
+		// Only the lead writes a project's memory, and only on the user's say-so.
+		// It's in projects/, a state path, so this comes before the check below,
+		// which allows them all. The name is compared ignoring case: on a Mac,
+		// Memory.md is the same file.
+		inProject := filepath.Dir(filepath.Dir(path)) == filepath.Join(home, "projects")
+		if inProject && strings.EqualFold(filepath.Base(path), "memory.md") && g.role != "lead" {
+			return fmt.Errorf("%s holds the facts the user approved, and only the lead edits it. Suggest a fact with 'crew remember' instead.", path)
+		}
 		for _, s := range statePaths {
 			if under(path, filepath.Join(home, s)) {
 				return nil

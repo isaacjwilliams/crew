@@ -45,7 +45,7 @@ func cmdPropose(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if source, err = c.proposalSource(source, proj); err != nil {
+	if source, err = c.ledgerSource(source, proj); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -74,9 +74,9 @@ func cmdPropose(c *Crew, args []string) error {
 	return nil
 }
 
-// proposalSource checks a --source value: gardener, user, lead, or
-// worker:<task>, with the task's full ID.
-func (c *Crew) proposalSource(s, proj string) (string, error) {
+// ledgerSource checks the --source of what an agent suggests to the ledger: user,
+// lead, gardener, or worker:<task>, which it returns with the task's full ID.
+func (c *Crew) ledgerSource(s, proj string) (string, error) {
 	switch s {
 	case "gardener", "user", "lead":
 		return s, nil
