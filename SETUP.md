@@ -53,7 +53,7 @@ git clone https://github.com/isaacjwilliams/crew ~/crew
 
 `crew setup` makes a private GitHub repo, `<you>/crew` (`--name` for another name, if you have a `crew` already), and turns the clone into yours: the private repo becomes `origin`, where your ledger is pushed, and the public one `upstream`, where new versions come from. Pushing to `upstream` is disabled, so your ledger can never reach the public repo. It writes your settings file, `config/crew.env`, from `templates/crew.env`, then runs `crew host up`, which puts this machine's files in place with `crew install` (below) and runs the crew here: it claims the lease and enables the timers and the lead's service. Before it enables them, it opens Claude Code in `~/agent-work`, where workers run, for you to trust that folder: accept the trust dialog, then type `/exit`. It does this once, and only when it has a terminal.
 
-Then open a new terminal, so `crew` is on your `PATH`, and run `lead`. The first time, it asks you to trust its own folder, and offers to add your first repo.
+Then open a new fish shell, so `crew` is on your `PATH`, and run `lead`. The first time, it asks you to trust its own folder, and offers to add your first repo.
 
 ### Another machine of yours
 
