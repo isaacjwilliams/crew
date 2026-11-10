@@ -63,10 +63,29 @@ func (c *Crew) hostUp(take bool) error {
 	}
 	note("crew runs on %s", c.Host)
 	c.cloneMissingProjects()
+	c.trustWorkRoot()
 	enableServices()
 	note("enabled %s", strings.Join(crewServices, " "))
 	c.runSelf(os.Stdout, "doctor")
 	return nil
+}
+
+// trustWorkRoot has the person accept Claude Code's trust dialog for WORK_ROOT, if
+// they haven't yet. Workers start there in background sessions, which can't show
+// the dialog. crew install has made the folder by now. How claude exits doesn't
+// matter: crew doctor runs next and flags the folder if it still isn't trusted, as
+// it does when there's no terminal to ask on.
+func (c *Crew) trustWorkRoot() {
+	home, _ := os.UserHomeDir()
+	root := c.Settings["WORK_ROOT"]
+	if trusted(home, root) || !stdinIsTerminal() {
+		return
+	}
+	say("Trusting %s, where workers run", tilde(home, root))
+	note("Claude Code will ask whether you trust this folder. Accept, then type /exit.")
+	cmd := c.claude()
+	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, os.Stdin, os.Stdout, os.Stderr
+	cmd.Run()
 }
 
 // runSelf runs another crew command in a process of its own, with its output to w.
@@ -300,12 +319,9 @@ func cmdSetup(c *Crew, args []string) error {
 		return err
 	}
 	say("Your crew is set up. Next:")
-	fmt.Printf(`  1. Trust two folders once (accept, then /exit):   cd %s; and claude
-                                                    cd %s/lead; and claude
-  2. Set BRANCH_PREFIX in %s/config/crew.env, then commit and push it.
-  3. In each repo you want the crew to work on:   crew project add
-  4. Talk to the lead: lead, or the crew session in the Claude app.
+	fmt.Print(`  Open a new terminal, so crew is on your PATH, and run lead. The first time, it
+  asks you to trust its folder, then helps you add your first repo.
   See SETUP.md for the full walkthrough.
-`, c.Settings["WORK_ROOT"], c.Home, c.Home)
+`)
 	return nil
 }

@@ -26,7 +26,11 @@ check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(c
 check "crew doctor finds the guard hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json runs crew-guard"* && $doctor_out == *"ok   config/worker-settings.json runs crew-guard"* ]]'
 check "crew doctor finds the commit hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json commits ledger edits"* && $doctor_out == *"ok   config/worker-settings.json commits ledger edits"* ]]'
 check "crew doctor finds the lead's settings for this machine" '[[ $doctor_out == *"ok   lead/.claude/settings.local.json written for this machine"* ]]'
-check "crew doctor flags an untrusted lead directory" '[[ $doctor_out == *"FAIL $H/lead trusted"* ]]'
+check "crew doctor flags an untrusted work root as a required check" '[[ $doctor_out == *"FAIL $HOME/agent-work trusted — cd $HOME/agent-work && claude"* && $doctor_out == *"Some required checks failed."* ]]'
+jq -n --arg p "$HOME/agent-work" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
+doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
+check "with only the work root trusted, as after setup, no required check fails" '[[ $doctor_out == *"ok   $HOME/agent-work trusted"* && $doctor_out == *"Required checks passed."* ]]'
+check "and the lead directory is an optional check, fixed by running lead once" '[[ $doctor_out == *"FAIL $H/lead trusted (optional) — run lead once and accept the trust prompt"* ]]'
 jq -n --arg p "$H" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor finds the lead directory trusted through the home, where Claude Code records it" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
@@ -127,6 +131,7 @@ check "nothing is changed before a machine runs the crew" '[[ $out == *"no machi
 out=$(tower "$TH/bin/crew" host up </dev/null 2>&1)
 check "host up claims the lease on origin" '[[ $(origin_host) == tower && $(cat "$TH/host") == tower && $out == *"crew runs on tower"* ]]'
 check "host up installs, and enables the timers and the lead service" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled" && grep -qx crew-lead.service "$SB/tower/systemctl-enabled"'
+check "without a terminal, host up starts no claude to trust the work root, and leaves it to doctor" '! grep -qx claude "$SB/tower/claude-calls.log" && [[ $out != *"Trusting"* && $out == *"FAIL $SB/tower/agent-work trusted"* ]]'
 rm -f "$TH/lead/.mcp.json"
 tower "$TH/bin/crew" serve >/dev/null 2>&1
 check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
@@ -226,7 +231,8 @@ out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup makes the private repo origin and the public one upstream" '[[ $(git -C "$H" remote get-url origin) == "$HOME/remotes/isaac/crew.git" && $(git -C "$H" remote get-url upstream) == "$SB/public.git" ]]'
 check "and nothing can be pushed to the public repo" '! git -C "$H" push -q upstream main 2>/dev/null && [[ -z $(git --git-dir="$SB/public.git" log --oneline main -- config/crew.env) ]]'
 check "it commits the person's settings, from the template, to the private repo" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" log -1 --format=%s main -- config/crew.env) == "crew: set up for isaac" ]] && cmp -s "$H/config/crew.env" "$H/templates/crew.env"'
-check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-lead.service "$HOME/systemctl-enabled" && [[ $out == *"Set BRANCH_PREFIX"* ]]'
+check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-lead.service "$HOME/systemctl-enabled"'
+check "and its closing text says to open a new terminal and run lead, and nothing more" '[[ $out == *"Open a new terminal, so crew is on your PATH, and run lead."* && $out != *"crew project add"* && $out != *"BRANCH_PREFIX"* ]]'
 out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'
 
