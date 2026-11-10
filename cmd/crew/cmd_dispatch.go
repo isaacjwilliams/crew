@@ -39,6 +39,7 @@ func cmdDispatch(c *Crew, args []string) error {
 	if _, err := c.workerSettings(p); err != nil {
 		return err
 	}
+	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
 	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
 		return err
 	}

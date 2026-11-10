@@ -371,7 +371,7 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 // place a worker's command line is built.
 func (c *Crew) launchWorker(p *Project) launcher {
 	return func(d Doc, wt, prompt string, resume bool) (launch, error) {
-		mcp, err := c.mcpConfigFlags(p)
+		mcp, err := c.refreshMCPConfig(p)
 		if err != nil {
 			return launch{}, err
 		}
@@ -381,7 +381,7 @@ func (c *Crew) launchWorker(p *Project) launcher {
 				return launch{}, err
 			}
 		}
-		// --mcp-config takes more than one value, so it must never be the last flag.
+		// The MCP flags go first: see refreshMCPConfig.
 		flags := append(mcp, "--agent", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
 			"--autocompact", p.Settings["WORKER_AUTOCOMPACT_WINDOW"], "--settings", settings)
 		return c.launchSession(d, "worker", wt, prompt, resume, flags...)

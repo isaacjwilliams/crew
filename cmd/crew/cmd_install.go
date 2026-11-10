@@ -372,15 +372,15 @@ func agentsMDOn(home string) bool {
 // writeLeadLocalSettings writes the lead's settings for this machine, in the home
 // but gitignored: it reads the ledger and the project checkouts as extra
 // directories, leaves out the home's CLAUDE.md, which is for developing crew, and
-// approves the servers in lead/.mcp.json, which crew writes from the projects'
-// mcp.json. That approval isn't in lead/.claude/settings.json: goal leads load
-// that file in a project's checkout, where it would approve the repo's own
-// .mcp.json. It's rewritten only when it changes.
+// approves the MCP servers crew writes to lead/.mcp.json. It's rewritten only
+// when it changes.
 func (in *installer) writeLeadLocalSettings() {
 	f := in.path("lead/.claude/settings.local.json")
 	o := newObject()
 	o.child("permissions").set("additionalDirectories", []any{in.Home, in.Settings["WORK_ROOT"]})
 	o.set("claudeMdExcludes", []any{in.Home + "/CLAUDE.md"})
+	// Not in lead/.claude/settings.json: goal leads get that file in a project's
+	// checkout, where this would approve the repo's own .mcp.json.
 	o.set("enableAllProjectMcpServers", true)
 	out := encodeJSON(o, true)
 	if cur, err := os.ReadFile(f); err == nil && string(cur) == out {

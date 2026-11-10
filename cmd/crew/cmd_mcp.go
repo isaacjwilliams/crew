@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // leadMCPFile is the servers every lead loads, in the home.
@@ -33,8 +34,8 @@ const leadMCPFile = "lead/.mcp.json"
 // between projects.
 var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// settingRef is a ${…} in a string in mcp.json.
-var settingRef = regexp.MustCompile(`\$\{[^}]*\}`)
+// settingRef is a ${…} in a string in mcp.json, with what's between the braces.
+var settingRef = regexp.MustCompile(`\$\{([^}]*)\}`)
 
 // crew mcp sync | crew mcp lead-settings --project P
 func cmdMCP(c *Crew, args []string) error {
@@ -60,8 +61,11 @@ func cmdMCP(c *Crew, args []string) error {
 }
 
 // syncMCP rebuilds every project's mcp.local.json, then lead/.mcp.json from them.
-// It reports each problem and carries on: a project whose mcp.json has one keeps
-// the mcp.local.json it had. It returns whether there were none.
+// It's best-effort: it reports each problem as it goes and carries on, so one
+// project's broken mcp.json doesn't keep the others' servers from the leads. That
+// project keeps the mcp.local.json it had. It returns whether there were no
+// problems, which only crew mcp sync needs: crew install and crew serve go on
+// either way.
 func (c *Crew) syncMCP() bool {
 	ok := true
 	for _, proj := range c.projects("") {
@@ -81,11 +85,15 @@ func (c *Crew) syncMCP() bool {
 	return ok
 }
 
-// mcpConfigFlags rebuilds a project's mcp.local.json, and returns the flags that
+// refreshMCPConfig rebuilds a project's mcp.local.json, and returns the flags that
 // give a fresh session its servers: --mcp-config and that file, or none when the
-// project has no mcp.json. Its launchers call it before a resume too, which takes
-// no flags, so the file a session started with is current when it resumes.
-func (c *Crew) mcpConfigFlags(p *Project) ([]string, error) {
+// project has no mcp.json. A project without one still gets the file, empty.
+// Its launchers call it before a resume too, which takes no flags, so the file a
+// session started with is current when it resumes.
+//
+// The launchers put these flags before their others: --mcp-config takes more than
+// one value, and launchSession puts the prompt right after the last flag.
+func (c *Crew) refreshMCPConfig(p *Project) ([]string, error) {
 	f, err := c.writeProjectMCP(p.Name, p.Settings)
 	if err != nil || !isFile(filepath.Join(p.Dir, "mcp.json")) {
 		return nil, err
@@ -144,17 +152,28 @@ func expandSettings(v any, s Settings) (any, error) {
 		}
 		return out, nil
 	case string:
-		settingName := func(ref string) string { return ref[2 : len(ref)-1] }
-		for _, ref := range settingRef.FindAllString(v, -1) {
-			if name := settingName(ref); !isName(name) {
-				return nil, fmt.Errorf("%s isn't a setting: only ${NAME} is supported", ref)
-			} else if _, set := s[name]; !set {
-				return nil, fmt.Errorf("${%s} isn't set; put it in the project's local.env", name)
-			}
-		}
-		return settingRef.ReplaceAllStringFunc(v, func(ref string) string { return s[settingName(ref)] }), nil
+		return expandString(v, s)
 	}
 	return v, nil
+}
+
+// expandString is str with each ${NAME} replaced by the setting NAME.
+func expandString(str string, s Settings) (string, error) {
+	var b strings.Builder
+	done := 0
+	for _, m := range settingRef.FindAllStringSubmatchIndex(str, -1) {
+		ref, name := str[m[0]:m[1]], str[m[2]:m[3]]
+		value, set := s[name]
+		if !isName(name) {
+			return "", fmt.Errorf("%s isn't a setting: only ${NAME} is supported", ref)
+		} else if !set {
+			return "", fmt.Errorf("${%s} isn't set; put it in the project's local.env", name)
+		}
+		b.WriteString(str[done:m[0]] + value)
+		done = m[1]
+	}
+	b.WriteString(str[done:])
+	return b.String(), nil
 }
 
 // writeProjectMCP writes a project's mcp.local.json from its mcp.json, and

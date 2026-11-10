@@ -52,7 +52,8 @@ func cmdTick(c *Crew, args []string) error {
 	if c.step(nil, "sync", "--quiet", "--all") != 0 {
 		warn("sync failed; carrying on with what the ledger has")
 	}
-	// So an edit to a project's mcp.json reaches the leads within a tick.
+	// So an edit to a project's mcp.json reaches the leads within a tick. It reports
+	// its own problems, which stop nothing else.
 	c.step(nil, "mcp", "sync")
 	as := c.agents()
 	for _, name := range c.projects("") {
