@@ -396,10 +396,16 @@ func (in *installer) writeLeadLocalSettings() {
 // confirm asks a yes-or-no question, yes unless the user answers no. Without a
 // terminal it reads the answer from stdin, and no answer is yes.
 func confirm(question string) bool {
-	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+	if stdinIsTerminal() {
 		fmt.Fprintf(os.Stderr, "  %s [Y/n] ", question)
 	}
 	a, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	a = strings.TrimSpace(a)
 	return a == "" || regexp.MustCompile(`^[Yy]`).MatchString(a)
+}
+
+// stdinIsTerminal: a person can answer on stdin, rather than a script or a test.
+func stdinIsTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
