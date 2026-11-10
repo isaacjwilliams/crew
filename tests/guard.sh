@@ -228,6 +228,8 @@ check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-rev
 check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
 check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"
 check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" "grep -qx 'tools: Read, Glob, Grep, Bash' $A/reviewer.md"
+check "reviewer leaves commit messages, which are stated intent, until it has derived intent" \
+  "grep -q 'Commit messages are stated intent' $A/reviewer.md && grep -q 'log --format=%H <range>' $A/reviewer.md && ! grep -q 'diff and log' $A/reviewer.md"
 check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is above 0, and stops at that many reviews" \
   "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
 check "the implementer pushes its fixes after every review, the last one included, before it posts the summary" \

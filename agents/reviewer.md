@@ -19,9 +19,9 @@ Your prompt gives you three things: the scope (a commit range in a review root),
 
 1. Read the rubric. Follow it exactly.
 2. Read the briefing's first line, which names the review type, and its sections up to `## Stated intent`. Stop there.
-3. Review the scope exactly as given: the diff and log of that range, and the code around it (callers, tests, docs). Don't widen the range or work out one of your own.
+3. Review the scope exactly as given: the diff of that range, and the code around it (callers, tests, docs). Don't widen the range or work out one of your own. Commit messages are stated intent, like the briefing's last section, so don't read them yet. To list the range's commits, use `git --no-optional-locks log --format=%H <range>`, which shows no messages.
 4. Write down your derived intent, as the rubric says, before you read `## Stated intent`.
-5. Then read the stated intent, compare, and finish the review.
+5. Then read the stated intent, which includes the commit messages, compare, and finish the review.
 
 Be direct and specific. Don't soften findings, and don't manufacture findings to look thorough. Having none is a good result when it's true.
 
