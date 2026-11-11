@@ -258,6 +258,8 @@ check "workers can't run codex themselves, only through crew codex, which runs i
   "jq -e >/dev/null '.permissions.deny | index(\"Bash(codex *)\")' $C/worker-settings.json && [[ \$(grep -l 'exec.Command(\"codex\"' $REPO_DIR/cmd/crew/*.go) == $REPO_DIR/cmd/crew/cmd_codex.go ]]"
 check "pr-review is one flow over the reviewers it launched: CODEX_REVIEW only decides whether Codex is launched, and Codex runs only through crew codex" \
   "[[ \$(grep -c CODEX_REVIEW $SK/SKILL.md) == 1 ]] && grep -q '^## 4. Launch the reviewers' $SK/SKILL.md && grep -q 'crew codex start <review root>' $SK/SKILL.md && grep -q 'crew codex reply <review root> <thread>' $SK/SKILL.md && ! grep -qE '(^|[^-])codex (exec|resume)' $SK/SKILL.md"
+check "Codex, like the Claude reviewer, leaves commit messages until it has derived intent" \
+  "grep -q '^> them until you have written your derived intent' $SK/SKILL.md && grep -qF 'git --no-optional-locks log --format=%H <range>' $SK/SKILL.md"
 check "rounds run only between two reviewers that reported, up to AUTO_REVIEW_REBUTTALS (2 by default), and the Claude reviewer is always fresh in one" \
   "grep -q 'Skip this step unless both reviewers reported' $SK/SKILL.md && grep -q 'crew config AUTO_REVIEW_REBUTTALS --project' $SK/SKILL.md && grep -qx 'AUTO_REVIEW_REBUTTALS=2' $C/defaults.env && grep -qx 'CODEX_REVIEW=\"no\"' $C/defaults.env && grep -q 'Spawn a fresh .reviewer. subagent, never a resumed one' $SK/SKILL.md && grep -q 'You always start a round fresh' $A/reviewer.md"
 check "reviewer.md answers a rebuttal round in the shape the skill asks for" \

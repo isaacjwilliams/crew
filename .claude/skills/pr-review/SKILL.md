@@ -118,8 +118,10 @@ They're isolated: pass nothing from one to the other while both run.
 
 > Adversarially review the work described in `<briefing path>`. Follow the rubric at `${CLAUDE_SKILL_DIR}/rubric.md`
 > exactly, including its `Derived intent vs. stated intent` section — derive intent from the artifact named for this
-> review type before you read the stated intent in the briefing. Use `git --no-optional-locks` for git status and diff;
-> the sandbox is read-only. You are reviewing work produced by another AI agent. Be direct and specific. Do not soften
+> review type before you read the stated intent in the briefing. Commit messages are stated intent too, so don't read
+> them until you have written your derived intent: list the range's commits with
+> `git --no-optional-locks log --format=%H <range>`, which shows no messages. Use `git --no-optional-locks` for git
+> status and diff; the sandbox is read-only. You are reviewing work produced by another AI agent. Be direct and specific. Do not soften
 > findings, and do not manufacture findings to appear thorough.
 
 Then start it as a background Bash command, so you're told when it finishes:
