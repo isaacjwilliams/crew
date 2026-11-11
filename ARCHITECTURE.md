@@ -561,6 +561,7 @@ Changing any of these means updating every side listed.
 
 | Contract | Producer → consumer |
 |---|---|
+| What README.md's pitch claims (What's different, Limits) rests on design principles 1, 2, 4, 5, 6, 8, 9 and 10, the ones CLAUDE.md's "What crew is for" names | `ARCHITECTURE.md` Design principles → `README.md`, `CLAUDE.md` "What crew is for" |
 | `worker_job` in task files is the job ID `claude agents` lists | `launchWorker` → `runningWorkers` (the concurrency cap), `Agents.jobState`, `Agents.jobBusy` |
 | `claude --bg` prints `backgrounded · <job> · …`, the job possibly in color, and a `note:` line when it starts a copy | Claude Code → `launchSession` (color codes stripped, the job is the line's third field) |
 | `claude agents --json --all` entries have `id`, `state`, `pid`, `status`, `waitingFor`, `sessionId`, `name` | Claude Code (research preview) → `agents`, `Agents.jobState`, `Agents.jobBusy`, `runningWorkers`, `stopIdleSession`, `waitForLaunch` |
