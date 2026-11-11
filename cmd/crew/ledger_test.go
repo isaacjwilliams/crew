@@ -236,6 +236,11 @@ func TestResolveIn(t *testing.T) {
 	if f, m := resolveIn("nothing", files); f != "" || len(m) != 0 {
 		t.Errorf("no match: %q, %v", f, m)
 	}
+	twin := filepath.Join(t.TempDir(), "001-saved-filters.md")
+	os.WriteFile(twin, nil, 0o644)
+	if f, m := resolveIn("001-saved-filters", append(files, twin)); f != "" || len(m) != 2 {
+		t.Errorf("an ID two projects share: %q, %v", f, m)
+	}
 }
 
 func TestFilesAreInNumberOrder(t *testing.T) {

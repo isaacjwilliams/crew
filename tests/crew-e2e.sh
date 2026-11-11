@@ -712,6 +712,12 @@ out=$(cd "$HOME" && crew status)
 check "outside a repo, status shows every project" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* && $out != *"other projects"* ]]'
 out=$(cd "$HOME" && crew find 1 2>&1)
 check "outside a repo, a task number two projects share is ambiguous" '[[ $out == *ambiguous* ]]'
+TWIN=$L/projects/$P2/tasks/$(basename "$F1"); sed "s/^project: .*/project: $P2/" "$F1" >"$TWIN"
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && crew attach "$(basename "$F1" .md)" 2>&1)
+check "outside a repo, a task ID two projects share is ambiguous, naming each project, and attach runs no claude" \
+  '[[ $out == *ambiguous*"($PJ)"*"($P2)"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
+check "CREW_PROJECT resolves a task ID two projects share in its project" '[[ $(CREW_PROJECT=$P2 crew get "$(basename "$F1" .md)" project) == "$P2" ]]'
+rm "$TWIN"
 out=$(CREW_PROJECT=$P2 crew status)
 check "CREW_PROJECT scopes status to its project, over the current directory's" '[[ $out == *"$NL$P2$NL"* && $out != *"$NL$PJ$NL"* ]]'
 check "scoped status ends with what waits on you in other projects" '[[ $out == *"waiting on you in other projects"*"$PJ: "*"task(s) with open questions"* ]]'

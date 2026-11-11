@@ -480,7 +480,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - a number (`7` → `007-*`);
   - a unique substring.
 
-  It searches the default project first (see Project scope), then all projects, so a task number two projects share resolves in a scoped session. On ambiguity it prints the candidates and fails.
+  It searches the default project first (see Project scope), then all projects, so a task number or ID two projects share resolves in a scoped session. Every project numbers its own tasks, so even an exact ID can match in two. On ambiguity it prints the candidates, each with its project, and fails.
 - **Sessions (`sessions.go`):**
   - `agents` returns what `claude agents --json --all` lists as `Agent`s, or nothing on failure. It reads each field on its own, so a field whose type changes loses only that field. It sets `TurnEnded` on a live `working` session whose transcript (`~/.claude/projects/*/<session>.jsonl`) ends with the `turn_duration` entry Claude Code writes when a turn ends (`turnEnded`).
   - `busy` counts a job as busy while a turn runs (`state` working) or while its live process holds an open prompt, such as a permission request (`status` waiting). A `blocked` job without an open prompt ended its turn on a question for the user, so it takes a followup: the answer is what the followup sends. A background shell the worker started, such as a dev server, keeps its `state` working and its `status` busy after its turn ends, so a `working` job counts as mid-turn only until it has `TurnEnded`. `jobState` shows such a job as "idle, background task running". `runningWorkers` and `stopIdleSession` use the same rule.

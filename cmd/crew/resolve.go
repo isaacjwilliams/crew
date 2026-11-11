@@ -70,34 +70,32 @@ func resolveIn(arg string, files []string) (string, []string) {
 		}
 	}
 	var matches []string
-	if n, ok := strings.CutPrefix(arg, "#"); ok {
+	add := func(match func(f string) bool) {
 		for _, f := range files {
-			if pr := (Doc{f}).Get("pr"); pr != "" {
-				if _, num := splitLast(pr); num == n {
-					matches = append(matches, f)
-				}
+			if match(f) {
+				matches = append(matches, f)
 			}
 		}
-	} else {
-		for _, f := range files {
-			if (Doc{f}).ID() == arg {
-				return f, nil
-			}
-		}
-		if n, err := strconv.Atoi(arg); err == nil && allDigits.MatchString(arg) {
-			prefix := fmt.Sprintf("%03d-", n)
-			for _, f := range files {
-				if strings.HasPrefix((Doc{f}).ID(), prefix) {
-					matches = append(matches, f)
-				}
-			}
-		} else {
-			for _, f := range files {
-				if strings.Contains((Doc{f}).ID(), arg) {
-					matches = append(matches, f)
-				}
-			}
-		}
+	}
+	isID := func(f string) bool { return (Doc{f}).ID() == arg }
+	prNumber, isPR := strings.CutPrefix(arg, "#")
+	n, err := strconv.Atoi(arg)
+	isNumber := err == nil && allDigits.MatchString(arg)
+	switch {
+	case isPR:
+		add(func(f string) bool {
+			pr := (Doc{f}).Get("pr")
+			_, num := splitLast(pr)
+			return pr != "" && num == prNumber
+		})
+	case slices.ContainsFunc(files, isID):
+		// Every project numbers its own tasks, so two projects can share an ID.
+		add(isID)
+	case isNumber:
+		prefix := fmt.Sprintf("%03d-", n)
+		add(func(f string) bool { return strings.HasPrefix((Doc{f}).ID(), prefix) })
+	default:
+		add(func(f string) bool { return strings.Contains((Doc{f}).ID(), arg) })
 	}
 	if len(matches) == 1 {
 		return matches[0], nil
@@ -105,11 +103,12 @@ func resolveIn(arg string, files []string) (string, []string) {
 	return "", matches
 }
 
-// ambiguous says that arg matches more than one file, and lists them.
+// ambiguous says that arg matches more than one file, and lists them with their
+// projects, since two projects can have files of the same name.
 func ambiguous(arg string, matches []string) string {
 	s := `"` + arg + `" is ambiguous:`
 	for _, m := range matches {
-		s += "\n  " + filepath.Base(m)
+		s += "\n  " + filepath.Base(m) + " (" + (Doc{m}).Get("project") + ")"
 	}
 	return s
 }
