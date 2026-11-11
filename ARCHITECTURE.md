@@ -195,8 +195,10 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
         → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user → its Outcome line
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
-        → gh pr ready (pr_mode ready) → crew set TASK status pr-open
+        → gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
 ```
+That's the first pass of automated review. A review round with an `Automated review requested` line (below) has the worker run another, once it has addressed the round's comments. A pass is the reviews after the last `Summary posted`, derived from the record rather than stored: it runs up to `AUTO_REVIEWS` reviews (at least one when the user asked for it), numbered on from the last pass, and posts a summary comment of its own.
+
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
 ### Review feedback
@@ -215,7 +217,12 @@ you review on GitHub → tell the lead (or run it yourself):
                          # if resume fails, or its job ends `failed` → fresh worker with a "pick up this task" prompt
                          # a new round's prompt says whether to reply on the PR (REPLY_TO_THREADS)
                          # records last_round_sent; status → addressing-feedback
-worker: address each comment → commit (no force-push) → push → crew reply TASK <id> "…" (if told to) → status pr-open
+  crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
+                         # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
+                         # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)
+                         # becomes the same line in crew feedback's round: "(comment <id>)"
+worker: address each comment in every unsent round, oldest first → commit (no force-push) → push
+        → crew reply TASK <id> "…" (if told to) → an "Automated review requested" line: a new pass → status pr-open
                          # crew reply: an inline comment → reply in its thread (to the thread root);
                          #   a conversation comment or review summary → a PR comment quoting it;
                          #   refuses an ID that isn't a comment or review on the task's own PR
@@ -583,7 +590,8 @@ Changing any of these means updating every side listed.
 | An unchecked item (`- [ ]`) under Open questions is a question waiting on the user; whoever records its answer under Decisions ticks it | `crew feedback` (collaborators' comments), implementer "When you're blocked" → `OpenQuestions` (`crew tick` marks the task `needs-input`), lead (relays and ticks); checked in `tests/guard.sh` |
 | Who a comment is from: the user (`gh api user`), a collaborator (`author_association` OWNER, MEMBER or COLLABORATOR, `user.type` not `Bot`), or anyone else | GitHub REST API → `crew feedback` |
 | GitHub comment lookups: `pulls/comments/<id>` has `pull_request_url` and `in_reply_to_id`, `issues/comments/<id>` has `issue_url`, and both and `pulls/<n>/reviews/<id>` have `html_url` and `body` | GitHub REST API → `crew reply` (which PR a comment is on, the thread root, the quote) |
-| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`) | `crew feedback` → implementer review-round workflow and `crew reply` |
+| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`), and a request for another pass as `- [ ] Automated review requested (<source>)` (`reviewRound.add`) | `crew feedback`, `crew review` → implementer review-round workflow and `crew reply`; the request line, `pr-review` step 3 (left out of the briefing) |
+| A followup prompt names every unsent round, "Round N" or "Rounds N to M" (`unsentRounds`) | `crew followup`, `crew tick` → implementer "Workflow: review rounds" step 1 |
 | State paths, the ledger: `projects/` and `reports/` in the home. Only they are committed by `crew`, edited by agents, or absent from the public repo | `statePaths` in `crew` (`commit` and the guard); checked in `tests/guard.sh`, which also checks this repo tracks nothing there but `projects/.gitkeep`, and no `config/crew.env` or `host` |
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" commit --hook` on `Edit\|Write\|NotebookEdit\|Bash`; it reads nothing from its JSON | `lead/.claude/settings.json`, `config/worker-settings.json` → `commitHook`, `crew doctor`; checked in `tests/guard.sh` |
 | Hook command path `${CREW_HOME:-$HOME/crew}/bin/crew-guard` and role names. `~/crew` is the usual home; `crew install` sets `env.CREW_HOME` in `~/.claude/settings.json`, so hooks find a home anywhere | agent frontmatter, `lead/.claude/settings.json` and `config/worker-settings.json` → `bin/crew-guard` (which runs `crew guard`), `crew doctor`; checked in `tests/guard.sh` |
