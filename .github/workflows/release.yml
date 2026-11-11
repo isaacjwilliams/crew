@@ -59,11 +59,7 @@ jobs:
           go-version-file: go.mod
 
       # The suites need bash, git, jq and util-linux (flock, setsid, script), which
-      # the runner has, and fish, which it hasn't.
-      - name: Install what the test suites need
-        run: sudo apt-get update && sudo apt-get install -y fish jq
-
-      # Lint stays a local check: it needs the claude CLI.
+      # the runner has. Lint stays a local check: it needs the claude CLI.
       - name: Test
         run: |
           go test ./...
