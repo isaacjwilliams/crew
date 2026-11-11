@@ -503,6 +503,9 @@ check "a collaborator's 'crew review' goes under Open questions for the user, no
 rm "$HOME/gh-more-comments"
 rounds1=$(crew get 1 review_rounds)
 check "crew review refuses a task with no open PR (merged, or none at all), and records nothing" '! crew review 1 2>/dev/null && ! crew review 3 2>/dev/null && [[ $(crew get 1 review_rounds) == "$rounds1" ]] && ! grep -q "Automated review requested" "$F1" "$F3"'
+echo CLOSED >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1; rounds13=$(crew get 13 review_rounds)
+check "crew review refuses a task in flight whose PR was closed unmerged" '[[ $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open ]] && ! crew review 13 2>/dev/null && [[ $(crew get 13 review_rounds) == "$rounds13" ]]'
+echo OPEN >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1
 out=$(crew review 13 2>/dev/null)
 check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
 setstate "done" null; out=$(crew tick 2>/dev/null)

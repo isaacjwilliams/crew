@@ -333,8 +333,8 @@ func cmdReview(c *Crew, args []string) error {
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
 	c.unlock()
-	warnManyRounds(p, n)
 	if as, job := c.agents(), t.WorkerJob(); as.jobBusy(job) {
+		warnManyRounds(p, n) // otherwise followup warns
 		fmt.Printf("round %d asks for another automated review; crew tick sends it once worker %s is free (%s)\n", n, job, as.jobState(job))
 		return nil
 	}
