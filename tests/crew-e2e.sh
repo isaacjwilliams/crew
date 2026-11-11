@@ -247,7 +247,7 @@ check "react adds 👀 to a review summary, an inline and a conversation comment
 check "react adds 🚀" 'crew react 1 rocket 111 >/dev/null && [[ $(reacted PRRC_111 ROCKET) == 1 ]]'
 n=$(reactions)
 check "react refuses a comment on another PR, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 116 2>&1) == *"comment 116 isn'"'"'t on PR #12"* && $(reactions) == "$n" ]]'
-check "react refuses someone else's review, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 902 2>&1) == *"review 902 on PR #12 isn'"'"'t yours"* && $(reactions) == "$n" ]]'
+check "react refuses someone else's review, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 902 2>&1) == *"review 902 on PR #12 isn'"'"'t by isaac"* && $(reactions) == "$n" ]]'
 check "react refuses an ID that isn't a number, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 abc 2>&1) == *"comment id must be a number"* && $(reactions) == "$n" ]]'
 check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
 check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'

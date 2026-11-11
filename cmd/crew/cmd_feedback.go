@@ -416,8 +416,8 @@ func atoiOr0(s string) int {
 
 var commentID = regexp.MustCompile(`^[0-9]+$`)
 
-// The kinds of comment a review round lists, as crew reply and crew react name
-// them.
+// The kinds of comment a review round lists. Each value is the word crew's
+// messages use for that kind.
 type commentKind string
 
 const (
@@ -535,13 +535,16 @@ func cmdReply(c *Crew, args []string) error {
 
 // The reactions crew react adds: their names on the command line, and their
 // GraphQL ReactionContent values.
-var reactions = map[string]string{"eyes": "EYES", "rocket": "ROCKET"}
+var reactionContent = map[string]string{"eyes": "EYES", "rocket": "ROCKET"}
 
 // crew react TASK eyes|rocket COMMENT_ID...: reacts to the user's own review
 // comments that a round lists, on the task's own PR only. A worker adds 👀
 // (eyes) to each one when it picks the round up, and 🚀 (rocket) to each one
-// it is about to change code for. Every ID is checked before any reaction is
-// added, so a bad ID changes nothing.
+// it is about to change code for. Rounds hold only the user's comments
+// (collaborators' wait for the user), so crew reacts to no one else's. Every ID
+// is checked before any reaction is added, so a bad ID changes nothing.
+// Reacting twice is harmless: a person has at most one of each reaction on a
+// comment.
 func cmdReact(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -554,7 +557,7 @@ func cmdReact(c *Crew, args []string) error {
 		return err
 	}
 	name, ids := args[1], args[2:]
-	content, ok := reactions[name]
+	content, ok := reactionContent[name]
 	if !ok {
 		return fail("the reaction must be eyes or rocket, not '%s'", name)
 	}
@@ -577,13 +580,12 @@ func cmdReact(c *Crew, args []string) error {
 			return err
 		}
 		if cm.whose(me) != "me" {
-			return fail("%s %s on PR #%s isn't yours; crew reacts only to your own", kind, id, num)
+			return fail("%s %s on PR #%s isn't by %s; crew reacts only to the user's own comments", kind, id, num, me)
 		}
 		subjects = append(subjects, cm.NodeID)
 	}
 	// GraphQL's addReaction takes all three kinds; REST has no reactions for a
-	// review summary. A person has at most one of each reaction on a comment,
-	// so adding one again leaves it as it was.
+	// review summary.
 	const mutation = `mutation($subject: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $subject, content: $content}) { clientMutationId } }`
 	for _, subject := range subjects {
 		if _, err := gh(repo, "api", "graphql", "--silent", "-f", "query="+mutation, "-f", "subject="+subject, "-f", "content="+content); err != nil {
