@@ -38,6 +38,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 - **No Go.** `crew` is one binary, which `~/crew/bin/crew` downloads from the release for your home's version the first time it runs, into `~/crew/bin/release/`.
 - **Claude Code 2.1.281 or later**: run `claude update`. The crew relies on background sessions (agent view), automatic `AGENTS.md` loading, and `--permission-prompts`.
 - **GitHub CLI signed in**: run `gh auth login`. Workers push and open PRs as you.
+- **Codex** is optional: with it, automated review gets a second reviewer. See [Codex in automated review](#codex-in-automated-review).
 - **A plan with auto mode** (Pro, Max, or Team) is recommended. The lead and workers use it by default, so they aren't stopped for every new shell command. See `WORKER_PERMISSION_MODE` and `LEAD_PERMISSION_MODE` below.
 
 ## 2. Install
@@ -331,6 +332,18 @@ Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (
 
 Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done, and the lead's report of the PR repeats what was left for you.
 
+### Codex in automated review
+
+If you use OpenAI's Codex, each automated review can run it alongside the reviewer agent, so two reviewers from different model families read the PR. To turn it on for every project:
+
+1. Install the [Codex CLI](https://github.com/openai/codex) and sign in: `codex login`.
+2. Add `CODEX_REVIEW=yes` to `config/crew.env`. A project can still turn it off with `CODEX_REVIEW=no` in its `project.env`.
+3. Run `crew doctor`. With Codex on, it requires `codex` installed, signed in and on the crew's services' `PATH`, since a signed-out Codex would otherwise leave every review to the reviewer agent alone.
+
+Codex gets exactly what the reviewer agent gets, your words and the change, and the two don't see each other's work until both have reported. Then they answer each other's findings for up to `AUTO_REVIEW_REBUTTALS` rounds (2 by default): each confirms, refutes, withdraws or changes the severity of what the other raised. The worker referees. It may add evidence from the code to a round, and it decides each finding at the end, from the highest severity a reviewer still holds. When one reviewer still refutes a finding, the worker settles it rather than leaving it for you: it fixes it, or sets it aside with evidence that the refuter is right, and the PR comment lists what it set aside.
+
+Codex runs read-only, with approvals off, on every call (`crew codex`), and a `deny` rule in workers' settings catches them running `codex` directly. It reviews with `CODEX_MODEL` at `CODEX_MODEL_EFFORT`. If Codex fails or stalls, the review carries on with the reviewer agent alone, and the record and the PR comment say Codex didn't report. Settings are read at each review, so a change applies to the next one, even on a task that's already running.
+
 ### Review and send feedback
 
 Review in GitHub as you normally would: submit a review, or leave a PR comment. With the tick timer on (below), that's all: within a few minutes `crew tick` records your comments as "Round N" in the task and resumes the worker that wrote the PR, as soon as it's idle. Without the timer, tell the lead "I reviewed #42", or run `crew tick` yourself. The two steps it does are also commands of their own:
@@ -429,6 +442,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
 | On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post one automated-review summary on each, and mark it ready after that review | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
+| Codex only reads when it reviews | `crew codex` runs Codex every time with the read-only sandbox and approvals off, fixed in code. A `deny` rule in `config/worker-settings.json` catches workers running `codex` directly |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
 | Your review capacity isn't exceeded | `crew dispatch` enforces `MAX_WORKERS`, and a goal's `max_in_flight` for its tasks, for the lead and for `crew tick` alike |
@@ -455,6 +469,10 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds (the plan may need a rethink) |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
+| `CODEX_REVIEW` | `no` | `yes` adds Codex to automated review, beside the reviewer agent (see [Codex in automated review](#codex-in-automated-review)) |
+| `CODEX_MODEL` | `gpt-6-astra` | The model Codex reviews with |
+| `CODEX_MODEL_EFFORT` | `xhigh` | Codex's reasoning effort (`model_reasoning_effort`) |
+| `AUTO_REVIEW_REBUTTALS` | 2 | Rounds between Codex and the reviewer agent in each review: `0`, `1` or `2`. With 1, a refutation made in round 1 can't be answered: round 1 is when each first sees the other's findings, so the answer would come in round 2 |
 | `WORKTREE_COPY` | empty | Gitignored files copied into each new worktree |
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |

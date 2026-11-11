@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack reply review-summary status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack reply review-summary codex status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync lead-settings
@@ -51,3 +51,4 @@ complete -c crew -n "__fish_seen_subcommand_from setup" -l name -x -d 'Name of y
 complete -c crew -n "__fish_seen_subcommand_from mcp; and not __fish_seen_subcommand_from $mcp_cmds" -a "$mcp_cmds"
 complete -c crew -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from lead-settings" -l project -x -d 'The lead\'s project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
+complete -c crew -n "__fish_seen_subcommand_from codex" -F

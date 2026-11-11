@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,14 +33,22 @@ type Agents []Agent
 // goes in its settings instead (sessionSettings).
 func (c *Crew) claude(args ...string) *exec.Cmd {
 	cmd := exec.Command("claude", args...)
+	env := environWithout("CLAUDECODE", "PATH", "CREW_PROJECT")
+	cmd.Env = append(env, "PATH="+c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return cmd
+}
+
+// environWithout is crew's own environment (os.Environ) without the named
+// variables.
+func environWithout(names ...string) []string {
 	env := []string{}
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") && !strings.HasPrefix(e, "PATH=") && !strings.HasPrefix(e, "CREW_PROJECT=") {
+		name, _, _ := strings.Cut(e, "=")
+		if !slices.Contains(names, name) {
 			env = append(env, e)
 		}
 	}
-	cmd.Env = append(env, "PATH="+c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return cmd
+	return env
 }
 
 // agents is what `claude agents --json --all` lists, or nothing when it fails.

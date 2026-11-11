@@ -87,10 +87,12 @@ After you open your PR, you review it before the user does. `AUTO_REVIEWS` (`cre
    - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. If it questions the brief's structure, don't change the code; treat it as in first-run step 5, under "Findings the brief settled": `left for the user`.
    - **fix later**: write a proposal (first-run step 8): `proposal <its file name>`.
    - **nitpick**: fix it if it's in lines this PR changed (`fixed in <short sha>`); otherwise `recorded`.
+   - **withdrawn**: its raiser withdrew it in a round and no reviewer holds it; don't change the code: `withdrawn in round <n>`.
+   - **split**: one reviewer holds it and the other refutes it, and you settle it. With cited evidence that sides with the refuter (a `file:line`, a passing test, a fact about the code), don't change the code: `not a defect: <the evidence>`. Otherwise act on it as above, at the severity it's held at.
    - **disputed, uncertain**: don't change the code: `left for the user`.
 
    Then run the checks and push.
-3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. A review whose reviewer failed isn't clean either. If this one isn't clean, and you've run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
+3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and you've run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
 5. If the task's `pr_mode` is `ready`, mark the PR ready: `gh pr ready <url>`. Then carry on with first-run step 10.
 

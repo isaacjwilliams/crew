@@ -76,6 +76,44 @@ check "automated review runs up to 3 times by default, and crew config lists it"
 echo 'AUTO_REVIEWS=0' >>"$PE"
 check "a project can turn automated review off" '[[ $(cd "$HOME" && crew config AUTO_REVIEWS --project "$P") == 0 ]]'
 sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
+check "Codex is off in automated review by default, with 2 rounds between the reviewers when it's on" '[[ $(crew config CODEX_REVIEW) == no && $(crew config AUTO_REVIEW_REBUTTALS) == 2 ]] && crew config | grep -qx CODEX_MODEL_EFFORT=xhigh'
+# crew codex: one read-only review by Codex, through tests/stubs/codex.
+mkdir -p "$SB/rev" && echo "Adversarially review the briefing." >"$SB/rev/prompt.md"
+out=$(cd "$SB" && crew codex webapp rev/prompt.md rev/answer-0 2>&1); st=$?
+check "crew codex runs codex exec read-only with approvals off, in a new session in the review root, from paths relative to the caller" \
+  '((st == 0)) && grep -qxF "codex exec -c sandbox_mode=\"read-only\" -c approval_policy=\"never\" -m gpt-6-astra -c model_reasoning_effort=\"xhigh\" --skip-git-repo-check --json -o $SB/rev/answer-0.md -C $SB/webapp - (in $SB/webapp)" "$HOME/codex-calls.log"'
+check "crew codex gives Codex the prompt file on stdin, and writes its reply and events" \
+  'cmp -s "$SB/rev/prompt.md" "$HOME/codex-stdin.last" && [[ $(cat "$SB/rev/answer-0.md") == "stub review" ]] && grep -q turn.completed "$SB/rev/answer-0.events.jsonl" && [[ $out == "final message: $SB/rev/answer-0.md" ]]'
+echo 'CODEX_MODEL="gpt-next"' >>"$PE"
+crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-1" >/dev/null 2>&1
+check "crew codex uses the project's model" '[[ $(tail -1 "$HOME/codex-calls.log") == *" -m gpt-next "* ]]'
+sed -i '/^CODEX_MODEL=/d' "$PE"
+check "crew codex takes no subcommand: a stray argument is refused" '! crew codex start "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-2" 2>/dev/null'
+touch "$HOME/codex-fail"
+out=$(crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-0" 2>&1); st=$?
+check "crew codex passes on a failing codex's status" '((st == 3)) && [[ $out == *"codex exited with status 3"* ]]'
+rm "$HOME/codex-fail"
+check "CLAUDECODE never reaches codex" '! grep -q LEAK "$HOME/codex-calls.log"'
+echo 'CODEX_REVIEW=yes' >>"$L/config/crew.env"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)
+check "with CODEX_REVIEW=yes in crew.env, crew doctor checks each project's codex is installed and signed in" \
+  '[[ $doctor_out == *"ok   $P: codex installed (CODEX_REVIEW=yes)"* && $doctor_out == *"ok   $P: codex signed in"* ]]'
+touch "$HOME/codex-signed-out"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1); st=$?
+check "crew doctor fails its required checks for a signed-out codex" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex signed in — run '"'codex login'"'"* && $doctor_out == *"Some required checks failed."* ]]'
+rm "$HOME/codex-signed-out"
+mkdir -p "$SB/no-codex"
+for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex ]] || ln -sf "$s" "$SB/no-codex/"; done
+no_codex_path=$SB/no-codex
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done
+doctor_out=$(env -u CLAUDECODE PATH="$no_codex_path" crew doctor 2>&1); st=$?
+check "crew doctor fails its required checks when CODEX_REVIEW=yes and codex isn't installed" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex installed (CODEX_REVIEW=yes)"* ]]'
+printf 'CODEX_REVIEW=maybe\nAUTO_REVIEW_REBUTTALS=3\n' >>"$PE"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)
+check "crew doctor reports a CODEX_REVIEW that isn't yes or no, and AUTO_REVIEW_REBUTTALS outside 0-2" \
+  '[[ $doctor_out == *"FAIL $P: CODEX_REVIEW is yes or no (got '"'maybe'"')"* && $doctor_out == *"FAIL $P: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '"'3'"')"* ]]'
+sed -i -e '/^CODEX_REVIEW=maybe$/d' -e '/^AUTO_REVIEW_REBUTTALS=3$/d' "$PE"; sed -i '/^CODEX_REVIEW=yes$/d' "$L/config/crew.env"
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'

@@ -128,9 +128,9 @@ A task's `## Decisions` holds one dated line per decision about the task: your a
 
 After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUTO_REVIEWS` times, and records each review in the task file, under `## Automated reviews` (just before `## Review rounds`), as `### Automated review N`. The record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it:
 
-- the range reviewed, the reviewer (marked `failed` when it didn't report), its derived intent and its reading of the stated intent;
-- every finding the reviewer raised, as a `####` heading with its severity, and lines for who raised it, the finding (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. The worker fills in the outcome once it has acted: `fixed in <sha>`, `proposal <file name>`, `recorded` (a nitpick outside the PR's lines) or `left for the user`;
-- the reviewer's conclusion and what it couldn't check;
+- the range reviewed, the reviewers (the Claude reviewer, and Codex when `CODEX_REVIEW` is on; each marked `failed` when it didn't report), how many rounds they had between them, and each one's derived intent and reading of the stated intent;
+- every finding a reviewer raised, as a `####` heading with its severity, and lines for who raised it (`both`, `Codex` or `Claude reviewer`), the finding (quoted), each round's replies to it (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. Besides the rubric's four, an agreed severity can be `withdrawn` (its raiser took it back in a round, and no reviewer holds it), `split` (one reviewer holds it and the other refutes it; the worker settles it), `disputed` (the worker disagrees, with evidence, and no reviewer does) or `uncertain`. The worker fills in the outcome once it has acted: `fixed in <sha>`, `proposal <file name>`, `recorded` (a nitpick outside the PR's lines), `withdrawn in round <n>`, `not a defect: <evidence>` (a split it set aside) or `left for the user`;
+- each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the PR's one summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary -->`, so a second `crew review-summary` edits it instead of posting another.
 
 ## Review rounds

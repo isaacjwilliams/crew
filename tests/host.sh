@@ -109,6 +109,14 @@ for c in gh jq claude; do ln -s "$(command -v "$c")" "$HOME/.local/share/mise/sh
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "the tick service finds tools installed with mise" '[[ $doctor_out != *"FAIL crew-tick.service"* ]]'
 check "crew doctor skips timers that aren't enabled" '[[ $doctor_out != *"crew-gardener.service"* ]]'
+check "crew doctor leaves codex off the services' tools while no project reviews with Codex" '[[ $doctor_out != *"finds codex"* ]]'
+mkdir -p "$H/projects/demo" && echo 'CODEX_REVIEW=yes' >"$H/projects/demo/project.env"
+doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
+check "with CODEX_REVIEW=yes, crew doctor flags a codex the tick service can't find" '[[ $doctor_out == *"FAIL crew-tick.service finds codex"* ]]'
+ln -s "$(command -v codex)" "$HOME/.local/share/mise/shims/codex"
+doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
+check "the tick service finds a codex installed with mise" '[[ $doctor_out == *"ok   crew-tick.service finds codex"* ]]'
+rm -r "$H/projects/demo"
 jq 'del(.hooks)' "$H/config/worker-settings.json" >"$HOME/ws" && mv "$HOME/ws" "$H/config/worker-settings.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor flags settings that lack the guard hook" '[[ $doctor_out == *"FAIL config/worker-settings.json runs crew-guard"* ]]'

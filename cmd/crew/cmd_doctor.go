@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -72,6 +73,9 @@ func cmdDoctor(c *Crew, args []string) error {
 		d.check(f+" loads project memory (crew memory --hook)", c.hookEndsWith(f, "SessionStart", `bin/crew" memory --hook`), "restore its hook: git -C "+c.Home+" diff "+f)
 	}
 	d.check("lead/.claude/settings.local.json written for this machine", isFile(c.path("lead/.claude/settings.local.json")), "run crew install")
+	// The tools the services must find: crew's own, and codex once a project
+	// reviews with it, since a worker's crew codex runs with a service's PATH.
+	serviceTools := runtimeTools
 	envs, _ := filepath.Glob(c.path("projects", "*", "project.env"))
 	for _, env := range envs {
 		pd := filepath.Dir(env)
@@ -87,6 +91,27 @@ func cmdDoctor(c *Crew, args []string) error {
 			d.check(p+": wt installed (WORKTREE_TOOL=worktrunk)", err == nil, "install Worktrunk: https://worktrunk.dev")
 		default:
 			d.check(fmt.Sprintf("%s: WORKTREE_TOOL is git or worktrunk (got '%s')", p, tool), false, "fix "+pd+"/project.env")
+		}
+		// A missing or signed-out Codex would quietly leave every review to the
+		// Claude reviewer alone.
+		fixSetting := "fix it in config/crew.env or " + pd + "/project.env"
+		switch review := own["CODEX_REVIEW"]; review {
+		case "no": // nothing to check
+		case "yes":
+			if !slices.Contains(serviceTools, "codex") {
+				serviceTools = append(slices.Clone(serviceTools), "codex")
+			}
+			_, err := exec.LookPath("codex")
+			d.check(p+": codex installed (CODEX_REVIEW=yes)", err == nil, "install Codex: https://github.com/openai/codex")
+			if err == nil {
+				d.check(p+": codex signed in", codexSignedIn(), "run 'codex login'")
+			}
+		default:
+			d.check(fmt.Sprintf("%s: CODEX_REVIEW is yes or no (got '%s')", p, review), false, fixSetting)
+		}
+		// Rounds between the two reviewers, read whether or not Codex is on yet.
+		if r := own["AUTO_REVIEW_REBUTTALS"]; !slices.Contains([]string{"0", "1", "2"}, r) {
+			d.check(fmt.Sprintf("%s: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '%s')", p, r), false, fixSetting)
 		}
 		local := Settings{}
 		err := readEnvFile(filepath.Join(pd, "local.env"), local)
@@ -119,7 +144,7 @@ func cmdDoctor(c *Crew, args []string) error {
 			continue
 		}
 		service, path, fix := c.servicePath(s)
-		for _, t := range runtimeTools {
+		for _, t := range serviceTools {
 			d.check(service+" finds "+t, onPath(t, path), fix)
 		}
 	}

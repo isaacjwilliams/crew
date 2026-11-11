@@ -61,6 +61,7 @@ isolate_home() {
   [[ $(command -v gh) == "$TESTS_DIR/stubs/gh" ]] || { echo "refusing to run: stub gh isn't first on PATH" >&2; exit 2; }
   [[ $(command -v wt) == "$TESTS_DIR/stubs/wt" ]] || { echo "refusing to run: stub wt isn't first on PATH" >&2; exit 2; }
   [[ $(command -v curl) == "$TESTS_DIR/stubs/curl" ]] || { echo "refusing to run: stub curl isn't first on PATH" >&2; exit 2; }
+  [[ $(command -v codex) == "$TESTS_DIR/stubs/codex" ]] || { echo "refusing to run: stub codex isn't first on PATH" >&2; exit 2; }
 }
 
 # make_home DIR — a crew home, as a clone of this repo would be once it has run:

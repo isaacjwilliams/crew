@@ -244,14 +244,28 @@ check "the task template and LEDGER.md define the (user) marker on Decisions" \
   "grep -q 'ending with whose call it was: \"(user)\"' $C/../templates/task.md && grep -q 'Only a .(user). line counts as yours' $REPO_DIR/LEDGER.md"
 check "pr-review takes only (user) lines as the user's decisions, and never sorts them into hard constraints" \
   "grep -q 'every line under the task.s Decisions that ends .(user)., and no other' $SK/SKILL.md && grep -q '^Write .None recorded.. The user.s decisions all go under stated intent' $SK/SKILL.md"
+check "pr-review turns the PR body's and commit messages' headings into #### ones, so stated intent stays the last section" \
+  "grep -q 'Turn each .#. or .##. heading in them into a .####.' $SK/SKILL.md"
 check "a pr-review run that records nothing isn't counted, and a second such stop blocks the worker" \
   "grep -q 'If the skill stops without recording a review, that isn.t a review and doesn.t count' $A/implementer.md && grep -q 'If it stops a second time for the same reason, you.re blocked' $A/implementer.md"
 check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
   "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
 check "a review whose reviewer failed is marked in the record, and the summary has a truthful line for it" \
-  "grep -q 'Reviewers: Claude reviewer, failed: <what happened>' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
+  "grep -q 'Reviewers: Claude reviewer and Codex (failed: <what happened>)' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
   "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
+check "workers can't run codex themselves, only through crew codex, which runs it read-only" \
+  "jq -e >/dev/null '.permissions.deny | index(\"Bash(codex *)\")' $C/worker-settings.json && [[ \$(grep -l 'exec.Command(\"codex\"' $REPO_DIR/cmd/crew/*.go) == $REPO_DIR/cmd/crew/cmd_codex.go ]]"
+check "pr-review is one flow over the reviewers it launched: CODEX_REVIEW only decides whether Codex is launched, and Codex runs only through crew codex" \
+  "[[ \$(grep -c CODEX_REVIEW $SK/SKILL.md) == 1 ]] && grep -q '^## 4. Launch the reviewers' $SK/SKILL.md && grep -q 'crew codex <review root> <briefing dir>/codex-prompt-0.md' $SK/SKILL.md && grep -q 'crew codex <review root> <briefing dir>/codex-prompt-<n>.md' $SK/SKILL.md && ! grep -rq 'crew codex reply' $SK $A $REPO_DIR/cmd && ! grep -qE '(^|[^-])codex (exec|resume)' $SK/SKILL.md"
+check "Codex, like the Claude reviewer, leaves commit messages until it has derived intent" \
+  "grep -q '^> them until you have written your derived intent' $SK/SKILL.md && grep -qF 'git --no-optional-locks log --format=%H <range>' $SK/SKILL.md"
+check "rounds run only between two reviewers that reported, up to AUTO_REVIEW_REBUTTALS (2 by default), and both reviewers start fresh in each" \
+  "grep -q 'Skip this step unless both reviewers reported' $SK/SKILL.md && grep -q 'crew config AUTO_REVIEW_REBUTTALS --project' $SK/SKILL.md && grep -qx 'AUTO_REVIEW_REBUTTALS=2' $C/defaults.env && grep -qx 'CODEX_REVIEW=\"no\"' $C/defaults.env && grep -q 'Both reviewers start fresh in every round, never resumed' $SK/SKILL.md && grep -q 'You always start a round fresh' $A/reviewer.md"
+check "reviewer.md answers a rebuttal round in the shape the skill asks for" \
+  "grep -qx '## Rebuttal rounds' $A/reviewer.md && grep -q 'A prompt that starts .Rebuttal round. is a different job' $A/reviewer.md && grep -q '^  > Rebuttal round <n> on' $SK/SKILL.md && grep -q 'confirm | refute | withdraw | reseverity' $A/reviewer.md"
+check "the implementer acts on withdrawn and split findings, and a review where only Codex failed can be clean" \
+  "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: held at <severity>, <reviewer> refutes' $SK/SKILL.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
