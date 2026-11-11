@@ -27,23 +27,17 @@ const hookOutputCap = 10000
 // crew remember "<fact>" --why TEXT [--source S] [--project P]
 func cmdRemember(c *Crew, args []string) error {
 	const use = `crew remember "<fact>" --why TEXT [--source S] [--project P]`
-	var fact, proj, why string
+	var proj, why string
 	source := "lead"
-	for len(args) > 0 {
-		flag := map[string]*string{"--project": &proj, "--why": &why, "--source": &source}[args[0]]
-		if flag != nil && len(args) > 1 {
-			*flag, args = args[1], args[2:]
-			continue
-		}
-		fact += " " + args[0]
-		args = args[1:]
+	fact, err := parseText(args, map[string]*string{"--project": &proj, "--why": &why, "--source": &source}, use)
+	if err != nil {
+		return err
 	}
 	fact, why = oneLine(fact), oneLine(why)
 	if fact == "" || why == "" {
 		return usage(use)
 	}
-	proj, err := c.oneProject(proj)
-	if err != nil {
+	if proj, err = c.oneProject(proj); err != nil {
 		return err
 	}
 	if source, err = c.ledgerSource(source, proj); err != nil {

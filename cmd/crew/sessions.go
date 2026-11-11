@@ -28,8 +28,8 @@ type Agents []Agent
 
 // claude is the claude CLI, run outside any parent Claude Code session's
 // environment (so it can be launched from inside one), with this home's bin/
-// first on PATH, so the sessions it starts run this home's crew. It drops the
-// parent's CREW_PROJECT: a session crew starts sets its own.
+// first on PATH and without the caller's CREW_PROJECT. A session's own project
+// goes in its settings instead (sessionSettings).
 func (c *Crew) claude(args ...string) *exec.Cmd {
 	cmd := exec.Command("claude", args...)
 	env := []string{}
@@ -251,7 +251,6 @@ func (c *Crew) launchSession(d Doc, role, wt, prompt string, resume bool, flags 
 		cmd = c.claude(append(args, prompt)...)
 	}
 	cmd.Dir = wt
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+d.Get("project"))
 	raw, _ := cmd.CombinedOutput()
 	// The job ID can come wrapped in color codes, which would never match `claude agents`.
 	out := ansiCode.ReplaceAllString(string(raw), "")
@@ -339,32 +338,56 @@ func (c *Crew) relaunch(start launcher, role string, d Doc, wt, prompt, freshPro
 
 var autocompactWindow = regexp.MustCompile(`^(auto|[0-9]+[kKmM]?)$`)
 
-// workerSettings is what workers run with: config/worker-settings.json, plus the
-// project's projects/<p>/worker-settings.json when it has one (allow rules or env
-// for that project's test commands, say). The project file can only add: objects
-// are merged and arrays appended, but any value the shipped file sets wins, so a
-// project can't drop a deny rule. It's a path, or the merged settings as JSON:
-// `claude --settings` takes either. It also checks WORKER_AUTOCOMPACT_WINDOW, so
-// a bad value stops a dispatch before its worktree exists.
+// readSettings is the settings file f, which must hold a JSON object.
+func readSettings(f string) (*object, error) {
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return nil, err
+	}
+	v, err := parseJSON(b)
+	o, ok := v.(*object)
+	if err != nil || !ok {
+		return nil, fail("%s isn't a JSON object of settings", f)
+	}
+	return o, nil
+}
+
+// sessionSettings is the --settings value of a session crew starts for project
+// p: settings, with CREW_PROJECT and CREW_HOME set in its env, so the session's
+// crew commands and hooks work on p in this home. It changes the settings it's
+// given. Every session crew starts for a project gets them this way, and never
+// through the environment crew runs claude with: a background session gets the
+// environment of Claude Code's daemon, which serves every project at once.
+func (c *Crew) sessionSettings(settings *object, p *Project) string {
+	env := settings.child("env")
+	env.set("CREW_PROJECT", p.Name)
+	env.set("CREW_HOME", c.Home)
+	return encodeJSON(settings, false)
+}
+
+// workerSettings is the --settings value workers run with:
+// config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
+// when it has one (allow rules or env for that project's test commands, say), as
+// sessionSettings. The project file can only add: objects are merged and arrays
+// appended, but any value the shipped file sets wins, so a project can't drop a
+// deny rule. It also checks WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a
+// dispatch before its worktree exists.
 func (c *Crew) workerSettings(p *Project) (string, error) {
 	if w := p.Settings["WORKER_AUTOCOMPACT_WINDOW"]; !autocompactWindow.MatchString(w) {
 		return "", fail("WORKER_AUTOCOMPACT_WINDOW must be auto or a token count like 400k, not '%s'", w)
 	}
-	base, extra := c.path("config/worker-settings.json"), filepath.Join(p.Dir, "worker-settings.json")
-	if !isFile(extra) {
-		return base, nil
+	settings, err := readSettings(c.path("config/worker-settings.json"))
+	if err != nil {
+		return "", err
 	}
-	var vals [2]any
-	for i, f := range []string{base, extra} {
-		b, err := os.ReadFile(f)
-		if err == nil {
-			vals[i], err = parseJSON(b)
-		}
+	if extra := filepath.Join(p.Dir, "worker-settings.json"); isFile(extra) {
+		more, err := readSettings(extra)
 		if err != nil {
-			return "", fail("%s isn't valid JSON", extra)
+			return "", err
 		}
+		settings = addOnly(settings, more).(*object)
 	}
-	return encodeJSON(addOnly(vals[0], vals[1]), false), nil
+	return c.sessionSettings(settings, p), nil
 }
 
 // launchWorker starts or resumes a task's worker in its worktree. It's the only

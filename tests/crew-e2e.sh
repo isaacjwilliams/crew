@@ -42,6 +42,9 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
+# The latest --settings sets CREW_PROJECT to project $1 and CREW_HOME to the home: a
+# background session takes its environment from Claude Code's daemon, not from crew.
+session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h' "$HOME/claude-settings.last" >/dev/null; }
 
 crew project add >/dev/null
 PE=$(ls "$L"/projects/*/project.env); PD=$(dirname "$PE"); P=$(basename "$PD")
@@ -125,7 +128,8 @@ check "worktree is on the task branch" '[[ $(git -C "$WT" branch --show-current)
 check "session id recorded, starting with the job id" '[[ $(crew get 1 worker_session) == "$(crew get 1 worker_job)"-* ]]'
 check "job id recorded without color codes" '[[ $(crew get 1 worker_job) =~ ^[0-9a-f]{8}$ ]]'
 check "workers start with the configured auto-compact window" 'grep -- "--agent implementer" "$HOME/claude-calls.log" | tail -1 | grep -q -- " --autocompact 400k "'
-check "workers get the shipped settings file when the project adds none" '[[ $(cat "$HOME/claude-settings.last") == "$L/config/worker-settings.json" ]]'
+check "workers get the shipped settings, with their project and the home, when the project adds none" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P"'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
@@ -277,7 +281,7 @@ echo '{"permissions": {' >"$PD/worker-settings.json"
 check "invalid project worker settings stop the dispatch" '! crew dispatch 5 >/dev/null 2>&1 && [[ ! -d $HOME/agent-work/$(basename "$PD")/$(basename "$F5" .md) ]]'
 cat >"$PD/worker-settings.json" <<'EOF'
 {"permissions": {"allow": ["Bash(bin/rspec *)", "Bash(git push)"], "deny": [], "defaultMode": "bypassPermissions"},
- "env": {"PGHOST": "/run/postgresql"}}
+ "env": {"PGHOST": "/run/postgresql", "CREW_PROJECT": "elsewhere"}}
 EOF
 # A value the shipped file sets always wins; give the test ledger's copy one to defend.
 jq '.permissions.defaultMode = "default"' "$L/config/worker-settings.json" >"$HOME/ws" && mv "$HOME/ws" "$L/config/worker-settings.json"
@@ -287,6 +291,7 @@ S=$(cat "$HOME/claude-settings.last")
 check "project settings add allow rules without duplicates" 'jq -e ".permissions.allow | (index(\"Bash(bin/rspec *)\") != null) and (map(select(. == \"Bash(git push)\")) | length == 1)" <<<"$S" >/dev/null'
 check "per-project WORKER_AUTOCOMPACT_WINDOW is honoured" 'grep -- "--agent implementer" "$HOME/claude-calls.log" | tail -1 | grep -q -- " --autocompact 250k "'
 check "project settings add new keys" 'jq -e ".env.PGHOST == \"/run/postgresql\"" <<<"$S" >/dev/null'
+check "project settings can't change the worker's project" 'session_env "$(basename "$PD")"'
 check "project settings can't override a value the shipped file sets" 'jq -e ".permissions.defaultMode == \"default\"" <<<"$S" >/dev/null'
 check "project settings can't drop deny rules" 'jq -e ".permissions.deny | index(\"Bash(gh pr merge *)\") != null" <<<"$S" >/dev/null'
 P=$(ls -d "$L"/projects/*)/proposals/2026-09-25-x.md
@@ -310,6 +315,9 @@ n=$(ls "$PD/tasks" | wc -l)
 for bad in "Contestant_Type" "agent/contestant-type" "trailing-" "$(printf 'x%.0s' {1..41})"; do
   check "--branch refuses '${bad:0:24}'" '! crew new "Bad branch" --branch "$bad" 2>/dev/null && [[ $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 done
+out=$(crew new "Stray flags" "--branch stray --on 7" 2>&1)
+check "new refuses an argument that looks like a flag but isn't one, and names it" '[[ $out == *"'"'"'--branch stray --on 7'"'"' isn'"'"'t an option here; usage: crew new"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+check "new refuses a flag with no value, rather than put it in the title" '! crew new "No branch" --branch 2>/dev/null && [[ $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 sed 's/^status: .*/status: open/' "$P" >"${P%x.md}y.md"
 check "promote refuses a bad --branch and leaves the proposal open" '! crew promote 2026-09-25-y --branch Nope 2>/dev/null && [[ $(crew proposals) == *2026-09-25-y* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 
@@ -518,6 +526,7 @@ check "goal new creates a draft goal" '[[ $GF == "$PD/goals/$G.md" && $(gget "$G
 check "goal new leaves max_in_flight to GOAL_MAX_IN_FLIGHT unless told" '[[ -z $(gget "$GF" max_in_flight) ]]'
 n=$(ls "$PD/goals" | wc -l)
 check "goal new refuses a --max-in-flight that isn't a whole number" '! crew goal new "Bad cap" --max-in-flight two 2>/dev/null && [[ $(ls "$PD/goals" | wc -l) == "$n" ]]'
+check "goal new refuses an unknown flag and a flag with no value" '! crew goal new "Stray" "--max-in-flight 2" 2>/dev/null && ! crew goal new "No cap" --max-in-flight 2>/dev/null && [[ $(ls "$PD/goals" | wc -l) == "$n" ]]'
 GF2=$(crew goal new "Capped goal" --max-in-flight 2)
 check "goal new --max-in-flight sets the goal's max_in_flight" '[[ $(gget "$GF2" max_in_flight) == 2 ]]'
 crew goal abandon "$GF2" >/dev/null
@@ -526,7 +535,8 @@ sed -i '/^## Goal$/a "Ship every card in the Season column." (tracker: the Seaso
 out=$(crew goal start 1); GJ=$(gget "$GF" lead_job); CO=$(gget "$GF" checkout)
 gl=$(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1)
 check "goal start launches the goal lead with the home as an extra directory" '[[ $(gget "$GF" status) == running && -n $GJ && $gl == *"--add-dir $L --bg --mcp-config $L/projects/$(gget "$GF" project)/mcp.local.json --agent goal-lead --permission-mode auto --settings {"*"} You are the goal lead for goal $G "* ]]'
-check "the goal lead gets the lead's settings, all but their agent" '[[ $(cat "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null'
+check "the goal lead gets the lead's settings, all but their agent, with its project and the home" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null && session_env "$(gget "$GF" project)"'
 check "the goal lead works in a detached checkout of the default branch" '[[ $(jq -r --arg id "$GJ" ".[] | select(.id == \$id) | .cwd" "$HOME/agents.json") == "$CO" && -z $(git -C "$CO" branch --show-current) && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) ]]'
 GT1=$(crew new "Season header" --goal 1); T1=$(basename "$GT1" .md)
 GT2=$(crew new "Season standings" --goal 1); T2=$(basename "$GT2" .md)
@@ -603,6 +613,9 @@ check "propose refuses an unknown source" '! crew propose "Something else" --pro
 WP=$(crew propose "Share the header partial" --project "$PJ" --source worker:7 --why "Two pages copy it.")
 check "a worker's proposal names its task by full id, and the source defaults to lead" '[[ $(crew get "$WP" source) == worker:007-contestant-type-on-update && $(crew get "$(crew propose "Lead idea" --project "$PJ")" source) == lead ]]'
 check "propose refuses a worker source that names no task" '! crew propose "Orphan idea" --project "$PJ" --source worker:999 2>/dev/null'
+n=$(ls "$(dirname "$SP")" | wc -l)
+check "propose refuses flags that arrive as one argument, rather than put them in the title" '! crew propose "Stray flags" "--project $PJ --source worker:7" 2>/dev/null && [[ $(ls "$(dirname "$SP")" | wc -l) == "$n" ]]'
+check "propose refuses a flag with no value" '! crew propose "No reason" --project "$PJ" --why 2>/dev/null && [[ $(ls "$(dirname "$SP")" | wc -l) == "$n" ]]'
 ST=$(crew promote "$SP" --branch pricing-strategy)
 check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" status) == draft && $(crew get "$SP" status) == accepted && $(crew get "$SP" task) == $(basename "$ST" .md) ]]'
 check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
@@ -640,10 +653,13 @@ check "proposals --all is every project" '[[ $(crew proposals --all) == *"$(base
 check "sync and cleanup --merged take --project" '(cd "$HOME" && crew sync --project "$P2" >/dev/null && [[ $(crew cleanup --merged --project "$P2") == "Nothing to clean up." ]])'
 fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 (cd "$HOME" && CREW_PROJECT=$PJ crew dispatch "$S1" >/dev/null 2>&1)
-check "a worker runs with its task's project, not the caller's" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
+check "a worker's settings name its task's project, not the caller's" 'session_env "$P2"'
+check "a worker's launch sets no CREW_PROJECT, which its session wouldn't get" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
 (cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
-check "the gardener runs with its project" '[[ $(grep -- "--agent gardener" "$HOME/claude-env.log" | tail -1) == "$P2 claude "* ]]'
-check "the gardener runs with its own settings, which load project memory" '[[ $(cat "$HOME/claude-settings.last") == "$L/config/gardener-settings.json" ]]'
+check "the gardener runs with its own settings, which load project memory, and its project" \
+  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2"'
+(cd "$HOME" && CREW_PROJECT=$P2 crew gardener --project "$PJ" >/dev/null 2>&1)
+check "the gardener of another project gets that project" 'session_env "$PJ"'
 (cd "$SB/shop" && CREW_PROJECT=$P2 crew observe >/dev/null 2>&1)
 check "crew observe runs with the read-only settings and no project, so its observer gets no project memory" \
   '[[ $(cat "$HOME/claude-settings.last") == "$L/config/readonly-settings.json" && $(grep -- "--agent casual-observer" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
@@ -660,6 +676,8 @@ check "remember appends, and names a worker's task by full id" '[[ $(grep -c "^-
 check "remember commits the suggestion" '[[ -z $(git -C "$L" status --porcelain -- "$MS") && $(git -C "$L" log -1 --format=%s) == "remember $PJ" ]]'
 check "remember refuses a bad source, an empty fact and a missing --why" \
   '! crew remember "X" --why "Y" --source bob --project "$PJ" 2>/dev/null && ! crew remember "" --why "Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
+check "remember refuses an unknown flag and a flag with no value" \
+  '! crew remember "X" "--why Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" --why 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
 out=$(crew status --project "$PJ")
 check "status counts a project's memory suggestions waiting on the user" '[[ $out == *"  memory suggestions: 2  (projects/$PJ/memory-suggestions.md)"* ]]'
 out=$(crew status --project "$P2")
@@ -715,6 +733,7 @@ check "a resume passes no --mcp-config, and the file it started with is rebuilt 
 G2F=$(crew goal new "Shop season" --project "$P2"); sed -i '/^## Goal$/a "Ship the shop."' "$G2F"
 crew goal start "$G2F" >/dev/null
 check "a goal lead for the project starts with --mcp-config too" '[[ $(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1) == *" --bg --mcp-config $ML2 --agent goal-lead "* ]]'
+check "a goal lead's settings name its own project" 'session_env "$P2"'
 git -C "$L" rm -q "$M2"; git -C "$L" commit -qm "no mcp.json for $P2"; setstate "done" null
 out=$(crew followup "$S2" --note "servers gone" 2>&1)
 check "once the project drops its mcp.json, a resume finds its mcp.local.json empty but valid" '[[ $out == *"(resume)"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
