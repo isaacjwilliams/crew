@@ -321,8 +321,8 @@ func cmdSetup(c *Crew, args []string) error {
 		return err
 	}
 	say("Your crew is set up. Next:")
-	fmt.Print(`  Open a new fish shell, so crew is on your PATH, and run lead. The first time,
-  it asks you to trust its folder, then helps you add your first repo.
+	fmt.Print(`  With ~/.local/bin on your PATH, run lead. The first time, it asks you to
+  trust its folder, then helps you add your first repo.
   See SETUP.md for the full walkthrough.
 `)
 	return nil

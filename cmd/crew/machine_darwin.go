@@ -20,7 +20,7 @@ func machineName() string {
 
 // installTools is how crew install suggests installing the tools it's missing.
 // macOS comes with curl.
-const installTools = "with Homebrew: brew install git gh fish"
+const installTools = "with Homebrew: brew install git gh"
 
 // ioctlGetTermios is the ioctl that reads a terminal's settings, for stdinIsTerminal.
 const ioctlGetTermios = syscall.TIOCGETA
