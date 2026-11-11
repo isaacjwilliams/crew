@@ -39,7 +39,7 @@ crew upgrade
 lead
 ```
 
-`crew` and `lead` are found through `~/.local/bin`, so it must be on your `PATH`; setup says what to add if it isn't. `crew upgrade` is how you get new versions later. The first `lead` asks you to trust its folder, and offers to add your first repo.
+`crew` and `lead` are found through `~/.local/bin`, so it must be on your `PATH`; setup says what to add if it isn't. The first `lead` asks you to trust its folder, and offers to add your first repo.
 
 Then paste this into your first lead:
 
