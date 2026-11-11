@@ -190,7 +190,7 @@ func (c *Crew) dispatchReady() {
 	var ready []candidate
 	for _, name := range c.projects("") {
 		if _, err := c.loadProject(name); err != nil {
-			continue // the tick has already said it skipped it
+			continue // no clone here, say: the tick warned of it and skipped it above
 		}
 		for _, t := range c.tasks(name) {
 			if t.Status() != Ready || !c.goalRunning(t) {
@@ -209,7 +209,7 @@ func (c *Crew) dispatchReady() {
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
 			fmt.Printf("%s: dispatched for goal %s\n", t.ID(), t.Goal())
-		case exitNotYet:
+		case exitNotYet: // held by a cap or a dependency; the next tick tries again
 		default:
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
 		}
