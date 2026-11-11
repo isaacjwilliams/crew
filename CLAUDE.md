@@ -16,7 +16,7 @@ The README's pitch rests on these principles in particular:
 - the plan is approved before code (4);
 - only the user merges (6);
 - nothing coordination-related touches the shared repo (1);
-- a plain-text ledger in a private repo, shared by several leads (2);
+- a plain-text ledger in a private repo (2);
 - one machine at a time (8);
 - plain words (9);
 - small and quiet (10).
