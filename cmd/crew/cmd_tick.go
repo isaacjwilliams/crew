@@ -161,7 +161,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 		return
 	}
 	if rounds > sent {
-		unsent := strings.ToLower(unsentRounds(t))
+		unsent := unsentRounds(t)
 		if c.step(nil, "followup", t.Path) == 0 {
 			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
 		}

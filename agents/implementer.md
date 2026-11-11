@@ -116,7 +116,7 @@ When your prompt says there's new feedback:
    An `Automated review requested` line isn't a comment to address or reply to: step 6 handles it.
 4. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push.
 5. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
-6. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, run a new pass of "Workflow: automated review", then tick the line. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
+6. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, run a new pass of "Workflow: automated review", then tick the line. One pass answers every such line in the rounds you were sent. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
 7. Tick the checkboxes in the rounds, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
 8. Finish with a short report listing each comment and what you did, and, after a pass, what automated review left for the user.
 

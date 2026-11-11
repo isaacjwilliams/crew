@@ -114,13 +114,13 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 }
 
 // unsentRounds names the review rounds the task's worker hasn't been sent yet:
-// "Round 3", or "Rounds 2 to 4" when several piled up while it was busy.
+// "round 3", or "rounds 2 to 4" when several piled up while it was busy.
 func unsentRounds(t Task) string {
 	from, to := atoiOr0(t.Get("last_round_sent"))+1, atoiOr0(t.Get("review_rounds"))
 	if from == to {
-		return fmt.Sprintf("Round %d", to)
+		return fmt.Sprintf("round %d", to)
 	}
-	return fmt.Sprintf("Rounds %d to %d", from, to)
+	return fmt.Sprintf("rounds %d to %d", from, to)
 }
 
 // crew restack TASK [--again]: has a stacked task's worker rebase it after its

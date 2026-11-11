@@ -160,8 +160,9 @@ func byWho(cms []ghComment, who string) []ghComment {
 }
 
 // crew feedback TASK [--since ISO]: pulls the PR comments newer than
-// feedback_since. The user's own become a review round for the worker; their
-// `crew review` comment asks it for another automated review.
+// feedback_since. The user's own become a review round for the worker; a
+// comment of theirs that says only `crew review` (isReviewRequest) asks it for
+// another automated review.
 // Collaborators' become unchecked items under Open questions: they wait for the
 // user to decide what to do, and no agent answers them on its own. Anyone else's
 // are left alone. Exits 3 if there was nothing new.
@@ -245,7 +246,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	r := reviewRound{reviews: byWho(reviews, "me"), inline: byWho(inline, "me")}
 	for _, cm := range byWho(convo, "me") {
 		if isReviewRequest(cm) {
-			r.reviewRequest = "comment " + cm.ID.String()
+			r.reviewRequestSource = "comment " + cm.ID.String()
 		} else {
 			r.convo = append(r.convo, cm)
 		}
@@ -276,7 +277,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	if !r.empty() {
 		n, round = r.add(t, num)
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
-		if r.reviewRequest != "" {
+		if r.reviewRequestSource != "" {
 			msg += ", with a request for another automated review"
 		}
 		t.Log(msg)
@@ -319,13 +320,15 @@ func cmdReview(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	// crew tick sends rounds only for tasks in flight, and crew sync leaves the
+	// status of a task whose PR was closed unmerged as it was.
 	if t.PR() == "" || !t.Status().InFlight() || t.Get("pr_state") == "closed" {
 		return fail("%s has no open PR", t.ID())
 	}
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequest: "crew review"}.add(t, t.PRNumber())
+	n, _ := reviewRound{reviewRequestSource: "crew review"}.add(t, t.PRNumber())
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -349,11 +352,11 @@ func isReviewRequest(cm ghComment) bool {
 // it, and their request for another automated review pass, if they made one.
 type reviewRound struct {
 	reviews, inline, convo []ghComment
-	reviewRequest          string // where it came from: "comment <id>" or "crew review"
+	reviewRequestSource    string // where it came from: "comment <id>" or "crew review"
 }
 
 func (r reviewRound) empty() bool {
-	return len(r.reviews)+len(r.inline)+len(r.convo) == 0 && r.reviewRequest == ""
+	return len(r.reviews)+len(r.inline)+len(r.convo) == 0 && r.reviewRequestSource == ""
 }
 
 // add writes the round into the task as its next, before ## Log, and counts it
@@ -388,8 +391,8 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 		}
 		b.WriteString("\n")
 	}
-	if r.reviewRequest != "" {
-		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n\n", r.reviewRequest)
+	if r.reviewRequestSource != "" {
+		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n\n", r.reviewRequestSource)
 	}
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
@@ -536,7 +539,7 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	}
 	review := t.NewestReview()
 	if review == 0 {
-		return fail("%s records no automated review to summarize", t.ID())
+		return fail("%s records no automated review to summarize (no '### Automated review N' under '## Automated reviews')", t.ID())
 	}
 	p, err := c.loadProject(t.Project())
 	if err != nil {
