@@ -116,6 +116,8 @@ func cmdInstall(c *Crew, args []string) error {
 			return err
 		}
 	}
+	// Only links an earlier install made, as its manifest lists them, never the
+	// other files in ~/.local/bin.
 	in.prune("links", bin, nil)
 	if !slices.Contains(filepath.SplitList(os.Getenv("PATH")), bin) {
 		note("~/.local/bin isn't on your PATH. Add it in your shell's startup file: fish_add_path ~/.local/bin in fish, or export PATH=\"$HOME/.local/bin:$PATH\" in bash or zsh")

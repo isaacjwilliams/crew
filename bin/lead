@@ -1,6 +1,6 @@
 #!/bin/sh
 # lead: talk to the crew lead. Runs `crew lead` from the crew home this file is in,
-# found through any symlinks to it, as bin/crew finds its home.
+# found through any symlinks to it with the same loop as bin/crew: keep the two in step.
 self=$0
 while [ -L "$self" ]; do
   link=$(readlink "$self")

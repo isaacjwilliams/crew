@@ -1,8 +1,8 @@
 package main
 
-// The lead, started in the home's lead/, whose settings make the session the lead
-// and give it the ledger and the project checkouts: crew lead, which bin/lead
-// runs, and crew serve.
+// Starting the lead: crew lead, which bin/lead runs, and execLead, which crew
+// lead and crew serve share. A lead runs in the home's lead/, whose settings make
+// the session the lead and give it the ledger and the project checkouts.
 
 import (
 	"os"
@@ -28,26 +28,23 @@ func cmdLead(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	name, sessionProject, settings := "lead", allProjects, c.Settings
+	// Every lead loads lead/.mcp.json, so bring it up to date first: a project
+	// lead's --settings switch off the other projects' servers as it lists them.
+	// A project's problem is reported and doesn't stop the lead.
+	c.syncMCP()
+	name, sessionProject, settings, mcp := "lead", allProjects, c.Settings, []string{}
 	if proj != "" {
 		name, sessionProject = "lead-"+proj, proj
 		if settings, err = c.projectSettings(proj); err != nil {
 			return err
 		}
-	}
-	// Every lead loads lead/.mcp.json, so bring it up to date. A project's problem
-	// is reported and doesn't stop the lead.
-	c.syncMCP()
-	flags := []string{"--name", name, "--permission-mode", settings["LEAD_PERMISSION_MODE"]}
-	if proj != "" {
-		// After the sync: these settings switch off the other projects' servers
-		// as lead/.mcp.json lists them now.
 		off, err := c.leadMCPSettings(proj)
 		if err != nil {
 			return err
 		}
-		flags = append(flags, "--settings", off)
+		mcp = []string{"--settings", off}
 	}
+	flags := append([]string{"--name", name, "--permission-mode", settings["LEAD_PERMISSION_MODE"]}, mcp...)
 	cmd := c.claude(append(flags, claudeArgs...)...)
 	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject)
 	return c.execLead(cmd)
