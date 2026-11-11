@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,6 +37,17 @@ func (c *Crew) claude(args ...string) *exec.Cmd {
 	env := environWithout("CLAUDECODE", "PATH", "CREW_PROJECT")
 	cmd.Env = append(env, "PATH="+c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return cmd
+}
+
+// execClaude replaces crew with cmd, a claude command, so the terminal and its
+// signals go straight to claude. claude keeps crew's current directory; a caller
+// that needs another changes into it first. It returns only when the exec fails.
+func execClaude(cmd *exec.Cmd) error {
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return fail("'claude' is required but not installed")
+	}
+	return syscall.Exec(path, cmd.Args, cmd.Env)
 }
 
 // environWithout is crew's own environment (os.Environ) without the named

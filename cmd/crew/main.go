@@ -50,6 +50,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"sync":           cmdSync,
 	"dispatch":       cmdDispatch,
 	"followup":       cmdFollowup,
+	"attach":         cmdAttach,
 	"restack":        cmdRestack,
 	"cleanup":        cmdCleanup,
 	"goal":           cmdGoal,

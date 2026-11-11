@@ -58,6 +58,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    collaborators' under Open questions for you
   crew followup TASK [--fresh] [--note TEXT]
                                    Resume the task's worker on the latest round/note
+  crew attach TASK                 Attach this terminal to the task's worker; a
+                                   followup or tick that resumes the worker ends it
   crew restack TASK [--again]      Have a stacked task's worker rebase it after its
                                    parent moved or merged (bottom of the stack first);
                                    --again resends a restack the worker already has

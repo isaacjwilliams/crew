@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # crew end to end: a bare "remote", a clone, a fresh crew home, and stub claude/gh.
-# Covers new/ready/dispatch/feedback/followup/reply/sync/cleanup/gardener/promote.
+# Covers new/ready/dispatch/feedback/followup/attach/reply/sync/cleanup/gardener/promote.
 # Variables below are read inside check's eval strings, which shellcheck can't see.
 # shellcheck disable=SC2034
 . "$(dirname "$0")/lib.sh"
@@ -171,6 +171,13 @@ check "workers get the shipped settings, with their project and the home, when t
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
+check "attach attaches to the task's worker from the current directory" \
+  '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
+check "attach takes a PR number" 'env -u CLAUDECODE crew attach "#12" && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" ]]'
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(env -u CLAUDECODE crew attach 2 2>&1)
+check "attach refuses a task that has no worker, and runs no claude" '[[ $out == *"no worker has run for 002-"*" yet" && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(crew attach 1 2>&1)
+check "attach refuses inside a Claude Code session, and runs no claude" '[[ $out == *"needs your own terminal"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "followup refuses while the worker is working" '! crew followup 1 --note hi 2>/dev/null'
 setstate blocked 4242 waiting
 check "followup refuses while the worker waits on a prompt" '! crew followup 1 --note hi 2>/dev/null'
@@ -707,6 +714,21 @@ out=$(cd "$HOME" && crew status)
 check "outside a repo, status shows every project" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* && $out != *"other projects"* ]]'
 out=$(cd "$HOME" && crew find 1 2>&1)
 check "outside a repo, a task number two projects share is ambiguous" '[[ $out == *ambiguous* ]]'
+TWIN=$L/projects/$P2/tasks/$(basename "$F1"); sed "s/^project: .*/project: $P2/" "$F1" >"$TWIN"
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && env -u CLAUDECODE crew attach "$(basename "$F1" .md)" 2>&1)
+check "outside a repo, a task ID two projects share is ambiguous, naming each project, and attach runs no claude" \
+  '[[ $out == *ambiguous*"($PJ)"*"($P2)"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
+check "CREW_PROJECT resolves a task ID two projects share in its project" '[[ $(CREW_PROJECT=$P2 crew get "$(basename "$F1" .md)" project) == "$P2" ]]'
+# A busy worker's hint names its task so that it resolves back to that task here.
+cp "$HOME/agents.json" "$HOME/agents.bak"
+jq --arg id "$(crew get "$F1" worker_job)" 'map(select(.id != $id)) + [{id: $id, state: "working", pid: 4242, sessionId: ($id + "-busy")}]' \
+  "$HOME/agents.bak" >"$HOME/agents.json"
+out=$(CREW_PROJECT=$P2 crew followup "$F1" --note hi 2>&1); want="crew attach '$F1',"
+check "a busy worker's hint names its task by path where another project's task with that ID would win" '[[ $out == *"$want"* ]]'
+out=$(CREW_PROJECT=$PJ crew followup "$F1" --note hi 2>&1); want="crew attach $(basename "$F1" .md),"
+check "a busy worker's hint names its task by ID where that ID finds it" '[[ $out == *"$want"* ]]'
+mv "$HOME/agents.bak" "$HOME/agents.json"
+rm "$TWIN"
 out=$(CREW_PROJECT=$P2 crew status)
 check "CREW_PROJECT scopes status to its project, over the current directory's" '[[ $out == *"$NL$P2$NL"* && $out != *"$NL$PJ$NL"* ]]'
 check "scoped status ends with what waits on you in other projects" '[[ $out == *"waiting on you in other projects"*"$PJ: "*"task(s) with open questions"* ]]'
