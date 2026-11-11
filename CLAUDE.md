@@ -1,12 +1,12 @@
 # agent-crew
 
-Source for a personal Claude Code agent setup: seven agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, reviewer, gardener), the `pr-review` skill in `.claude/skills/`, the `crew` CLI (Go, in `cmd/crew/`) with its write guard, fish integration, systemd units and their launchd twins for a Mac, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
+Source for a personal Claude Code agent setup: seven agent profiles (lead, goal-lead, implementer, casual-observer, plan-reviewer, reviewer, gardener), the `pr-review` skill in `.claude/skills/`, the `crew` CLI (Go, in `cmd/crew/`) with its write guard, the `lead` command, fish completions, systemd units and their launchd twins for a Mac, and the lead's settings in `lead/`. This checkout becomes the public repo once the user publishes it. A person's *crew home* (`~/crew`) is a private copy of it, made by `crew setup`, which adds their ledger and pulls new versions from here with `crew upgrade`. Development happens here; a home only takes changes from upstream.
 
 Read `ARCHITECTURE.md` before any structural change. It has the design principles, the flows, and the **Contracts** table of cross-file dependencies. `SETUP.md` is the user-facing guide; `tests/README.md` explains the test harness.
 
 ## Safety rules for working in this repo
 
-- **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
+- **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/.local/bin/`, `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
 - **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
 - **Never run `claude remote-control`**, not even with `--help`: it may start a server. Read https://code.claude.com/docs/en/remote-control.md instead.
 - **Never push this repo, or create GitHub repos,** unless the user asks: nothing here is public until they publish it.
@@ -29,8 +29,8 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
 
 ## Conventions
 
-- **Shipped code** is Go, standard library only, plus fish, and two `sh` files in `bin/`: the launcher `crew` and the hook forwarder `crew-guard`.
-  - Runtime dependencies are git, gh, claude, fish and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add third-party Go modules, Python or Node.
+- **Shipped code** is Go, standard library only, plus three `sh` files in `bin/` (the launcher `crew`, the hook forwarder `crew-guard` and the `lead` shim) and the fish completions.
+  - Runtime dependencies are git, gh, claude and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add third-party Go modules, Python or Node.
   - `gofmt` and `go vet` are the Go lint. Keep shellcheck clean at `-S warning` for `bin/` and `tests/`.
   - Linux is the reference, and crew runs on macOS too. Code that runs a system's own tools goes in a `_linux.go` file with a `_darwin.go` beside it; the parsing and choices around it go in a neutral file, so `go test` on Linux covers them. The shell suites are Linux-only; the release workflow runs `go test` on macOS.
   - **Services** are `systemd/` units on Linux and `launchd/` plists on a Mac, one plist per `.service`. `services_linux.go` and `services_darwin.go` define the same functions and are the only places crew runs `systemctl` or `launchctl`; callers never branch on the system. A change to a unit needs the same change to its plist: `services_test.go` checks that they agree.

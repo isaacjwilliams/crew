@@ -21,8 +21,9 @@ Setup
   crew upgrade                     Merge the public repo's new version, install it,
                                    push, and restart the lead's server
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
-                                   Put this machine's files in place: agents, fish
-                                   functions, the services (not enabled)
+                                   Put this machine's files in place: agents, links
+                                   to crew and lead in ~/.local/bin, fish
+                                   completions, the services (not enabled)
   crew project add [PATH]          Register a repo (default: current) with the ledger,
                                    or this machine's clone of one registered already
   crew checkout PROJECT            Bring the lead's reading copy of PROJECT up to date
