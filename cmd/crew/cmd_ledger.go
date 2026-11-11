@@ -173,6 +173,9 @@ func cmdSet(c *Crew, args []string) error {
 		return fail("key required")
 	}
 	key, value := args[1], strings.Join(args[2:], " ")
+	if _, ok := parsePriority(value); key == "priority" && !ok {
+		return fail("priority must be a whole number, not '%s'", value)
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}

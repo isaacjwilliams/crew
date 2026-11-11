@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -320,6 +321,27 @@ func (t Task) PR() string        { return t.Get("pr") }
 func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
+
+// Priority orders crew tick's dispatch of a running goal's ready tasks: higher
+// goes first. A task without one has priority 0.
+func (t Task) Priority() (int, error) {
+	v := t.Get("priority")
+	n, ok := parsePriority(v)
+	if !ok {
+		return 0, fmt.Errorf("%s: priority '%s' isn't a whole number", t.ID(), v)
+	}
+	return n, nil
+}
+
+// parsePriority reads a task's priority: a whole number, negative to push a task
+// back, or empty for 0.
+func parsePriority(s string) (int, bool) {
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil
+}
 
 // PRNumber is the number at the end of the task's PR URL.
 func (t Task) PRNumber() string {

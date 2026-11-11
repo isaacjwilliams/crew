@@ -221,6 +221,14 @@ func (s *statusView) taskRow(t Task, indent string) {
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
 	}
+	if Status(st) == Ready && t.Goal() != "" {
+		// Only a goal's ready tasks are dispatched in priority order.
+		if n, err := t.Priority(); err != nil {
+			notes = append(notes, "priority ?")
+		} else if n != 0 {
+			notes = append(notes, fmt.Sprintf("priority %d", n))
+		}
+	}
 	fmt.Printf("  %s %-20s %-26s %-6s %s\n", padID(indent+t.ID()), st, worker, pr, strings.Join(notes, "  "))
 	for _, k := range s.kids[t.Path] {
 		s.taskRow(k, strings.ReplaceAll(indent, "└ ", "  ")+"└ ")
