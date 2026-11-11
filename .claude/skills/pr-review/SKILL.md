@@ -196,8 +196,8 @@ then spawn the Claude reviewer, so both work at once, and wait for both answers 
   > `git --no-optional-locks`; the sandbox is read-only.
 
 - **The Claude reviewer** gets the mirror image: Codex's open findings it didn't raise, Codex's refutations and answers,
-  and your counter-evidence. Write `reviewer-round-<n>.md`: its own report and any earlier round replies of its own,
-  verbatim, then the numbered items. Spawn a fresh `reviewer` subagent, never a resumed one, with this prompt:
+  and your counter-evidence. Write `reviewer-round-<n>.md`: its own report, then each earlier round's items and its
+  reply to them, all verbatim, then this round's numbered items. Spawn a fresh `reviewer` subagent, never a resumed one, with this prompt:
 
   > Rebuttal round <n> on `<fork sha>..HEAD` in `<review root>`. The rubric is `${CLAUDE_SKILL_DIR}/rubric.md`, the
   > briefing `<briefing path>`, and the round `<briefing dir>/reviewer-round-<n>.md`.

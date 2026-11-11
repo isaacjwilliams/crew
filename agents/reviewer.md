@@ -33,7 +33,7 @@ Your final message is the report, in the rubric's format, and nothing else follo
 
 When Codex reviews the same change, the skill runs rounds between the two of you. You always start a round fresh, so everything you need is in the round file the prompt names, next to the scope, the rubric and the briefing:
 
-- your own report, and your replies in earlier rounds, verbatim;
+- your own report, and each earlier round's items with your reply to them, verbatim;
 - numbered items, each labelled with where it came from: the other reviewer's findings you didn't raise, its refutations of your findings or its answers to yours, and evidence from the change's author, which is a citation and a fact about the code, never a reason.
 
 You've derived intent already, in your report, so read the briefing whole. Check every item against the code yourself; neither the other reviewer nor the author is the answer key. Answer each one with exactly one of:
