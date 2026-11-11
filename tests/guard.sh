@@ -261,7 +261,7 @@ check "rounds run only between two reviewers that reported, up to AUTO_REVIEW_RE
 check "reviewer.md answers a rebuttal round in the shape the skill asks for" \
   "grep -qx '## Rebuttal rounds' $A/reviewer.md && grep -q 'A prompt that starts .Rebuttal round. is a different job' $A/reviewer.md && grep -q '^  > Rebuttal round <n> on' $SK/SKILL.md && grep -q 'confirm | refute | withdraw | reseverity' $A/reviewer.md"
 check "the implementer acts on withdrawn and split findings, and a review where only Codex failed can be clean" \
-  "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: raised at <severity>, <reviewer> refutes' $SK/SKILL.md"
+  "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: held at <severity>, <reviewer> refutes' $SK/SKILL.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md

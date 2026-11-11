@@ -87,8 +87,8 @@ After you open your PR, you review it before the user does. `AUTO_REVIEWS` (`cre
    - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. If it questions the brief's structure, don't change the code; treat it as in first-run step 5, under "Findings the brief settled": `left for the user`.
    - **fix later**: write a proposal (first-run step 8): `proposal <its file name>`.
    - **nitpick**: fix it if it's in lines this PR changed (`fixed in <short sha>`); otherwise `recorded`.
-   - **withdrawn**: the reviewer that raised it withdrew it in a round; don't change the code: `withdrawn in round <n>`.
-   - **split**: one reviewer still refutes it, and you settle it. With cited evidence that sides with the refuter (a `file:line`, a passing test, a fact about the code), don't change the code: `not a defect: <the evidence>`. Otherwise act on it as above, at the severity it was raised at.
+   - **withdrawn**: its raiser withdrew it in a round and no reviewer holds it; don't change the code: `withdrawn in round <n>`.
+   - **split**: one reviewer holds it and the other refutes it, and you settle it. With cited evidence that sides with the refuter (a `file:line`, a passing test, a fact about the code), don't change the code: `not a defect: <the evidence>`. Otherwise act on it as above, at the severity it's held at.
    - **disputed, uncertain**: don't change the code: `left for the user`.
 
    Then run the checks and push.

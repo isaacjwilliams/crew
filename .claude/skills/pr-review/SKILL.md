@@ -220,12 +220,14 @@ Now give each finding your verdict, on where the reviewers ended:
 - **Disagree**: you have counter-evidence, as step 5 defines it.
 - **Uncertain**: plausible, but you can't settle it. It goes to the user, never quietly in your favour.
 
-Then its **agreed severity**:
+Then its **agreed severity**, from where each reviewer stands after the last round. A reviewer **holds** a finding it
+raised and didn't withdraw, or one it confirmed or gave a severity of its own. It **refutes** one it refuted, or one it
+raised and then withdrew.
 
-- **Withdrawn** when every reviewer that raised it withdrew it in a round.
-- **Split** when a reviewer still refutes it after the last round. You settle a split when you act on the review, not
-  here: record the severity it was raised at and who refutes it.
-- Otherwise, start from the **highest severity any reviewer still holds**. When you agree, that's the agreed severity.
+- **Withdrawn** when no reviewer holds it: its raisers withdrew it and nobody confirmed it.
+- **Split** when one reviewer holds it and the other refutes it. You settle a split when you act on the review, not
+  here: record the severity it's held at and who refutes it.
+- Otherwise, start from the **highest severity any reviewer holds**. When you agree, that's the agreed severity.
   You may lower it only with cited evidence that the consequence is smaller than the reviewers say; if you can't cite
   any, keep it.
 - When you disagree and no reviewer refutes the finding, it's `disputed`.
@@ -259,7 +261,7 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 - Round <n>, <reviewer>:
   > <its reply on this finding, verbatim>
 - Verdict: <agree | disagree | uncertain> — <your evidence, with file:line>
-- Agreed severity: <must fix | should fix | fix later | nitpick | withdrawn | split: raised at <severity>, <reviewer> refutes | disputed | uncertain>
+- Agreed severity: <must fix | should fix | fix later | nitpick | withdrawn | split: held at <severity>, <reviewer> refutes | disputed | uncertain>
 - Outcome:
 
 **Conclusion — Claude reviewer:** <verbatim>
