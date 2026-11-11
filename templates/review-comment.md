@@ -5,10 +5,10 @@
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
      agents. Withdrawn findings aren't listed.
 
-     <N> counts every review in this pass, including one whose reviewers failed. The first pass
-     opens with the line below. A later pass, one the user asked for, opens instead with "<N> more
-     automated reviews of this PR ran since the last summary." ("1 more automated review …" for
-     one). Each review reads the whole PR, so never say it reviewed only the new changes.
+     <N> counts every review in this pass, including one whose reviewers failed. When the record
+     has a "Summary posted" line before this pass's reviews, open instead of the line below with
+     "<N> more automated reviews of this PR ran since the last summary." ("1 more automated review
+     …" for one). Each review reads the whole PR, so never say it reviewed only the new changes.
      The sentences after it say who reviewed, from the Reviewers and Rounds lines:
      - the Claude reviewer only: "Each was by a Claude reviewer." ("It was by …" after a single review)
      - with Codex: "Each was by a Claude reviewer and Codex."
