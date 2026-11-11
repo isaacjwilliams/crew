@@ -502,13 +502,17 @@ func cmdReply(c *Crew, args []string) error {
 	return nil
 }
 
-// summaryMarker tags the automated-review summary a worker posts on its PR, so
-// crew review-summary finds it again and edits it rather than posting another.
-const summaryMarker = "<!-- crew review-summary -->"
+// summaryMarker tags the automated-review summary a worker posts on its PR with
+// the newest review it covers, so crew review-summary can find it again.
+func summaryMarker(review int) string {
+	return fmt.Sprintf("<!-- crew review-summary: review %d -->", review)
+}
 
-// crew review-summary TASK FILE: posts FILE as the automated-review summary on
-// the task's own PR. A PR has one: if a summary from this GitHub account is
-// there already, it is edited to FILE instead.
+// crew review-summary TASK FILE: posts FILE on the task's own PR as the summary
+// of its automated review, up to the newest review the task records. Each pass
+// of automated review gets a summary of its own: when this GitHub account's
+// summary for that same review is there already, it is edited to FILE instead.
+// Earlier passes' summaries are left as they are.
 func cmdReviewSummary(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -530,6 +534,10 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	if t.PR() == "" {
 		return fail("task has no PR")
 	}
+	review := t.NewestReview()
+	if review == 0 {
+		return fail("%s records no automated review to summarize", t.ID())
+	}
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -541,13 +549,14 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	repo, num := p.Repo(), t.PRNumber()
 	// summaryMarker finds this comment again; replyMarker keeps crew feedback from
 	// reading it back as the user's feedback.
-	body := strings.TrimRight(string(text), "\n") + "\n\n" + summaryMarker + "\n" + replyMarker
+	marker := summaryMarker(review)
+	body := strings.TrimRight(string(text), "\n") + "\n\n" + marker + "\n" + replyMarker
 	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
 	if err != nil {
 		return err
 	}
 	for _, cm := range comments {
-		if cm.whose(me) == "me" && strings.Contains(cm.Body, summaryMarker) {
+		if cm.whose(me) == "me" && strings.Contains(cm.Body, marker) {
 			if _, err := gh(repo, "api", "--silent", "--method", "PATCH", "repos/{owner}/{repo}/issues/comments/"+cm.ID.String(), "-f", "body="+body); err != nil {
 				return quietly(err)
 			}

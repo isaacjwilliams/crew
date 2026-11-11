@@ -233,15 +233,25 @@ rm -f "$HOME/gh-last-body"
 check "reply refuses a comment on another PR" '! crew reply 1 116 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 check "reply refuses an ID that is no comment or review on the PR" '! crew reply 1 999 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
+review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
+check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
+review "$F1" 1
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1); body=$(cat "$HOME/gh-last-body")
-want=$'Automated review\n\nNothing found.\n\n<!-- crew review-summary -->\n<!-- crew -->'
-check "review-summary posts the file on the task's PR, tagged as the summary and as crew's" '[[ $out == "posted the automated-review summary on PR #12" && $body == "$want" ]] && grep -q "issues/12/comments -f body=Automated review" "$HOME/gh-calls.log"'
+want=$'Automated review\n\nNothing found.\n\n<!-- crew review-summary: review 1 -->\n<!-- crew -->'
+check "review-summary posts the file on the task's PR, tagged as crew's and as the summary up to the newest review" '[[ $out == "posted the automated-review summary on PR #12" && $body == "$want" ]] && grep -q "issues/12/comments -f body=Automated review" "$HOME/gh-calls.log"'
 printf 'Automated review\n\nOne fixed.\n' >"$HOME/summary.md"; posts=$(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log")
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
-check "a second summary edits the first instead of posting another" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summary") == "Automated review"*"One fixed."* && $(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log") == "$posts" ]] && grep -q "PATCH repos/{owner}/{repo}/issues/comments/120 " "$HOME/gh-calls.log"'
+check "a second summary for the same newest review edits the first instead of posting another" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/120") == "Automated review"*"One fixed."* && $(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log") == "$posts" ]] && grep -q "PATCH repos/{owner}/{repo}/issues/comments/120 " "$HOME/gh-calls.log"'
+sed -i "/^### Automated review 1\$/a Summary posted" "$F1"; review "$F1" 2; review "$F1" 3
+printf 'Automated review\n\nTwo more ran.\n' >"$HOME/summary.md"
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
+check "once a later review is recorded, the next pass's summary is posted new and the first is left alone" '[[ $out == "posted the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/121") == *"Two more ran."*"<!-- crew review-summary: review 3 -->"* && $(cat "$HOME/gh-summaries/120") == *"One fixed."* ]]'
+printf 'Automated review\n\nTwo more ran, edited.\n' >"$HOME/summary.md"
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
+check "within the later pass, a second summary edits that pass's comment" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/121") == *"edited."* && $(cat "$HOME/gh-summaries/120") == *"One fixed."* && ! -e $HOME/gh-summaries/122 ]]'
 out=$(crew feedback 1 --since 1970-01-01T00:00:00Z)
-check "crew feedback doesn't read the summary back" '[[ $out == *"comment 115"* && $out != *"comment 120"* ]] && ! grep -q "One fixed" "$F1"'
-rm -f "$HOME/gh-last-body" "$HOME/gh-summary"
+check "crew feedback doesn't read the summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]] && ! grep -q "One fixed\|Two more" "$F1"'
+rm -rf "$HOME/gh-last-body" "$HOME/gh-summaries"
 check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew review-summary 2 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 : >"$HOME/summary.md"
 check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'

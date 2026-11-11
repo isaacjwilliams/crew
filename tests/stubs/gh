@@ -13,8 +13,9 @@
 #   118  carol, conversation comment, no write access (NONE; never pulled)
 #   119  a bot with write access, conversation comment (never pulled)
 #   $HOME/gh-more-comments, if present: more conversation comments, one JSON object a line
-#   120  isaac's automated-review summary, once one is posted to #12; its body is
-#        $HOME/gh-summary (tagged <!-- crew -->, so never pulled)
+#   120… isaac's automated-review summaries, as they are posted to #12: 120 first, then
+#        121 and on. Each one's body is $HOME/gh-summaries/<id> (tagged <!-- crew -->, so
+#        never pulled)
 # `repo create NAME --private --source . --remote origin` makes a bare repo at
 # $HOME/remotes/NAME.git and adds it as origin, or fails if that repo exists.
 # Looking up any other comment or review ID fails, like a 404. The body of the latest
@@ -59,17 +60,22 @@ case "$*" in
     echo '{"id":114,"pull_request_review_id":901,'"$isaac"',"path":"a.ts","line":1,"body":"draft in pending review","html_url":"u114","created_at":"2026-09-25T21:10:00Z"}' ;;
   *issues/comments/115) echo "$c115" ;;
   *issues/comments/116) echo "$c116" ;;
-  # An edit to the summary: its new body is already in gh-last-body (above).
-  *"--method PATCH "*issues/comments/120\ -f\ body=*) [[ -e $HOME/gh-summary ]] && cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;
+  # An edit to a summary: its new body is already in gh-last-body (above).
+  *"--method PATCH "*issues/comments/*\ -f\ body=*)
+    id=$*; id=${id#*issues/comments/}; id=${id%% *}
+    [[ -e $HOME/gh-summaries/$id ]] && cp "$HOME/gh-last-body" "$HOME/gh-summaries/$id" ;;
   *issues/comments/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
-  *issues/12/comments\ -f\ body=*"<!-- crew review-summary -->"*) cp "$HOME/gh-last-body" "$HOME/gh-summary" ;;
+  *issues/12/comments\ -f\ body=*"<!-- crew review-summary"*)
+    mkdir -p "$HOME/gh-summaries"
+    cp "$HOME/gh-last-body" "$HOME/gh-summaries/$((120 + $(find "$HOME/gh-summaries" -type f | wc -l)))" ;;
   *issues/12/comments\ -f\ body=*) : ;;
   *issues/12/comments*)
     echo "$c115"; echo "$c117"; echo "$c118"; echo "$c119"
     [[ -e $HOME/gh-more-comments ]] && cat "$HOME/gh-more-comments"
-    if [[ -e $HOME/gh-summary ]]; then
-      jq -cn --rawfile b "$HOME/gh-summary" '{id:120, user:{login:"isaac",type:"User"}, author_association:"OWNER", body:$b, html_url:"u120", created_at:"2026-09-25T21:30:00Z", issue_url:"https://api.github.com/repos/isaac/webapp/issues/12"}'
-    fi ;;
+    for f in "$HOME"/gh-summaries/*; do
+      [[ -e $f ]] || continue
+      jq -cn --rawfile b "$f" --argjson id "${f##*/}" '{id:$id, user:{login:"isaac",type:"User"}, author_association:"OWNER", body:$b, html_url:("u" + ($id | tostring)), created_at:"2026-09-25T21:30:00Z", issue_url:"https://api.github.com/repos/isaac/webapp/issues/12"}'
+    done ;;
   "pr list"*) echo "https://github.com/isaac/webapp/pull/12" ;;
   "pr view"*) echo "{\"state\":\"$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"updatedAt\":\"$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)\"}" ;;
   "auth status") exit 0 ;;

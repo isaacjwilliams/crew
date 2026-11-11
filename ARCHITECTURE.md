@@ -26,7 +26,7 @@ These are invariants. Breaking one changes the design, not just the implementati
      - task branches pushed under `BRANCH_PREFIX`, after every commit;
      - the PRs workers open;
      - optional one-line replies to the user's own review comments: in the thread for an inline comment, otherwise as a PR comment that quotes the one it answers;
-     - one comment per PR summing up its automated review (`crew review-summary`), which a worker edits rather than posting a second;
+     - one comment per pass of automated review summing it up (`crew review-summary`), which a worker edits rather than posting a second for the same pass;
      - two lines in `.git/info/exclude`, which is local to the clone.
 2. **The ledger is the single source of truth, it's plain text, and it's pushed to the person's private remote.**
    - Every change is committed at once and pushed in the background, normally within seconds, so another machine can take over with what this one knew. A push that fails is retried by the next commit, and by every `crew tick`.
@@ -575,7 +575,7 @@ Changing any of these means updating every side listed.
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies and the automated-review summary | `crew reply`, `crew review-summary` → the `crew feedback` filter |
-| `<!-- crew review-summary -->` marker on the automated-review summary, found on the user's own comments | `crew review-summary` (posts, or edits the comment that has it) |
+| `<!-- crew review-summary: review N -->` marker on an automated-review summary, N the newest review it covers (`Task.NewestReview`, from `### Automated review N`), found on the user's own comments | `crew review-summary` (edits the comment with the same N, or posts a new one: a later pass's summary is a comment of its own) |
 | The briefing: first line `Code review`, then exactly `## Scope`, `## How to verify`, `## Hard constraints`, `## Stated intent`, stated intent last; the reviewer reads up to `## Stated intent` and derives intent first | `pr-review` `SKILL.md` step 3 → `reviewer.md`, `rubric.md` ("Derived intent vs. stated intent") |
 | A line under a task's Decisions ends with whose call it was: `(user)`, `(lead)` or `(worker)`; only `(user)` lines are the user's decisions in the review briefing, and `## Hard constraints` always reads `None recorded.` | `lead.md`, `goal-lead.md`, `implementer.md` (writers), `templates/task.md`, `LEDGER.md` → `pr-review` `SKILL.md` step 3; checked in `tests/guard.sh` |
 | The rubric is `rubric.md` beside `SKILL.md`, passed to the reviewer by path (`${CLAUDE_SKILL_DIR}/rubric.md`), with severities `must fix`, `should fix`, `fix later`, `nitpick` and its report format | `pr-review` → `reviewer.md`; checked in `tests/guard.sh` |
