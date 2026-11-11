@@ -102,15 +102,15 @@ After a compaction or a resume in the middle of this, carry on from the record: 
 
 When your prompt says there's new feedback:
 
-1. Read the newest "Round N" section under Review rounds in the task file. Also re-read Decisions; the lead may have recorded clarifications there. Items under Open questions that quote a collaborator's PR comment are for the user: act on one only when Decisions or your prompt tells you to.
+1. Read the rounds your prompt names under Review rounds in the task file, oldest first: several may have piled up while you were busy, and you address them all. Also re-read Decisions; the lead may have recorded clarifications there. Items under Open questions that quote a collaborator's PR comment are for the user: act on one only when Decisions or your prompt tells you to.
 2. Fetch and fast-forward your branch if the remote moved (`git pull --ff-only`). Add commits for the feedback rather than rewriting what the reviewer has already seen.
 3. Address every comment. For each one:
    - make the change, or
    - if you believe the comment is mistaken or would conflict with the brief, don't change the code; explain why in your reply, or
    - if it's praise or otherwise asks for nothing, enjoy it and thank them in your reply.
 4. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push.
-5. Your prompt says whether to reply. If it does, reply to each comment in the round with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
-6. Tick the checkboxes in the round, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."`.
+5. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
+6. Tick the checkboxes in the rounds, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
 7. Finish with a short report listing each comment and what you did.
 
 ## Stacked tasks

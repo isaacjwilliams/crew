@@ -183,7 +183,7 @@ check "collaborators' comments go under Open questions, unchecked, for the user"
 check "comments from people without write access, and from bots, are never pulled" '! grep -q "Drive-by idea\|Coverage report" "$F1"'
 check "followup resumes on a new round" 'crew followup 1 >/dev/null && [[ $(crew get 1 status) == addressing-feedback && $(crew get 1 last_round_sent) == 1 ]]'
 check "resume passes the recorded session" 'grep -q -- "--resume $(crew get 1 worker_session) " "$HOME/claude-calls.log"'
-check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in the round with .crew reply."'
+check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in those rounds with .crew reply."'
 setstate "done" null
 check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "Round 1" | grep -q "use defaults" && [[ $(crew get 1 status) == working ]]'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
@@ -476,7 +476,12 @@ s13=$(crew get 13 worker_session); crew set 13 feedback_since 1970-01-01T00:00:0
 check "status shows a worker whose turn ended as idle, though a shell it left running keeps it working" '[[ $(crew status) == *"worker: idle, background task running"* ]]'
 out=$(crew tick)
 check "tick sends a round to a worker whose turn ended, though a shell it left running keeps it working" '[[ $out == *"013-tick-routing: round 3 sent to its worker"* && $(crew get 13 last_round_sent) == 3 && $(resumes) == $((n + 1)) ]]'
-rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate "done" null; crew set 13 status pr-open
+rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; crew set 13 status pr-open
+crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null
+setstate "done" null
+out=$(crew tick)
+check "rounds that piled up behind a busy worker are all named in its prompt" '[[ $out == *"013-tick-routing: rounds 4 to 5 sent to its worker"* && $(crew get 13 last_round_sent) == 5 && $(last_prompt) == *"New review feedback is in Rounds 4 to 5 under"* ]]'
+setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
 check "launched sessions never inherit crew's lock fds" '! grep -q "LEAK LOCK FD" "$HOME/claude-calls.log"'
