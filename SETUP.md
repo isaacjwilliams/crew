@@ -342,7 +342,7 @@ If you use OpenAI's Codex, each automated review can run it alongside the review
 
 Codex gets exactly what the reviewer agent gets, your words and the change, and the two don't see each other's work until both have reported. Then they answer each other's findings for up to `AUTO_REVIEW_REBUTTALS` rounds (2 by default): each confirms, refutes, withdraws or changes the severity of what the other raised. The worker referees. It may add evidence from the code to a round, and it decides each finding at the end, from the highest severity a reviewer still holds. When one reviewer still refutes a finding, the worker settles it rather than leaving it for you: it fixes it, or sets it aside with evidence that the refuter is right, and the PR comment lists what it set aside.
 
-Codex runs read-only, with approvals off, on every call (`crew codex`), and workers' settings deny running `codex` any other way. It reviews with `CODEX_MODEL` at `CODEX_MODEL_EFFORT`. If Codex fails or stalls, the review carries on with the reviewer agent alone, and the record and the PR comment say Codex didn't report. Settings are read at each review, so a change applies to the next one, even on a task that's already running.
+Codex runs read-only, with approvals off, on every call (`crew codex`), and a `deny` rule in workers' settings catches them running `codex` directly. It reviews with `CODEX_MODEL` at `CODEX_MODEL_EFFORT`. If Codex fails or stalls, the review carries on with the reviewer agent alone, and the record and the PR comment say Codex didn't report. Settings are read at each review, so a change applies to the next one, even on a task that's already running.
 
 ### Review and send feedback
 
