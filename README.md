@@ -15,7 +15,7 @@ You talk to a **lead**, at a terminal or from the Claude app on your phone. It r
 - **The ledger is plain Markdown in a private repo of yours.** Every task, plan, decision and review round is a file you can read and edit. crew commits and pushes it as it changes, so another machine can take over where this one left off.
 - **Several leads at once.** Each lead is a planning conversation, and they share the ledger, so each one sees what the others wrote down.
 - **Ordinary words, used in their ordinary sense**: lead, worker, task, goal, proposal. A few terms are crew's own, like the ledger and the gardener.
-- **Small.** One Go binary on the standard library, seven agent files, three short `sh` scripts and plain text. No database, no tmux. Timers run plain `crew` commands to keep work moving, not agents supervising agents, so an idle crew starts no agents.
+- **Small.** One Go binary on the standard library, seven agent files, three short `sh` scripts and plain text. No database, no tmux. Timers run plain `crew` commands to keep work moving, not agents supervising agents, so a crew with nothing to do starts no agents. The one scheduled agent, the gardener, runs once a week, and only when your default branch has new commits.
 
 ## Limits
 
