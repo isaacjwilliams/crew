@@ -481,6 +481,24 @@ crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 
 setstate "done" null
 out=$(crew tick)
 check "rounds that piled up behind a busy worker are all named in its prompt" '[[ $out == *"013-tick-routing: rounds 4 to 5 sent to its worker"* && $(crew get 13 last_round_sent) == 5 && $(last_prompt) == *"New review feedback is in Rounds 4 to 5 under"* ]]'
+# Another automated review, asked for on the PR (a `crew review` comment) or with crew review.
+round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
+comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
+{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; } >"$HOME/gh-more-comments"
+crew set 13 status pr-open; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
+crew feedback 13 >/dev/null 2>&1; r6=$(round "$F13" 6)
+check "the user's 'crew review' comment, in any case and with space around it, becomes a request line in a new round" '[[ $r6 == *"- [ ] Automated review requested (comment 130)"* && $r6 != *"Crew Review"* ]]'
+check "a longer comment that mentions crew review is an ordinary comment" '[[ $r6 == *"- [ ] comment 132 — [link](u132)"*"crew review it again"* && $r6 != *"(comment 132)"* ]]'
+check "a collaborator's 'crew review' goes under Open questions for the user, not into the round" '[[ $(section "$F13" "## Open questions") == *"@bob commented on PR #12, comment 131"* && $r6 != *131* ]]'
+rm "$HOME/gh-more-comments"
+rounds1=$(crew get 1 review_rounds)
+check "crew review refuses a task with no open PR (merged, or none at all), and records nothing" '! crew review 1 2>/dev/null && ! crew review 3 2>/dev/null && [[ $(crew get 1 review_rounds) == "$rounds1" ]] && ! grep -q "Automated review requested" "$F1" "$F3"'
+out=$(crew review 13 2>/dev/null)
+check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
+setstate "done" null; out=$(crew tick 2>/dev/null)
+check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
+crew set 13 status pr-open; setstate "done" null
+check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in Round 8 under"* ]]'
 setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'

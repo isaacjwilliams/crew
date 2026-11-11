@@ -12,6 +12,7 @@
 #   117  isaac's conversation reply tagged <!-- crew --> (a worker reply; never pulled)
 #   118  carol, conversation comment, no write access (NONE; never pulled)
 #   119  a bot with write access, conversation comment (never pulled)
+#   $HOME/gh-more-comments, if present: more conversation comments, one JSON object a line
 #   120  isaac's automated-review summary, once one is posted to #12; its body is
 #        $HOME/gh-summary (tagged <!-- crew -->, so never pulled)
 # `repo create NAME --private --source . --remote origin` makes a bare repo at
@@ -65,6 +66,7 @@ case "$*" in
   *issues/12/comments\ -f\ body=*) : ;;
   *issues/12/comments*)
     echo "$c115"; echo "$c117"; echo "$c118"; echo "$c119"
+    [[ -e $HOME/gh-more-comments ]] && cat "$HOME/gh-more-comments"
     if [[ -e $HOME/gh-summary ]]; then
       jq -cn --rawfile b "$HOME/gh-summary" '{id:120, user:{login:"isaac",type:"User"}, author_association:"OWNER", body:$b, html_url:"u120", created_at:"2026-09-25T21:30:00Z", issue_url:"https://api.github.com/repos/isaac/webapp/issues/12"}'
     fi ;;
