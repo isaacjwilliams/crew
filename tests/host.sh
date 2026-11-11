@@ -135,6 +135,12 @@ check "without a terminal, host up starts no claude to trust the work root, and 
 # script gives host up a terminal on stdin, as a person running it has.
 out=$(tower script -qec "$TH/bin/crew host up" /dev/null </dev/null 2>&1)
 check "on a terminal, host up starts claude to trust the work root, before it enables the services" 'grep -qx "claude " "$SB/tower/claude-calls.log" && [[ ${out%%enabled crew-tick.timer*} == *"Trusting ~/agent-work"* ]]'
+for leaving in "INT:a Ctrl+C" "HUP:a closed terminal"; do
+  echo "${leaving%%:*}" >"$SB/tower/claude-interrupt"; : >"$SB/tower/systemctl-enabled"
+  out=$(tower script -qec "$TH/bin/crew host up" /dev/null </dev/null 2>&1)
+  check "${leaving#*:} that ends the trust step doesn't stop host up: it enables the services and runs doctor" 'grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && [[ $out == *"FAIL $SB/tower/agent-work trusted"* ]]'
+done
+rm -f "$SB/tower/claude-interrupt"
 jq -n --arg p "$SB/tower/agent-work" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$SB/tower/.claude.json"
 : >"$SB/tower/claude-calls.log"
 out=$(tower script -qec "$TH/bin/crew host up" /dev/null </dev/null 2>&1)

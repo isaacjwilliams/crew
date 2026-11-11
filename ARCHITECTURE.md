@@ -383,7 +383,7 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 1. `crew install`.
 2. Pull, write this machine's name in `host`, commit, push. A rejected push means another machine moved first: drop the claim and look again. Without `--take`, a lease another machine holds is refused.
 3. Clone each project this machine has no clone of into `$WORK_ROOT/<p>/repo`, and record it in `local.env`.
-4. If `$WORK_ROOT` isn't trusted yet, open Claude Code there for the user to accept the trust dialog (`trustWorkRoot`), since workers' background sessions can't show it. Without a terminal, `crew doctor` says how.
+4. If `$WORK_ROOT` isn't trusted yet, open Claude Code there for the user to accept the trust dialog (`trustWorkRoot`), since workers' background sessions can't show it. crew catches Ctrl+C and hangup until `claude` exits, so leaving it any way goes on to step 5. Without a terminal, `crew doctor` says how.
 5. Enable the services (`crewServices`: `crew-tick.timer`, `crew-gardener.timer` and `crew-lead.service`, or on a Mac the jobs `crew-tick`, `crew-gardener` and `crew-lead`), and run `crew doctor`.
 
 **Holding it:** every change takes `lock`, which runs `requireHost`: `host` must name this machine, and `.crew-lease-lost` must not exist. Every ledger commit starts a background push (`pushSoon`).

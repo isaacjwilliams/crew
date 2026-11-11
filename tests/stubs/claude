@@ -12,6 +12,9 @@
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/remote-control.cwd    the directory `claude remote-control` last ran in
 #   $HOME/claude-env.log        every invocation again, after the CREW_PROJECT it ran with ("unset" for none)
+#   $HOME/claude-interrupt   if present, a bare `claude` sends the signal it names (INT or HUP)
+#                            to its process group, as Ctrl+C or a closed terminal does, and
+#                            exits as that signal would
 # It records LEAK CLAUDECODE if crew left that variable set, and LEAK LOCK FD <n> if
 # fd n is open on one of crew's .crew*.lock files.
 # Like the real CLI, `--resume <session> --bg <prompt>` continues that session under
@@ -28,6 +31,12 @@ for fd in /proc/$$/fd/*; do
   [[ $(readlink "$fd" 2>/dev/null) == */.crew*.lock ]] && echo "LEAK LOCK FD ${fd##*/}" >>"$HOME/claude-calls.log"
 done
 [[ -f $HOME/agents.json ]] || echo '[]' >"$HOME/agents.json"
+# The whole process group gets the signal, crew included, as it does from a terminal.
+if [[ $# == 0 && -f $HOME/claude-interrupt ]]; then
+  sig=$(<"$HOME/claude-interrupt")
+  trap 'exit $((128 + $(kill -l "$sig")))' "$sig"
+  kill -"$sig" 0
+fi
 
 # --add-dir and --mcp-config are variadic in the real CLI: the token after their value must be a flag.
 args=("$@") resume="" name="" flags=0

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -72,9 +73,10 @@ func (c *Crew) hostUp(take bool) error {
 
 // trustWorkRoot has the person accept Claude Code's trust dialog for WORK_ROOT, if
 // they haven't yet. Workers start there in background sessions, which can't show
-// the dialog. crew install has made the folder by now. How claude exits doesn't
-// matter: crew doctor runs next and flags the folder if it still isn't trusted, as
-// it does when there's no terminal to ask on.
+// the dialog. crew install has made the folder by now. crew waits for claude
+// however the person leaves it, Ctrl+C or a closed terminal included, so host up
+// always goes on to enable the services and run crew doctor. Doctor flags the
+// folder if it still isn't trusted, as it does when there's no terminal to ask on.
 func (c *Crew) trustWorkRoot() {
 	home, _ := os.UserHomeDir()
 	root := c.Settings["WORK_ROOT"]
@@ -85,6 +87,13 @@ func (c *Crew) trustWorkRoot() {
 	note("Claude Code will ask whether you trust this folder. Accept, then type /exit.")
 	cmd := c.claude()
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, os.Stdin, os.Stdout, os.Stderr
+	// Ctrl+C and a closed terminal signal crew as well as claude. Catching them while
+	// claude runs, as git does around an editor, lets them end only claude. Ignoring
+	// them instead would make claude ignore them too. Nothing reads caught: having it
+	// registered is what keeps crew from exiting.
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, os.Interrupt, syscall.SIGHUP)
+	defer signal.Stop(caught)
 	cmd.Run()
 }
 
