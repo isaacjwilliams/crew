@@ -18,7 +18,7 @@ They coordinate through the **ledger**: Markdown files under `projects/` in the 
 
 ## Design principles
 
-These are invariants. Breaking one changes the design, not just the implementation.
+These are invariants. Breaking one changes the design, not just the implementation. A change that weakens one needs the user's say first: raise it before writing the code.
 
 1. **Nothing coordination-related touches the shared repo.**
    - No labels, comments other than the ones below, committed config, or files in the working tree. The repo belongs to other people too.
@@ -56,6 +56,14 @@ These are invariants. Breaking one changes the design, not just the implementati
    - The home's `host` file names it, and a git push claims it, so two machines can't both believe they hold it.
    - Every change to the ledger checks it, and so does everything that starts a session, so two machines never dispatch the same task. Other machines only read.
    - Moving the crew is `crew host up --take` on the new machine. Work in flight carries on there with fresh workers: sessions stay behind, but task files and pushed branches don't.
+9. **Plain words.**
+   - Each concept gets an ordinary word, used in its ordinary sense: lead, worker, task, goal, proposal, memory.
+   - A new concept gets a word a newcomer would guess right, not a coined term or a metaphor that needs a glossary.
+   - Existing terms stay, crew's own among them (ledger, brief, gardener, stack and restack, crew home, goal lead, host). This principle is for what's added.
+10. **Small and quiet.**
+    - crew is one Go binary on the standard library, the agent files, and plain text. There's no database. The dependency rules are in `CLAUDE.md`, under Conventions.
+    - Plain `crew` commands on timers coordinate the work, not agents supervising agents. crew starts a worker, a goal lead or the gardener only when there's work for it: see [`crew tick`](#crew-tick) and [Gardener](#gardener) for when. So a crew with no work sends no model requests of its own. For the gardener, new commits on the default branch are work, whoever made them.
+    - Two processes stay up while the crew is idle, and both are Claude Code's. One is the lead's Remote Control server (`crew serve`, the `crew-lead` service), which waits for you to open the lead from your phone. The other is the daemon that `claude --bg` hands workers and goal leads to, which outlives them. Claude Code's docs don't say either one uses the model while it waits (see [Assumptions](#assumptions-to-re-check-when-claude-code-updates)).
 
 ## Repository layout and where each file installs
 
@@ -553,6 +561,7 @@ Changing any of these means updating every side listed.
 
 | Contract | Producer → consumer |
 |---|---|
+| What README.md's pitch claims (What's different, Limits) rests on the design principles CLAUDE.md's "What crew is for" names, the requirements in SETUP.md §1 (its platforms) and SETUP.md's "Several at once" (its leads) | `ARCHITECTURE.md` Design principles, `SETUP.md` §1 Requirements and "Several at once" → `README.md`, `CLAUDE.md` "What crew is for" |
 | `worker_job` in task files is the job ID `claude agents` lists | `launchWorker` → `runningWorkers` (the concurrency cap), `Agents.jobState`, `Agents.jobBusy` |
 | `claude --bg` prints `backgrounded · <job> · …`, the job possibly in color, and a `note:` line when it starts a copy | Claude Code → `launchSession` (color codes stripped, the job is the line's third field) |
 | `claude agents --json --all` entries have `id`, `state`, `pid`, `status`, `waitingFor`, `sessionId`, `name` | Claude Code (research preview) → `agents`, `Agents.jobState`, `Agents.jobBusy`, `runningWorkers`, `stopIdleSession`, `waitForLaunch` |
@@ -718,5 +727,6 @@ Built against Claude Code 2.1.281–2.1.285 docs and CLI (September 2026); the p
 - **Goal leads** haven't been run live. Three things they rely on are untested: that a background session gets the repo's MCP servers and the user's connectors (a tracker, say) and can read them in `auto` mode without a prompt; that `plan-reviewer`'s reports reach a background session in a later turn after it ends its own; and that a goal lead whose turn has ended while reviews still run takes a resume without losing them (the docs say background subagents carry over to the next process).
 - **A PR's `updatedAt`** equalled the time of the last review or conversation comment, to the second, on every open PR in cli/cli and rails/rails whose last event was one (checked 2026-10-15). GitHub doesn't document it. If it stops holding, `crew tick` misses comments on quiet PRs until something else touches them; drop `prMayHaveNewComments`.
 - **The lead as a service** (`crew-lead.service`, `crew serve`): `claude remote-control --name crew --spawn same-dir --permission-mode <mode>`, run by systemd with no terminal. Checked live on 2026-10-20 (2.1.296): the phone can start sessions on a `remote-control` server and they honour the project's `"agent"`; project `additionalDirectories` and PreToolUse hooks apply in them; `--continue` brings back only the server's own first session, and sessions started from the phone hang after a server restart; `--permission-mode auto` works, `--settings` is refused in server mode. On 2026-10-21 `--continue` failed on a first start ("No recent session found in this directory"), and the docs say it serves only that one session, so `crew serve` doesn't pass it: a plain start brings back every session the last server served, within about four hours. `--spawn same-dir` keeps sessions in `lead/`, whatever spawn mode was saved for it. Checked live on 2026-10-21: the service starts and serves with no terminal, `crew` appears on the phone, and its sessions run as the lead and read the ledger. `initialPrompt` doesn't fire in them (the server runs each as `claude --print --input-format stream-json …`), so the lead on the phone waits for a first message instead of opening with a briefing. Checked live on 2026-10-22 (2.1.296): two idle workers that a phone session had dispatched kept running through the restart `crew upgrade` makes, under `KillMode=process` (L2). Not yet checked: that phone sessions come back after a restart.
+- **An idle crew uses no model** (principle 10; not confirmed live). crew sends nothing while idle, but two of Claude Code's processes stay up. The Remote Control docs say the server "registers with the Anthropic API and polls for work", and that it opens one session when it starts (`--create-session-in-dir`, on by default). The agent-view docs tie model requests to a session's turns and the summaries written as each ends, and say the daemon (their "supervisor") stops a session's process once it has waited unattached for about an hour. Neither page says whether a waiting server, its first session or the daemon makes model requests. To check: leave the crew with nothing in flight for a day, with the gardener's timer paused, and compare your usage before and after.
 - **`crew tick` from systemd:** `claude --bg` run from a oneshot service with `KillMode=process` is assumed to leave the background-session daemon, and the workers it resumes, running after the service exits. It also assumes `git fetch` works without your ssh-agent. Neither has been confirmed by a live run. `crew doctor` checks that the unit's `PATH` finds the tools `crew` needs.
 - **Live verification:** the lead, implementer and gardener haven't been run end to end against a real model. Do a smoke test with a tiny task after any significant change.

@@ -4,6 +4,23 @@ Source for a personal Claude Code agent setup: seven agent profiles (lead, goal-
 
 Read `ARCHITECTURE.md` before any structural change. It has the design principles, the flows, and the **Contracts** table of cross-file dependencies. `SETUP.md` is the user-facing guide; `tests/README.md` explains the test harness.
 
+## What crew is for
+
+crew is built around its user's review queue: they never face more PRs than they chose to, and each one implements a plan they approved.
+
+**A change that weakens any of the [design principles](ARCHITECTURE.md#design-principles) in `ARCHITECTURE.md` needs the user's say first. Raise it before writing the code.**
+
+The README's pitch rests on these principles in particular:
+
+- review capacity caps the work (5);
+- the plan is approved before code (4);
+- only the user merges (6);
+- nothing coordination-related touches the shared repo (1);
+- a plain-text ledger in a private repo (2);
+- one machine at a time (8);
+- plain words (9);
+- small and quiet (10).
+
 ## Safety rules for working in this repo
 
 - **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/.local/bin/`, `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
