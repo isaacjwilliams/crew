@@ -97,6 +97,9 @@ Only these, verbatim, each as a `###` subsection:
   between commits, for example `git log --format='----- %H%n%B' <fork sha>..HEAD`. Never an abbreviated format that
   drops bodies.
 
+A PR body or commit message often has headings of its own. Turn each `#` or `##` heading in them into a `####`
+heading, so nothing after `## Stated intent` starts a new section. That's the only change you make to them.
+
 Nothing else from the task file goes in: not its title, Context, Structure, Plan, Log or review rounds. If you catch
 yourself explaining, delete the sentence.
 
