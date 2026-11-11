@@ -57,7 +57,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		if newRound {
 			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
 		}
-		return fail("worker %s is busy (%s). Wait for it, answer it in agent view (claude attach %s), or SendMessage %s a note", job, as.jobState(job), job, t.Get("worker_name"))
+		return fail("worker %s is busy (%s). Wait for it, answer it in agent view (crew attach %s), or SendMessage %s a note", job, as.jobState(job), t.ID(), t.Get("worker_name"))
 	}
 	if !newRound && note == "" {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())

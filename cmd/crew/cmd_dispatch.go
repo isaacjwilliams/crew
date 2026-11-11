@@ -117,7 +117,7 @@ func cmdDispatch(c *Crew, args []string) error {
 	c.commit("dispatch " + p.Name + "/" + t.ID())
 	fmt.Printf("dispatched %s → worker %s (%s)\n", t.ID(), l.job, name)
 	fmt.Printf("  worktree: %s\n", wt)
-	fmt.Printf("  watch:    claude attach %s   |   claude agents\n", l.job)
+	fmt.Printf("  watch:    crew attach %s   |   claude agents\n", t.ID())
 	return nil
 }
 
