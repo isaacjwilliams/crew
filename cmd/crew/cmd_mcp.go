@@ -1,17 +1,17 @@
 package main
 
-// MCP servers for one project: crew mcp sync, crew mcp lead-settings. A project
-// declares its servers in projects/<p>/mcp.json, shaped like a repo's .mcp.json,
-// and refers to a secret as ${NAME}: a setting from its settings files, which for
-// a secret is its local.env. crew writes two git-ignored files from it, which
-// nobody edits by hand:
+// MCP servers for one project, and crew mcp sync. A project declares its servers
+// in projects/<p>/mcp.json, shaped like a repo's .mcp.json, and refers to a
+// secret as ${NAME}: a setting from its settings files, which for a secret is its
+// local.env. crew writes two git-ignored files from it, which nobody edits by
+// hand:
 //
 //   - projects/<p>/mcp.local.json: the project's servers, each named
 //     <p>_<server>, with every ${NAME} replaced by its value. The project's
 //     workers and goal leads start with it as --mcp-config.
 //   - lead/.mcp.json: every project's servers. Leads run in lead/, so Claude Code
 //     loads it as their folder's servers. A lead for one project starts with the
-//     settings crew mcp lead-settings prints, which turn the others off.
+//     settings leadMCPSettings makes, which turn the others off.
 //
 // Neither is ever deleted. With nothing to hold, it has no servers, so a session
 // that started with it still finds a valid file.
@@ -37,35 +37,23 @@ var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // settingRef is a ${…} in a string in mcp.json, with what's between the braces.
 var settingRef = regexp.MustCompile(`\$\{([^}]*)\}`)
 
-// crew mcp sync | crew mcp lead-settings --project P
+// crew mcp sync
 func cmdMCP(c *Crew, args []string) error {
-	switch {
-	case len(args) == 1 && args[0] == "sync":
-		if !c.syncMCP() {
-			return exitQuietly(1)
-		}
-		return nil
-	case len(args) == 3 && args[0] == "lead-settings" && args[1] == "--project":
-		proj, err := c.oneProject(args[2])
-		if err != nil {
-			return err
-		}
-		settings, err := c.leadMCPSettings(proj)
-		if err != nil {
-			return err
-		}
-		fmt.Println(settings)
-		return nil
+	if len(args) != 1 || args[0] != "sync" {
+		return usage("crew mcp sync")
 	}
-	return usage("crew mcp sync | crew mcp lead-settings --project P")
+	if !c.syncMCP() {
+		return exitQuietly(1)
+	}
+	return nil
 }
 
 // syncMCP rebuilds every project's mcp.local.json, then lead/.mcp.json from them.
 // It's best-effort: it reports each problem as it goes and carries on, so one
 // project's broken mcp.json doesn't keep the others' servers from the leads. That
 // project keeps the mcp.local.json it had. It returns whether there were no
-// problems, which only crew mcp sync needs: crew install and crew serve go on
-// either way.
+// problems, which only crew mcp sync needs: crew install, crew lead and crew
+// serve go on either way.
 func (c *Crew) syncMCP() bool {
 	ok := true
 	for _, proj := range c.projects("") {

@@ -191,7 +191,6 @@ check "the lead reads code in its crew checkout, after the project's AGENTS.md, 
 check "the lead names the project in every crew new, and asks when more than one fits" "grep -q 'Name the project in every .crew new.' $A/lead.md && grep -q 'more than one fits, ask' $A/lead.md"
 check "the lead's hard rules keep it off its reading copy too" "grep -q 'That covers the user.s checkout, which is theirs, and your reading copy' $A/lead.md"
 check "goal leads read code in their working directory, a checkout, not through crew checkout" "grep -q 'Read code in your working directory.' $A/goal-lead.md"
-check "the lead function starts the lead in the home's lead/, in LEAD_PERMISSION_MODE" "grep -q 'pushd \$CREW_HOME/lead' $REPO_DIR/fish/functions/lead.fish && grep -qF -- '--permission-mode (crew config LEAD_PERMISSION_MODE)' $REPO_DIR/fish/functions/lead.fish"
 check "lead relays answers to a finished worker with crew followup, not SendMessage" \
   "grep -q 'Only if .crew followup. refuses' $A/lead.md"
 # --- the plan is where structure gets decided, so it has to be visible there and in what reaches the user

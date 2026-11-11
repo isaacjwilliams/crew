@@ -2,7 +2,7 @@
 # Static checks. Uses the REAL claude only for `plugin validate` (no model call).
 . "$(dirname "$0")/lib.sh"
 cd "$REPO_DIR" || exit 2
-launchers=(bin/crew bin/crew-guard)
+launchers=(bin/crew bin/crew-guard bin/lead)
 scripts=(tests/*.sh tests/stubs/*)
 
 for f in "${launchers[@]}"; do check "sh -n $f" "sh -n '$f'"; done
@@ -22,6 +22,6 @@ for f in config/*.json lead/.claude/settings.json; do check "valid JSON $f" "jq 
 if command -v claude >/dev/null; then
   check "claude plugin validate agents" 'claude plugin validate agents >/dev/null 2>&1'
 else echo "  (skipped agent validation: claude not installed)"; fi
-check "executables are executable" '[[ -x bin/crew && -x bin/crew-guard ]]'
+check "executables are executable" '[[ -x bin/crew && -x bin/crew-guard && -x bin/lead ]]'
 
 summary lint

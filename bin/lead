@@ -1,0 +1,10 @@
+#!/bin/sh
+# lead: talk to the crew lead. Runs `crew lead` from the crew home this file is in,
+# found through any symlinks to it, as bin/crew finds its home.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+bin=$(cd "$(dirname "$self")" && pwd -P) || { echo "lead: can't find the crew home of $0" >&2; exit 1; }
+exec "$bin/crew" lead "$@"

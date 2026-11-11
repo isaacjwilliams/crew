@@ -10,7 +10,7 @@
 #   $HOME/stop-noop          if present, `claude stop` leaves the process open
 #   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
-#   $HOME/remote-control.cwd    the directory `claude remote-control` last ran in
+#   $HOME/claude.cwd            the directory the latest call ran in
 #   $HOME/claude-env.log        every invocation again, after the CREW_PROJECT it ran with ("unset" for none)
 #   $HOME/claude-interrupt   if present, a bare `claude` sends the signal it names (INT or HUP)
 #                            to its process group, as Ctrl+C or a closed terminal does, and
@@ -25,6 +25,7 @@
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
 echo "${CREW_PROJECT-unset} claude $*" >>"$HOME/claude-env.log"
+echo "$PWD" >"$HOME/claude.cwd"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/claude-calls.log"
 # A background supervisor that inherited one of crew's locks would hold it forever.
 for fd in /proc/$$/fd/*; do
@@ -69,8 +70,7 @@ case ${1:-} in
   rm)
     if [[ -f $HOME/rm-fail ]]; then echo "Error: couldn't delete ${2:-}" >&2; exit 1; fi
     agents 'map(select(.id != $id))' --arg id "${2:-}" ;;
-  attach|logs) : ;;
-  remote-control) echo "$PWD" >"$HOME/remote-control.cwd" ;;
+  attach|logs|remote-control) : ;;
   *)
     if [[ " $* " == *" --bg "* ]]; then
       if [[ -f $HOME/fail-resume && -n $resume ]]; then echo "Error: session not found"; exit 1; fi

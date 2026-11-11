@@ -9,7 +9,7 @@ H=$HOME/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
 check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
-check "fish files installed" '[[ -f $HOME/.config/fish/conf.d/agent-crew.fish && -f $HOME/.config/fish/functions/lead.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
+check "fish files installed" '[[ -f $HOME/.config/fish/conf.d/agent-crew.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
 check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q "user enable" "$HOME/systemctl-calls.log"'
 check "install says the units are off here, and what turns them on" '[[ $out == *"off on this machine: crew-tick.timer crew-gardener.timer crew-lead.service. crew host up turns them on"* ]]'
 check "CREW_HOME set for Claude Code sessions" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
@@ -49,21 +49,21 @@ check "and replaced with the home's copy" 'cmp -s "$HOME/.claude/agents/lead.md"
 # 4. What the home stops shipping is removed; what it starts shipping is installed.
 lead_inode=$(stat -c %i "$HOME/.claude/agents/lead.md")
 echo '# new upstream' >>"$H/agents/lead.md"
-echo 'function crew-extra; end' >"$H/fish/functions/crew-extra.fish"
+echo 'complete -c crew-extra' >"$H/fish/completions/crew-extra.fish"
 rm "$H/agents/gardener.md" "$H/systemd/crew-gardener.timer"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 check "a changed agent is replaced by rename, not rewritten in place" '[[ $(stat -c %i "$HOME/.claude/agents/lead.md") != "$lead_inode" ]] && cmp -s "$H/agents/lead.md" "$HOME/.claude/agents/lead.md"'
-check "a new fish function is installed" '[[ -f $HOME/.config/fish/functions/crew-extra.fish ]]'
+check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
 check "other agents are left alone" '[[ -f $HOME/.claude/agents/implementer.md ]]'
 
 # 5. A skipped component keeps its files.
-rm "$H/fish/functions/crew-extra.fish"
+rm "$H/fish/completions/crew-extra.fish"
 "$H/bin/crew" install --yes --no-fish >/dev/null 2>&1
-check "--no-fish leaves a dropped fish file alone" '[[ -f $HOME/.config/fish/functions/crew-extra.fish ]]'
+check "--no-fish leaves a dropped fish file alone" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 "$H/bin/crew" install --yes >/dev/null 2>&1
-check "the next run with fish removes it" '[[ ! -e $HOME/.config/fish/functions/crew-extra.fish && -f $HOME/.config/fish/functions/lead.fish ]]'
+check "the next run with fish removes it" '[[ ! -e $HOME/.config/fish/completions/crew-extra.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
 echo '[Timer]' >"$H/systemd/crew-extra.timer"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 rm "$H/systemd/crew-extra.timer"
@@ -156,14 +156,14 @@ check "on a terminal, host up starts no claude once the work root is trusted" '!
 rm -f "$TH/lead/.mcp.json"
 tower "$TH/bin/crew" serve >/dev/null 2>&1
 check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
-check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/remote-control.cwd") == "$TH/lead" ]]'
+check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
 check "the lead's Remote Control server works on every project" '[[ $(grep " remote-control " "$SB/tower/claude-env.log" | tail -1) == "all claude remote-control "* ]]'
-# The lead function, in fish: in DIR, run `lead ARGS`, and print the claude call it made.
+# In DIR, run `lead ARGS` in bash, and print the claude call it made.
 lead_in() {
-  (cd "$1" && tower env CREW_HOME="$TH" PATH="$TH/bin:$PATH" fish --no-config -c "source $SB/tower/.config/fish/functions/lead.fish; lead $2") >/dev/null 2>&1 || return
+  (cd "$1" && tower env -u CREW_HOME bash -c "$TH/bin/lead $2") >/dev/null 2>&1 || return
   tail -n 1 "$SB/tower/claude-env.log"
 }
 # Two projects with MCP servers. The second needs no clone here, and is never committed.
@@ -175,6 +175,10 @@ check "lead outside a repo works on every project, and gets every project's MCP 
   '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" && $(jq -c ".mcpServers | keys" "$TH/lead/.mcp.json") == "[\"${P}_tracker\",\"shop_tracker\"]" ]]'
 check "lead in a project's repo works on that project, with the other projects' servers off" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto --settings $off hello" ]]'
 check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto --settings $off -c" ]]'
+check "lead starts claude in the home's lead/" '[[ $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
+rm "$TH/lead/.mcp.json"
+echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/shop"}, "wiki": {"type": "http", "url": "https://wiki.example/shop"}}}' >"$TH/projects/shop/mcp.json"
+check "a project's lead syncs the servers before it switches the others off" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode auto --settings {\"disabledMcpjsonServers\":[\"shop_tracker\",\"shop_wiki\"]}" ]]'
 rm -r "$TH/projects/shop" "$TH/projects/$P/mcp.json"
 check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
 n=$(wc -l <"$SB/tower/claude-env.log")
