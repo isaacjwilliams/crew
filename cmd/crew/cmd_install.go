@@ -21,7 +21,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 // The tools crew runs: what crew doctor checks, here and on the PATH of the
@@ -396,10 +398,20 @@ func (in *installer) writeLeadLocalSettings() {
 // confirm asks a yes-or-no question, yes unless the user answers no. Without a
 // terminal it reads the answer from stdin, and no answer is yes.
 func confirm(question string) bool {
-	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+	if stdinIsTerminal() {
 		fmt.Fprintf(os.Stderr, "  %s [Y/n] ", question)
 	}
 	a, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	a = strings.TrimSpace(a)
 	return a == "" || regexp.MustCompile(`^[Yy]`).MatchString(a)
+}
+
+// stdinIsTerminal: a person can answer on stdin, rather than a script or a test.
+// It asks for the terminal's settings, which only a terminal has, as isatty
+// does; the standard library has no isatty of its own. Being a character device
+// isn't enough: /dev/null is one too.
+func stdinIsTerminal() bool {
+	var t syscall.Termios
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), ioctlGetTermios, uintptr(unsafe.Pointer(&t)))
+	return errno == 0
 }

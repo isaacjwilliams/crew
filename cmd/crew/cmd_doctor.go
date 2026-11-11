@@ -108,10 +108,9 @@ func cmdDoctor(c *Crew, args []string) error {
 			d.check(p+": mcp.json reads, and every ${NAME} in it is set", err == nil, hint)
 		}
 	}
-	fmt.Println("Trust (workers start in worktrees under WORK_ROOT; the lead in the home's lead/)")
-	for _, dir := range []string{c.Settings["WORK_ROOT"], c.path("lead")} {
-		d.check(dir+" trusted", trusted(home, dir), "cd "+dir+" && claude, accept, /exit")
-	}
+	fmt.Println("Trust (workers start in worktrees under WORK_ROOT)")
+	root := c.Settings["WORK_ROOT"]
+	d.check(root+" trusted", trusted(home, root), "cd "+root+" && claude, accept, /exit")
 	// A service runs crew with the PATH it sets, not your shell's, so a tool your
 	// shell finds through its config (mise, nvm, ...) can be missing there.
 	fmt.Println("Enabled services")
@@ -124,8 +123,14 @@ func cmdDoctor(c *Crew, args []string) error {
 			d.check(service+" finds "+t, onPath(t, path), fix)
 		}
 	}
-	fmt.Println("AGENTS.md loading")
+	// The checks below are optional: they don't count towards required.
 	required := d.ok
+	// Running lead in a terminal asks for trust itself, so this check is optional.
+	// Only the lead service, which the phone talks to, needs it done beforehand,
+	// and it retries every 30 seconds until it is.
+	fmt.Println("The lead on your phone")
+	d.check(c.path("lead")+" trusted (optional)", trusted(home, c.path("lead")), "run lead once and accept the trust prompt")
+	fmt.Println("AGENTS.md loading")
 	d.check("Project instructions = claude-md-and-agents-md (optional)", agentsMDOn(home), "only matters for repos that have both CLAUDE.md and AGENTS.md")
 	if !required {
 		fmt.Println("Some required checks failed.")
