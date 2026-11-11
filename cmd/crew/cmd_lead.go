@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"syscall"
 )
 
 // crew lead [--project P] [claude options] ["<request>"]: talk to the lead. Every
@@ -70,9 +69,5 @@ func (c *Crew) execLead(cmd *exec.Cmd) error {
 	if err := os.Chdir(c.path("lead")); err != nil {
 		return fail("%s is missing", c.path("lead"))
 	}
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return fail("'claude' is required but not installed")
-	}
-	return syscall.Exec(path, cmd.Args, cmd.Env)
+	return execClaude(cmd)
 }
