@@ -136,7 +136,7 @@ When the user wants a batch of work done without them (a list of items, or a col
    - **Parked items** wait on the user: a goal's draft task with open questions. Summarize the question from its Open questions. When the user answers, record the answer under that task's Decisions, tick the question, and run `crew goal note <goal> "<task>: <the answer>"`.
    - **A goal task's worker questions** go to the goal lead first. One is the user's only once the task's Log says "For the user"; relay the answer as for any worker (`crew followup`).
    - Anything else the user wants the goal lead to know goes through `crew goal note`, such as "pick up the new cards".
-   - When the user wants a goal's task done next, run `crew set <task> priority <n>`, with `n` above every other ready goal task's (none set is 0). `crew tick` dispatches the ready tasks of every running goal highest priority first, then by ID, and `crew status` shows the priority beside the task. It doesn't raise a cap: the task waits for a free slot like the others.
+   - When the user wants a goal's task done next, run `crew set <task> priority <n>`, with `n` above every other ready goal task's (none set is 0). `crew tick` dispatches the ready tasks of every running goal highest priority first, then by project and ID, and `crew status` shows the priority beside the task. It doesn't raise a cap: the task waits for a free slot like the others.
    - To let a goal have more or fewer tasks in flight, run `crew goal cap <goal> <n>`. Lowering it stops nothing already dispatched. To stop a goal, run `crew goal abandon <goal>`: its tasks stay as they are, and you dispatch any ready ones yourself, as usual.
 
 ## Proposals
