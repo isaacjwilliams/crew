@@ -55,6 +55,14 @@ func cmdDoctor(c *Crew, args []string) error {
 	for _, a := range []string{"lead", "implementer", "casual-observer", "plan-reviewer", "reviewer", "gardener", "goal-lead"} {
 		d.check(a, isFile(filepath.Join(home, ".claude/agents", a+".md")), "run crew install")
 	}
+	// Your shell finds crew and lead through these links, and so do the workers
+	// of a Claude Code daemon started from your shell.
+	fmt.Println("Commands")
+	bin := filepath.Join(home, ".local/bin")
+	for _, name := range linkedCommands {
+		target, err := os.Readlink(filepath.Join(bin, name))
+		d.check("~/.local/bin/"+name+" links to this home", err == nil && target == c.path("bin", name), "run crew install")
+	}
 	fmt.Println("Crew home")
 	d.check(c.Home+" is a git repo", gitOK(c.Home, "rev-parse"), "")
 	fi, err := os.Stat(c.path("bin/crew-guard"))
@@ -155,6 +163,10 @@ func cmdDoctor(c *Crew, args []string) error {
 	// and it retries every 30 seconds until it is.
 	fmt.Println("The lead on your phone")
 	d.check(c.path("lead")+" trusted (optional)", trusted(home, c.path("lead")), "run lead once and accept the trust prompt")
+	// Optional because doctor sees only the PATH it was run with, which may not be
+	// your shell's: crew host up's, say, or a session's.
+	fmt.Println("Your shell")
+	d.check("~/.local/bin on PATH (optional)", onShellPath(bin), addLocalBinToPath)
 	fmt.Println("AGENTS.md loading")
 	d.check("Project instructions = claude-md-and-agents-md (optional)", agentsMDOn(home), "only matters for repos that have both CLAUDE.md and AGENTS.md")
 	if !required {

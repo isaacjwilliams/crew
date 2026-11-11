@@ -97,7 +97,7 @@ Options:
 | `--no-fish`, `--no-services` | Skip those parts: the fish completions, or the crew's services (systemd units, or launchd jobs on a Mac) |
 | `--skip-agents-md-setting` | Don't ask about loading `AGENTS.md` |
 
-`crew` and `lead` are found through `~/.local/bin`, so it has to be on your `PATH`. If it isn't, install says what to add to your shell's startup file: `fish_add_path ~/.local/bin` in fish, or `export PATH="$HOME/.local/bin:$PATH"` in bash or zsh.
+`crew` and `lead` are found through `~/.local/bin`, so it has to be on your `PATH`. If it isn't, install and `crew doctor` say what to add to your shell's startup file: `fish_add_path ~/.local/bin` in fish, or `export PATH="$HOME/.local/bin:$PATH"` in bash or zsh.
 
 ### The lead on your phone
 
@@ -151,7 +151,7 @@ crew host down          # hand over: stop the crew here and release the lease
    crew project add
    crew doctor
    ```
-   `crew project add` records the repo's remote and default branch in `~/crew/projects/<owner>-<repo>/project.env`, where any setting can be overridden for that project. Your clone's path goes in `local.env` beside it, which isn't committed: each machine has its own clone. `crew doctor` checks versions, `gh` auth, agent files, trust, the AGENTS.md setting, and that each enabled service can find the tools `crew` needs.
+   `crew project add` records the repo's remote and default branch in `~/crew/projects/<owner>-<repo>/project.env`, where any setting can be overridden for that project. Your clone's path goes in `local.env` beside it, which isn't committed: each machine has its own clone. `crew doctor` checks versions, `gh` auth, agent files, the `crew` and `lead` links, trust, the AGENTS.md setting, and that each enabled service can find the tools `crew` needs.
 4. **If the repo uses [Worktrunk](https://worktrunk.dev)** for per-worktree setup (databases, services, dependency installs), see [Repos that use Worktrunk](#repos-that-use-worktrunk) below.
 5. **Optional:** add branch protection on the default branch, if the repo's owner allows it. The agents are told never to merge or push there, but branch protection is the only thing that makes it impossible (see section 8).
 

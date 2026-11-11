@@ -28,14 +28,22 @@ check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(c
 check "crew doctor finds the guard hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json runs crew-guard"* && $doctor_out == *"ok   config/worker-settings.json runs crew-guard"* ]]'
 check "crew doctor finds the commit hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json commits ledger edits"* && $doctor_out == *"ok   config/worker-settings.json commits ledger edits"* ]]'
 check "crew doctor finds the lead's settings for this machine" '[[ $doctor_out == *"ok   lead/.claude/settings.local.json written for this machine"* ]]'
+check "crew doctor finds crew and lead linked into the home" '[[ $doctor_out == *"ok   ~/.local/bin/crew links to this home"* && $doctor_out == *"ok   ~/.local/bin/lead links to this home"* ]]'
 check "crew doctor flags an untrusted work root as a required check" '[[ $doctor_out == *"FAIL $HOME/agent-work trusted — cd $HOME/agent-work && claude"* && $doctor_out == *"Some required checks failed."* ]]'
 jq -n --arg p "$HOME/agent-work" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "with only the work root trusted, as after setup, no required check fails" '[[ $doctor_out == *"ok   $HOME/agent-work trusted"* && $doctor_out == *"Required checks passed."* ]]'
 check "and the lead directory is an optional check, fixed by running lead once" '[[ $doctor_out == *"FAIL $H/lead trusted (optional) — run lead once and accept the trust prompt"* ]]'
+check "and so is ~/.local/bin on PATH, with what to add" '[[ $doctor_out == *"FAIL ~/.local/bin on PATH (optional) — add it in your shell'"'"'s startup file: fish_add_path ~/.local/bin"* ]]'
 jq -n --arg p "$H" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor finds the lead directory trusted through the home, where Claude Code records it" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
+doctor_out=$(PATH="$HOME/.local/bin:$PATH" crew doctor 2>&1 || true)
+check "crew doctor, run through the link, finds ~/.local/bin on PATH" '[[ $doctor_out == *"ok   ~/.local/bin on PATH"* ]]'
+ln -sfn "$HOME/other/crew/bin/lead" "$HOME/.local/bin/lead"
+doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
+check "crew doctor flags a link to another home as a required check" '[[ $doctor_out == *"FAIL ~/.local/bin/lead links to this home — run crew install"* && $doctor_out == *"Some required checks failed."* ]]'
+ln -sfn "$H/bin/lead" "$HOME/.local/bin/lead"
 
 # 2. An unchanged re-run backs nothing up.
 backups() { find "$HOME/.local/share/agent-crew/backups" -type f 2>/dev/null | wc -l; }

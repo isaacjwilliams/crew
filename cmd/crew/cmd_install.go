@@ -34,6 +34,19 @@ var runtimeTools = []string{"git", "gh", "claude", "curl"}
 
 const minClaude = "2.1.281"
 
+// linkedCommands are the home's bin/ commands crew install links into
+// ~/.local/bin, so a shell finds them. crew-guard is for hooks, not for PATH.
+var linkedCommands = []string{"crew", "lead"}
+
+// addLocalBinToPath is how to put ~/.local/bin on a shell's PATH, for crew
+// install and crew doctor to suggest.
+const addLocalBinToPath = `add it in your shell's startup file: fish_add_path ~/.local/bin in fish, or export PATH="$HOME/.local/bin:$PATH" in bash or zsh`
+
+// onShellPath: dir is one of the directories on the PATH crew runs with.
+func onShellPath(dir string) bool {
+	return slices.Contains(filepath.SplitList(os.Getenv("PATH")), dir)
+}
+
 // installer is one run of crew install.
 type installer struct {
 	*Crew
@@ -111,7 +124,7 @@ func cmdInstall(c *Crew, args []string) error {
 
 	say("Linking crew and lead → ~/.local/bin/")
 	bin := filepath.Join(home, ".local/bin")
-	for _, name := range []string{"crew", "lead"} {
+	for _, name := range linkedCommands {
 		if err := in.link("links", c.path("bin", name), filepath.Join(bin, name)); err != nil {
 			return err
 		}
@@ -119,8 +132,8 @@ func cmdInstall(c *Crew, args []string) error {
 	// Only links an earlier install made, as its manifest lists them, never the
 	// other files in ~/.local/bin.
 	in.prune("links", bin, nil)
-	if !slices.Contains(filepath.SplitList(os.Getenv("PATH")), bin) {
-		note("~/.local/bin isn't on your PATH. Add it in your shell's startup file: fish_add_path ~/.local/bin in fish, or export PATH=\"$HOME/.local/bin:$PATH\" in bash or zsh")
+	if !onShellPath(bin) {
+		note("~/.local/bin isn't on your PATH: %s", addLocalBinToPath)
 	}
 
 	if fish {
