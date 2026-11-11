@@ -156,7 +156,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
 	if as.jobBusy(job) {
 		if rounds > sent {
-			fmt.Printf("%s: round %d waits for its worker (%s)\n", id, rounds, as.jobState(job))
+			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
 		}
 		return
 	}

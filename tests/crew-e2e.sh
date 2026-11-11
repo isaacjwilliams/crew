@@ -458,7 +458,7 @@ F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13
 crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; crew set 13 status pr-open
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
-check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waits for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
+check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
@@ -477,7 +477,7 @@ check "tick reads them again once GitHub says the PR changed" '[[ $(crew get 13 
 rm -f "$HOME/gh-pr-updated"
 crew set 13 feedback_since 1970-01-01T00:00:00Z; setstate blocked 4242 waiting; n=$(resumes)
 out=$(crew tick)
-check "tick holds a round for a worker with an open prompt, and says so" '[[ $out == *"013-tick-routing: round 2 waits for its worker (blocked)"* && $(crew get 13 last_round_sent) == 1 && $(resumes) == "$n" ]]'
+check "tick holds a round for a worker with an open prompt, and says so" '[[ $out == *"013-tick-routing: round 2 waiting for its worker (blocked)"* && $(crew get 13 last_round_sent) == 1 && $(resumes) == "$n" ]]'
 setstate blocked 4242 busy
 out=$(crew tick)
 check "tick sends a round to a worker that ended its turn on a question" '[[ $out == *"013-tick-routing: round 2 sent to its worker"* && $(crew get 13 last_round_sent) == 2 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
@@ -487,10 +487,10 @@ check "status shows a worker whose turn ended as idle, though a shell it left ru
 out=$(crew tick)
 check "tick sends a round to a worker whose turn ended, though a shell it left running keeps it working" '[[ $out == *"013-tick-routing: round 3 sent to its worker"* && $(crew get 13 last_round_sent) == 3 && $(resumes) == $((n + 1)) ]]'
 rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; crew set 13 status pr-open
-crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null
+crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 13 feedback_since 1970-01-01T00:00:00Z; waiting=$(crew tick 2>/dev/null)
 setstate "done" null
 out=$(crew tick)
-check "rounds that piled up behind a busy worker are all named in its prompt" '[[ $out == *"013-tick-routing: rounds 4 to 5 sent to its worker"* && $(crew get 13 last_round_sent) == 5 && $(last_prompt) == *"New review feedback is in rounds 4 to 5 under"* ]]'
+check "rounds that piled up behind a busy worker are all named while they wait, and in its prompt" '[[ $waiting == *"013-tick-routing: rounds 4 to 5 waiting for its worker (working)"* && $out == *"013-tick-routing: rounds 4 to 5 sent to its worker"* && $(crew get 13 last_round_sent) == 5 && $(last_prompt) == *"New review feedback is in rounds 4 to 5 under"* ]]'
 # Another automated review, asked for on the PR (a `crew review` comment) or with crew review.
 round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
 comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
