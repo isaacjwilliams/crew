@@ -240,48 +240,17 @@ func cmdFeedback(c *Crew, args []string) error {
 	}
 	convo := relevant(allConvo, me, func(cm ghComment) bool { return cm.CreatedAt > since })
 
-	myReviews, myInline, myConvo := byWho(reviews, "me"), byWho(inline, "me"), byWho(convo, "me")
+	r := reviewRound{reviews: byWho(reviews, "me"), inline: byWho(inline, "me"), convo: byWho(convo, "me")}
 	theirReviews, theirInline, theirConvo := byWho(reviews, "collaborator"), byWho(inline, "collaborator"), byWho(convo, "collaborator")
-	nr, ni, nc := len(myReviews), len(myInline), len(myConvo)
 	no := len(theirReviews) + len(theirInline) + len(theirConvo)
-	if nr+ni+nc+no == 0 {
+	if r.empty() && no == 0 {
 		fmt.Printf("No new review feedback on PR #%s since %s.\n", num, since)
 		return exitQuietly(3)
 	}
 
-	rounds := atoiOr0(t.Get("review_rounds"))
-	var round, questions strings.Builder
-	if nr+ni+nc > 0 {
-		rounds++
-		fmt.Fprintf(&round, "### Round %d — %s (PR #%s)\n\n", rounds, time.Now().Format("2006-01-02 15:04"), num)
-		if nr > 0 {
-			round.WriteString("**Review summaries**\n")
-			for _, r := range myReviews {
-				fmt.Fprintf(&round, "- [ ] review %s (%s)\n%s\n", r.ID, strings.ToLower(r.State), quoted(r.Body))
-			}
-			round.WriteString("\n")
-		}
-		if ni > 0 {
-			round.WriteString("**Inline comments**\n")
-			for _, cm := range myInline {
-				thread := ""
-				if cm.InReplyTo != nil {
-					thread = " (in thread " + cm.InReplyTo.String() + ")"
-				}
-				fmt.Fprintf(&round, "- [ ] %s — comment %s%s — [link](%s)\n%s\n", cm.where(), cm.ID, thread, cm.HTMLURL, quoted(cm.Body))
-			}
-			round.WriteString("\n")
-		}
-		if nc > 0 {
-			round.WriteString("**Conversation comments**\n")
-			for _, cm := range myConvo {
-				fmt.Fprintf(&round, "- [ ] comment %s — [link](%s)\n%s\n", cm.ID, cm.HTMLURL, quoted(cm.Body))
-			}
-			round.WriteString("\n")
-		}
-	}
-	for _, r := range theirReviews {
-		fmt.Fprintf(&questions, "- [ ] @%s reviewed PR #%s (%s), review %s — [link](%s)\n%s\n", r.User.Login, num, strings.ToLower(r.State), r.ID, r.HTMLURL, quoted(r.Body))
+	var questions strings.Builder
+	for _, rv := range theirReviews {
+		fmt.Fprintf(&questions, "- [ ] @%s reviewed PR #%s (%s), review %s — [link](%s)\n%s\n", rv.User.Login, num, strings.ToLower(rv.State), rv.ID, rv.HTMLURL, quoted(rv.Body))
 	}
 	for _, cm := range theirInline {
 		fmt.Fprintf(&questions, "- [ ] @%s commented on %s in PR #%s, comment %s — [link](%s)\n%s\n", cm.User.Login, cm.where(), num, cm.ID, cm.HTMLURL, quoted(cm.Body))
@@ -293,10 +262,11 @@ func cmdFeedback(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if round.Len() > 0 {
-		t.InsertBefore("## Log", round.String())
-		t.Set("review_rounds", fmt.Sprint(rounds))
-		t.Log(fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", rounds, nr, ni, nc))
+	var n int
+	var round string
+	if !r.empty() {
+		n, round = r.add(t, num)
+		t.Log(fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo)))
 	}
 	if questions.Len() > 0 {
 		t.AppendToSection("## Open questions", questions.String())
@@ -309,14 +279,63 @@ func cmdFeedback(c *Crew, args []string) error {
 	if questions.Len() > 0 {
 		fmt.Print("For the user (under Open questions):\n" + questions.String())
 	}
-	if round.Len() == 0 {
+	if round == "" {
 		return nil
 	}
-	fmt.Print(round.String())
-	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil && rounds > max {
-		warn("this is round %d (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", rounds, max)
-	}
+	fmt.Print(round)
+	warnManyRounds(p, n)
 	return nil
+}
+
+// A review round: the user's new comments on the PR, for the worker that wrote it.
+type reviewRound struct {
+	reviews, inline, convo []ghComment
+}
+
+func (r reviewRound) empty() bool { return len(r.reviews)+len(r.inline)+len(r.convo) == 0 }
+
+// add writes the round into the task as its next, before ## Log, and counts it
+// in review_rounds. It returns the round's number and text. Run it with the
+// ledger lock held.
+func (r reviewRound) add(t Task, prNumber string) (int, string) {
+	n := atoiOr0(t.Get("review_rounds")) + 1
+	var b strings.Builder
+	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format("2006-01-02 15:04"), prNumber)
+	if len(r.reviews) > 0 {
+		b.WriteString("**Review summaries**\n")
+		for _, rv := range r.reviews {
+			fmt.Fprintf(&b, "- [ ] review %s (%s)\n%s\n", rv.ID, strings.ToLower(rv.State), quoted(rv.Body))
+		}
+		b.WriteString("\n")
+	}
+	if len(r.inline) > 0 {
+		b.WriteString("**Inline comments**\n")
+		for _, cm := range r.inline {
+			thread := ""
+			if cm.InReplyTo != nil {
+				thread = " (in thread " + cm.InReplyTo.String() + ")"
+			}
+			fmt.Fprintf(&b, "- [ ] %s — comment %s%s — [link](%s)\n%s\n", cm.where(), cm.ID, thread, cm.HTMLURL, quoted(cm.Body))
+		}
+		b.WriteString("\n")
+	}
+	if len(r.convo) > 0 {
+		b.WriteString("**Conversation comments**\n")
+		for _, cm := range r.convo {
+			fmt.Fprintf(&b, "- [ ] comment %s — [link](%s)\n%s\n", cm.ID, cm.HTMLURL, quoted(cm.Body))
+		}
+		b.WriteString("\n")
+	}
+	t.InsertBefore("## Log", b.String())
+	t.Set("review_rounds", fmt.Sprint(n))
+	return n, b.String()
+}
+
+// warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds.
+func warnManyRounds(p *Project, n int) {
+	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil && n > max {
+		warn("this is round %d (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", n, max)
+	}
 }
 
 func atoiOr0(s string) int {
