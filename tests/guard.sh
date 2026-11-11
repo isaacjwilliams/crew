@@ -145,8 +145,8 @@ check "the implementer force-pushes on its own, with an explicit lease its setti
 check "the restack note's push uses the lease form the implementer is told to use" \
   "grep -qF 'git push --force-with-lease=%s:%s origin %s' <<<\"\$SRC\" && grep -q 'Push with the .git push --force-with-lease=…. command the note gives' $A/implementer.md"
 check "implementer prompt spells out the GitHub allowances" "grep -q '^## On GitHub, you may do exactly this' $REPO_DIR/agents/implementer.md"
-check "implementer answers every kind of review comment with crew reply, posts the one automated-review summary with crew review-summary, and posts no other comments" \
-  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., the one summary comment on your PR' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply. or the .crew review-summary.;' $A/implementer.md"
+check "implementer answers every kind of review comment with crew reply, posts one automated-review summary a pass with crew review-summary, and posts no other comments" \
+  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., one summary comment for each pass of automated review' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply. or the .crew review-summary.;' $A/implementer.md"
 check "implementer marks its PR ready only after automated review, as its settings allow" \
   "grep -q 'with .--draft. when automated review will run' $A/implementer.md && awk '/crew review-summary <task> <file>.. Add a last line/ && !s {s=NR} /mark the PR ready: .gh pr ready <url>./ && !r {r=NR} END {exit !(s && r && s < r)}' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
@@ -180,7 +180,7 @@ L_UNIT=$REPO_DIR/systemd/crew-lead.service
 check "the lead service runs crew serve, restarts it, and leaves it stopped when serve exits 3 (not the host)" \
   "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -q 'exitNotHost = 3' <<<\"\$SRC\""
 check "crew followup's prompt, not the worker, decides whether a review round gets replies" \
-  "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in the round with' <<<\"\$SRC\""
+  "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in those rounds with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \
   "grep -q '~/.claude/CLAUDE.md. with their taste' $A/implementer.md && ! grep -q '^## Engineering standards' $A/implementer.md"
 check "plan-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C" \
@@ -231,9 +231,13 @@ check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookE
 check "reviewer leaves commit messages, which are stated intent, until it has derived intent" \
   "grep -q 'Commit messages are stated intent' $A/reviewer.md && grep -q 'log --format=%H <range>' $A/reviewer.md && ! grep -q 'diff and log' $A/reviewer.md"
 check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is above 0, and stops at that many reviews" \
-  "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
+  "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'this pass has run fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
 check "the implementer pushes its fixes after every review, the last one included, before it posts the summary" \
   "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
+check "a pass is counted from the last Summary posted, one the user asked for runs at least one review, and only a draft is marked ready" \
+  "grep -q 'A pass is the reviews recorded after the last .Summary posted. line' $A/implementer.md && grep -q 'A pass the user asked for runs at least one, even when .AUTO_REVIEWS. is 0' $A/implementer.md && grep -q 'and the PR is still a draft' $A/implementer.md"
+check "a requested pass runs after the round's other comments are pushed, and the request gets no crew reply" \
+  "grep -q 'Automated review requested (%s)' <<<\"\$SRC\" && awk '/^## Workflow: review rounds/ {w=1} w && /^4\\. Run checks, commit/ && !p {p=NR} w && /run a new pass of .Workflow: automated review./ && !r {r=NR} END {exit !(p && r && p < r)}' $A/implementer.md && grep -q 'Don.t .crew reply. to the comment that asked for it' $A/implementer.md"
 check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
   "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
 for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do

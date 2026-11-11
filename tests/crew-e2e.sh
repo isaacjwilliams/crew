@@ -183,9 +183,9 @@ check "collaborators' comments go under Open questions, unchecked, for the user"
 check "comments from people without write access, and from bots, are never pulled" '! grep -q "Drive-by idea\|Coverage report" "$F1"'
 check "followup resumes on a new round" 'crew followup 1 >/dev/null && [[ $(crew get 1 status) == addressing-feedback && $(crew get 1 last_round_sent) == 1 ]]'
 check "resume passes the recorded session" 'grep -q -- "--resume $(crew get 1 worker_session) " "$HOME/claude-calls.log"'
-check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in the round with .crew reply."'
+check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in those rounds with .crew reply."'
 setstate "done" null
-check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "Round 1" | grep -q "use defaults" && [[ $(crew get 1 status) == working ]]'
+check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults" && [[ $(crew get 1 status) == working ]]'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 rm -f "$HOME/fail-resume"
@@ -233,15 +233,25 @@ rm -f "$HOME/gh-last-body"
 check "reply refuses a comment on another PR" '! crew reply 1 116 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 check "reply refuses an ID that is no comment or review on the PR" '! crew reply 1 999 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
+review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
+check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
+review "$F1" 1
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1); body=$(cat "$HOME/gh-last-body")
-want=$'Automated review\n\nNothing found.\n\n<!-- crew review-summary -->\n<!-- crew -->'
-check "review-summary posts the file on the task's PR, tagged as the summary and as crew's" '[[ $out == "posted the automated-review summary on PR #12" && $body == "$want" ]] && grep -q "issues/12/comments -f body=Automated review" "$HOME/gh-calls.log"'
+want=$'Automated review\n\nNothing found.\n\n<!-- crew review-summary: review 1 -->\n<!-- crew -->'
+check "review-summary posts the file on the task's PR, tagged as crew's and as the summary up to the newest review" '[[ $out == "posted the automated-review summary on PR #12" && $body == "$want" ]] && grep -q "issues/12/comments -f body=Automated review" "$HOME/gh-calls.log"'
 printf 'Automated review\n\nOne fixed.\n' >"$HOME/summary.md"; posts=$(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log")
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
-check "a second summary edits the first instead of posting another" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summary") == "Automated review"*"One fixed."* && $(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log") == "$posts" ]] && grep -q "PATCH repos/{owner}/{repo}/issues/comments/120 " "$HOME/gh-calls.log"'
+check "a second summary for the same newest review edits the first instead of posting another" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/120") == "Automated review"*"One fixed."* && $(grep -c "issues/12/comments -f body=" "$HOME/gh-calls.log") == "$posts" ]] && grep -q "PATCH repos/{owner}/{repo}/issues/comments/120 " "$HOME/gh-calls.log"'
+sed -i "/^### Automated review 1\$/a Summary posted" "$F1"; review "$F1" 2; review "$F1" 3
+printf 'Automated review\n\nTwo more ran.\n' >"$HOME/summary.md"
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
+check "once a later review is recorded, the next pass's summary is posted new and the first is left alone" '[[ $out == "posted the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/121") == *"Two more ran."*"<!-- crew review-summary: review 3 -->"* && $(cat "$HOME/gh-summaries/120") == *"One fixed."* ]]'
+printf 'Automated review\n\nTwo more ran, edited.\n' >"$HOME/summary.md"
+out=$(crew review-summary 1 "$HOME/summary.md" 2>&1)
+check "within the later pass, a second summary edits that pass's comment" '[[ $out == "updated the automated-review summary on PR #12" && $(cat "$HOME/gh-summaries/121") == *"edited."* && $(cat "$HOME/gh-summaries/120") == *"One fixed."* && ! -e $HOME/gh-summaries/122 ]]'
 out=$(crew feedback 1 --since 1970-01-01T00:00:00Z)
-check "crew feedback doesn't read the summary back" '[[ $out == *"comment 115"* && $out != *"comment 120"* ]] && ! grep -q "One fixed" "$F1"'
-rm -f "$HOME/gh-last-body" "$HOME/gh-summary"
+check "crew feedback doesn't read the summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]] && ! grep -q "One fixed\|Two more" "$F1"'
+rm -rf "$HOME/gh-last-body" "$HOME/gh-summaries"
 check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew review-summary 2 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 : >"$HOME/summary.md"
 check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
@@ -448,7 +458,7 @@ F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13
 crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; crew set 13 status pr-open
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
-check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waits for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
+check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
@@ -467,7 +477,7 @@ check "tick reads them again once GitHub says the PR changed" '[[ $(crew get 13 
 rm -f "$HOME/gh-pr-updated"
 crew set 13 feedback_since 1970-01-01T00:00:00Z; setstate blocked 4242 waiting; n=$(resumes)
 out=$(crew tick)
-check "tick holds a round for a worker with an open prompt, and says so" '[[ $out == *"013-tick-routing: round 2 waits for its worker (blocked)"* && $(crew get 13 last_round_sent) == 1 && $(resumes) == "$n" ]]'
+check "tick holds a round for a worker with an open prompt, and says so" '[[ $out == *"013-tick-routing: round 2 waiting for its worker (blocked)"* && $(crew get 13 last_round_sent) == 1 && $(resumes) == "$n" ]]'
 setstate blocked 4242 busy
 out=$(crew tick)
 check "tick sends a round to a worker that ended its turn on a question" '[[ $out == *"013-tick-routing: round 2 sent to its worker"* && $(crew get 13 last_round_sent) == 2 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
@@ -476,7 +486,33 @@ s13=$(crew get 13 worker_session); crew set 13 feedback_since 1970-01-01T00:00:0
 check "status shows a worker whose turn ended as idle, though a shell it left running keeps it working" '[[ $(crew status) == *"worker: idle, background task running"* ]]'
 out=$(crew tick)
 check "tick sends a round to a worker whose turn ended, though a shell it left running keeps it working" '[[ $out == *"013-tick-routing: round 3 sent to its worker"* && $(crew get 13 last_round_sent) == 3 && $(resumes) == $((n + 1)) ]]'
-rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate "done" null; crew set 13 status pr-open
+rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; crew set 13 status pr-open
+crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 13 feedback_since 1970-01-01T00:00:00Z; waiting=$(crew tick 2>/dev/null)
+setstate "done" null
+out=$(crew tick)
+check "rounds that piled up behind a busy worker are all named while they wait, and in its prompt" '[[ $waiting == *"013-tick-routing: rounds 4 to 5 waiting for its worker (working)"* && $out == *"013-tick-routing: rounds 4 to 5 sent to its worker"* && $(crew get 13 last_round_sent) == 5 && $(last_prompt) == *"New review feedback is in rounds 4 to 5 under"* ]]'
+# Another automated review, asked for on the PR (a `crew review` comment) or with crew review.
+round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
+comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
+{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; } >"$HOME/gh-more-comments"
+crew set 13 status pr-open; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
+crew feedback 13 >/dev/null 2>&1; r6=$(round "$F13" 6)
+check "the user's 'crew review' comment, in any case and with space around it, becomes a request line in a new round" '[[ $r6 == *"- [ ] Automated review requested (comment 130)"* && $r6 != *"Crew Review"* ]]'
+check "a longer comment that mentions crew review is an ordinary comment" '[[ $r6 == *"- [ ] comment 132 — [link](u132)"*"crew review it again"* && $r6 != *"(comment 132)"* ]]'
+check "a collaborator's 'crew review' goes under Open questions for the user, not into the round" '[[ $(section "$F13" "## Open questions") == *"@bob commented on PR #12, comment 131"* && $r6 != *131* ]]'
+rm "$HOME/gh-more-comments"
+rounds1=$(crew get 1 review_rounds)
+check "crew review refuses a task with no open PR (merged, or none at all), and records nothing" '! crew review 1 2>/dev/null && ! crew review 3 2>/dev/null && [[ $(crew get 1 review_rounds) == "$rounds1" ]] && ! grep -q "Automated review requested" "$F1" "$F3"'
+echo CLOSED >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1; rounds13=$(crew get 13 review_rounds)
+check "crew review refuses a task in flight whose PR was closed unmerged" '[[ $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open ]] && ! crew review 13 2>/dev/null && [[ $(crew get 13 review_rounds) == "$rounds13" ]]'
+echo OPEN >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1
+out=$(crew review 13 2>/dev/null)
+check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
+setstate "done" null; out=$(crew tick 2>/dev/null)
+check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
+crew set 13 status pr-open; setstate "done" null
+check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
 check "launched sessions never inherit crew's lock fds" '! grep -q "LEAK LOCK FD" "$HOME/claude-calls.log"'

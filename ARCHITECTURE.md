@@ -26,7 +26,7 @@ These are invariants. Breaking one changes the design, not just the implementati
      - task branches pushed under `BRANCH_PREFIX`, after every commit;
      - the PRs workers open;
      - optional one-line replies to the user's own review comments: in the thread for an inline comment, otherwise as a PR comment that quotes the one it answers;
-     - one comment per PR summing up its automated review (`crew review-summary`), which a worker edits rather than posting a second;
+     - one comment per pass of automated review summing it up (`crew review-summary`), which a worker edits rather than posting a second for the same pass;
      - two lines in `.git/info/exclude`, which is local to the clone.
 2. **The ledger is the single source of truth, it's plain text, and it's pushed to the person's private remote.**
    - Every change is committed at once and pushed in the background, normally within seconds, so another machine can take over with what this one knew. A push that fails is retried by the next commit, and by every `crew tick`.
@@ -195,8 +195,10 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
         → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user → its Outcome line
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
-        → gh pr ready (pr_mode ready) → crew set TASK status pr-open
+        → gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
 ```
+That's the first pass of automated review. A review round with an `Automated review requested` line (below) has the worker run another, once it has addressed the round's comments. A pass is the reviews after the last `Summary posted`, derived from the record rather than stored: it runs up to `AUTO_REVIEWS` reviews (at least one when the user asked for it), numbered on from the last pass, and posts a summary comment of its own.
+
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
 ### Review feedback
@@ -215,7 +217,12 @@ you review on GitHub → tell the lead (or run it yourself):
                          # if resume fails, or its job ends `failed` → fresh worker with a "pick up this task" prompt
                          # a new round's prompt says whether to reply on the PR (REPLY_TO_THREADS)
                          # records last_round_sent; status → addressing-feedback
-worker: address each comment → commit (no force-push) → push → crew reply TASK <id> "…" (if told to) → status pr-open
+  crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
+                         # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
+                         # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)
+                         # becomes the same line in crew feedback's round: "(comment <id>)"
+worker: address each comment in every unsent round, oldest first → commit (no force-push) → push
+        → crew reply TASK <id> "…" (if told to) → an "Automated review requested" line: a new pass → status pr-open
                          # crew reply: an inline comment → reply in its thread (to the thread root);
                          #   a conversation comment or review summary → a PR comment quoting it;
                          #   refuses an ID that isn't a comment or review on the task's own PR
@@ -569,21 +576,22 @@ Changing any of these means updating every side listed.
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
-| A review round's followup prompt says whether to reply ("Reply to each comment in the round with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 5; checked in `tests/guard.sh` |
+| A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 5; checked in `tests/guard.sh` |
 | Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
 | Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies and the automated-review summary | `crew reply`, `crew review-summary` → the `crew feedback` filter |
-| `<!-- crew review-summary -->` marker on the automated-review summary, found on the user's own comments | `crew review-summary` (posts, or edits the comment that has it) |
+| `<!-- crew review-summary: review N -->` marker on an automated-review summary, N the newest review it covers (`Task.NewestReview`, from `### Automated review N`), found on the user's own comments | `crew review-summary` (edits the comment with the same N, or posts a new one: a later pass's summary is a comment of its own) |
 | The briefing: first line `Code review`, then exactly `## Scope`, `## How to verify`, `## Hard constraints`, `## Stated intent`, stated intent last; the reviewer reads up to `## Stated intent` and derives intent first | `pr-review` `SKILL.md` step 3 → `reviewer.md`, `rubric.md` ("Derived intent vs. stated intent") |
 | A line under a task's Decisions ends with whose call it was: `(user)`, `(lead)` or `(worker)`; only `(user)` lines are the user's decisions in the review briefing, and `## Hard constraints` always reads `None recorded.` | `lead.md`, `goal-lead.md`, `implementer.md` (writers), `templates/task.md`, `LEDGER.md` → `pr-review` `SKILL.md` step 3; checked in `tests/guard.sh` |
 | The rubric is `rubric.md` beside `SKILL.md`, passed to the reviewer by path (`${CLAUDE_SKILL_DIR}/rubric.md`), with severities `must fix`, `should fix`, `fix later`, `nitpick` and its report format | `pr-review` → `reviewer.md`; checked in `tests/guard.sh` |
-| The record: `### Automated review N` under `## Automated reviews` (before `## Review rounds`), a `Reviewers` line naming any reviewer that failed, each finding a `####` heading with `Raised by` (`both`, `Codex` or `Claude reviewer`), `Finding`, a `Round <n>, <reviewer>` line per round reply, `Verdict`, `Agreed severity` (the rubric's four, or `withdrawn`, `split: …`, `disputed`, `uncertain`) and `Outcome` lines, and `Summary posted` under the newest review once the summary is up | `pr-review` step 8 → implementer "Workflow: automated review" (outcomes, resuming) → `templates/review-comment.md` → lead (what was left for the user); `templates/task.md`, `LEDGER.md` |
+| The record: `### Automated review N` under `## Automated reviews` (before `## Review rounds`), a `Reviewers` line naming any reviewer that failed, each finding a `####` heading with `Raised by` (`both`, `Codex` or `Claude reviewer`), `Finding`, a `Round <n>, <reviewer>` line per round reply, `Verdict`, `Agreed severity` (the rubric's four, or `withdrawn`, `split: …`, `disputed`, `uncertain`) and `Outcome` lines, and `Summary posted` under the newest review once the summary is up | `pr-review` step 8 → implementer "Workflow: automated review" (outcomes, resuming, passes) → `crew review-summary` (`Task.NewestReview` reads the headings) → `templates/review-comment.md` → lead (what was left for the user); `templates/task.md`, `LEDGER.md` |
 | An unchecked item (`- [ ]`) under Open questions is a question waiting on the user; whoever records its answer under Decisions ticks it | `crew feedback` (collaborators' comments), implementer "When you're blocked" → `OpenQuestions` (`crew tick` marks the task `needs-input`), lead (relays and ticks); checked in `tests/guard.sh` |
 | Who a comment is from: the user (`gh api user`), a collaborator (`author_association` OWNER, MEMBER or COLLABORATOR, `user.type` not `Bot`), or anyone else | GitHub REST API → `crew feedback` |
 | GitHub comment lookups: `pulls/comments/<id>` has `pull_request_url` and `in_reply_to_id`, `issues/comments/<id>` has `issue_url`, and both and `pulls/<n>/reviews/<id>` have `html_url` and `body` | GitHub REST API → `crew reply` (which PR a comment is on, the thread root, the quote) |
-| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`) | `crew feedback` → implementer review-round workflow and `crew reply` |
+| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`), and a request for another pass as `- [ ] Automated review requested (<source>)` (`reviewRound.add`) | `crew feedback`, `crew review` → implementer review-round workflow and `crew reply`; the request line, `pr-review` step 3 (left out of the briefing) |
+| A followup prompt names every unsent round, "round N" or "rounds N to M" (`unsentRounds`) | `crew followup`, `crew tick` → implementer "Workflow: review rounds" step 1 |
 | State paths, the ledger: `projects/` and `reports/` in the home. Only they are committed by `crew`, edited by agents, or absent from the public repo | `statePaths` in `crew` (`commit` and the guard); checked in `tests/guard.sh`, which also checks this repo tracks nothing there but `projects/.gitkeep`, and no `config/crew.env` or `host` |
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" commit --hook` on `Edit\|Write\|NotebookEdit\|Bash`; it reads nothing from its JSON | `lead/.claude/settings.json`, `config/worker-settings.json` → `commitHook`, `crew doctor`; checked in `tests/guard.sh` |
 | Hook command path `${CREW_HOME:-$HOME/crew}/bin/crew-guard` and role names. `~/crew` is the usual home; `crew install` sets `env.CREW_HOME` in `~/.claude/settings.json`, so hooks find a home anywhere | agent frontmatter, `lead/.claude/settings.json` and `config/worker-settings.json` → `bin/crew-guard` (which runs `crew guard`), `crew doctor`; checked in `tests/guard.sh` |

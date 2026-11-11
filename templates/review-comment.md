@@ -1,11 +1,15 @@
-<!-- The automated-review summary on a worker's PR. Fill it in from the task file's Automated reviews
-     record alone, then post it with `crew review-summary <task> <file>`. Leave out this comment, the
-     <…> placeholders and any section that would be empty. One line per finding: a reader should take
-     it in at a glance. It's for the user's collaborators too, so it never mentions the ledger,
-     tasks, proposals or agents. Withdrawn findings aren't listed.
+<!-- The automated-review summary on a worker's PR, one for each pass of automated review. Fill it
+     in from this pass's reviews in the task file's Automated reviews record alone, then post it
+     with `crew review-summary <task> <file>`. Leave out this comment, the <…> placeholders and any
+     section that would be empty. One line per finding: a reader should take it in at a glance.
+     It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
+     agents. Withdrawn findings aren't listed.
 
-     <N> counts every review, including one whose reviewers failed. The sentences after it say who
-     reviewed, from the Reviewers and Rounds lines:
+     <N> counts every review in this pass, including one whose reviewers failed. When the record
+     has a "Summary posted" line before this pass's reviews, open instead of the line below with
+     "<N> more automated reviews of this PR ran since the last summary." ("1 more automated review
+     …" for one). Each review reads the whole PR, so never say it reviewed only the new changes.
+     The sentences after it say who reviewed, from the Reviewers and Rounds lines:
      - the Claude reviewer only: "Each was by a Claude reviewer." ("It was by …" after a single review)
      - with Codex: "Each was by a Claude reviewer and Codex."
      - when some review's Rounds line is above 0, add "They answered each other's findings in reviews 1

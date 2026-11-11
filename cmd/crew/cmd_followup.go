@@ -31,8 +31,8 @@ func cmdFollowup(c *Crew, args []string) error {
 	return c.followup(t, fresh, note)
 }
 
-// followup resumes a task's worker with its newest review round, or a note, or
-// both; or starts a fresh worker when fresh is set or the resume fails.
+// followup resumes a task's worker with the review rounds it hasn't been sent, or
+// a note, or both; or starts a fresh worker when fresh is set or the resume fails.
 func (c *Crew) followup(t Task, fresh bool, note string) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -55,7 +55,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if as.jobBusy(job) {
 		// A round sent any other way would go out again: only crew records last_round_sent.
 		if newRound {
-			return fail("worker %s is busy (%s). crew tick sends round %d once it's free", job, as.jobState(job), rounds)
+			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in agent view (claude attach %s), or SendMessage %s a note", job, as.jobState(job), job, t.Get("worker_name"))
 	}
@@ -73,9 +73,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 
 	prompt := fmt.Sprintf("New input for task %s (task file: %s).", t.ID(), t.Path)
 	if newRound {
-		prompt += fmt.Sprintf(" New review feedback is in Round %d under '## Review rounds'; follow your review-round workflow.", rounds)
+		prompt += fmt.Sprintf(" New review feedback is in %s under '## Review rounds'; follow your review-round workflow.", unsentRounds(t))
 		if p.Settings["REPLY_TO_THREADS"] == "yes" {
-			prompt += " Reply to each comment in the round with `crew reply`."
+			prompt += " Reply to each comment in those rounds with `crew reply`."
 		} else {
 			prompt += " Don't reply to the comments on the PR: this project has REPLY_TO_THREADS off."
 		}
@@ -111,6 +111,16 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	c.commit("followup " + p.Name + "/" + t.ID())
 	fmt.Printf("followup sent to %s → worker %s (%s)\n", t.ID(), l.job, l.mode)
 	return nil
+}
+
+// unsentRounds names the review rounds the task's worker hasn't been sent yet:
+// "round 3", or "rounds 2 to 4" when several piled up while it was busy.
+func unsentRounds(t Task) string {
+	from, to := atoiOr0(t.Get("last_round_sent"))+1, atoiOr0(t.Get("review_rounds"))
+	if from == to {
+		return fmt.Sprintf("round %d", to)
+	}
+	return fmt.Sprintf("rounds %d to %d", from, to)
 }
 
 // crew restack TASK [--again]: has a stacked task's worker rebase it after its

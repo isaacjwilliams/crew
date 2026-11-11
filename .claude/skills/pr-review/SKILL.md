@@ -29,7 +29,7 @@ and nothing else.
 | The fork point, the range and the review root | The brief's Context, Structure or Plan: an assistant-written plan the user approved |
 | Test, lint and run commands | Justification for a trade-off you chose |
 | The user's decisions, the lines marked `(user)` | Which findings you expect, or a defence in advance |
-| | Your reading of the user's intent |
+| The user's review comments, as the task's review rounds quote them | Your reading of the user's intent |
 
 Verbatim means verbatim. Quote; don't condense.
 
@@ -92,6 +92,10 @@ Only these, verbatim, each as a `###` subsection:
 - `### The user's request`: the quoted (`>`) block in the task's Goal section. Not the restatement that follows it.
 - `### The user's decisions`: every line under the task's Decisions that ends `(user)`, and no other. A line without
   that ending isn't the user's, whatever it says. Omit the subsection if there are none.
+- `### The user's review comments`: the quoted (`>`) text of every comment under the task's `## Review rounds`,
+  verbatim, under a `#### Round <n>` heading for each round. Leave out each round's other lines: the checkbox lines
+  with a comment's ID and link, and any `Automated review requested` line. Only the user's comments are recorded
+  there. Omit the subsection if there are none.
 - `### Pull request`: its title and body, from `gh pr view`.
 - `### Commits`: every commit in `<fork sha>..HEAD`, with its full hash and its whole message, and a delimiter line
   between commits, for example `git log --format='----- %H%n%B' <fork sha>..HEAD`. Never an abbreviated format that
@@ -100,8 +104,8 @@ Only these, verbatim, each as a `###` subsection:
 A PR body or commit message often has headings of its own. Turn each `#` or `##` heading in them into a `####`
 heading, so nothing after `## Stated intent` starts a new section. That's the only change you make to them.
 
-Nothing else from the task file goes in: not its title, Context, Structure, Plan, Log or review rounds. If you catch
-yourself explaining, delete the sentence.
+Nothing else from the task file goes in: not its title, Context, Structure, Plan or Log, and nothing from its review
+rounds but the user's comments. If you catch yourself explaining, delete the sentence.
 
 Stated intent comes last, and the headings are spelled exactly so, because a reviewer has to read the code before it
 reads the stated intent. It reads up to `## Stated intent` and stops there until it has written its own account of the

@@ -139,6 +139,22 @@ func TestSections(t *testing.T) {
 	}
 }
 
+func TestNewestReview(t *testing.T) {
+	none := Task{docWith(t, sampleTask)}
+	if n := none.NewestReview(); n != 0 {
+		t.Errorf("a task without automated reviews: NewestReview = %d", n)
+	}
+	// The newest is the last heading, across passes; a heading quoted in a
+	// review round isn't a review.
+	two := Task{docWith(t, "## Automated reviews\n<!-- Appended by the worker. -->\n\n"+
+		"### Automated review 1\n#### [should fix] x\nSummary posted\n\n"+
+		"### Automated review 2\n#### [nitpick] y\n\n"+
+		"## Review rounds\n### Round 1\n  > ### Automated review 9\n\n## Log\n")}
+	if n := two.NewestReview(); n != 2 {
+		t.Errorf("NewestReview = %d, want 2", n)
+	}
+}
+
 func TestLog(t *testing.T) {
 	d := docWith(t, "---\nid: 1\n---\n## Log")
 	d.Log("did a thing")

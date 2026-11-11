@@ -16,7 +16,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │                    │         each in ~/agent-work/<project>/<task>)
            │                    │  ├─ casual-observer pass before the PR
            │                    │  ├─ push branch, open draft PR
-           │                    ▼  └─ automated review of the PR, fixes, one summary comment
+           │                    ▼  └─ automated review of the PR, fixes, a summary comment
            └── review/merge ── GitHub PRs
                                    ▲
        gardener (weekly timer) ────┘ reads merged commits → proposals in the ledger
@@ -332,6 +332,8 @@ Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (
 
 Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done, and the lead's report of the PR repeats what was left for you.
 
+**Another pass, after your review.** Once the worker has made the changes you asked for, you can have automated review check them: comment `crew review` on the PR (the whole comment, in any case), or ask the lead, which runs `crew review <task>`. Either way the request joins your review comments as a line in a review round, so it waits for a busy worker like any round. The worker addresses the round's comments first, then runs a new pass: up to `AUTO_REVIEWS` more reviews, at least one even when `AUTO_REVIEWS` is 0, each of the whole PR. The reviewers get your review comments as part of what you asked for. The pass ends with a new summary comment of its own, and the earlier ones stay as they were. Only your own `crew review` counts: a collaborator's goes under Open questions, like their other comments.
+
 ### Codex in automated review
 
 If you use OpenAI's Codex, each automated review can run it alongside the reviewer agent, so two reviewers from different model families read the PR. To turn it on for every project:
@@ -350,7 +352,8 @@ Review in GitHub as you normally would: submit a review, or leave a PR comment. 
 
 ```fish
 crew feedback '#42'    # YOUR new comments → "Round N"; collaborators' → Open questions, for you
-crew followup '#42'    # resumes the same worker session on that round
+crew followup '#42'    # resumes the same worker session on the rounds it hasn't had
+crew review '#42'      # asks for another pass of automated review, as a round of its own
 ```
 
 The worker makes the changes as new commits (no force-push), pushes, replies to each of your comments with what it did (set `REPLY_TO_THREADS=no` to turn this off). An inline comment gets a reply in its thread; a conversation comment or review summary gets a PR comment that quotes it, and marks the task `pr-open` again.
@@ -441,7 +444,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
-| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post one automated-review summary on each, and mark it ready after that review | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
+| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post an automated-review summary on each for every pass of automated review, and mark it ready after the first | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Codex only reads when it reviews | `crew codex` runs Codex every time with the read-only sandbox and approvals off, fixed in code. A `deny` rule in `config/worker-settings.json` catches workers running `codex` directly |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
@@ -539,7 +542,8 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - branch names chosen with `--branch` (validated, prefixed, made unique), ready checks, dispatch, and dependency gating;
   - worker-side updates from inside a worktree;
   - feedback rounds, which skip the worker's own replies and comments in unsubmitted reviews, and put collaborators' comments under Open questions instead;
-  - `crew tick`: recording a round while the worker is busy and sending it once it's free, including to a worker that asked you a question, marking a task waiting on you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
+  - requests for another pass of automated review: your `crew review` comment and `crew review`, each a line in a round, and one summary comment per pass;
+  - `crew tick`: recording a round while the worker is busy and sending it once it's free, with any rounds before it, including to a worker that asked you a question, marking a task waiting on you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
   - followup: refusing while a worker is busy, continuing one that ended its turn on a question, never resending an old round, resuming, and falling back to a fresh worker;
   - replies: to thread roots, quoting conversation comments and review summaries, and refusing comments from other PRs; sync, cleanup (ending a background process left running in the worktree, and only that), the gardener, and promoting proposals;
   - `WORKTREE_TOOL=worktrunk`: dispatch and cleanup through `wt`, stopping on unapproved hooks, the ledger unlocked while hooks run;

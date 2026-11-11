@@ -156,13 +156,14 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
 	if as.jobBusy(job) {
 		if rounds > sent {
-			fmt.Printf("%s: round %d waits for its worker (%s)\n", id, rounds, as.jobState(job))
+			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
 		}
 		return
 	}
 	if rounds > sent {
+		unsent := unsentRounds(t)
 		if c.step(nil, "followup", t.Path) == 0 {
-			fmt.Printf("%s: round %d sent to its worker\n", id, rounds)
+			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
 		}
 		return
 	}

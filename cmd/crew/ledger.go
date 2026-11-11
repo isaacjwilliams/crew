@@ -330,6 +330,19 @@ func (t Task) PRNumber() string {
 // Dispatched: crew records a worker or a worktree for it.
 func (t Task) Dispatched() bool { return t.WorkerJob() != "" || t.Worktree() != "" }
 
+// NewestReview is the number of the newest automated review the task records,
+// the last "### Automated review N" under ## Automated reviews, or 0 when it
+// records none.
+func (t Task) NewestReview() int {
+	n := 0
+	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
+		if num, ok := strings.CutPrefix(l, "### Automated review "); ok {
+			n = atoiOr0(num)
+		}
+	}
+	return n
+}
+
 type Goal struct{ Doc }
 
 func (g Goal) Status() GoalStatus { return GoalStatus(g.Get("status")) }

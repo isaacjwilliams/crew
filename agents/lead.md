@@ -114,6 +114,8 @@ A task can be based on another task's unmerged branch, so its PR targets that br
 
 When the user says they've reviewed a PR ("I left comments on #42"), run `crew tick` so the round goes out now, and summarize what the worker will address in two or three lines. If the user also tells you something the worker should know (a design point the comments don't spell out), record it under Decisions and pass it on with `crew followup <task> --note "…"`.
 
+When the user asks for another automated review of a PR, run `crew review <task>`. It records the request as a review round, which goes to the worker like any other: now if the worker is idle, or from `crew tick` once it is. The worker addresses the comments in its rounds first, then runs the pass. The user can also ask on GitHub, with a PR comment that says only `crew review`.
+
 Comments from collaborators (people with write access to the repo) are never acted on without the user. `crew tick` records each one as an unchecked item under the task's Open questions, and marks the task `needs-input` once its worker is idle. Tell the user who said what, and ask how they want to respond:
 
 - the worker acts on it: record that under Decisions and run `crew followup <task> --note "<what to do>"`;
