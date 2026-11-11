@@ -228,7 +228,7 @@ you review on GitHub → tell the lead (or run it yourself):
   crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
                          # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
                          # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)
-                         # becomes the same line in crew feedback's round: "(comment <id>)"
+                         # becomes the same line in crew feedback's round: "(comment <id>)", one line for each
 worker: crew react TASK eyes <every ID in the unsent rounds>
         → address each comment, oldest round first (crew react TASK rocket <id> before changing code for it)
         → commit (no force-push) → push

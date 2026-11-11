@@ -514,10 +514,11 @@ check "rounds that piled up behind a busy worker are all named while they wait, 
 # Another automated review, asked for on the PR (a `crew review` comment) or with crew review.
 round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
 comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
-{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; } >"$HOME/gh-more-comments"
+{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; comment 133 isaac OWNER "crew review"; } >"$HOME/gh-more-comments"
 crew set 13 status pr-open; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
 crew feedback 13 >/dev/null 2>&1; r6=$(round "$F13" 6)
 check "the user's 'crew review' comment, in any case and with space around it, becomes a request line in a new round" '[[ $r6 == *"- [ ] Automated review requested (comment 130)"* && $r6 != *"Crew Review"* ]]'
+check "two 'crew review' comments in one round each get a request line, so the worker reacts to both" '[[ $r6 == *$'"'"'- [ ] Automated review requested (comment 130)\n- [ ] Automated review requested (comment 133)'"'"'* ]]'
 check "a longer comment that mentions crew review is an ordinary comment" '[[ $r6 == *"- [ ] comment 132 — [link](u132)"*"crew review it again"* && $r6 != *"(comment 132)"* ]]'
 check "a collaborator's 'crew review' goes under Open questions for the user, not into the round" '[[ $(section "$F13" "## Open questions") == *"@bob commented on PR #12, comment 131"* && $r6 != *131* ]]'
 rm "$HOME/gh-more-comments"

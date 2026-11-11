@@ -248,7 +248,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	r := reviewRound{reviews: byWho(reviews, "me"), inline: byWho(inline, "me")}
 	for _, cm := range byWho(convo, "me") {
 		if isReviewRequest(cm) {
-			r.reviewRequestSource = "comment " + cm.ID.String()
+			r.reviewRequests = append(r.reviewRequests, "comment "+cm.ID.String())
 		} else {
 			r.convo = append(r.convo, cm)
 		}
@@ -279,7 +279,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	if !r.empty() {
 		n, round = r.add(t, num)
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
-		if r.reviewRequestSource != "" {
+		if len(r.reviewRequests) > 0 {
 			msg += ", with a request for another automated review"
 		}
 		t.Log(msg)
@@ -330,7 +330,7 @@ func cmdReview(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequestSource: "crew review"}.add(t, t.PRNumber())
+	n, _ := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -351,14 +351,15 @@ func isReviewRequest(cm ghComment) bool {
 }
 
 // A review round: the user's new comments on the PR, for the worker that wrote
-// it, and their request for another automated review pass, if they made one.
+// it, and their requests for another automated review pass, if they made any.
+// The worker runs one pass for them all, and reacts to each request comment.
 type reviewRound struct {
 	reviews, inline, convo []ghComment
-	reviewRequestSource    string // where it came from: "comment <id>" or "crew review"
+	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
 }
 
 func (r reviewRound) empty() bool {
-	return len(r.reviews)+len(r.inline)+len(r.convo) == 0 && r.reviewRequestSource == ""
+	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0
 }
 
 // add writes the round into the task as its next, before ## Log, and counts it
@@ -393,8 +394,11 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 		}
 		b.WriteString("\n")
 	}
-	if r.reviewRequestSource != "" {
-		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n\n", r.reviewRequestSource)
+	for _, source := range r.reviewRequests {
+		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n", source)
+	}
+	if len(r.reviewRequests) > 0 {
+		b.WriteString("\n")
 	}
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
