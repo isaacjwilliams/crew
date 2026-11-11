@@ -249,11 +249,19 @@ check "a pr-review run that records nothing isn't counted, and a second such sto
 check "a worker resumed after the last outcome runs the checks and pushes before it goes on" \
   "grep -q 'no .Summary posted. needs the end of step 2 (run the checks and push), then step 3' $A/implementer.md"
 check "a review whose reviewer failed is marked in the record, and the summary has a truthful line for it" \
-  "grep -q 'Reviewers: Claude reviewer, failed: <what happened>' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
+  "grep -q 'Reviewers: Claude reviewer and Codex (failed: <what happened>)' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
   "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
 check "workers can't run codex themselves, only through crew codex, which runs it read-only" \
   "jq -e >/dev/null '.permissions.deny | index(\"Bash(codex *)\")' $C/worker-settings.json && [[ \$(grep -l 'exec.Command(\"codex\"' $REPO_DIR/cmd/crew/*.go) == $REPO_DIR/cmd/crew/cmd_codex.go ]]"
+check "pr-review is one flow over the reviewers it launched: CODEX_REVIEW only decides whether Codex is launched, and Codex runs only through crew codex" \
+  "[[ \$(grep -c CODEX_REVIEW $SK/SKILL.md) == 1 ]] && grep -q '^## 4. Launch the reviewers' $SK/SKILL.md && grep -q 'crew codex start <review root>' $SK/SKILL.md && grep -q 'crew codex reply <review root> <thread>' $SK/SKILL.md && ! grep -qE '(^|[^-])codex (exec|resume)' $SK/SKILL.md"
+check "rounds run only between two reviewers that reported, up to AUTO_REVIEW_REBUTTALS (2 by default), and the Claude reviewer is always fresh in one" \
+  "grep -q 'Skip this step unless both reviewers reported' $SK/SKILL.md && grep -q 'crew config AUTO_REVIEW_REBUTTALS --project' $SK/SKILL.md && grep -qx 'AUTO_REVIEW_REBUTTALS=2' $C/defaults.env && grep -qx 'CODEX_REVIEW=\"no\"' $C/defaults.env && grep -q 'Spawn a fresh .reviewer. subagent, never a resumed one' $SK/SKILL.md && grep -q 'You always start a round fresh' $A/reviewer.md"
+check "reviewer.md answers a rebuttal round in the shape the skill asks for" \
+  "grep -qx '## Rebuttal rounds' $A/reviewer.md && grep -q 'A prompt that starts .Rebuttal round. is a different job' $A/reviewer.md && grep -q '^  > Rebuttal round <n> on' $SK/SKILL.md && grep -q 'confirm | refute | withdraw | reseverity' $A/reviewer.md"
+check "the implementer acts on withdrawn and split findings, and a review where only Codex failed can be clean" \
+  "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: raised at <severity>, <reviewer> refutes' $SK/SKILL.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
