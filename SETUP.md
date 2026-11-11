@@ -27,7 +27,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 
 **How the lead talks to the right worker.** Every task file records its worker's session name, job ID, and session ID. "Address my comments on #42" becomes: find the task whose `pr` is #42, append your new comments to it as a review round, then resume *that* session in *that* worktree. The lead never has to remember anything. If the session no longer exists, a fresh worker picks up from the task file and the branch.
 
-**What your collaborators see:** branches pushed under your `BRANCH_PREFIX` (a worker pushes after every commit, so a repo whose CI runs on every push runs it on those branches too), draft PRs, one comment per PR summing up its automated review, and (optionally) one-line replies to your own review comments, all under your GitHub account. Nothing else: no labels, no other comments, no files in the repo. `crew project add` only adds two lines to `.git/info/exclude`, which is local to your clone.
+**What your collaborators see:** branches pushed under your `BRANCH_PREFIX` (a worker pushes after every commit, so a repo whose CI runs on every push runs it on those branches too), draft PRs, one comment per PR summing up its automated review, 👀 and 🚀 reactions to your own review comments, and (optionally) one-line replies to them, all under your GitHub account. Nothing else: no labels, no other comments, no files in the repo. `crew project add` only adds two lines to `.git/info/exclude`, which is local to your clone.
 
 ---
 
@@ -357,7 +357,9 @@ crew followup '#42'    # resumes the same worker session on the rounds it hasn't
 crew review '#42'      # asks for another pass of automated review, as a round of its own
 ```
 
-The worker makes the changes as new commits (no force-push), pushes, replies to each of your comments with what it did (set `REPLY_TO_THREADS=no` to turn this off). An inline comment gets a reply in its thread; a conversation comment or review summary gets a PR comment that quotes it, and marks the task `pr-open` again.
+When the worker picks up a round, it reacts 👀 to each of your comments in it, and then 🚀 to each one it's about to change code for. A comment it answers without a change, a question say, keeps only its 👀. A `crew review` comment gets 👀 when it's picked up and 🚀 when its pass starts.
+
+The worker makes the changes as new commits (no force-push), pushes, replies to each of your comments with what it did (set `REPLY_TO_THREADS=no` to turn this off), and marks the task `pr-open` again. An inline comment gets a reply in its thread; a conversation comment or review summary gets a PR comment that quotes it.
 
 Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` lists them under the task's Open questions, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored.
 
