@@ -589,7 +589,7 @@ Changing any of these means updating every side listed.
 | Front-matter key names | `templates/task.md`, `templates/goal.md`, `templates/proposal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
 | A proposal's or memory suggestion's `source` is `gardener`, `user`, `lead` or `worker:<task id>` | `crew propose` and `crew remember` (`ledgerSource`), the gardener → `Proposal.Author` (`crew promote`), `crew proposals`, `lead.md`, `implementer.md`, `gardener.md`, `LEDGER.md` |
 | Proposal section headings (`## Why it matters`, `## Proposal`, `## First step`, `## Log` last) | `templates/proposal.md`, the gardener → `crew propose`, `Proposal.TaskContext` (`crew promote`) |
-| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalRunning` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
+| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalReady` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
 | A dispatch that only has to wait exits 4 (`notYet`) | `dispatchChecks`, `crew dispatch` → `dispatchReady` |
 | The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks" of the installed `lead.md` | `lead.md` → `goal-lead.md`; checked in `tests/guard.sh` |

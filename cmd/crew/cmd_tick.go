@@ -181,7 +181,10 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 // each one ready, which is the go-ahead. It's the tick's last step, so workers
 // made busy by this tick's review rounds and restacks count against MAX_WORKERS.
 // A task held by a cap or a dependency (exit 4) waits for the next tick, and the
-// next task is tried: caps are per goal, and dependencies per task.
+// next task is tried: caps are per goal, and dependencies per task. Each task is
+// checked again just before its dispatch, since an earlier one can take minutes
+// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
+// abandoned or the task dispatched by hand.
 func (c *Crew) dispatchReady() {
 	type candidate struct {
 		Task
@@ -193,7 +196,7 @@ func (c *Crew) dispatchReady() {
 			continue // no clone here, say: the tick warned of it and skipped it above
 		}
 		for _, t := range c.tasks(name) {
-			if t.Status() != Ready || !c.goalRunning(t) {
+			if !c.goalReady(t) {
 				continue
 			}
 			n, err := t.Priority()
@@ -205,6 +208,9 @@ func (c *Crew) dispatchReady() {
 	}
 	slices.SortStableFunc(ready, func(a, b candidate) int { return cmp.Compare(b.priority, a.priority) })
 	for _, t := range ready {
+		if !c.goalReady(t.Task) {
+			continue
+		}
 		var errs strings.Builder
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
@@ -216,10 +222,10 @@ func (c *Crew) dispatchReady() {
 	}
 }
 
-// goalRunning: the task belongs to a running goal.
-func (c *Crew) goalRunning(t Task) bool {
+// goalReady: the task is ready and its goal running, so crew tick dispatches it.
+func (c *Crew) goalReady(t Task) bool {
 	g, ok := c.taskGoal(t)
-	return ok && g.Status() == GoalRunning
+	return t.Status() == Ready && ok && g.Status() == GoalRunning
 }
 
 // prMayHaveNewComments: GitHub moves a PR's updatedAt (recorded as pr_updated by

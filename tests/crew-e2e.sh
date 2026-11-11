@@ -725,8 +725,17 @@ setstate "done" null
 out=$(crew tick 2>&1)
 check "the one free worker slot goes to the highest priority task of any goal" '[[ $out == *"$TQ: dispatched for goal $G4"* && $out != *"$TC: dispatched"* && $(crew get "$PC" status) == ready ]]'
 sed -i '/^MAX_WORKERS=1$/d' "$PE"
+# A goal abandoned while the tick dispatches an earlier task (its worktree hooks
+# running) has none of its tasks dispatched after.
+crew goal cap "$GF4" 3 >/dev/null; PR=$(goal_task "$GF4" "Promo footer"); TR=$(basename "$PR" .md); crew set "$PR" priority 3
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PE"
+printf 'crew goal abandon %s >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$G3" >"$HOME/wt-hook-cmd"
+setstate "done" null
+out=$(crew tick 2>&1)
+check "a goal abandoned during an earlier dispatch in the tick has none of its tasks dispatched" '[[ $out == *"$TR: dispatched for goal $G4"* && $(gget "$GF3" status) == abandoned && $out != *"$TC"* && $(crew get "$PC" status) == ready ]]'
+sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
 crew goal abandon "$GF4" >/dev/null 2>&1
-for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$NG"; do crew set "$f" status abandoned; done
+for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$NG"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
