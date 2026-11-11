@@ -252,6 +252,8 @@ check "a review whose reviewer failed is marked in the record, and the summary h
   "grep -q 'Reviewers: Claude reviewer, failed: <what happened>' $SK/SKILL.md && grep -q 'None could finish, so this PR hasn.t had an automated review' $C/../templates/review-comment.md && ! grep -q 'None found anything to fix' $C/../templates/review-comment.md"
 check "the implementer fills the summary from the template the home ships, and marks the record once it's posted" \
   "[[ -f $C/../templates/review-comment.md ]] && grep -q 'Fill in .templates/review-comment.md.' $A/implementer.md && grep -q '.Summary posted.' $A/implementer.md"
+check "workers can't run codex themselves, only through crew codex, which runs it read-only" \
+  "jq -e >/dev/null '.permissions.deny | index(\"Bash(codex *)\")' $C/worker-settings.json && [[ \$(grep -l 'exec.Command(\"codex\"' $REPO_DIR/cmd/crew/*.go) == $REPO_DIR/cmd/crew/cmd_codex.go ]]"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md

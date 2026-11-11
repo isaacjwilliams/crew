@@ -30,6 +30,7 @@
       "Bash(gh pr review *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
+      "Bash(codex *)",
       "Agent(lead)",
       "Agent(implementer)",
       "Agent(gardener)",

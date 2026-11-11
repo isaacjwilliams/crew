@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -87,6 +88,23 @@ func cmdDoctor(c *Crew, args []string) error {
 			d.check(p+": wt installed (WORKTREE_TOOL=worktrunk)", err == nil, "install Worktrunk: https://worktrunk.dev")
 		default:
 			d.check(fmt.Sprintf("%s: WORKTREE_TOOL is git or worktrunk (got '%s')", p, tool), false, "fix "+pd+"/project.env")
+		}
+		// A missing or signed-out Codex would quietly leave every review to the
+		// Claude reviewer alone.
+		fixSetting := "fix it in config/crew.env or " + pd + "/project.env"
+		switch review := own["CODEX_REVIEW"]; review {
+		case "no":
+		case "yes":
+			_, err := exec.LookPath("codex")
+			d.check(p+": codex installed (CODEX_REVIEW=yes)", err == nil, "install Codex: https://github.com/openai/codex")
+			if err == nil {
+				d.check(p+": codex signed in", codexSignedIn(), "run 'codex login'")
+			}
+		default:
+			d.check(fmt.Sprintf("%s: CODEX_REVIEW is yes or no (got '%s')", p, review), false, fixSetting)
+		}
+		if r := own["AUTO_REVIEW_REBUTTALS"]; !slices.Contains([]string{"0", "1", "2"}, r) {
+			d.check(fmt.Sprintf("%s: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '%s')", p, r), false, fixSetting)
 		}
 		local := Settings{}
 		err := readEnvFile(filepath.Join(pd, "local.env"), local)

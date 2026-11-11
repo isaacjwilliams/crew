@@ -198,3 +198,8 @@ func startedThread(events string) string {
 		}
 	}
 }
+
+// codexSignedIn: Codex is signed in, so a review can run.
+func codexSignedIn() bool {
+	return exec.Command("codex", "login", "status").Run() == nil
+}

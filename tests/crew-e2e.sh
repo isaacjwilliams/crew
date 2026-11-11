@@ -98,6 +98,26 @@ out=$(crew codex start "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/round-0" 2>&1);
 check "crew codex passes on a failing codex's status, and still prints the thread" '((st == 3)) && [[ $out == *"codex exited with status 3"* && $(tail -1 <<<"$out") == "thread: $THREAD" ]]'
 rm "$HOME/codex-fail"
 check "CLAUDECODE never reaches codex" '! grep -q LEAK "$HOME/codex-calls.log"'
+echo 'CODEX_REVIEW=yes' >>"$L/config/crew.env"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)
+check "with CODEX_REVIEW=yes in crew.env, crew doctor checks each project's codex is installed and signed in" \
+  '[[ $doctor_out == *"ok   $P: codex installed (CODEX_REVIEW=yes)"* && $doctor_out == *"ok   $P: codex signed in"* ]]'
+touch "$HOME/codex-signed-out"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1); st=$?
+check "crew doctor fails its required checks for a signed-out codex" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex signed in — run '"'codex login'"'"* && $doctor_out == *"Some required checks failed."* ]]'
+rm "$HOME/codex-signed-out"
+mkdir -p "$SB/no-codex"
+for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex ]] || ln -sf "$s" "$SB/no-codex/"; done
+no_codex_path=$SB/no-codex
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done
+doctor_out=$(env -u CLAUDECODE PATH="$no_codex_path" crew doctor 2>&1); st=$?
+check "crew doctor fails its required checks when CODEX_REVIEW=yes and codex isn't installed" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex installed (CODEX_REVIEW=yes)"* ]]'
+printf 'CODEX_REVIEW=maybe\nAUTO_REVIEW_REBUTTALS=3\n' >>"$PE"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)
+check "crew doctor reports a CODEX_REVIEW that isn't yes or no, and AUTO_REVIEW_REBUTTALS outside 0-2" \
+  '[[ $doctor_out == *"FAIL $P: CODEX_REVIEW is yes or no (got '"'maybe'"')"* && $doctor_out == *"FAIL $P: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '"'3'"')"* ]]'
+sed -i -e '/^CODEX_REVIEW=maybe$/d' -e '/^AUTO_REVIEW_REBUTTALS=3$/d' "$PE"; sed -i '/^CODEX_REVIEW=yes$/d' "$L/config/crew.env"
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'
