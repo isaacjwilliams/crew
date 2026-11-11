@@ -338,7 +338,7 @@ If you use OpenAI's Codex, each automated review can run it alongside the review
 
 1. Install the [Codex CLI](https://github.com/openai/codex) and sign in: `codex login`.
 2. Add `CODEX_REVIEW=yes` to `config/crew.env`. A project can still turn it off with `CODEX_REVIEW=no` in its `project.env`.
-3. Run `crew doctor`. With Codex on, it requires `codex` installed and signed in, since a signed-out Codex would otherwise leave every review to the reviewer agent alone.
+3. Run `crew doctor`. With Codex on, it requires `codex` installed, signed in and on the crew's services' `PATH`, since a signed-out Codex would otherwise leave every review to the reviewer agent alone.
 
 Codex gets exactly what the reviewer agent gets, your words and the change, and the two don't see each other's work until both have reported. Then they answer each other's findings for up to `AUTO_REVIEW_REBUTTALS` rounds (2 by default): each confirms, refutes, withdraws or changes the severity of what the other raised. The worker referees. It may add evidence from the code to a round, and it decides each finding at the end, from the highest severity a reviewer still holds. When one reviewer still refutes a finding, the worker settles it rather than leaving it for you: it fixes it, or sets it aside with evidence that the refuter is right, and the PR comment lists what it set aside.
 

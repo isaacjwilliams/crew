@@ -73,6 +73,9 @@ func cmdDoctor(c *Crew, args []string) error {
 		d.check(f+" loads project memory (crew memory --hook)", c.hookEndsWith(f, "SessionStart", `bin/crew" memory --hook`), "restore its hook: git -C "+c.Home+" diff "+f)
 	}
 	d.check("lead/.claude/settings.local.json written for this machine", isFile(c.path("lead/.claude/settings.local.json")), "run crew install")
+	// The tools the services must find: crew's own, and codex once a project
+	// reviews with it, since a worker's crew codex runs with a service's PATH.
+	serviceTools := runtimeTools
 	envs, _ := filepath.Glob(c.path("projects", "*", "project.env"))
 	for _, env := range envs {
 		pd := filepath.Dir(env)
@@ -95,6 +98,9 @@ func cmdDoctor(c *Crew, args []string) error {
 		switch review := own["CODEX_REVIEW"]; review {
 		case "no": // nothing to check
 		case "yes":
+			if !slices.Contains(serviceTools, "codex") {
+				serviceTools = append(slices.Clone(serviceTools), "codex")
+			}
 			_, err := exec.LookPath("codex")
 			d.check(p+": codex installed (CODEX_REVIEW=yes)", err == nil, "install Codex: https://github.com/openai/codex")
 			if err == nil {
@@ -138,7 +144,7 @@ func cmdDoctor(c *Crew, args []string) error {
 			continue
 		}
 		service, path, fix := c.servicePath(s)
-		for _, t := range runtimeTools {
+		for _, t := range serviceTools {
 			d.check(service+" finds "+t, onPath(t, path), fix)
 		}
 	}
