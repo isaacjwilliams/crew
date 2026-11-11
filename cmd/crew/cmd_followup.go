@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 )
 
 // crew followup TASK [--fresh] [--note TEXT]
@@ -61,7 +62,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		if newRound {
 			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
 		}
-		return fail("worker %s is busy (%s). Wait for it, answer it with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
+		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
 	if !newRound && note == "" {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
@@ -133,6 +134,11 @@ func unsentRounds(t Task) string {
 func cmdAttach(c *Crew, args []string) error {
 	if len(args) != 1 {
 		return usage("crew attach TASK")
+	}
+	// A session's Bash has no terminal to hand over, so a lead that follows a
+	// hint would get a claude that can't be used.
+	if os.Getenv("CLAUDECODE") != "" {
+		return fail("crew attach needs your own terminal, not a Claude Code session; run 'crew attach %s' in one", args[0])
 	}
 	t, err := c.resolveTask(args[0])
 	if err != nil {

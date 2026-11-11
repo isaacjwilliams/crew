@@ -172,10 +172,12 @@ check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
-  '(cd "$WT" && crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
-check "attach takes a PR number" 'crew attach "#12" && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" ]]'
-calls=$(wc -l <"$HOME/claude-calls.log"); out=$(crew attach 2 2>&1)
+  '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
+check "attach takes a PR number" 'env -u CLAUDECODE crew attach "#12" && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" ]]'
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(env -u CLAUDECODE crew attach 2 2>&1)
 check "attach refuses a task that has no worker, and runs no claude" '[[ $out == *"no worker has run for 002-"*" yet" && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(crew attach 1 2>&1)
+check "attach refuses inside a Claude Code session, and runs no claude" '[[ $out == *"needs your own terminal"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "followup refuses while the worker is working" '! crew followup 1 --note hi 2>/dev/null'
 setstate blocked 4242 waiting
 check "followup refuses while the worker waits on a prompt" '! crew followup 1 --note hi 2>/dev/null'
@@ -713,7 +715,7 @@ check "outside a repo, status shows every project" '[[ $out == *"$NL$PJ$NL"* && 
 out=$(cd "$HOME" && crew find 1 2>&1)
 check "outside a repo, a task number two projects share is ambiguous" '[[ $out == *ambiguous* ]]'
 TWIN=$L/projects/$P2/tasks/$(basename "$F1"); sed "s/^project: .*/project: $P2/" "$F1" >"$TWIN"
-calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && crew attach "$(basename "$F1" .md)" 2>&1)
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && env -u CLAUDECODE crew attach "$(basename "$F1" .md)" 2>&1)
 check "outside a repo, a task ID two projects share is ambiguous, naming each project, and attach runs no claude" \
   '[[ $out == *ambiguous*"($PJ)"*"($P2)"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "CREW_PROJECT resolves a task ID two projects share in its project" '[[ $(CREW_PROJECT=$P2 crew get "$(basename "$F1" .md)" project) == "$P2" ]]'
