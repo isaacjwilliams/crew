@@ -130,7 +130,7 @@ func unsentRounds(t Task) string {
 
 // crew attach TASK: attaches this terminal to the task's worker, as `claude
 // attach <job>` does. crew holds no lock while attached: a followup or a tick that
-// resumes the worker stops its idle process first, which should end the attach.
+// resumes the worker stops its idle process first, and that ends the attach.
 func cmdAttach(c *Crew, args []string) error {
 	if len(args) != 1 {
 		return usage("crew attach TASK")
