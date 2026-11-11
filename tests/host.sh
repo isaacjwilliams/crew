@@ -199,6 +199,10 @@ rm -r "$TH/projects/shop" "$TH/projects/$P/mcp.json"
 check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
 n=$(wc -l <"$SB/tower/claude-env.log")
 check "lead --project with an unknown project starts nothing" '! lead_in "$SB/tower" "--project nope" && ! lead_in "$SB/tower" "--project" && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
+check "and so does a CREW_PROJECT that isn't a project" '! (cd "$SB/tower" && tower env CREW_PROJECT=nope "$SB/tower/.local/bin/lead" hello) >/dev/null 2>&1 && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
+echo 'LEAD_PERMISSION_MODE=acceptEdits' >>"$TH/projects/$P/local.env"
+check "a project's lead runs in that project's LEAD_PERMISSION_MODE" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode acceptEdits --settings "* ]]'
+sed -i '/^LEAD_PERMISSION_MODE=/d' "$TH/projects/$P/local.env"
 wait_for '[[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-parse main)" ]]'
 
 git clone -q "$SB/crew.git" "$LH"
