@@ -123,6 +123,23 @@ func unsentRounds(t Task) string {
 	return fmt.Sprintf("rounds %d to %d", from, to)
 }
 
+// crew attach TASK: attaches this terminal to the task's worker, as `claude
+// attach <job>` does. crew holds no lock while attached: a followup or a tick that
+// resumes the worker stops its idle process first, and that ends the attach.
+func cmdAttach(c *Crew, args []string) error {
+	if len(args) != 1 {
+		return usage("crew attach TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	if t.WorkerJob() == "" {
+		return fail("no worker has run for %s yet", t.ID())
+	}
+	return execClaude(c.claude("attach", t.WorkerJob()))
+}
+
 // crew restack TASK [--again]: has a stacked task's worker rebase it after its
 // parent moved or merged. crew only works out where to cut and what to rebase
 // onto; the worker does the rebase, the push and the PR retarget, and records the

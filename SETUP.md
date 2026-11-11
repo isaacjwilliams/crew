@@ -272,6 +272,8 @@ Each worker is a row named `crew-<project>-<task>`. You'll see:
 
 Keys: `Space` peeks and lets you reply without leaving the list, `Enter` attaches, `←` detaches. Talking to a worker directly here is fine: it records what you decide or ask for under its task's Decisions, so the lead sees it too.
 
+From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach '#123'` works too). When crew resumes that worker with a review round or a note, the attach ends.
+
 ### Let `crew tick` keep things moving
 
 `crew tick` does everything that needs no decision from you, across all your projects:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # crew end to end: a bare "remote", a clone, a fresh crew home, and stub claude/gh.
-# Covers new/ready/dispatch/feedback/followup/reply/sync/cleanup/gardener/promote.
+# Covers new/ready/dispatch/feedback/followup/attach/reply/sync/cleanup/gardener/promote.
 # Variables below are read inside check's eval strings, which shellcheck can't see.
 # shellcheck disable=SC2034
 . "$(dirname "$0")/lib.sh"
@@ -171,6 +171,11 @@ check "workers get the shipped settings, with their project and the home, when t
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
+check "attach attaches to the task's worker from the current directory" \
+  '(cd "$WT" && crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
+check "attach takes a PR number" 'crew attach "#12" && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" ]]'
+calls=$(wc -l <"$HOME/claude-calls.log"); out=$(crew attach 2 2>&1)
+check "attach refuses a task that has no worker, and runs no claude" '[[ $out == *"no worker has run for 002-"*" yet" && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "followup refuses while the worker is working" '! crew followup 1 --note hi 2>/dev/null'
 setstate blocked 4242 waiting
 check "followup refuses while the worker waits on a prompt" '! crew followup 1 --note hi 2>/dev/null'
