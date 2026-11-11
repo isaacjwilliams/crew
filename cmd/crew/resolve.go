@@ -147,6 +147,23 @@ func (c *Crew) resolveTask(arg string) (Task, error) {
 	return Task{Doc{f}}, err
 }
 
+// taskArg names t for a crew command run from here: by its ID when that resolves
+// back to t, or else by its file's path, quoted for the shell. Another project
+// can have a task with the same ID, and it would win as the default project.
+func (c *Crew) taskArg(t Task) string {
+	if u, err := c.resolveTask(t.ID()); err == nil && sameFile(u.Path, t.Path) {
+		return t.ID()
+	}
+	return "'" + strings.ReplaceAll(t.Path, "'", `'\''`) + "'"
+}
+
+// sameFile says whether paths a and b lead to the same file.
+func sameFile(a, b string) bool {
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
+}
+
 func (c *Crew) resolveGoal(arg string) (Goal, error) {
 	f, err := c.resolve("goals", arg)
 	return Goal{Doc{f}}, err
