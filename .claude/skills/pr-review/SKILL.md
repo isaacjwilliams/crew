@@ -114,24 +114,24 @@ The Claude reviewer always runs. Codex runs alongside it when `crew config CODEX
 `project`) prints `yes`; that's the only thing the setting decides. Launch Codex first, so the two run at the same time.
 They're isolated: pass nothing from one to the other while both run.
 
-**Codex.** Write this prompt to `codex-prompt.md` in the briefing's directory, with both paths written out in full:
+**Codex.** Write this prompt to `codex-prompt-0.md` in the briefing's directory, with both paths written out in full:
 
 > Adversarially review the work described in `<briefing path>`. Follow the rubric at `${CLAUDE_SKILL_DIR}/rubric.md`
 > exactly, including its `Derived intent vs. stated intent` section — derive intent from the artifact named for this
 > review type before you read the stated intent in the briefing. Commit messages are stated intent too, so don't read
 > them until you have written your derived intent: list the range's commits with
 > `git --no-optional-locks log --format=%H <range>`, which shows no messages. Use `git --no-optional-locks` for git
-> status and diff; the sandbox is read-only. You are reviewing work produced by another AI agent. Be direct and specific. Do not soften
-> findings, and do not manufacture findings to appear thorough.
+> status and diff; the sandbox is read-only. You are reviewing work produced by another AI agent. Be direct and
+> specific. Do not soften findings, and do not manufacture findings to appear thorough.
 
 Then start it as a background Bash command, so you're told when it finishes:
 
 ```
-crew codex start <review root> <briefing dir>/codex-prompt.md <briefing dir>/codex-round-0
+crew codex <review root> <briefing dir>/codex-prompt-0.md <briefing dir>/codex-answer-0
 ```
 
-`crew codex` is the only way to run Codex: it keeps every turn read-only, rounds included. Its report lands in
-`<briefing dir>/codex-round-0.md`. Keep the thread ID from its last line of output (`thread: <id>`) for the rounds.
+`crew codex` is the only way to run Codex: it keeps every run read-only, rounds included. Its report lands in
+`<briefing dir>/codex-answer-0.md`.
 
 **The Claude reviewer.** Spawn the `reviewer` subagent with this prompt, and nothing else. Write the fork point's full
 SHA out in it.
@@ -183,23 +183,30 @@ finding like any other, open to the other reviewer.
 Before the first round, the open items are the findings only one reviewer raised and every finding you have
 counter-evidence against. If nothing is open, skip the rounds.
 
-**A round.** Number the open items, and write each reviewer's share in the briefing's directory. Start Codex's turn,
-then spawn the Claude reviewer, so both work at once, and wait for both answers before you close the round.
+**A round.** Both reviewers start fresh in every round, never resumed, so each gets everything it needs in a round
+file of its own, in the briefing's directory: its own report, then each earlier round's items and its reply to them,
+all verbatim, then this round's numbered items. Start Codex, then spawn the Claude reviewer, so both work at once, and
+wait for both answers before you close the round.
 
-- **Codex** gets the Claude reviewer's open findings that Codex didn't raise, the Claude reviewer's refutations of
-  Codex's findings and its answers to Codex's refutations, each verbatim, and your counter-evidence on any open item.
-  Write them to `codex-reply-<n>.md` under this preamble, then run, in the background,
-  `crew codex reply <review root> <thread> <briefing dir>/codex-reply-<n>.md <briefing dir>/codex-round-<n>`:
+- **Codex's** items are the Claude reviewer's open findings that Codex didn't raise, the Claude reviewer's refutations
+  of Codex's findings and its answers to Codex's refutations, and your counter-evidence on any open item. Write them to
+  `codex-round-<n>.md`, and this prompt to `codex-prompt-<n>.md`, then run, in the background,
+  `crew codex <review root> <briefing dir>/codex-prompt-<n>.md <briefing dir>/codex-answer-<n>`:
 
-  > Rebuttal round <n>. A second reviewer reviewed the same change independently, under the same rubric and briefing.
-  > Below are numbered items from it, and evidence from the change's author. Answer every item with one of: confirm,
-  > refute, withdraw (only a finding you raised) or reseverity with the new severity, and your evidence: a `file:line`,
-  > a test, or a fact about the code. Then list any new finding in the rubric's format, or say there are none. Use
-  > `git --no-optional-locks`; the sandbox is read-only.
+  > Rebuttal round <n> on the change described in `<briefing path>`, under the rubric at
+  > `${CLAUDE_SKILL_DIR}/rubric.md`. The round file `<briefing dir>/codex-round-<n>.md` holds your own earlier report,
+  > each earlier round's items with your reply to them, and this round's numbered items: findings from a second
+  > reviewer who reviewed the same change independently under the same rubric and briefing, its objections to your
+  > findings, and evidence from the change's author. You've derived intent already, in your report, so read the
+  > briefing whole. Check every item against the code yourself. Answer each one with exactly one of: confirm, refute,
+  > withdraw (only a finding you raised) or reseverity with the new severity, and your evidence: a `file:line`, a
+  > test, or a fact about the code. Reply under `### Round <n>`, one numbered line per item, then list any new finding
+  > in the rubric's format under `### New findings`, or write "None.". Use `git --no-optional-locks`; the sandbox is
+  > read-only.
 
-- **The Claude reviewer** gets the mirror image: Codex's open findings it didn't raise, Codex's refutations and answers,
-  and your counter-evidence. Write `reviewer-round-<n>.md`: its own report, then each earlier round's items and its
-  reply to them, all verbatim, then this round's numbered items. Spawn a fresh `reviewer` subagent, never a resumed one, with this prompt:
+- **The Claude reviewer's** items are the mirror image: Codex's open findings it didn't raise, Codex's refutations and
+  answers, and your counter-evidence. Write them to `reviewer-round-<n>.md`, and spawn a fresh `reviewer` subagent with
+  this prompt:
 
   > Rebuttal round <n> on `<fork sha>..HEAD` in `<review root>`. The rubric is `${CLAUDE_SKILL_DIR}/rubric.md`, the
   > briefing `<briefing path>`, and the round `<briefing dir>/reviewer-round-<n>.md`.

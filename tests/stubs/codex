@@ -5,9 +5,8 @@
 #   $HOME/codex-stdin.last   what the latest `exec` read on stdin (its prompt)
 #   $HOME/codex-signed-out   if present, `login status` fails, like a signed-out Codex
 #   $HOME/codex-fail         if present, `exec` exits 3 after writing its events
-# `exec` prints a thread.started event (a new thread, or the one it resumes) and
-# writes "stub review" to its -o file. It records LEAK CLAUDECODE if crew left that
-# variable set.
+# `exec` prints Codex's events and writes "stub review" to its -o file. It records
+# LEAK CLAUDECODE if crew left that variable set.
 set -u
 echo "codex $* (in $PWD)" >>"$HOME/codex-calls.log"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/codex-calls.log"
@@ -22,19 +21,16 @@ esac
 [[ ${1:-} == exec ]] || { echo "stub codex: unexpected call: $*" >&2; exit 2; }
 shift
 
-thread=0199a3b2-1c2d-7e3f-8a9b-0c1d2e3f4a5b out="" resume=0
+out=""
 while (($#)); do
   case $1 in
-    -c | -m | -C) shift 2 ;;
     -o) out=$2; shift 2 ;;
-    resume) resume=1; shift ;;
-    -) shift ;;
-    -*) shift ;;
-    *) ((resume)) && thread=$1; shift ;;
+    -c | -m | -C) shift 2 ;;
+    *) shift ;;
   esac
 done
 cat >"$HOME/codex-stdin.last"
-echo "{\"type\":\"thread.started\",\"thread_id\":\"$thread\"}"
+echo '{"type":"thread.started","thread_id":"0199a3b2-1c2d-7e3f-8a9b-0c1d2e3f4a5b"}'
 echo '{"type":"turn.started"}'
 [[ -n $out ]] && echo "stub review" >"$out"
 if [[ -e $HOME/codex-fail ]]; then exit 3; fi

@@ -4,15 +4,12 @@ package main
 // the only way crew runs Codex.
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"time"
 )
 
@@ -23,34 +20,20 @@ var codexStallLimit = 15 * time.Minute
 // exitCodexStalled is crew codex's exit code when it stopped a stalled Codex.
 const exitCodexStalled = 124
 
-// codexReadOnly goes on every call, resume included: a resumed thread would
-// otherwise keep whatever sandbox it was created with.
+// codexReadOnly goes on every call: Codex reviews and never changes anything.
 var codexReadOnly = []string{"-c", `sandbox_mode="read-only"`, "-c", `approval_policy="never"`}
 
-var codexThread = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-
-// crew codex start ROOT PROMPT_FILE OUT_PREFIX
-// crew codex reply ROOT THREAD PROMPT_FILE OUT_PREFIX
+// crew codex ROOT PROMPT_FILE OUT_PREFIX
 //
-// Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, starting a thread or
-// continuing THREAD. Codex's final message goes to OUT_PREFIX.md and its events
-// to OUT_PREFIX.events.jsonl. The last line printed is "thread: <id>", the
-// thread to reply on, or "thread: unknown" when Codex never started one, which
-// leaves nothing to reply on. It exits with Codex's status, or 124 when Codex wrote no
-// event for codexStallLimit and was stopped.
+// Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, in a new session
+// each time. Codex's final message goes to OUT_PREFIX.md and its events to
+// OUT_PREFIX.events.jsonl. It exits with Codex's status, or 124 when Codex wrote
+// no event for codexStallLimit and was stopped.
 func cmdCodex(c *Crew, args []string) error {
-	var root, thread, prompt, out string
-	switch {
-	case len(args) == 4 && args[0] == "start":
-		root, prompt, out = args[1], args[2], args[3]
-	case len(args) == 5 && args[0] == "reply":
-		root, thread, prompt, out = args[1], args[2], args[3], args[4]
-		if !codexThread.MatchString(thread) {
-			return fail("not a thread id: %s", thread)
-		}
-	default:
-		return usage("crew codex start ROOT PROMPT_FILE OUT_PREFIX | crew codex reply ROOT THREAD PROMPT_FILE OUT_PREFIX")
+	if len(args) != 3 {
+		return usage("crew codex ROOT PROMPT_FILE OUT_PREFIX")
 	}
+	root, prompt, out := args[0], args[1], args[2]
 	if !isDir(root) {
 		return fail("no such directory: %s", root)
 	}
@@ -73,28 +56,13 @@ func cmdCodex(c *Crew, args []string) error {
 		}
 	}
 
-	tuning := []string{"-m", settings["CODEX_MODEL"], "-c", fmt.Sprintf("model_reasoning_effort=%q", settings["CODEX_MODEL_EFFORT"]),
-		"--skip-git-repo-check", "--json", "-o", out + ".md"}
 	argv := append([]string{"exec"}, codexReadOnly...)
-	if thread == "" {
-		argv = append(argv, tuning...)
-		argv = append(argv, "-C", root, "-")
-	} else {
-		// resume takes no -C: it runs where crew starts it, in root.
-		argv = append(argv, "resume")
-		argv = append(argv, tuning...)
-		argv = append(argv, thread, "-")
-	}
+	argv = append(argv, "-m", settings["CODEX_MODEL"], "-c", fmt.Sprintf("model_reasoning_effort=%q", settings["CODEX_MODEL_EFFORT"]),
+		"--skip-git-repo-check", "--json", "-o", out+".md", "-C", root, "-")
 	events := out + ".events.jsonl"
 	status, stalled, err := runCodex(argv, root, prompt, events)
 	if err != nil {
 		return err
-	}
-	if started := startedThread(events); started != "" {
-		thread = started
-	}
-	if thread == "" {
-		thread = "unknown"
 	}
 	switch {
 	case stalled:
@@ -104,7 +72,6 @@ func cmdCodex(c *Crew, args []string) error {
 		warn("codex exited with status %d; see %s", status, events)
 	}
 	fmt.Printf("final message: %s.md\n", out)
-	fmt.Printf("thread: %s\n", thread)
 	if status != 0 {
 		return exitQuietly(status)
 	}
@@ -187,30 +154,6 @@ func (n notifyingWriter) Write(p []byte) (int, error) {
 	default:
 	}
 	return n.w.Write(p)
-}
-
-// startedThread is the thread ID in the events file's first thread.started
-// event, or "" when it has none.
-func startedThread(events string) string {
-	f, err := os.Open(events)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadBytes('\n')
-		var e struct {
-			Type     string `json:"type"`
-			ThreadID string `json:"thread_id"`
-		}
-		if json.Unmarshal(line, &e) == nil && e.Type == "thread.started" {
-			return e.ThreadID
-		}
-		if err != nil {
-			return ""
-		}
-	}
 }
 
 // codexSignedIn: Codex is signed in, so a review can run.

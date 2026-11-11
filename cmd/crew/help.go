@@ -61,11 +61,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    review summary on the task's PR (used by workers)
   crew review-summary TASK FILE    Post FILE as the automated-review summary on the
                                    task's PR, or edit the one there (used by workers)
-  crew codex start ROOT PROMPT_FILE OUT_PREFIX
-  crew codex reply ROOT THREAD PROMPT_FILE OUT_PREFIX
-                                   One turn of a read-only Codex review in ROOT: its
-                                   reply in OUT_PREFIX.md, events in
-                                   OUT_PREFIX.events.jsonl, then "thread: <id>";
+  crew codex ROOT PROMPT_FILE OUT_PREFIX
+                                   A read-only Codex review in ROOT: its reply in
+                                   OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl;
                                    exits 124 when Codex stalls (used by pr-review)
   crew status [--done] [--all|--project P]
                                    Tasks with worker state; stacked tasks are listed
