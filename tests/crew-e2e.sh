@@ -76,6 +76,28 @@ check "automated review runs up to 3 times by default, and crew config lists it"
 echo 'AUTO_REVIEWS=0' >>"$PE"
 check "a project can turn automated review off" '[[ $(cd "$HOME" && crew config AUTO_REVIEWS --project "$P") == 0 ]]'
 sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
+check "Codex is off in automated review by default, with 2 rounds between the reviewers when it's on" '[[ $(crew config CODEX_REVIEW) == no && $(crew config AUTO_REVIEW_REBUTTALS) == 2 ]] && crew config | grep -qx CODEX_MODEL_EFFORT=xhigh'
+# crew codex: one read-only turn of Codex, through tests/stubs/codex.
+THREAD=0199a3b2-1c2d-7e3f-8a9b-0c1d2e3f4a5b
+mkdir -p "$SB/rev" && echo "Adversarially review the briefing." >"$SB/rev/prompt.md"
+out=$(cd "$SB" && crew codex start webapp rev/prompt.md rev/round-0 2>&1); st=$?
+check "crew codex start runs codex exec read-only with approvals off, in the review root, from paths relative to the caller" \
+  '((st == 0)) && grep -qxF "codex exec -c sandbox_mode=\"read-only\" -c approval_policy=\"never\" -m gpt-6-astra -c model_reasoning_effort=\"xhigh\" --skip-git-repo-check --json -o $SB/rev/round-0.md -C $SB/webapp - (in $SB/webapp)" "$HOME/codex-calls.log"'
+check "crew codex gives Codex the prompt file on stdin, writes its reply and events, and prints the thread last" \
+  'cmp -s "$SB/rev/prompt.md" "$HOME/codex-stdin.last" && [[ $(cat "$SB/rev/round-0.md") == "stub review" ]] && grep -q thread.started "$SB/rev/round-0.events.jsonl" && [[ $(tail -1 <<<"$out") == "thread: $THREAD" ]]'
+echo 'CODEX_MODEL="gpt-next"' >>"$PE"
+out=$(crew codex reply "$SB/webapp" "$THREAD" "$SB/rev/prompt.md" "$SB/rev/round-1" 2>&1); st=$?
+check "crew codex reply resumes the thread, read-only with approvals off again, with the project's model" \
+  '((st == 0)) && [[ $(tail -1 "$HOME/codex-calls.log") == "codex exec -c sandbox_mode=\"read-only\" -c approval_policy=\"never\" resume -m gpt-next -c model_reasoning_effort=\"xhigh\" --skip-git-repo-check --json -o $SB/rev/round-1.md $THREAD - (in $SB/webapp)" && $(tail -1 <<<"$out") == "thread: $THREAD" ]]'
+sed -i '/^CODEX_MODEL=/d' "$PE"
+n=$(wc -l <"$HOME/codex-calls.log")
+out=$(crew codex reply "$SB/webapp" 'x; rm -rf /' "$SB/rev/prompt.md" "$SB/rev/round-2" 2>&1); st=$?
+check "crew codex reply refuses what isn't a thread ID, without running codex" '((st != 0)) && [[ $out == *"not a thread id"* && $(wc -l <"$HOME/codex-calls.log") == "$n" ]]'
+touch "$HOME/codex-fail"
+out=$(crew codex start "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/round-0" 2>&1); st=$?
+check "crew codex passes on a failing codex's status, and still prints the thread" '((st == 3)) && [[ $out == *"codex exited with status 3"* && $(tail -1 <<<"$out") == "thread: $THREAD" ]]'
+rm "$HOME/codex-fail"
+check "CLAUDECODE never reaches codex" '! grep -q LEAK "$HOME/codex-calls.log"'
 sed -i '/^MAX_WORKERS=2$/d' "$PE"; rm "$L/config/crew.env"
 F1=$(crew new "Saved search filters")
 check "a ledger commit reaches origin soon after the command" 'pushed && [[ $(git --git-dir="$SB/home.git" log -1 --format=%s main) == "new "*"/001-saved-search-filters" ]]'
