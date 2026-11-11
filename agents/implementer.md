@@ -106,7 +106,7 @@ After a compaction or a resume in the middle of this, carry on from the record: 
 
 When your prompt says there's new feedback, your reactions tell the user, on GitHub, where each of their comments stands: 👀 you've picked it up, 🚀 you're acting on it.
 
-1. Find the rounds your prompt names under Review rounds in the task file. Before you read them in detail, react 👀 to everything in them, in one call: `crew react <task> eyes <id> <id> …`, with the ID each item lists. That covers review summaries, inline and conversation comments, and the comment behind an `Automated review requested (comment <id>)` line.
+1. Find the rounds your prompt names under Review rounds in the task file. Before you read them in detail, react 👀 to everything in them, in one call: `crew react <task> eyes <id> <id> …`, with the ID each item lists. That covers review summaries, inline and conversation comments, and the comment behind an `Automated review requested (comment <id>)` line. A round from the lead's `crew review` lists no ID: skip the call when there's none.
 2. Read the rounds, oldest first: several may have piled up while you were busy, and you address them all. Also re-read Decisions; the lead may have recorded clarifications there. Items under Open questions that quote a collaborator's PR comment are for the user: act on one only when Decisions or your prompt tells you to.
 3. Fetch and fast-forward your branch if the remote moved (`git pull --ff-only`). Add commits for the feedback rather than rewriting what the reviewer has already seen.
 4. Address every comment. For each one:
