@@ -137,8 +137,8 @@ crew host down          # hand over: stop the crew here and release the lease
 
 ## 3. First-time configuration
 
-1. **Edit your settings file**, `~/crew/config/crew.env`, which `crew setup` made from `templates/crew.env`, then commit and push it (`git -C ~/crew commit -am "My settings"; and git -C ~/crew push`). Anything you set there overrides `config/defaults.env`, which lists every setting with its default; leave that file as it is. At minimum:
-   - Set `BRANCH_PREFIX`, e.g. `isaac/`. These branches land on the shared remote.
+1. **Edit your settings file**, `~/crew/config/crew.env`, which `crew setup` made from `templates/crew.env`, then commit and push it (`git -C ~/crew commit -am "My settings"; and git -C ~/crew push`). Anything you set there overrides `config/defaults.env`, which lists every setting with its default; leave that file as it is. Worth a look:
+   - `BRANCH_PREFIX` (default `agent/`): change it, to `isaac/` say, if you want your own prefix on the branches that land on the shared remote.
    - Check `MAX_WORKERS` (concurrent sessions) and `GOAL_MAX_IN_FLIGHT` (how many of a goal's tasks may be dispatched but unmerged at once, open PRs included). A goal can set its own; see [Goals](#goals). Start low; raise them once the loop feels trustworthy.
    - If the app needs untracked files like `.env.local` to run tests, list them in `WORKTREE_COPY`.
 2. **Trust two folders once.** Background sessions check workspace trust before starting, and so does the lead. `crew host up` (which `crew setup` runs) has you trust `~/agent-work`, and the first `lead` asks you to trust its own folder. If setup ran without a terminal, `crew doctor` flags `~/agent-work`; trust it yourself:
