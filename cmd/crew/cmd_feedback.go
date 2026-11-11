@@ -414,6 +414,51 @@ func atoiOr0(s string) int {
 
 var commentID = regexp.MustCompile(`^[0-9]+$`)
 
+// The kinds of comment a review round lists, as crew reply and crew react name
+// them.
+type commentKind string
+
+const (
+	inlineComment commentKind = "inline comment"
+	convoComment  commentKind = "comment"
+	reviewSummary commentKind = "review"
+)
+
+// prComment looks up comment or review id on PR #num: an inline review comment,
+// a conversation comment or a review summary. It refuses an ID that isn't one
+// of them, or is one on another PR.
+func prComment(repo, num, id string) (ghComment, commentKind, error) {
+	if !commentID.MatchString(id) {
+		return ghComment{}, "", fail("comment id must be a number, not '%s'", id)
+	}
+	get := func(endpoint string) (ghComment, bool) {
+		var cm ghComment
+		out, err := ghQuiet(repo, "api", endpoint)
+		if err != nil {
+			return cm, false
+		}
+		dec := json.NewDecoder(bytes.NewReader(out))
+		dec.UseNumber()
+		return cm, dec.Decode(&cm) == nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/pulls/comments/" + id); ok {
+		if !strings.HasSuffix(cm.PullRequestURL, "/pulls/"+num) {
+			return cm, "", fail("comment %s isn't on PR #%s", id, num)
+		}
+		return cm, inlineComment, nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/issues/comments/" + id); ok {
+		if !strings.HasSuffix(cm.IssueURL, "/issues/"+num) {
+			return cm, "", fail("comment %s isn't on PR #%s", id, num)
+		}
+		return cm, convoComment, nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/pulls/" + num + "/reviews/" + id); ok {
+		return cm, reviewSummary, nil
+	}
+	return ghComment{}, "", fail("%s isn't a review comment, conversation comment or review on PR #%s", id, num)
+}
+
 // crew reply TASK COMMENT_ID TEXT: replies to one of the review comments a round
 // lists, on the task's own PR only. An inline comment gets a reply in its thread.
 // A conversation comment or a review summary has no thread, so the reply is a
@@ -436,9 +481,6 @@ func cmdReply(c *Crew, args []string) error {
 	if text == "" {
 		return fail("reply text required")
 	}
-	if !commentID.MatchString(cid) {
-		return fail("comment id must be a number, not '%s'", cid)
-	}
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -451,20 +493,11 @@ func cmdReply(c *Crew, args []string) error {
 	}
 	repo, num := p.Repo(), t.PRNumber()
 	body := text + "\n\n" + replyMarker
-	lookup := func(endpoint string) (ghComment, bool) {
-		var cm ghComment
-		out, err := ghQuiet(repo, "api", endpoint)
-		if err != nil {
-			return cm, false
-		}
-		dec := json.NewDecoder(bytes.NewReader(out))
-		dec.UseNumber()
-		return cm, dec.Decode(&cm) == nil
+	cm, kind, err := prComment(repo, num, cid)
+	if err != nil {
+		return err
 	}
-	if cm, ok := lookup("repos/{owner}/{repo}/pulls/comments/" + cid); ok {
-		if !strings.HasSuffix(cm.PullRequestURL, "/pulls/"+num) {
-			return fail("comment %s isn't on PR #%s", cid, num)
-		}
+	if kind == inlineComment {
 		// GitHub only accepts replies to a thread's top-level comment.
 		root := cm.ID
 		if cm.InReplyTo != nil {
@@ -476,17 +509,6 @@ func cmdReply(c *Crew, args []string) error {
 		fmt.Printf("replied to comment %s in its thread\n", cid)
 		return nil
 	}
-	cm, ok := lookup("repos/{owner}/{repo}/issues/comments/" + cid)
-	kind := "Comment"
-	if ok {
-		if !strings.HasSuffix(cm.IssueURL, "/issues/"+num) {
-			return fail("comment %s isn't on PR #%s", cid, num)
-		}
-	} else if cm, ok = lookup("repos/{owner}/{repo}/pulls/" + num + "/reviews/" + cid); ok {
-		kind = "Review"
-	} else {
-		return fail("%s isn't a review comment, conversation comment or review on PR #%s", cid, num)
-	}
 	first := ""
 	for _, l := range strings.Split(strings.ReplaceAll(cm.Body, "\r", ""), "\n") {
 		if strings.TrimSpace(l) != "" {
@@ -497,11 +519,15 @@ func cmdReply(c *Crew, args []string) error {
 	if r := []rune(first); len(r) > 120 {
 		first = string(r[:117]) + "…"
 	}
-	quote := fmt.Sprintf("> [%s](%s): %s", kind, cm.HTMLURL, first)
+	label := "Comment"
+	if kind == reviewSummary {
+		label = "Review"
+	}
+	quote := fmt.Sprintf("> [%s](%s): %s", label, cm.HTMLURL, first)
 	if _, err := gh(repo, "api", "--silent", "repos/{owner}/{repo}/issues/"+num+"/comments", "-f", "body="+quote+"\n\n"+body); err != nil {
 		return quietly(err)
 	}
-	fmt.Printf("replied to %s %s on PR #%s\n", strings.ToLower(kind), cid, num)
+	fmt.Printf("replied to %s %s on PR #%s\n", kind, cid, num)
 	return nil
 }
 
