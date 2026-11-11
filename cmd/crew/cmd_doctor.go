@@ -93,7 +93,7 @@ func cmdDoctor(c *Crew, args []string) error {
 		// Claude reviewer alone.
 		fixSetting := "fix it in config/crew.env or " + pd + "/project.env"
 		switch review := own["CODEX_REVIEW"]; review {
-		case "no":
+		case "no": // nothing to check
 		case "yes":
 			_, err := exec.LookPath("codex")
 			d.check(p+": codex installed (CODEX_REVIEW=yes)", err == nil, "install Codex: https://github.com/openai/codex")
@@ -103,6 +103,7 @@ func cmdDoctor(c *Crew, args []string) error {
 		default:
 			d.check(fmt.Sprintf("%s: CODEX_REVIEW is yes or no (got '%s')", p, review), false, fixSetting)
 		}
+		// Rounds between the two reviewers, read whether or not Codex is on yet.
 		if r := own["AUTO_REVIEW_REBUTTALS"]; !slices.Contains([]string{"0", "1", "2"}, r) {
 			d.check(fmt.Sprintf("%s: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '%s')", p, r), false, fixSetting)
 		}

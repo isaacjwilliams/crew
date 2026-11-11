@@ -35,7 +35,8 @@ var codexThread = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
 // Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, starting a thread or
 // continuing THREAD. Codex's final message goes to OUT_PREFIX.md and its events
 // to OUT_PREFIX.events.jsonl. The last line printed is "thread: <id>", the
-// thread to reply on. It exits with Codex's status, or 124 when Codex wrote no
+// thread to reply on, or "thread: unknown" when Codex never started one, which
+// leaves nothing to reply on. It exits with Codex's status, or 124 when Codex wrote no
 // event for codexStallLimit and was stopped.
 func cmdCodex(c *Crew, args []string) error {
 	var root, thread, prompt, out string
@@ -72,13 +73,17 @@ func cmdCodex(c *Crew, args []string) error {
 		}
 	}
 
-	argv := append([]string{"exec"}, codexReadOnly...)
 	tuning := []string{"-m", settings["CODEX_MODEL"], "-c", fmt.Sprintf("model_reasoning_effort=%q", settings["CODEX_MODEL_EFFORT"]),
 		"--skip-git-repo-check", "--json", "-o", out + ".md"}
+	argv := append([]string{"exec"}, codexReadOnly...)
 	if thread == "" {
-		argv = append(append(argv, tuning...), "-C", root, "-")
+		argv = append(argv, tuning...)
+		argv = append(argv, "-C", root, "-")
 	} else {
-		argv = append(append(append(argv, "resume"), tuning...), thread, "-")
+		// resume takes no -C: it runs where crew starts it, in root.
+		argv = append(argv, "resume")
+		argv = append(argv, tuning...)
+		argv = append(argv, thread, "-")
 	}
 	events := out + ".events.jsonl"
 	status, stalled, err := runCodex(argv, root, prompt, events)
@@ -127,7 +132,8 @@ func runCodex(argv []string, root, prompt, events string) (status int, stalled b
 	wrote := make(chan struct{}, 1)
 	cmd := exec.Command("codex", argv...)
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, in, notifyingWriter{log, wrote}, os.Stderr
-	// Codex isn't part of the Claude Code session that runs crew.
+	// Codex isn't part of the Claude Code session that runs crew: a claude that
+	// Codex ran would otherwise take itself for a nested session and refuse.
 	cmd.Env = environWithout("CLAUDECODE")
 	// Once Codex has exited, don't wait long for a process it started that still
 	// holds its output open.
@@ -138,6 +144,7 @@ func runCodex(argv []string, root, prompt, events string) (status int, stalled b
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	quiet := time.NewTimer(codexStallLimit)
+	defer quiet.Stop()
 	for {
 		select {
 		case <-wrote:
@@ -146,18 +153,25 @@ func runCodex(argv []string, root, prompt, events string) (status int, stalled b
 			stalled = true
 			cmd.Process.Kill()
 		case err := <-done:
-			var exit *exec.ExitError
-			switch {
-			case err == nil || errors.Is(err, exec.ErrWaitDelay):
-				return 0, stalled, nil
-			case errors.As(err, &exit) && exit.ExitCode() > 0:
-				return exit.ExitCode(), stalled, nil
-			case errors.As(err, &exit):
-				return 1, stalled, nil // ended by a signal
-			}
-			return 0, false, err
+			status, err := exitStatus(err)
+			return status, stalled, err
 		}
 	}
+}
+
+// exitStatus is the status a finished command exited with, given what Wait
+// returned: 1 for one ended by a signal, which has no status of its own.
+func exitStatus(err error) (int, error) {
+	var exit *exec.ExitError
+	switch {
+	case err == nil || errors.Is(err, exec.ErrWaitDelay):
+		return 0, nil
+	case !errors.As(err, &exit):
+		return 0, err
+	case exit.ExitCode() < 0:
+		return 1, nil
+	}
+	return exit.ExitCode(), nil
 }
 
 // notifyingWriter writes to w and signals each write on wrote, without waiting

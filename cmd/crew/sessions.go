@@ -38,7 +38,8 @@ func (c *Crew) claude(args ...string) *exec.Cmd {
 	return cmd
 }
 
-// environWithout is crew's environment without the named variables.
+// environWithout is crew's own environment (os.Environ) without the named
+// variables.
 func environWithout(names ...string) []string {
 	env := []string{}
 	for _, e := range os.Environ() {
