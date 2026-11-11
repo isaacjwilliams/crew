@@ -2,7 +2,8 @@ package main
 
 // PR comments: crew feedback reads them into the task, crew review asks for
 // another automated review as a review round of its own, crew reply answers
-// comments, and crew review-summary posts the summary of automated review.
+// comments, crew react marks the ones a worker picked up or is acting on, and
+// crew review-summary posts the summary of automated review.
 
 import (
 	"bytes"
@@ -55,8 +56,9 @@ func prOfBranch(repo, branch string) string {
 // A review, an inline review comment or a conversation comment, as the GitHub
 // REST API returns it.
 type ghComment struct {
-	ID   json.Number `json:"id"`
-	User *struct {
+	ID     json.Number `json:"id"`
+	NodeID string      `json:"node_id"` // its ID in GraphQL
+	User   *struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -528,6 +530,67 @@ func cmdReply(c *Crew, args []string) error {
 		return quietly(err)
 	}
 	fmt.Printf("replied to %s %s on PR #%s\n", kind, cid, num)
+	return nil
+}
+
+// The reactions crew react adds: their names on the command line, and their
+// GraphQL ReactionContent values.
+var reactions = map[string]string{"eyes": "EYES", "rocket": "ROCKET"}
+
+// crew react TASK eyes|rocket COMMENT_ID...: reacts to the user's own review
+// comments that a round lists, on the task's own PR only. A worker adds 👀
+// (eyes) to each one when it picks the round up, and 🚀 (rocket) to each one
+// it is about to change code for. Every ID is checked before any reaction is
+// added, so a bad ID changes nothing.
+func cmdReact(c *Crew, args []string) error {
+	if err := need("gh"); err != nil {
+		return err
+	}
+	if len(args) < 3 {
+		return usage("crew react TASK eyes|rocket COMMENT_ID...")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	name, ids := args[1], args[2:]
+	content, ok := reactions[name]
+	if !ok {
+		return fail("the reaction must be eyes or rocket, not '%s'", name)
+	}
+	if t.PR() == "" {
+		return fail("task has no PR")
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	me, err := c.ghLogin()
+	if err != nil {
+		return err
+	}
+	repo, num := p.Repo(), t.PRNumber()
+	var subjects []string
+	for _, id := range ids {
+		cm, kind, err := prComment(repo, num, id)
+		if err != nil {
+			return err
+		}
+		if cm.whose(me) != "me" {
+			return fail("%s %s on PR #%s isn't yours; crew reacts only to your own", kind, id, num)
+		}
+		subjects = append(subjects, cm.NodeID)
+	}
+	// GraphQL's addReaction takes all three kinds; REST has no reactions for a
+	// review summary. A person has at most one of each reaction on a comment,
+	// so adding one again leaves it as it was.
+	const mutation = `mutation($subject: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $subject, content: $content}) { clientMutationId } }`
+	for _, subject := range subjects {
+		if _, err := gh(repo, "api", "graphql", "--silent", "-f", "query="+mutation, "-f", "subject="+subject, "-f", "content="+content); err != nil {
+			return quietly(err)
+		}
+	}
+	fmt.Printf("reacted %s to %d comment(s) on PR #%s\n", name, len(subjects), num)
 	return nil
 }
 
