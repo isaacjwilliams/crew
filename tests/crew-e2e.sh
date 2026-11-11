@@ -239,6 +239,18 @@ check "reply to a review summary posts a PR comment that quotes it" '[[ $out == 
 rm -f "$HOME/gh-last-body"
 check "reply refuses a comment on another PR" '! crew reply 1 116 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 check "reply refuses an ID that is no comment or review on the PR" '! crew reply 1 999 x 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
+check "reply refuses an ID that isn't a number" '[[ $(crew reply 1 abc x 2>&1) == *"comment id must be a number"* && ! -e $HOME/gh-last-body ]]'
+reacted() { grep -c "^gh api graphql --silent -f query=mutation.*addReaction.* -f subject=$1 -f content=$2\$" "$HOME/gh-calls.log"; }   # node-id CONTENT
+reactions() { grep -c "^gh api graphql " "$HOME/gh-calls.log"; }
+out=$(crew react 1 eyes 900 111 115 2>&1)
+check "react adds 👀 to a review summary, an inline and a conversation comment in one call, by node ID" '[[ $out == "reacted eyes to 3 comment(s) on PR #12" && $(reacted PRR_900 EYES) == 1 && $(reacted PRRC_111 EYES) == 1 && $(reacted IC_115 EYES) == 1 && $(reactions) == 3 ]]'
+check "react adds 🚀" 'crew react 1 rocket 111 >/dev/null && [[ $(reacted PRRC_111 ROCKET) == 1 ]]'
+n=$(reactions)
+check "react refuses a comment on another PR, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 116 2>&1) == *"comment 116 isn'"'"'t on PR #12"* && $(reactions) == "$n" ]]'
+check "react refuses someone else's review, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 902 2>&1) == *"review 902 on PR #12 isn'"'"'t by isaac"* && $(reactions) == "$n" ]]'
+check "react refuses an ID that isn't a number, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 abc 2>&1) == *"comment id must be a number"* && $(reactions) == "$n" ]]'
+check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
+check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
 check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
@@ -264,6 +276,7 @@ check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] &&
 check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
+check "react doesn't depend on REPLY_TO_THREADS" 'crew react 1 eyes 111 >/dev/null'
 setstate "done" null; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "with REPLY_TO_THREADS off, a review-round followup tells the worker not to reply" 'crew followup 1 >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Don.t reply to the comments on the PR"'
 fill "$F2"; sed -i 's/^depends_on:$/depends_on: 001/' "$F2"; crew ready 2 >/dev/null
@@ -501,10 +514,11 @@ check "rounds that piled up behind a busy worker are all named while they wait, 
 # Another automated review, asked for on the PR (a `crew review` comment) or with crew review.
 round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
 comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
-{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; } >"$HOME/gh-more-comments"
+{ comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; comment 133 isaac OWNER "crew review"; } >"$HOME/gh-more-comments"
 crew set 13 status pr-open; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
 crew feedback 13 >/dev/null 2>&1; r6=$(round "$F13" 6)
 check "the user's 'crew review' comment, in any case and with space around it, becomes a request line in a new round" '[[ $r6 == *"- [ ] Automated review requested (comment 130)"* && $r6 != *"Crew Review"* ]]'
+check "two 'crew review' comments in one round each get a request line, so the worker reacts to both" '[[ $r6 == *$'"'"'- [ ] Automated review requested (comment 130)\n- [ ] Automated review requested (comment 133)'"'"'* ]]'
 check "a longer comment that mentions crew review is an ordinary comment" '[[ $r6 == *"- [ ] comment 132 — [link](u132)"*"crew review it again"* && $r6 != *"(comment 132)"* ]]'
 check "a collaborator's 'crew review' goes under Open questions for the user, not into the round" '[[ $(section "$F13" "## Open questions") == *"@bob commented on PR #12, comment 131"* && $r6 != *131* ]]'
 rm "$HOME/gh-more-comments"

@@ -2,7 +2,8 @@ package main
 
 // PR comments: crew feedback reads them into the task, crew review asks for
 // another automated review as a review round of its own, crew reply answers
-// comments, and crew review-summary posts the summary of automated review.
+// comments, crew react marks the ones a worker picked up or is acting on, and
+// crew review-summary posts the summary of automated review.
 
 import (
 	"bytes"
@@ -55,8 +56,9 @@ func prOfBranch(repo, branch string) string {
 // A review, an inline review comment or a conversation comment, as the GitHub
 // REST API returns it.
 type ghComment struct {
-	ID   json.Number `json:"id"`
-	User *struct {
+	ID     json.Number `json:"id"`
+	NodeID string      `json:"node_id"` // its ID in GraphQL
+	User   *struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -246,7 +248,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	r := reviewRound{reviews: byWho(reviews, "me"), inline: byWho(inline, "me")}
 	for _, cm := range byWho(convo, "me") {
 		if isReviewRequest(cm) {
-			r.reviewRequestSource = "comment " + cm.ID.String()
+			r.reviewRequests = append(r.reviewRequests, "comment "+cm.ID.String())
 		} else {
 			r.convo = append(r.convo, cm)
 		}
@@ -277,7 +279,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	if !r.empty() {
 		n, round = r.add(t, num)
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
-		if r.reviewRequestSource != "" {
+		if len(r.reviewRequests) > 0 {
 			msg += ", with a request for another automated review"
 		}
 		t.Log(msg)
@@ -328,7 +330,7 @@ func cmdReview(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequestSource: "crew review"}.add(t, t.PRNumber())
+	n, _ := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -349,14 +351,15 @@ func isReviewRequest(cm ghComment) bool {
 }
 
 // A review round: the user's new comments on the PR, for the worker that wrote
-// it, and their request for another automated review pass, if they made one.
+// it, and their requests for another automated review pass, if they made any.
+// The worker runs one pass for them all, and reacts to each request comment.
 type reviewRound struct {
 	reviews, inline, convo []ghComment
-	reviewRequestSource    string // where it came from: "comment <id>" or "crew review"
+	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
 }
 
 func (r reviewRound) empty() bool {
-	return len(r.reviews)+len(r.inline)+len(r.convo) == 0 && r.reviewRequestSource == ""
+	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0
 }
 
 // add writes the round into the task as its next, before ## Log, and counts it
@@ -391,8 +394,11 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 		}
 		b.WriteString("\n")
 	}
-	if r.reviewRequestSource != "" {
-		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n\n", r.reviewRequestSource)
+	for _, source := range r.reviewRequests {
+		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n", source)
+	}
+	if len(r.reviewRequests) > 0 {
+		b.WriteString("\n")
 	}
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
@@ -413,6 +419,51 @@ func atoiOr0(s string) int {
 }
 
 var commentID = regexp.MustCompile(`^[0-9]+$`)
+
+// The kinds of comment a review round lists. Each value is the word crew's
+// messages use for that kind.
+type commentKind string
+
+const (
+	inlineComment commentKind = "inline comment"
+	convoComment  commentKind = "comment"
+	reviewSummary commentKind = "review"
+)
+
+// prComment looks up comment or review id on PR #num: an inline review comment,
+// a conversation comment or a review summary. It refuses an ID that isn't one
+// of them, or is one on another PR.
+func prComment(repo, num, id string) (ghComment, commentKind, error) {
+	if !commentID.MatchString(id) {
+		return ghComment{}, "", fail("comment id must be a number, not '%s'", id)
+	}
+	get := func(endpoint string) (ghComment, bool) {
+		var cm ghComment
+		out, err := ghQuiet(repo, "api", endpoint)
+		if err != nil {
+			return cm, false
+		}
+		dec := json.NewDecoder(bytes.NewReader(out))
+		dec.UseNumber()
+		return cm, dec.Decode(&cm) == nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/pulls/comments/" + id); ok {
+		if !strings.HasSuffix(cm.PullRequestURL, "/pulls/"+num) {
+			return cm, "", fail("comment %s isn't on PR #%s", id, num)
+		}
+		return cm, inlineComment, nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/issues/comments/" + id); ok {
+		if !strings.HasSuffix(cm.IssueURL, "/issues/"+num) {
+			return cm, "", fail("comment %s isn't on PR #%s", id, num)
+		}
+		return cm, convoComment, nil
+	}
+	if cm, ok := get("repos/{owner}/{repo}/pulls/" + num + "/reviews/" + id); ok {
+		return cm, reviewSummary, nil
+	}
+	return ghComment{}, "", fail("%s isn't a review comment, conversation comment or review on PR #%s", id, num)
+}
 
 // crew reply TASK COMMENT_ID TEXT: replies to one of the review comments a round
 // lists, on the task's own PR only. An inline comment gets a reply in its thread.
@@ -436,9 +487,6 @@ func cmdReply(c *Crew, args []string) error {
 	if text == "" {
 		return fail("reply text required")
 	}
-	if !commentID.MatchString(cid) {
-		return fail("comment id must be a number, not '%s'", cid)
-	}
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -451,20 +499,11 @@ func cmdReply(c *Crew, args []string) error {
 	}
 	repo, num := p.Repo(), t.PRNumber()
 	body := text + "\n\n" + replyMarker
-	lookup := func(endpoint string) (ghComment, bool) {
-		var cm ghComment
-		out, err := ghQuiet(repo, "api", endpoint)
-		if err != nil {
-			return cm, false
-		}
-		dec := json.NewDecoder(bytes.NewReader(out))
-		dec.UseNumber()
-		return cm, dec.Decode(&cm) == nil
+	cm, kind, err := prComment(repo, num, cid)
+	if err != nil {
+		return err
 	}
-	if cm, ok := lookup("repos/{owner}/{repo}/pulls/comments/" + cid); ok {
-		if !strings.HasSuffix(cm.PullRequestURL, "/pulls/"+num) {
-			return fail("comment %s isn't on PR #%s", cid, num)
-		}
+	if kind == inlineComment {
 		// GitHub only accepts replies to a thread's top-level comment.
 		root := cm.ID
 		if cm.InReplyTo != nil {
@@ -476,17 +515,6 @@ func cmdReply(c *Crew, args []string) error {
 		fmt.Printf("replied to comment %s in its thread\n", cid)
 		return nil
 	}
-	cm, ok := lookup("repos/{owner}/{repo}/issues/comments/" + cid)
-	kind := "Comment"
-	if ok {
-		if !strings.HasSuffix(cm.IssueURL, "/issues/"+num) {
-			return fail("comment %s isn't on PR #%s", cid, num)
-		}
-	} else if cm, ok = lookup("repos/{owner}/{repo}/pulls/" + num + "/reviews/" + cid); ok {
-		kind = "Review"
-	} else {
-		return fail("%s isn't a review comment, conversation comment or review on PR #%s", cid, num)
-	}
 	first := ""
 	for _, l := range strings.Split(strings.ReplaceAll(cm.Body, "\r", ""), "\n") {
 		if strings.TrimSpace(l) != "" {
@@ -497,11 +525,78 @@ func cmdReply(c *Crew, args []string) error {
 	if r := []rune(first); len(r) > 120 {
 		first = string(r[:117]) + "…"
 	}
-	quote := fmt.Sprintf("> [%s](%s): %s", kind, cm.HTMLURL, first)
+	label := "Comment"
+	if kind == reviewSummary {
+		label = "Review"
+	}
+	quote := fmt.Sprintf("> [%s](%s): %s", label, cm.HTMLURL, first)
 	if _, err := gh(repo, "api", "--silent", "repos/{owner}/{repo}/issues/"+num+"/comments", "-f", "body="+quote+"\n\n"+body); err != nil {
 		return quietly(err)
 	}
-	fmt.Printf("replied to %s %s on PR #%s\n", strings.ToLower(kind), cid, num)
+	fmt.Printf("replied to %s %s on PR #%s\n", kind, cid, num)
+	return nil
+}
+
+// The reactions crew react adds: their names on the command line, and their
+// GraphQL ReactionContent values.
+var reactionContent = map[string]string{"eyes": "EYES", "rocket": "ROCKET"}
+
+// crew react TASK eyes|rocket COMMENT_ID...: reacts to the user's own review
+// comments that a round lists, on the task's own PR only. A worker adds 👀
+// (eyes) to each one when it picks the round up, and 🚀 (rocket) to each one
+// it is about to change code for. Rounds hold only the user's comments
+// (collaborators' wait for the user), so crew reacts to no one else's. Every ID
+// is checked before any reaction is added, so a bad ID changes nothing.
+// Reacting twice is harmless: a person has at most one of each reaction on a
+// comment.
+func cmdReact(c *Crew, args []string) error {
+	if err := need("gh"); err != nil {
+		return err
+	}
+	if len(args) < 3 {
+		return usage("crew react TASK eyes|rocket COMMENT_ID...")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	name, ids := args[1], args[2:]
+	content, ok := reactionContent[name]
+	if !ok {
+		return fail("the reaction must be eyes or rocket, not '%s'", name)
+	}
+	if t.PR() == "" {
+		return fail("task has no PR")
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	me, err := c.ghLogin()
+	if err != nil {
+		return err
+	}
+	repo, num := p.Repo(), t.PRNumber()
+	var subjects []string
+	for _, id := range ids {
+		cm, kind, err := prComment(repo, num, id)
+		if err != nil {
+			return err
+		}
+		if cm.whose(me) != "me" {
+			return fail("%s %s on PR #%s isn't by %s; crew reacts only to the user's own comments", kind, id, num, me)
+		}
+		subjects = append(subjects, cm.NodeID)
+	}
+	// GraphQL's addReaction takes all three kinds; REST has no reactions for a
+	// review summary.
+	const mutation = `mutation($subject: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $subject, content: $content}) { clientMutationId } }`
+	for _, subject := range subjects {
+		if _, err := gh(repo, "api", "graphql", "--silent", "-f", "query="+mutation, "-f", "subject="+subject, "-f", "content="+content); err != nil {
+			return quietly(err)
+		}
+	}
+	fmt.Printf("reacted %s to %d comment(s) on PR #%s\n", name, len(subjects), num)
 	return nil
 }
 

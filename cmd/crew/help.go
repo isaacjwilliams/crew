@@ -68,6 +68,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    now if the worker is idle, else by crew tick
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
+  crew react TASK eyes|rocket COMMENT_ID...
+                                   React to your own review comments on the task's
+                                   PR: picked up, or being changed (used by workers)
   crew review-summary TASK FILE    Post FILE as the automated-review summary on the
                                    task's PR, or edit the one there (used by workers)
   crew codex ROOT PROMPT_FILE OUT_PREFIX

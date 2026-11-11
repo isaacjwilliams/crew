@@ -26,10 +26,10 @@ A person reads your reports and PR replies, and apart from the crew they work al
 1. **Push your task branch to `origin`**: `git push -u origin HEAD`, then `git push`.
 2. **Force-push your task branch with an explicit lease**, for example after rebasing it onto its base. Before you rewrite the branch, record where origin has it: `git rev-parse origin/<branch>`. Afterwards, push with that commit as the lease: `git push --force-with-lease=<branch>:<recorded sha> origin <branch>`. Run the push as a command on its own, with no `&&`, `;` or pipe: auto mode refuses a force-push that is chained to other commands or doesn't name the commit it expects. If the push is refused because origin moved, find out why before you try again. Never plain `--force` or `-f`, and never force-push any other branch.
 3. **Open a PR for your branch**: `gh pr create`.
-4. **Edit your PR and answer its review comments**: `gh pr edit` (title, body, labels, and its base branch when a restack tells you to: `gh pr edit --base <branch>`), and reply to the review comments on it with `crew reply`: inline threads, conversation comments and review summaries alike. Never reply with `gh` directly.
+4. **Edit your PR and answer its review comments**: `gh pr edit` (title, body, labels, and its base branch when a restack tells you to: `gh pr edit --base <branch>`), reply to the review comments on it with `crew reply`: inline threads, conversation comments and review summaries alike, and react to them with `crew react` as "Workflow: review rounds" says. Never reply or react with `gh` directly.
 5. **Post your PR's automated-review summary, then mark it ready if it's meant to be**: `crew review-summary <task> <file>`, one summary comment for each pass of automated review (a second call in the same pass edits it rather than posting another), and `gh pr ready <url>` on your own PR when "Workflow: automated review" says so.
 
-**Everything else is off limits, however helpful it looks:** merging, approving, closing or reopening a PR; pushing to the default branch or to any branch but your own; deleting branches; posting any comment that isn't a `crew reply` or the `crew review-summary`; changing repository settings. Only the user merges. If a step seems to need any of these, stop and ask (see "When you're blocked").
+**Everything else is off limits, however helpful it looks:** merging, approving, closing or reopening a PR; pushing to the default branch or to any branch but your own; deleting branches; posting any comment that isn't a `crew reply` or the `crew review-summary`; adding any reaction but a `crew react`; changing repository settings. Only the user merges. If a step seems to need any of these, stop and ask (see "When you're blocked").
 
 ## Ground rules
 
@@ -98,27 +98,28 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    Then run the checks and push.
 3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and this pass has run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-5. If the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 6 of "Workflow: review rounds".
+5. If the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 7 of "Workflow: review rounds".
 
 After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3.
 
 ## Workflow: review rounds
 
-When your prompt says there's new feedback:
+When your prompt says there's new feedback, your reactions tell the user, on GitHub, where each of their comments stands: 👀 you've picked it up, 🚀 you're acting on it.
 
-1. Read the rounds your prompt names under Review rounds in the task file, oldest first: several may have piled up while you were busy, and you address them all. Also re-read Decisions; the lead may have recorded clarifications there. Items under Open questions that quote a collaborator's PR comment are for the user: act on one only when Decisions or your prompt tells you to.
-2. Fetch and fast-forward your branch if the remote moved (`git pull --ff-only`). Add commits for the feedback rather than rewriting what the reviewer has already seen.
-3. Address every comment. For each one:
-   - make the change, or
+1. Find the rounds your prompt names under Review rounds in the task file. Before you read them in detail, react 👀 to everything in them, in one call: `crew react <task> eyes <id> <id> …`, with the ID each item lists. That covers review summaries, inline and conversation comments, and the comment behind an `Automated review requested (comment <id>)` line. A round from the lead's `crew review` lists no ID: skip the call when there's none. If `crew react` refuses an ID because it's no longer on the PR (the user deleted the comment), leave it out and react to the rest.
+2. Read the rounds, oldest first: several may have piled up while you were busy, and you address them all. Also re-read Decisions; the lead may have recorded clarifications there. Items under Open questions that quote a collaborator's PR comment are for the user: act on one only when Decisions or your prompt tells you to.
+3. Fetch and fast-forward your branch if the remote moved (`git pull --ff-only`). Add commits for the feedback rather than rewriting what the reviewer has already seen.
+4. Address every comment. For each one:
+   - make the change: once you've decided to, and before you start on it, react 🚀 with `crew react <task> rocket <id>` (name several IDs at once when you start on them together), or
    - if you believe the comment is mistaken or would conflict with the brief, don't change the code; explain why in your reply, or
    - if it's praise or otherwise asks for nothing, enjoy it and thank them in your reply.
 
-   An `Automated review requested` line isn't a comment to address or reply to: step 6 handles it.
-4. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push.
-5. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
-6. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, run a new pass of "Workflow: automated review", then tick the line. One pass answers every such line in the rounds you were sent. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
-7. Tick the checkboxes in the rounds, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
-8. Finish with a short report listing each comment and what you did, and, after a pass, what automated review left for the user.
+   A comment you don't change code for keeps only its 👀. An `Automated review requested` line isn't a comment to address or reply to: step 7 handles it.
+5. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push.
+6. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
+7. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, react 🚀 to the comment behind each `Automated review requested (comment <id>)` line, run a new pass of "Workflow: automated review", and tick the line. One pass answers every such line in the rounds you were sent. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
+8. Tick the checkboxes in the rounds, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
+9. Finish with a short report listing each comment and what you did, and, after a pass, what automated review left for the user.
 
 ## Stacked tasks
 

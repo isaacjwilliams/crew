@@ -27,6 +27,7 @@ These are invariants. Breaking one changes the design, not just the implementati
      - the PRs workers open;
      - optional one-line replies to the user's own review comments: in the thread for an inline comment, otherwise as a PR comment that quotes the one it answers;
      - one comment per pass of automated review summing it up (`crew review-summary`), which a worker edits rather than posting a second for the same pass;
+     - 👀 and 🚀 reactions to the user's own review comments (`crew react`): picked up, and being changed;
      - two lines in `.git/info/exclude`, which is local to the clone.
 2. **The ledger is the single source of truth, it's plain text, and it's pushed to the person's private remote.**
    - Every change is committed at once and pushed in the background, normally within seconds, so another machine can take over with what this one knew. A push that fails is retried by the next commit, and by every `crew tick`.
@@ -227,12 +228,17 @@ you review on GitHub → tell the lead (or run it yourself):
   crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
                          # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
                          # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)
-                         # becomes the same line in crew feedback's round: "(comment <id>)"
-worker: address each comment in every unsent round, oldest first → commit (no force-push) → push
+                         # becomes the same line in crew feedback's round: "(comment <id>)", one line for each
+worker: crew react TASK eyes <every ID in the unsent rounds>
+        → address each comment, oldest round first (crew react TASK rocket <id> before changing code for it)
+        → commit (no force-push) → push
         → crew reply TASK <id> "…" (if told to) → an "Automated review requested" line: a new pass → status pr-open
                          # crew reply: an inline comment → reply in its thread (to the thread root);
                          #   a conversation comment or review summary → a PR comment quoting it;
                          #   refuses an ID that isn't a comment or review on the task's own PR
+                         # crew react: GraphQL addReaction on each one's node_id, the same for all three kinds;
+                         #   eyes or rocket only; checks every ID first (on the task's own PR, the user's own)
+                         #   and reacts to none if one fails
 ```
 
 ### Stacked tasks
@@ -587,7 +593,7 @@ Changing any of these means updating every side listed.
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
-| A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 5; checked in `tests/guard.sh` |
+| A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 6; checked in `tests/guard.sh` |
 | Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
 | Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
@@ -600,15 +606,16 @@ Changing any of these means updating every side listed.
 | The record: `### Automated review N` under `## Automated reviews` (before `## Review rounds`), a `Reviewers` line naming any reviewer that failed, each finding a `####` heading with `Raised by` (`both`, `Codex` or `Claude reviewer`), `Finding`, a `Round <n>, <reviewer>` line per round reply, `Verdict`, `Agreed severity` (the rubric's four, or `withdrawn`, `split: …`, `disputed`, `uncertain`) and `Outcome` lines, and `Summary posted` under the newest review once the summary is up | `pr-review` step 8 → implementer "Workflow: automated review" (outcomes, resuming, passes) → `crew review-summary` (`Task.NewestReview` reads the headings) → `templates/review-comment.md` → lead (what was left for the user); `templates/task.md`, `LEDGER.md` |
 | An unchecked item (`- [ ]`) under Open questions is a question waiting on the user; whoever records its answer under Decisions ticks it | `crew feedback` (collaborators' comments), implementer "When you're blocked" → `OpenQuestions` (`crew tick` marks the task `needs-input`), lead (relays and ticks); checked in `tests/guard.sh` |
 | Who a comment is from: the user (`gh api user`), a collaborator (`author_association` OWNER, MEMBER or COLLABORATOR, `user.type` not `Bot`), or anyone else | GitHub REST API → `crew feedback` |
-| GitHub comment lookups: `pulls/comments/<id>` has `pull_request_url` and `in_reply_to_id`, `issues/comments/<id>` has `issue_url`, and both and `pulls/<n>/reviews/<id>` have `html_url` and `body` | GitHub REST API → `crew reply` (which PR a comment is on, the thread root, the quote) |
-| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`), and a request for another pass as `- [ ] Automated review requested (<source>)` (`reviewRound.add`) | `crew feedback`, `crew review` → implementer review-round workflow and `crew reply`; the request line, `pr-review` step 3 (left out of the briefing) |
+| GitHub comment lookups: `pulls/comments/<id>` has `pull_request_url` and `in_reply_to_id`, `issues/comments/<id>` has `issue_url`, and both and `pulls/<n>/reviews/<id>` have `html_url`, `body`, `user` and `node_id` | GitHub REST API → `prComment` → `crew reply` (which PR a comment is on, the thread root, the quote), `crew react` (whose it is) |
+| GraphQL `addReaction(input: {subjectId, content})` takes any `Reactable`, which `PullRequestReview`, `PullRequestReviewComment` and `IssueComment` all are; `content` is `EYES` or `ROCKET` here | `crew react`, from the comment's REST `node_id` |
+| Round text "Round N", an ID listed for every comment and review summary (`comment <id>`, `review <id>`), and a request for another pass as `- [ ] Automated review requested (<source>)` (`reviewRound.add`) | `crew feedback`, `crew review` → implementer review-round workflow, `crew reply` and `crew react`; the request line, `pr-review` step 3 (left out of the briefing) |
 | A followup prompt names every unsent round, "round N" or "rounds N to M" (`unsentRounds`) | `crew followup`, `crew tick` → implementer "Workflow: review rounds" step 1 |
 | State paths, the ledger: `projects/` and `reports/` in the home. Only they are committed by `crew`, edited by agents, or absent from the public repo | `statePaths` in `crew` (`commit` and the guard); checked in `tests/guard.sh`, which also checks this repo tracks nothing there but `projects/.gitkeep`, and no `config/crew.env` or `host` |
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" commit --hook` on `Edit\|Write\|NotebookEdit\|Bash`; it reads nothing from its JSON | `lead/.claude/settings.json`, `config/worker-settings.json` → `commitHook`, `crew doctor`; checked in `tests/guard.sh` |
 | Hook command path `${CREW_HOME:-$HOME/crew}/bin/crew-guard` and role names. `~/crew` is the usual home; `crew install` sets `env.CREW_HOME` in `~/.claude/settings.json`, so hooks find a home anywhere | agent frontmatter, `lead/.claude/settings.json` and `config/worker-settings.json` → `bin/crew-guard` (which runs `crew guard`), `crew doctor`; checked in `tests/guard.sh` |
 | A home other than `~/crew` is written into the `%h/crew` paths and the `# Environment=CREW_HOME=` line of `systemd/*.service`. Every `launchd/*.plist` is rendered: `%h/crew` is the home, any other `%h` the user's home | those files → `renderUnit` and `renderPlist` in `crew install`; checked in `tests/host.sh` and `services_test.go` |
 | Each `launchd/<label>.plist` is the twin of `systemd/<label>.service`: the same command, the unit's `PATH` entries within its own, the same `Nice`, `AbandonProcessGroup` where the unit has `KillMode=process`; `Label` is the file's name, `Disabled` is true, `CREW_HOME` is `%h/crew`, output goes to `%h/crew/logs/<label>.log` | `systemd/` ↔ `launchd/`; checked in `services_test.go` |
-| What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`; automated review adds `crew review-summary` and `gh pr ready`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
+| What workers may do on GitHub (a restack adds nothing new: `--force-with-lease` on their own branch, and `gh pr edit --base`; automated review adds `crew review-summary` and `gh pr ready`; review rounds add `crew react`) | `implementer.md` ("On GitHub, you may do exactly this") ↔ `worker-settings.json` `allow`/`deny`; checked in `tests/guard.sh` |
 | Locks: `.crew.lock` (every mutation), `.crew-tick.lock` (one `crew tick` at a time) and `.crew-push.lock` (one ledger push at a time), taken with `flock(2)`; Go opens them close-on-exec, so a session or background push crew starts never holds one | `crew` → `claude`; checked by `tests/stubs/claude` (no open fd on a `.crew*.lock` file) and `tests/crew-e2e.sh` |
 | `CREW_PROJECT` is a registered project or `all`, set for every session: by `lead` (`--project P`, the repo it's run in, or `all`), by `crew serve`, and by crew in the `--settings` `env` of the sessions it starts for a project | `cmd_lead.go`, `sessionSettings`, `crew serve` → `defaultProject`; checked in `tests/crew-e2e.sh` and `tests/host.sh` |
 | `crew` on PATH for agents | `claude` (in `sessions.go`) prepending `bin/` (the lead, through `crew lead` and `crew serve`, and the gardener), the units' `PATH`, and the `~/.local/bin/crew` link `crew install` makes. Workers and goal leads get the PATH of Claude Code's daemon: the units, the launchd jobs and `claude`, any of which may start it, put `bin/` first, and a daemon started from your own shell finds `crew` through the link ("Environment" under Assumptions to re-check) |
