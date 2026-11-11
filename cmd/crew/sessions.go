@@ -39,9 +39,9 @@ func (c *Crew) claude(args ...string) *exec.Cmd {
 	return cmd
 }
 
-// execClaude replaces crew with cmd, a claude command, in the current directory,
-// so the terminal and its signals go straight to claude. It returns only when
-// the exec fails.
+// execClaude replaces crew with cmd, a claude command, so the terminal and its
+// signals go straight to claude. claude keeps crew's current directory; a caller
+// that needs another changes into it first. It returns only when the exec fails.
 func execClaude(cmd *exec.Cmd) error {
 	path, err := exec.LookPath("claude")
 	if err != nil {
