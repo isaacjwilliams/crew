@@ -1,10 +1,11 @@
 package main
 
 // crew install puts this machine's files in place: the agents in ~/.claude/agents/,
-// the fish files in ~/.config/fish/, and the crew's services, installed but not
-// enabled (services_linux.go and services_darwin.go). Re-running it is safe. A
-// file is replaced only when it differs, after a backup, and by rename, so a
-// running crew-guard hook never reads half a file.
+// links to crew and lead in ~/.local/bin/, the fish completions in
+// ~/.config/fish/, and the crew's services, installed but not enabled
+// (services_linux.go and services_darwin.go). Re-running it is safe. A file is
+// replaced only when it differs, after a backup, and by rename, so a running
+// crew-guard hook never reads half a file.
 // A file an earlier install shipped and this one doesn't is backed up and
 // removed. The manifest of what was shipped, and the backups, live in
 // ~/.local/share/agent-crew/.
@@ -18,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +33,19 @@ import (
 var runtimeTools = []string{"git", "gh", "claude", "curl"}
 
 const minClaude = "2.1.281"
+
+// linkedCommands are the home's bin/ commands crew install links into
+// ~/.local/bin, so a shell finds them. crew-guard is for hooks, not for PATH.
+var linkedCommands = []string{"crew", "lead"}
+
+// addLocalBinToPath is how to put ~/.local/bin on a shell's PATH, for crew
+// install and crew doctor to suggest.
+const addLocalBinToPath = `add it in your shell's startup file: fish_add_path ~/.local/bin in fish, or export PATH="$HOME/.local/bin:$PATH" in bash or zsh`
+
+// onShellPath: dir is one of the directories on the PATH crew runs with.
+func onShellPath(dir string) bool {
+	return slices.Contains(filepath.SplitList(os.Getenv("PATH")), dir)
+}
 
 // installer is one run of crew install.
 type installer struct {
@@ -70,13 +85,9 @@ func cmdInstall(c *Crew, args []string) error {
 	if b, err := os.ReadFile(filepath.Join(in.state, "manifest")); err == nil {
 		in.old = splitLines(string(b))
 	}
-	// The fish files name ~/crew, the usual home. Only a home elsewhere needs its
-	// path written into them.
-	custom := c.Home != filepath.Join(home, "crew")
-
 	say("Checking dependencies")
 	var missing []string
-	for _, t := range append(runtimeTools, "fish") {
+	for _, t := range runtimeTools {
 		if _, err := exec.LookPath(t); err != nil {
 			missing = append(missing, t)
 		}
@@ -111,8 +122,22 @@ func cmdInstall(c *Crew, args []string) error {
 	in.writeLeadLocalSettings()
 	c.syncMCP()
 
+	say("Linking crew and lead → ~/.local/bin/")
+	bin := filepath.Join(home, ".local/bin")
+	for _, name := range linkedCommands {
+		if err := in.link("links", c.path("bin", name), filepath.Join(bin, name)); err != nil {
+			return err
+		}
+	}
+	// Only links an earlier install made, as its manifest lists them, never the
+	// other files in ~/.local/bin.
+	in.prune("links", bin, nil)
+	if !onShellPath(bin) {
+		note("~/.local/bin isn't on your PATH: %s", addLocalBinToPath)
+	}
+
 	if fish {
-		say("Installing fish integration → ~/.config/fish/")
+		say("Installing fish completions → ~/.config/fish/")
 		var files []string
 		filepath.WalkDir(c.path("fish"), func(p string, d fs.DirEntry, err error) error {
 			if err == nil && d.Type().IsRegular() {
@@ -123,21 +148,12 @@ func cmdInstall(c *Crew, args []string) error {
 		sort.Strings(files)
 		for _, f := range files {
 			rel, _ := filepath.Rel(c.path("fish"), f)
-			var content []byte
-			if rel == "conf.d/agent-crew.fish" && custom {
-				content = renderLines(f, func(l string) string {
-					if strings.HasPrefix(l, "set -q CREW_HOME; or set -gx CREW_HOME ") {
-						return "set -q CREW_HOME; or set -gx CREW_HOME " + c.Home
-					}
-					return l
-				})
-			}
-			if err := in.installContent("fish", f, content, filepath.Join(home, ".config/fish", rel)); err != nil {
+			if err := in.install("fish", f, filepath.Join(home, ".config/fish", rel)); err != nil {
 				return err
 			}
 		}
 		in.prune("fish", filepath.Join(home, ".config/fish"), nil)
-		note("open a new fish shell (or: source ~/.config/fish/conf.d/agent-crew.fish)")
+		note("new fish shells complete crew and lead")
 	}
 
 	if services {
@@ -248,13 +264,42 @@ func (in *installer) installContent(component, src string, content []byte, dst s
 	return os.Rename(tmp.Name(), dst)
 }
 
+// link points dst at target with a symlink, and records it in the manifest. A
+// link to target there already is left alone. Anything else there is backed up,
+// then replaced by rename.
+func (in *installer) link(component, target, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in.newRows = append(in.newRows, component+"\t"+dst)
+	in.shipped[dst] = true
+	if cur, err := os.Readlink(dst); err == nil && cur == target {
+		return nil
+	}
+	if exists(dst) {
+		in.backup(dst)
+	}
+	tmp := dst + ".new"
+	os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
 // backup copies a file into this run's backup directory, at its path under the
-// user's home.
+// user's home. A symlink is copied as a link, not as the file it points at.
 func (in *installer) backup(path string) {
 	rel := strings.TrimPrefix(path, in.home+"/")
 	dst := filepath.Join(in.backups, rel)
 	os.MkdirAll(filepath.Dir(dst), 0o755)
-	if exec.Command("cp", "-p", path, dst).Run() != nil {
+	var err error
+	if target, lerr := os.Readlink(path); lerr == nil {
+		err = os.Symlink(target, dst)
+	} else {
+		err = exec.Command("cp", "-p", path, dst).Run()
+	}
+	if err != nil {
 		warn("couldn't back up %s", path)
 	}
 	note("backed up ~/%s → %s/", rel, in.backups)
@@ -263,13 +308,16 @@ func (in *installer) backup(path string) {
 // prune removes the files the last install of a component shipped and this one
 // didn't, running beforeRemove (when there is one) on each first. Run it after the
 // component's installs. It only touches files under root, the component's
-// directory. A component this run skips (--no-fish, --no-services) is never
-// pruned, so it loses nothing.
+// directory, and never a directory. A component this run skips (--no-fish,
+// --no-services) is never pruned, so it loses nothing.
 func (in *installer) prune(component, root string, beforeRemove func(path string)) {
 	in.pruned[component] = true
 	for _, row := range in.old {
 		comp, path, _ := strings.Cut(row, "\t")
-		if comp != component || !strings.HasPrefix(path, root+"/") || !isFile(path) || in.shipped[path] {
+		if comp != component || !strings.HasPrefix(path, root+"/") || in.shipped[path] {
+			continue
+		}
+		if fi, err := os.Lstat(path); err != nil || fi.IsDir() {
 			continue
 		}
 		if beforeRemove != nil {

@@ -9,8 +9,8 @@ func cmdHelp(c *Crew, args []string) error {
 
 const helpText = `crew — ledger CLI for the agent crew
 
-A command works on one project: --project P, else CREW_PROJECT (set by the lead
-function and for every session crew starts), else the repo you're in. Without
+A command works on one project: --project P, else CREW_PROJECT (set by crew lead
+and for every session crew starts), else the repo you're in. Without
 one, commands that list take every project, and --project all or --all asks
 for every project.
 
@@ -21,8 +21,9 @@ Setup
   crew upgrade                     Merge the public repo's new version, install it,
                                    push, and restart the lead's server
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
-                                   Put this machine's files in place: agents, fish
-                                   functions, the services (not enabled)
+                                   Put this machine's files in place: agents, links
+                                   to crew and lead in ~/.local/bin, fish
+                                   completions, the services (not enabled)
   crew project add [PATH]          Register a repo (default: current) with the ledger,
                                    or this machine's clone of one registered already
   crew checkout PROJECT            Bring the lead's reading copy of PROJECT up to date
@@ -33,6 +34,9 @@ Setup
                                    projects, enable the services
   crew host down [--force]         Hand over: stop the crew here and release the lease
                                    (refused while a worktree has unpushed commits)
+  crew lead [--project P] [claude options] ["<request>"]
+                                   Talk to the lead, in a new session (lead -c
+                                   continues the last one); bin/lead runs it
   crew serve                       Serve the lead with Remote Control (what
                                    crew-lead.service runs); exits 3 on a machine
                                    that doesn't run the crew
@@ -139,10 +143,6 @@ MCP servers  (a project's own, from projects/<p>/mcp.json)
   crew mcp sync                    Rebuild each project's mcp.local.json and the
                                    leads' lead/.mcp.json now (crew tick does it too),
                                    and report any problem
-  crew mcp lead-settings --project P
-                                   Print the settings a lead for P starts with, which
-                                   switch off every other project's servers (run by
-                                   the lead function)
 
 Other
   crew push                        Push the ledger to origin now (crew pushes it in

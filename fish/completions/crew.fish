@@ -1,7 +1,7 @@
-set -l crew_cmds help version setup upgrade install project checkout host serve doctor config new ready dispatch feedback followup restack review reply review-summary codex status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready dispatch feedback followup restack review reply review-summary codex status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
-set -l mcp_cmds sync lead-settings
+set -l mcp_cmds sync
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
 complete -c crew -n "__fish_seen_subcommand_from ready dispatch feedback followup restack review show path find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
@@ -47,8 +47,8 @@ set -l host_cmds up down
 complete -c crew -n "__fish_seen_subcommand_from host; and not __fish_seen_subcommand_from $host_cmds" -a "$host_cmds"
 complete -c crew -n "__fish_seen_subcommand_from host; and __fish_seen_subcommand_from up" -l take -d 'Take the crew over from the machine running it'
 complete -c crew -n "__fish_seen_subcommand_from host; and __fish_seen_subcommand_from down" -l force -d 'Hand over even with unpushed work in worktrees'
+complete -c crew -n "__fish_seen_subcommand_from lead" -l project -x -d 'Work on this project (all: every project)' \
+    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from setup" -l name -x -d 'Name of your private repo (default: crew)'
 complete -c crew -n "__fish_seen_subcommand_from mcp; and not __fish_seen_subcommand_from $mcp_cmds" -a "$mcp_cmds"
-complete -c crew -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from lead-settings" -l project -x -d 'The lead\'s project' \
-    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
 complete -c crew -n "__fish_seen_subcommand_from codex" -F

@@ -9,7 +9,9 @@ H=$HOME/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
 check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
-check "fish files installed" '[[ -f $HOME/.config/fish/conf.d/agent-crew.fish && -f $HOME/.config/fish/functions/lead.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
+check "crew and lead linked into ~/.local/bin" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" && $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" ]]'
+check "and the fish completions installed, and nothing else for fish" '[[ -f $HOME/.config/fish/completions/crew.fish && -f $HOME/.config/fish/completions/lead.fish && $(find "$HOME/.config/fish" -type f | wc -l) == 2 ]]'
+check "install says when ~/.local/bin isn't on PATH, and what to add" '[[ $out == *"~/.local/bin isn'"'"'t on your PATH"*"fish_add_path ~/.local/bin"* ]]'
 check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q "user enable" "$HOME/systemctl-calls.log"'
 check "install says the units are off here, and what turns them on" '[[ $out == *"off on this machine: crew-tick.timer crew-gardener.timer crew-lead.service. crew host up turns them on"* ]]'
 check "CREW_HOME set for Claude Code sessions" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
@@ -26,44 +28,65 @@ check "crew doctor shows the home and its version" '[[ $doctor_out == *"crew $(c
 check "crew doctor finds the guard hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json runs crew-guard"* && $doctor_out == *"ok   config/worker-settings.json runs crew-guard"* ]]'
 check "crew doctor finds the commit hook in the settings" '[[ $doctor_out == *"ok   lead/.claude/settings.json commits ledger edits"* && $doctor_out == *"ok   config/worker-settings.json commits ledger edits"* ]]'
 check "crew doctor finds the lead's settings for this machine" '[[ $doctor_out == *"ok   lead/.claude/settings.local.json written for this machine"* ]]'
+check "crew doctor finds crew and lead linked into the home" '[[ $doctor_out == *"ok   ~/.local/bin/crew links to this home"* && $doctor_out == *"ok   ~/.local/bin/lead links to this home"* ]]'
 check "crew doctor flags an untrusted work root as a required check" '[[ $doctor_out == *"FAIL $HOME/agent-work trusted — cd $HOME/agent-work && claude"* && $doctor_out == *"Some required checks failed."* ]]'
 jq -n --arg p "$HOME/agent-work" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "with only the work root trusted, as after setup, no required check fails" '[[ $doctor_out == *"ok   $HOME/agent-work trusted"* && $doctor_out == *"Required checks passed."* ]]'
 check "and the lead directory is an optional check, fixed by running lead once" '[[ $doctor_out == *"FAIL $H/lead trusted (optional) — run lead once and accept the trust prompt"* ]]'
+check "and so is ~/.local/bin on PATH, with what to add" '[[ $doctor_out == *"FAIL ~/.local/bin on PATH (optional) — add it in your shell'"'"'s startup file: fish_add_path ~/.local/bin"* ]]'
 jq -n --arg p "$H" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor finds the lead directory trusted through the home, where Claude Code records it" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
+doctor_out=$(PATH="$HOME/.local/bin:$PATH" crew doctor 2>&1 || true)
+check "crew doctor, run through the link, finds ~/.local/bin on PATH" '[[ $doctor_out == *"ok   ~/.local/bin on PATH"* ]]'
+ln -sfn "$HOME/other/crew/bin/lead" "$HOME/.local/bin/lead"
+doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
+check "crew doctor flags a link to another home as a required check" '[[ $doctor_out == *"FAIL ~/.local/bin/lead links to this home — run crew install"* && $doctor_out == *"Some required checks failed."* ]]'
+ln -sfn "$H/bin/lead" "$HOME/.local/bin/lead"
 
 # 2. An unchanged re-run backs nothing up.
 backups() { find "$HOME/.local/share/agent-crew/backups" -type f 2>/dev/null | wc -l; }
-n=$(backups); out=$("$H/bin/crew" install --yes 2>&1)
+n=$(backups); out=$(PATH="$HOME/.local/bin:$PATH" "$H/bin/crew" install --yes 2>&1)
 check "an unchanged re-run backs nothing up" '[[ $out != *"backed up"* && $(backups) == "$n" ]]'
+check "install says nothing about PATH once ~/.local/bin is on it" '[[ $out != *"isn'"'"'t on your PATH"* ]]'
 
 # 3. An installed agent edited in place is backed up before it's replaced.
 echo '# local tweak' >>"$HOME/.claude/agents/lead.md"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 check "an edited agent is backed up" 'grep -q "local tweak" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
 check "and replaced with the home's copy" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
+rm "$HOME/.local/bin/crew"; echo stray >"$HOME/.local/bin/crew"; ln -sfn "$HOME/other/crew/bin/lead" "$HOME/.local/bin/lead"
+"$H/bin/crew" install --yes >/dev/null 2>&1
+check "a stray file where crew's link goes is backed up, and replaced by the link" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" ]] && grep -qx stray "$HOME"/.local/share/agent-crew/backups/*/.local/bin/crew'
+check "a link to another home is backed up as a link, and replaced" '[[ $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" && $(readlink "$HOME"/.local/share/agent-crew/backups/*/.local/bin/lead) == "$HOME/other/crew/bin/lead" ]]'
 
 # 4. What the home stops shipping is removed; what it starts shipping is installed.
 lead_inode=$(stat -c %i "$HOME/.claude/agents/lead.md")
 echo '# new upstream' >>"$H/agents/lead.md"
-echo 'function crew-extra; end' >"$H/fish/functions/crew-extra.fish"
+echo 'complete -c crew-extra' >"$H/fish/completions/crew-extra.fish"
 rm "$H/agents/gardener.md" "$H/systemd/crew-gardener.timer"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 check "a changed agent is replaced by rename, not rewritten in place" '[[ $(stat -c %i "$HOME/.claude/agents/lead.md") != "$lead_inode" ]] && cmp -s "$H/agents/lead.md" "$HOME/.claude/agents/lead.md"'
-check "a new fish function is installed" '[[ -f $HOME/.config/fish/functions/crew-extra.fish ]]'
+check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
 check "other agents are left alone" '[[ -f $HOME/.claude/agents/implementer.md ]]'
+# An install from before crew lead shipped the lead function and a conf.d snippet.
+for f in conf.d/agent-crew.fish functions/lead.fish; do
+  mkdir -p "$HOME/.config/fish/${f%/*}"; echo "# old $f" >"$HOME/.config/fish/$f"
+  printf 'fish\t%s\n' "$HOME/.config/fish/$f" >>"$HOME/.local/share/agent-crew/manifest"
+done
+"$H/bin/crew" install --yes >/dev/null 2>&1
+check "the fish files an older install shipped are removed and backed up" '[[ ! -e $HOME/.config/fish/conf.d/agent-crew.fish && ! -e $HOME/.config/fish/functions/lead.fish ]] &&
+  grep -q "# old conf.d" "$HOME"/.local/share/agent-crew/backups/*/.config/fish/conf.d/agent-crew.fish && grep -q "# old functions" "$HOME"/.local/share/agent-crew/backups/*/.config/fish/functions/lead.fish'
 
 # 5. A skipped component keeps its files.
-rm "$H/fish/functions/crew-extra.fish"
+rm "$H/fish/completions/crew-extra.fish"
 "$H/bin/crew" install --yes --no-fish >/dev/null 2>&1
-check "--no-fish leaves a dropped fish file alone" '[[ -f $HOME/.config/fish/functions/crew-extra.fish ]]'
+check "--no-fish leaves a dropped fish file alone" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 "$H/bin/crew" install --yes >/dev/null 2>&1
-check "the next run with fish removes it" '[[ ! -e $HOME/.config/fish/functions/crew-extra.fish && -f $HOME/.config/fish/functions/lead.fish ]]'
+check "the next run with fish removes it" '[[ ! -e $HOME/.config/fish/completions/crew-extra.fish && -f $HOME/.config/fish/completions/crew.fish ]]'
 echo '[Timer]' >"$H/systemd/crew-extra.timer"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 rm "$H/systemd/crew-extra.timer"
@@ -90,7 +113,7 @@ H=$HOME/elsewhere/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
 check "a re-run with a custom home backs nothing up" '[[ $out != *"backed up"* ]]'
 check "CREW_HOME set to the custom home" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
-check "fish conf.d points at the custom home" 'grep -q "CREW_HOME $H\$" "$HOME/.config/fish/conf.d/agent-crew.fish"'
+check "crew and lead are linked into the custom home" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" && $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" ]]'
 for s in gardener tick lead; do
   check "$s service points at the custom home" 'grep -q "^Environment=CREW_HOME=$H\$" "$HOME/.config/systemd/user/crew-$s.service" && grep -q "^ExecStart=$H/bin/crew " "$HOME/.config/systemd/user/crew-$s.service"'
 done
@@ -156,14 +179,15 @@ check "on a terminal, host up starts no claude once the work root is trusted" '!
 rm -f "$TH/lead/.mcp.json"
 tower "$TH/bin/crew" serve >/dev/null 2>&1
 check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
-check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/remote-control.cwd") == "$TH/lead" ]]'
+check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
 check "the lead's Remote Control server works on every project" '[[ $(grep " remote-control " "$SB/tower/claude-env.log" | tail -1) == "all claude remote-control "* ]]'
-# The lead function, in fish: in DIR, run `lead ARGS`, and print the claude call it made.
+# In DIR, run `lead ARGS` in bash, through the link install made, and print the
+# claude call it made.
 lead_in() {
-  (cd "$1" && tower env CREW_HOME="$TH" PATH="$TH/bin:$PATH" fish --no-config -c "source $SB/tower/.config/fish/functions/lead.fish; lead $2") >/dev/null 2>&1 || return
+  (cd "$1" && tower env -u CREW_HOME bash -c "$SB/tower/.local/bin/lead $2") >/dev/null 2>&1 || return
   tail -n 1 "$SB/tower/claude-env.log"
 }
 # Two projects with MCP servers. The second needs no clone here, and is never committed.
@@ -175,10 +199,18 @@ check "lead outside a repo works on every project, and gets every project's MCP 
   '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" && $(jq -c ".mcpServers | keys" "$TH/lead/.mcp.json") == "[\"${P}_tracker\",\"shop_tracker\"]" ]]'
 check "lead in a project's repo works on that project, with the other projects' servers off" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto --settings $off hello" ]]'
 check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto --settings $off -c" ]]'
+check "lead starts claude in the home's lead/" '[[ $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
+rm "$TH/lead/.mcp.json"
+echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/shop"}, "wiki": {"type": "http", "url": "https://wiki.example/shop"}}}' >"$TH/projects/shop/mcp.json"
+check "a project's lead syncs the servers before it switches the others off" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode auto --settings {\"disabledMcpjsonServers\":[\"shop_tracker\",\"shop_wiki\"]}" ]]'
 rm -r "$TH/projects/shop" "$TH/projects/$P/mcp.json"
 check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
 n=$(wc -l <"$SB/tower/claude-env.log")
 check "lead --project with an unknown project starts nothing" '! lead_in "$SB/tower" "--project nope" && ! lead_in "$SB/tower" "--project" && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
+check "and so does a CREW_PROJECT that isn't a project" '! (cd "$SB/tower" && tower env CREW_PROJECT=nope "$SB/tower/.local/bin/lead" hello) >/dev/null 2>&1 && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
+echo 'LEAD_PERMISSION_MODE=acceptEdits' >>"$TH/projects/$P/local.env"
+check "a project's lead runs in that project's LEAD_PERMISSION_MODE" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode acceptEdits --settings "* ]]'
+sed -i '/^LEAD_PERMISSION_MODE=/d' "$TH/projects/$P/local.env"
 wait_for '[[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-parse main)" ]]'
 
 git clone -q "$SB/crew.git" "$LH"
@@ -253,7 +285,7 @@ check "setup makes the private repo origin and the public one upstream" '[[ $(gi
 check "and nothing can be pushed to the public repo" '! git -C "$H" push -q upstream main 2>/dev/null && [[ -z $(git --git-dir="$SB/public.git" log --oneline main -- config/crew.env) ]]'
 check "it commits the person's settings, from the template, to the private repo" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" log -1 --format=%s main -- config/crew.env) == "crew: set up for isaac" ]] && cmp -s "$H/config/crew.env" "$H/templates/crew.env"'
 check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-lead.service "$HOME/systemctl-enabled"'
-check "and its closing text says to open a new fish shell and run lead, and nothing more" '[[ $out == *"Open a new fish shell, so crew is on your PATH, and run lead."* && $out != *"crew project add"* && $out != *"BRANCH_PREFIX"* ]]'
+check "and its closing text says to put ~/.local/bin on PATH and run lead, and nothing more" '[[ $out == *"With ~/.local/bin on your PATH, run lead."* && $out != *"crew project add"* && $out != *"BRANCH_PREFIX"* ]]'
 out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'
 
@@ -295,9 +327,9 @@ H=$HOME/crew; make_home "$H"; rm -rf "$H/bin/release"   # as a fresh clone has i
 V=$(cat "$H/VERSION")
 out=$("$H/bin/crew" version 2>&1)
 check "a missing binary is downloaded from the release for VERSION, and run" '[[ $out == "$V" && -x $H/bin/release/crew-$V ]] && grep -q "releases/download/v$V/$ASSET" "$HOME/curl-calls.log"'
-mkdir -p "$HOME/.local/bin"; ln -s "$H/bin/crew" "$HOME/.local/bin/crew"
+"$H/bin/crew" install --yes --no-services --skip-agents-md-setting >/dev/null 2>&1
 out=$("$HOME/.local/bin/crew" version 2>&1)
-check "it runs through a symlink, and downloads only once" '[[ $out == "$V" && $(wc -l <"$HOME/curl-calls.log") == 1 ]]'
+check "it runs through the link install makes, and downloads only once" '[[ $out == "$V" && $(wc -l <"$HOME/curl-calls.log") == 1 ]]'
 release_binary 9.9.7
 out=$(CREW_VERSION=9.9.7 "$H/bin/crew" version 2>&1)
 check "CREW_VERSION fetches and runs another version" '[[ $out == 9.9.7 && -x $H/bin/release/crew-9.9.7 && -x $H/bin/release/crew-$V ]]'

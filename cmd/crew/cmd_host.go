@@ -252,9 +252,6 @@ func cmdServe(c *Crew, args []string) error {
 		report(err)
 		return exitQuietly(exitNotHost)
 	}
-	if err := os.Chdir(c.path("lead")); err != nil {
-		return fail("%s is missing", c.path("lead"))
-	}
 	// Its sessions load lead/.mcp.json, so bring it up to date. A project's problem
 	// is reported and doesn't stop the lead.
 	c.syncMCP()
@@ -265,11 +262,7 @@ func cmdServe(c *Crew, args []string) error {
 	// is the one its sessions find.
 	cmd := c.claude("remote-control", "--name", "crew", "--spawn", "same-dir", "--permission-mode", c.Settings["LEAD_PERMISSION_MODE"])
 	cmd.Env = append(cmd.Env, "CREW_PROJECT="+allProjects)
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return fail("'claude' is required but not installed")
-	}
-	return syscall.Exec(path, cmd.Args, cmd.Env)
+	return c.execLead(cmd)
 }
 
 // crew setup [--name NAME] turns a fresh clone of the public crew repo into a
@@ -328,8 +321,8 @@ func cmdSetup(c *Crew, args []string) error {
 		return err
 	}
 	say("Your crew is set up. Next:")
-	fmt.Print(`  Open a new fish shell, so crew is on your PATH, and run lead. The first time,
-  it asks you to trust its folder, then helps you add your first repo.
+	fmt.Print(`  With ~/.local/bin on your PATH, run lead. The first time, it asks you to
+  trust its folder, then helps you add your first repo.
   See SETUP.md for the full walkthrough.
 `)
 	return nil

@@ -132,8 +132,8 @@ func (c *Crew) projectSettings(name string) (Settings, error) {
 const allProjects = "all"
 
 // defaultProject is the project a command works on when it isn't told which,
-// or "" for every project. In a session crew or the lead fish function starts,
-// it's CREW_PROJECT, a project or "all". In your own shell, it's the project
+// or "" for every project. In a session crew starts, the lead's included, it's
+// CREW_PROJECT, a project or "all". In your own shell, it's the project
 // whose repo you're in. The session's choice wins over the current directory,
 // which in a session is only wherever its shell last went.
 func (c *Crew) defaultProject() (string, error) {
