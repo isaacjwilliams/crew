@@ -36,6 +36,8 @@ func cmdDispatch(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Building the launcher reads the worker settings, so a bad one stops here,
+	// before anything changes.
 	start, err := c.launchWorker(p)
 	if err != nil {
 		return err

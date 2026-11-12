@@ -375,6 +375,24 @@ func TestAgentFilesAreTheAgentsOwnAndEverySubagents(t *testing.T) {
 	}
 }
 
+func TestSessionRolesAreTheAgentsTheLeadMayNotRunAsSubagents(t *testing.T) {
+	settings, err := readSettings("../../lead/.claude/settings.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var denied []string
+	for _, rule := range settings.child("permissions").vals["deny"].([]any) {
+		if name, ok := strings.CutPrefix(rule.(string), "Agent("); ok {
+			denied = append(denied, strings.TrimSuffix(name, ")"))
+		}
+	}
+	slices.Sort(denied)
+	roles := slices.Sorted(slices.Values(sessionRoles))
+	if !slices.Equal(denied, roles) {
+		t.Errorf("the lead's settings deny the agents %v; sessionRoles is %v", denied, roles)
+	}
+}
+
 func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
 	c := &Crew{Home: t.TempDir()}
 	missing := c.fingerprint([]string{"--agent", "x"}, "agents/x.md")

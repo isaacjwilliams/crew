@@ -43,6 +43,8 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if err != nil {
 		return err
 	}
+	// Building the launcher reads the worker settings, so a bad one stops here,
+	// before anything changes.
 	start, err := c.launchWorker(p)
 	if err != nil {
 		return err

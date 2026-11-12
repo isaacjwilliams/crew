@@ -247,7 +247,8 @@ type launcher struct {
 	p      *Project
 	prefix string   // of the file's keys for the session: worker_name, lead_session, …
 	flags  []string // a fresh session's launch flags, but for its name and MCP config
-	// fingerprint is what a fresh session loads now: its flags and agent files.
+	// fingerprint is what a fresh session loads now: its flags, which carry its
+	// settings as a JSON string, and its agent files.
 	fingerprint string
 }
 
@@ -259,7 +260,8 @@ func (c *Crew) newLauncher(p *Project, prefix, agent string, flags ...string) la
 }
 
 // sessionRoles are the agents that run as sessions of their own. Every other
-// agent is a subagent, which a session may run.
+// agent is a subagent, which a session may run. The lead's settings deny each of
+// them as a subagent, and a test checks the two lists agree.
 var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener"}
 
 // agentFiles are the files in the home that a session of agent loads its
@@ -388,7 +390,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	l := launch{job: job, session: started, mode: "fresh", by: start}
 	if resume {
 		l.mode = "resume"
-		// It continues the session it was asked to, unless it said otherwise.
+		// A resume that never reported its session continues the recorded one.
 		if started == "" {
 			l.session = session
 		}
@@ -423,15 +425,14 @@ func (c *Crew) waitForLaunch(job string) (session string, ok bool) {
 // <prefix>_fingerprint isn't the launcher's. A fresh session gets freshPrompt and
 // then prompt.
 func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
-	session, why := d.Get(start.prefix+"_session"), ""
-	switch recorded := d.Get(start.prefix + "_fingerprint"); {
-	case fresh || session == "":
-		// Fresh already, and nothing more to say why.
-	case recorded == "":
-		why = "started before crew recorded what sessions load"
-	case recorded != start.fingerprint:
-		why = "its instructions or settings changed"
-	default:
+	session := d.Get(start.prefix + "_session")
+	resume, why := !fresh && session != "", ""
+	if recorded := d.Get(start.prefix + "_fingerprint"); resume && recorded == "" {
+		resume, why = false, "started before crew recorded what sessions load"
+	} else if resume && recorded != start.fingerprint {
+		resume, why = false, "its instructions or settings changed"
+	}
+	if resume {
 		l, err := c.launchSession(start, d, wt, prompt, true)
 		if err != errNotStarted {
 			return l, err
