@@ -22,12 +22,17 @@
       "Bash(git push --force-with-lease=*)",
       "Bash(gh pr edit *)",
       "Bash(gh pr ready *)",
+      "Bash(gh run view *)",
+      "Bash(gh run rerun --failed *)",
+      "Bash(gh run watch *)",
       "WebFetch(domain:*)"
     ],
     "deny": [
       "Bash(gh pr merge *)",
       "Bash(gh pr close *)",
       "Bash(gh pr review *)",
+      "Bash(gh run cancel *)",
+      "Bash(gh run delete *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
       "Bash(codex *)",

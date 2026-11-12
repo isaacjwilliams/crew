@@ -131,10 +131,10 @@ done
 check "lead and workers default to auto mode" \
   "grep -qx 'LEAD_PERMISSION_MODE=\"auto\"' $C/defaults.env && grep -qx 'WORKER_PERMISSION_MODE=\"auto\"' $C/defaults.env"
 # --- tripwires: the worker's GitHub allowances match its prompt
-for r in 'gh pr merge *' 'gh pr close *' 'gh pr review *' 'git push --force *' 'git push -f *'; do
+for r in 'gh pr merge *' 'gh pr close *' 'gh pr review *' 'gh run cancel *' 'gh run delete *' 'git push --force *' 'git push -f *'; do
   check "worker denies $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.deny | index(\$r)' $C/worker-settings.json"
 done
-for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *' 'gh pr ready *'; do
+for r in 'git push -u origin HEAD' 'git push --force-with-lease' 'git push --force-with-lease=*' 'gh pr create *' 'gh pr edit *' 'gh pr ready *' 'gh run view *' 'gh run rerun --failed *' 'gh run watch *'; do
   check "worker allows $r" "jq -e >/dev/null --arg r 'Bash($r)' '.permissions.allow | index(\$r)' $C/worker-settings.json"
 done
 check "the implementer pushes after every commit, with the push commands its settings allow" \
@@ -145,12 +145,18 @@ check "the implementer force-pushes on its own, with an explicit lease its setti
 check "the restack note's push uses the lease form the implementer is told to use" \
   "grep -qF 'git push --force-with-lease=%s:%s origin %s' <<<\"\$SRC\" && grep -q 'Push with the .git push --force-with-lease=…. command the note gives' $A/implementer.md"
 check "implementer prompt spells out the GitHub allowances" "grep -q '^## On GitHub, you may do exactly this' $REPO_DIR/agents/implementer.md"
-check "implementer answers every kind of review comment with crew reply, posts one automated-review summary a pass with crew review-summary, and posts no other comments" \
-  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., one summary comment for each pass of automated review' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply. or the .crew review-summary.;' $A/implementer.md"
+check "implementer answers every kind of review comment with crew reply, posts one automated-review summary a pass with crew review-summary, one CI comment a red build with crew ci-summary, and no other comments" \
+  "grep -q 'reply to the review comments on it with .crew reply.: inline threads, conversation comments and review summaries' $A/implementer.md && grep -q '.crew review-summary <task> <file>., one summary comment for each pass of automated review' $A/implementer.md && grep -q 'Post one comment for each red build with .crew ci-summary <task> <file>.' $A/implementer.md && grep -q 'posting any comment that isn.t a .crew reply., the .crew review-summary. or a .crew ci-summary.;' $A/implementer.md"
+check "implementer reads CI logs, reruns only failed jobs once and watches them with the gh run commands its settings allow, and never cancels a run" \
+  "grep -q 'read the logs with .gh run view., rerun a run.s failed jobs once with .gh run rerun --failed <run>. and watch it with .gh run watch.' $A/implementer.md && grep -q 'Never rerun a whole run, and never cancel one' $A/implementer.md && grep -q '.gh run rerun --failed <run>. and then .gh run watch <run> --exit-status.' $A/implementer.md"
+check "implementer names no CI service but GitHub Actions: for any other, the project says how" \
+  "! grep -qiE 'semaphore|circleci|buildkite|jenkins|travis|gitlab|teamcity|drone' $A/implementer.md $C/worker-settings.json && grep -q 'For any other CI, read its logs the way the project.s AGENTS.md or memory says' $A/implementer.md"
+check "a red build comes to the implementer as a round's CI line, which it handles before the comments, with the shipped template" \
+  "awk '/^## Workflow: review rounds/ {w=1} w && /^4\\. If a round has a .CI failed on <sha>: <checks>. line/ && !c {c=NR} w && /^5\\. Address every comment/ && !a {a=NR} END {exit !(c && a && c < a)}' $A/implementer.md && grep -q 'fill in .templates/ci-comment.md.' $A/implementer.md && [[ -f $C/../templates/ci-comment.md ]] && grep -qF '\"- [ ] %s%s: %s\\n\\n\", ciFailedOn' <<<\"\$SRC\" && grep -qF 'ciFailedOn   = \"CI failed on \"' <<<\"\$SRC\""
 check "implementer reacts to review comments only with crew react, never with gh" \
   "grep -q 'react to them with .crew react. as .Workflow: review rounds. says. Never reply or react with .gh. directly' $A/implementer.md && grep -q 'adding any reaction but a .crew react.;' $A/implementer.md"
 check "on a review round, the implementer reacts 👀 to every item before reading them, and 🚀 before changing code for one" \
-  "awk '/^## Workflow: review rounds/ {w=1} w && /^1\\. .*crew react <task> eyes/ && !e {e=NR} w && /^2\\. Read the rounds/ && !r {r=NR} w && /^4\\. Address every comment/ && !a {a=NR} w && /make the change: .*before you start on it, react 🚀 with .crew react <task> rocket <id>./ && !k {k=NR} w && /^5\\. Run checks, commit/ && !c {c=NR} END {exit !(e && e < r && r < a && a < k && k < c)}' $A/implementer.md && grep -q 'react 🚀 to the comment behind each .Automated review requested (comment <id>). line, run a new pass' $A/implementer.md"
+  "awk '/^## Workflow: review rounds/ {w=1} w && /^1\\. .*crew react <task> eyes/ && !e {e=NR} w && /^2\\. Read the rounds/ && !r {r=NR} w && /^5\\. Address every comment/ && !a {a=NR} w && /make the change: .*before you start on it, react 🚀 with .crew react <task> rocket <id>./ && !k {k=NR} w && /^6\\. Run checks, commit/ && !c {c=NR} END {exit !(e && e < r && r < a && a < k && k < c)}' $A/implementer.md && grep -q 'react 🚀 to the comment behind each .Automated review requested (comment <id>). line, run a new pass' $A/implementer.md"
 check "implementer marks its PR ready only after automated review, as its settings allow" \
   "grep -q 'with .--draft. when automated review will run' $A/implementer.md && awk '/crew review-summary <task> <file>.. Add a last line/ && !s {s=NR} /mark the PR ready: .gh pr ready <url>./ && !r {r=NR} END {exit !(s && r && s < r)}' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
@@ -240,7 +246,7 @@ check "the implementer pushes its fixes after every review, the last one include
 check "a pass is counted from the last Summary posted, one the user asked for runs at least one review, and only a draft is marked ready" \
   "grep -q 'A pass is the reviews recorded after the last .Summary posted. line' $A/implementer.md && grep -q 'A pass the user asked for runs at least one, even when .AUTO_REVIEWS. is 0' $A/implementer.md && grep -q 'and the PR is still a draft' $A/implementer.md"
 check "a requested pass runs after the round's other comments are pushed, and the request gets no crew reply" \
-  "grep -q 'Automated review requested (%s)' <<<\"\$SRC\" && awk '/^## Workflow: review rounds/ {w=1} w && /^5\\. Run checks, commit/ && !p {p=NR} w && /run a new pass of .Workflow: automated review./ && !r {r=NR} END {exit !(p && r && p < r)}' $A/implementer.md && grep -q 'Don.t .crew reply. to the comment that asked for it' $A/implementer.md"
+  "grep -q 'Automated review requested (%s)' <<<\"\$SRC\" && awk '/^## Workflow: review rounds/ {w=1} w && /^6\\. Run checks, commit/ && !p {p=NR} w && /run a new pass of .Workflow: automated review./ && !r {r=NR} END {exit !(p && r && p < r)}' $A/implementer.md && grep -q 'Don.t .crew reply. to the comment that asked for it' $A/implementer.md"
 check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
   "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
 for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do
