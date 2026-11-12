@@ -47,6 +47,7 @@ set -l host_cmds up down
 complete -c crew -n "__fish_seen_subcommand_from host; and not __fish_seen_subcommand_from $host_cmds" -a "$host_cmds"
 complete -c crew -n "__fish_seen_subcommand_from host; and __fish_seen_subcommand_from up" -l take -d 'Take the crew over from the machine running it'
 complete -c crew -n "__fish_seen_subcommand_from host; and __fish_seen_subcommand_from down" -l force -d 'Hand over even with unpushed work in worktrees'
+complete -c crew -n "__fish_seen_subcommand_from lead" -l hook -d "For a UserPromptSubmit hook: say when the lead's instructions changed"
 complete -c crew -n "__fish_seen_subcommand_from lead" -l project -x -d 'Work on this project (all: every project)' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from setup" -l name -x -d 'Name of your private repo (default: crew)'

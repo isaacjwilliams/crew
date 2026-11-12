@@ -32,11 +32,12 @@ type Agents []Agent
 
 // claude is the claude CLI, run outside any parent Claude Code session's
 // environment (so it can be launched from inside one), with this home's bin/
-// first on PATH and without the caller's CREW_PROJECT. A session's own project
-// goes in its settings instead (sessionSettings).
+// first on PATH and without the caller's CREW_PROJECT or CREW_LEAD_FINGERPRINT.
+// A session's own project goes in its settings instead (sessionSettings), and
+// only crew lead sets a fingerprint.
 func (c *Crew) claude(args ...string) *exec.Cmd {
 	cmd := exec.Command("claude", args...)
-	env := environWithout("CLAUDECODE", "PATH", "CREW_PROJECT")
+	env := environWithout("CLAUDECODE", "PATH", "CREW_PROJECT", "CREW_LEAD_FINGERPRINT")
 	cmd.Env = append(env, "PATH="+c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return cmd
 }

@@ -12,6 +12,7 @@
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/claude.cwd            the directory the latest call ran in
 #   $HOME/claude-env.log        every invocation again, after the CREW_PROJECT it ran with ("unset" for none)
+#   $HOME/claude-fingerprint.log  every invocation again, after its CREW_LEAD_FINGERPRINT ("unset" for none)
 #   $HOME/claude-interrupt   if present, a bare `claude` sends the signal it names (INT or HUP)
 #                            to its process group, as Ctrl+C or a closed terminal does, and
 #                            exits as that signal would
@@ -25,6 +26,7 @@
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
 echo "${CREW_PROJECT-unset} claude $*" >>"$HOME/claude-env.log"
+echo "${CREW_LEAD_FINGERPRINT-unset} claude $*" >>"$HOME/claude-fingerprint.log"
 echo "$PWD" >"$HOME/claude.cwd"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/claude-calls.log"
 # A background supervisor that inherited one of crew's locks would hold it forever.

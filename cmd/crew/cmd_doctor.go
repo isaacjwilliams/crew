@@ -76,6 +76,8 @@ func cmdDoctor(c *Crew, args []string) error {
 	for _, f := range []string{"lead/.claude/settings.json", "config/worker-settings.json"} {
 		d.check(f+" commits ledger edits (crew commit --hook)", c.hookEndsWith(f, "PostToolUse", `bin/crew" commit --hook`), "restore its hook: git -C "+c.Home+" diff "+f)
 	}
+	// Without it, a lead never hears that crew changed its instructions under it.
+	d.check("lead/.claude/settings.json says when the lead's instructions change (crew lead --hook)", c.hookEndsWith("lead/.claude/settings.json", "UserPromptSubmit", `bin/crew" lead --hook`), "restore its hook: git -C "+c.Home+" diff lead/.claude/settings.json")
 	// Without it, an agent starts without its project's memory.
 	for _, f := range []string{"lead/.claude/settings.json", "config/worker-settings.json", "config/gardener-settings.json"} {
 		d.check(f+" loads project memory (crew memory --hook)", c.hookEndsWith(f, "SessionStart", `bin/crew" memory --hook`), "restore its hook: git -C "+c.Home+" diff "+f)

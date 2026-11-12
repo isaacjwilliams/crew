@@ -56,6 +56,24 @@ check "crew config --project reads a project from anywhere" '[[ $(cd "$HOME" && 
 doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)   # it checks claude --version, not a session
 check "crew doctor finds this machine's clone" '[[ $doctor_out == *"ok   $P: cloned on this machine"* ]]'
 check "crew doctor checks that the lead, workers and gardener load project memory" '[[ $(grep -c "ok   .* loads project memory (crew memory --hook)" <<<"$doctor_out") == 3 ]]'
+check "crew doctor checks that the lead's settings say when its instructions change" '[[ $doctor_out == *"ok   lead/.claude/settings.json says when the lead'"'"'s instructions change (crew lead --hook)"* ]]'
+jq 'del(.hooks.UserPromptSubmit)' "$L/lead/.claude/settings.json" >"$HOME/ls" && mv "$HOME/ls" "$L/lead/.claude/settings.json"
+doctor_out=$(env -u CLAUDECODE crew doctor 2>&1 || true)
+check "crew doctor flags lead settings without their UserPromptSubmit hook" '[[ $doctor_out == *"FAIL lead/.claude/settings.json says when the lead'"'"'s instructions change (crew lead --hook)"* ]]'
+git -C "$L" checkout -q -- lead/.claude/settings.json
+# crew lead gives its session the fingerprint of what a lead loads, and the lead's
+# UserPromptSubmit hook tells the session once that has changed.
+crew lead hello >/dev/null 2>&1; fp=$(tail -1 "$HOME/claude-fingerprint.log" | cut -d" " -f1)
+check "crew lead passes claude the fingerprint of what a lead loads" '[[ $fp =~ ^[0-9a-f]{12}$ && $(tail -1 "$HOME/claude-fingerprint.log") == "$fp claude --name lead"*" hello" ]]'
+out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook); st=$?
+check "the lead's hook says nothing while what a lead loads is unchanged" '((st == 0)) && [[ -z $out ]]'
+echo "# changed" >>"$L/agents/lead.md"
+out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook); st=$?
+check "after agents/lead.md changes, the lead's hook tells the session to have the user start a new lead" \
+  '((st == 0)) && [[ $out == "crew'"'"'s lead instructions or settings changed since this session started (crew is now $(cat "$L/VERSION")). Tell the user once, briefly, that they should quit and start a new lead to get them." ]]'
+out=$(env -u CREW_LEAD_FINGERPRINT crew lead --hook); st=$?
+check "the lead's hook says nothing in a session crew lead didn't start" '((st == 0)) && [[ -z $out ]]'
+git -C "$L" checkout -q -- agents
 mv "$PD/local.env" "$HOME/local.env.saved"
 out=$(crew new "No clone here" --project "$P" 2>&1)
 check "a project with no clone on this machine fails clearly" '[[ $out == *"no clone of $P on this machine"* ]]'
@@ -162,7 +180,8 @@ check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"
 sed -i '/^## Structure$/a s' "$F1"; crew ready 1 >/dev/null
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
-check "dispatch starts a worker" 'crew dispatch 1 >/dev/null'
+check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
+check "a dispatch run by a lead doesn't pass on the lead's fingerprint" '[[ $(grep -- "--agent implementer" "$HOME/claude-fingerprint.log" | tail -1) == "unset claude "* ]]'
 WT=$(crew get 1 worktree)
 check "worktree is on the task branch" '[[ $(git -C "$WT" branch --show-current) == agent/saved-search-filters ]]'
 check "session id recorded, starting with the job id" '[[ $(crew get 1 worker_session) == "$(crew get 1 worker_job)"-* ]]'
