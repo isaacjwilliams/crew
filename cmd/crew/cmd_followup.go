@@ -67,6 +67,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if !newRound && note == "" {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
 	warnManyRounds(p, t)
 	// The worktree may not be on this machine: the task moved here, say.
 	if err := c.ensureWorktree(p, t); err != nil {
@@ -89,8 +92,8 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	// Under the lock: a task merged or abandoned since crew tick looked at it, or
-	// while crew feedback or crew ci-fix read GitHub, keeps its worker stopped.
+	// Again under the lock: a task merged or abandoned since crew tick looked at
+	// it, or while crew feedback or crew ci-fix read GitHub, keeps its worker stopped.
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}

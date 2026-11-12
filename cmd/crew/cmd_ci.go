@@ -147,7 +147,10 @@ func cmdCIFix(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if st := t.Status(); st != PROpen {
+	switch st := t.Status(); {
+	case st.Finished():
+		return nothingToDo("%s is %s", t.ID(), st)
+	case st != PROpen:
 		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
 	if t.CIReported(head) {
