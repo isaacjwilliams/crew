@@ -471,10 +471,13 @@ func readSettings(f string) (*object, error) {
 // given. Every session crew starts for a project gets them this way, and never
 // through the environment crew runs claude with: a background session gets the
 // environment of Claude Code's daemon, which serves every project at once.
+// CREW_LEAD_FINGERPRINT is set empty for the same reason: a daemon a lead's own
+// shell started would hand every session the lead's (see crew lead --hook).
 func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	env := settings.child("env")
 	env.set("CREW_PROJECT", p.Name)
 	env.set("CREW_HOME", c.Home)
+	env.set("CREW_LEAD_FINGERPRINT", "")
 	return encodeJSON(settings, false)
 }
 

@@ -44,9 +44,10 @@ last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
-# The latest --settings sets CREW_PROJECT to project $1 and CREW_HOME to the home: a
-# background session takes its environment from Claude Code's daemon, not from crew.
-session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h' "$HOME/claude-settings.last" >/dev/null; }
+# The latest --settings sets CREW_PROJECT to project $1, CREW_HOME to the home, and
+# CREW_LEAD_FINGERPRINT to nothing: a background session takes its environment from
+# Claude Code's daemon, not from crew, and a lead's own shell may have started that.
+session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h and .env.CREW_LEAD_FINGERPRINT == ""' "$HOME/claude-settings.last" >/dev/null; }
 
 crew project add >/dev/null
 PE=$(ls "$L"/projects/*/project.env); PD=$(dirname "$PE"); P=$(basename "$PD")
@@ -182,6 +183,7 @@ check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
 check "a dispatch run by a lead doesn't pass on the lead's fingerprint" '[[ $(grep -- "--agent implementer" "$HOME/claude-fingerprint.log" | tail -1) == "unset claude "* ]]'
+check "a worker's settings set the lead's fingerprint empty, so a daemon a lead started can't hand it on" 'jq -e ".env.CREW_LEAD_FINGERPRINT == \"\"" "$HOME/claude-settings.last" >/dev/null'
 WT=$(crew get 1 worktree)
 check "worktree is on the task branch" '[[ $(git -C "$WT" branch --show-current) == agent/saved-search-filters ]]'
 check "session id recorded, starting with the job id" '[[ $(crew get 1 worker_session) == "$(crew get 1 worker_job)"-* ]]'
