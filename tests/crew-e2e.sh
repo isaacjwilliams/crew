@@ -280,7 +280,7 @@ check "the next followup resumes the worker it started fresh" '[[ $out == *"(res
 sed -i 's/^worker_fingerprint: .*/worker_fingerprint:/' "$F1"; setstate "done" 4242; job=$(crew get 1 worker_job)
 out=$(crew followup 1 --note "dispatched before fingerprints" 2>&1)
 check "a worker started before crew recorded fingerprints starts fresh on its next followup, and says why" \
-  '[[ $out == *"(fresh: started before crew recorded what sessions load)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]] && ! resumed'
+  '[[ $out == *"(fresh: its instructions or settings changed)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]] && ! resumed'
 check "a fresh start stops the idle process of the session it replaces" \
   'grep -qx "claude stop $job" "$HOME/claude-calls.log" && [[ $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .pid" "$HOME/agents.json") == null && $(crew get 1 worker_job) != "$job" ]]'
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'

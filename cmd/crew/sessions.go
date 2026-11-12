@@ -422,14 +422,12 @@ func (c *Crew) waitForLaunch(job string) (session string, ok bool) {
 // relaunch resumes the session a file records as <prefix>_session, or starts a
 // fresh one when it records none, when fresh is set, when the resume fails, or
 // when the session would run on old instructions or settings: its recorded
-// <prefix>_fingerprint isn't the launcher's. A fresh session gets freshPrompt and
-// then prompt.
+// <prefix>_fingerprint isn't the launcher's, or it has none. A fresh session gets
+// freshPrompt and then prompt.
 func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
 	session := d.Get(start.prefix + "_session")
 	resume, why := !fresh && session != "", ""
-	if recorded := d.Get(start.prefix + "_fingerprint"); resume && recorded == "" {
-		resume, why = false, "started before crew recorded what sessions load"
-	} else if resume && recorded != start.fingerprint {
+	if resume && d.Get(start.prefix+"_fingerprint") != start.fingerprint {
 		resume, why = false, "its instructions or settings changed"
 	}
 	if resume {
