@@ -73,8 +73,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    PR: picked up, or being changed (used by workers)
   crew review-summary TASK FILE    Post FILE as the automated-review summary on the
                                    task's PR, or edit the one there (used by workers)
-  crew ci-fix TASK                 If CI is red on the head of the task's PR, and the
-                                   worker handed the PR over, send it the failure as a
+  crew ci-fix TASK                 If CI is red on the head of the task's open PR, and
+                                   the worker handed it over, send it the failure as a
                                    review round, once a commit; past MAX_CI_FIXES,
                                    ask you instead (run by crew tick)
   crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on

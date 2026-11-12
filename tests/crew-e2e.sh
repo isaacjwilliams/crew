@@ -561,6 +561,10 @@ echo 'MAX_CI_FIXES=0' >>"$PE"; ci bbbb2222ffff test:FAILURE
 out=$(crew tick 2>/dev/null)
 check "with MAX_CI_FIXES=0, crew leaves red CI alone" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == pr-open ]] && ! grep -q bbbb222 "$F13"'
 sed -i '/^MAX_CI_FIXES=0$/d' "$PE"
+echo CLOSED >"$HOME/gh-pr-state"
+out=$(crew tick 2>/dev/null); byhand=$(crew ci-fix 13)
+check "red CI on a PR closed without merging is left alone, by tick and by hand" '[[ -z $out && $byhand == *"PR #12 is closed"* && $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open && $(crew get 13 review_rounds) == 9 ]]'
+echo OPEN >"$HOME/gh-pr-state"
 crew tick >/dev/null 2>&1; setstate "done" null; crew set 13 status pr-open; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
 check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 fix attempts, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 fix attempts (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'

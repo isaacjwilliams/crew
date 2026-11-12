@@ -123,17 +123,22 @@ func cmdCIFix(c *Crew, args []string) error {
 	if st := t.Status(); st != PROpen {
 		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
-	// Read the PR's head and checks afresh: ci_state is only crew tick's filter.
-	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "headRefOid,statusCheckRollup")
+	// Read the PR afresh: ci_state is only crew tick's filter, and crew sync leaves
+	// the status of a task whose PR was closed unmerged as it was.
+	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,headRefOid,statusCheckRollup")
 	if err != nil {
 		return quietly(err)
 	}
 	var pr struct {
+		State             string    `json:"state"`
 		HeadRefOid        string    `json:"headRefOid"`
 		StatusCheckRollup []ciCheck `json:"statusCheckRollup"`
 	}
 	if err := json.Unmarshal(out, &pr); err != nil {
 		return fail("can't read the checks of %s: %v", t.PR(), err)
+	}
+	if pr.State != "OPEN" {
+		return nothingToDo("PR #%s is %s", t.PRNumber(), strings.ToLower(pr.State))
 	}
 	head := shortSHA(pr.HeadRefOid)
 	state, failed := rollup(pr.StatusCheckRollup)
