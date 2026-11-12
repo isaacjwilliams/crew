@@ -568,50 +568,6 @@ rm "$HOME/gh-pr-view-hook"; n=$(resumes); WT13=$(crew get 13 worktree); crew set
 out=$(crew followup 13 --note "carry on" 2>&1)
 check "crew followup won't resume the worker of an abandoned task, or rebuild its worktree" '[[ $out == *"013-tick-routing is abandoned; not resuming its worker"* && $(resumes) == "$n" && $(crew get 13 status) == abandoned && $(crew get 13 worktree) == /elsewhere/13 ]]'
 crew set 13 worktree "$WT13"; crew set 13 status pr-open
-echo CLOSED >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1; rounds13=$(crew get 13 review_rounds)
-check "crew review refuses a task in flight whose PR was closed unmerged" '[[ $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open ]] && ! crew review 13 2>/dev/null && [[ $(crew get 13 review_rounds) == "$rounds13" ]]'
-echo OPEN >"$HOME/gh-pr-state"; crew sync >/dev/null 2>&1
-out=$(crew review 13 2>/dev/null)
-check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
-setstate "done" null; out=$(crew tick 2>/dev/null)
-check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
-crew set 13 status pr-open; setstate "done" null
-check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
-# Red CI on a PR: crew tick sends it to the worker as a review round once the worker has
-# handed the PR over (pr-open), once for each head commit, and asks you past MAX_CI_FIXES.
-ci() {  # head name:conclusion…: the PR's head commit and its check runs; a conclusion of - is one still running
-  echo "$1" >"$HOME/gh-pr-head"; shift
-  local c; for c in "$@"; do
-    jq -cn --arg n "${c%%:*}" --arg c "${c#*:}" '{__typename: "CheckRun", name: $n} + if $c == "-" then {status: "IN_PROGRESS"} else {status: "COMPLETED", conclusion: $c} end'
-  done | jq -cs . >"$HOME/gh-pr-checks"
-}
-sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
-setstate "done" null; crew set 13 status working; n=$(resumes)
-ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED
-out=$(crew tick 2>/dev/null)
-check "red CI before the worker hands its PR over is recorded by sync, and left to the worker" '[[ $(crew get 13 ci_state) == failing && $(crew get 13 review_rounds) == 8 && $out != *CI* && $(resumes) == "$n" ]] && ! grep -q "CI failed on" "$F13"'
-out=$(crew ci-fix 13); code=$?
-check "crew ci-fix, run by hand before the hand-over, leaves it alone too" '[[ $out == *"is working, and its CI is its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == 8 ]]'
-crew set 13 status pr-open; ci aaaa1111ffff test:FAILURE lint:-
-out=$(crew tick 2>/dev/null)
-check "red CI while another check on the head is still running is left alone" '[[ $(crew get 13 ci_state) == running && $(crew get 13 review_rounds) == 8 && -z $out ]]'
-ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED build:CANCELLED
-out=$(crew tick 2>/dev/null)
-check "once every check has finished, a tick records the red CI as a round and sends it to the idle worker" '[[ $out == $'"'"'013-tick-routing: CI round 9 recorded: red on aaaa111\n013-tick-routing: round 9 sent to its worker'"'"' && $(round "$F13" 9) == "- [ ] CI failed on aaaa111: test" && $(crew get 13 last_round_sent) == 9 && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
-setstate "done" null; crew set 13 status pr-open
-out=$(crew tick 2>/dev/null)
-check "a second tick on the same red head records nothing" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(resumes) == $((n + 1)) ]]'
-echo 'MAX_CI_FIXES=0' >>"$PE"; ci bbbb2222ffff test:FAILURE
-out=$(crew tick 2>/dev/null)
-check "with MAX_CI_FIXES=0, crew leaves red CI alone" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == pr-open ]] && ! grep -q bbbb222 "$F13"'
-sed -i '/^MAX_CI_FIXES=0$/d' "$PE"
-printf '#!/bin/sh\ncrew set 13 status abandoned\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
-out=$(crew ci-fix 13)
-check "a task abandoned while crew ci-fix reads GitHub is sent nothing" '[[ $out == "nothing to do: 013-tick-routing is abandoned" && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == abandoned ]] && ! grep -q bbbb222 "$F13"'
-rm "$HOME/gh-pr-view-hook"; n=$(resumes); WT13=$(crew get 13 worktree); crew set 13 worktree /elsewhere/13
-out=$(crew followup 13 --note "carry on" 2>&1)
-check "crew followup won't resume the worker of an abandoned task, or rebuild its worktree" '[[ $out == *"013-tick-routing is abandoned; not resuming its worker"* && $(resumes) == "$n" && $(crew get 13 status) == abandoned && $(crew get 13 worktree) == /elsewhere/13 ]]'
-crew set 13 worktree "$WT13"; crew set 13 status pr-open
 # Only crew ci-fix asks for headRefOid, so the hook leaves crew sync's read alone.
 printf '#!/bin/sh\ncase "$*" in *headRefOid*) crew set 13 status abandoned ;; esac\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
 sed -i '/^## Open questions$/a - [ ] Euros or pounds?' "$F13"

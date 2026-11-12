@@ -183,7 +183,9 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 			return
 		}
 	}
-	if waiting := t.OpenQuestions(); st != NeedsInput && waiting > 0 {
+	// Read the status again: the task may have been merged or abandoned while
+	// the steps above waited on GitHub.
+	if st, waiting := t.Status(), t.OpenQuestions(); st.InFlight() && st != NeedsInput && waiting > 0 {
 		if c.step(nil, "set", t.Path, "status", string(NeedsInput)) == 0 {
 			fmt.Printf("%s: waiting on you (%d open question(s))\n", id, waiting)
 		}

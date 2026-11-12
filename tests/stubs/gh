@@ -27,7 +27,7 @@
 # just after the newest comment above, unless $HOME/gh-pr-updated gives another time.
 # A PR's head commit is $HOME/gh-pr-head, and its statusCheckRollup the JSON array in
 # $HOME/gh-pr-checks; without them, it has no checks. `pr view` runs $HOME/gh-pr-view-hook
-# first, when it exists: something that happens while crew waits for GitHub.
+# first, when it exists, with gh's arguments: something that happens while crew waits for GitHub.
 echo "gh $*" >>"$HOME/gh-calls.log"
 for a in "$@"; do [[ $a == body=* ]] && printf '%s' "${a#body=}" >"$HOME/gh-last-body"; done
 isaac='"user":{"login":"isaac","type":"User"},"author_association":"OWNER"'
@@ -85,7 +85,7 @@ case "$*" in
     done ;;
   "pr list"*) echo "https://github.com/isaac/webapp/pull/12" ;;
   "pr view"*)
-    [[ -x $HOME/gh-pr-view-hook ]] && "$HOME/gh-pr-view-hook"
+    [[ -x $HOME/gh-pr-view-hook ]] && "$HOME/gh-pr-view-hook" "$@"
     jq -cn --arg state "$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)" --arg updated "$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)" \
       --arg head "$(cat "$HOME/gh-pr-head" 2>/dev/null || echo 0123456789abcdef)" --argjson checks "$(cat "$HOME/gh-pr-checks" 2>/dev/null || echo '[]')" \
       '{state: $state, isDraft: false, reviewDecision: "APPROVED", updatedAt: $updated, headRefOid: $head, statusCheckRollup: $checks}' ;;
