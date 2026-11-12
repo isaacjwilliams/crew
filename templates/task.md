@@ -15,6 +15,7 @@ worktree:
 pr:
 pr_state:
 pr_updated:
+ci_state:
 worker_name:
 worker_job:
 worker_session:

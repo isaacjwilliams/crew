@@ -69,7 +69,7 @@ func TestDefaultsEnv(t *testing.T) {
 	for k, want := range map[string]string{
 		"MAX_WORKERS": "3", "GOAL_MAX_IN_FLIGHT": "3", "BRANCH_PREFIX": "agent/", "WORK_ROOT": "/home/me/agent-work",
 		"WORKER_PERMISSION_MODE": "auto", "WORKER_AUTOCOMPACT_WINDOW": "400k", "LEAD_PERMISSION_MODE": "auto",
-		"PRE_PR_REVIEW": "yes", "PR_MODE": "draft", "REPLY_TO_THREADS": "yes", "MAX_REVIEW_ROUNDS": "4",
+		"PRE_PR_REVIEW": "yes", "PR_MODE": "draft", "REPLY_TO_THREADS": "yes", "MAX_REVIEW_ROUNDS": "4", "MAX_CI_FIXES": "2",
 		"WORKTREE_COPY": "", "WORKTREE_TOOL": "git", "GARDENER_LOOKBACK": "14 days ago", "GARDENER_MAX_TURNS": "150",
 	} {
 		if v, ok := s[k]; !ok || v != want {

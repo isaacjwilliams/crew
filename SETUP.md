@@ -364,6 +364,16 @@ The worker makes the changes as new commits (no force-push), pushes, replies to 
 
 Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` lists them under the task's Open questions, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored.
 
+### Red CI
+
+Workers run the project's checks before they push, but a PR can still go red on CI: a job that only runs there, another platform, a different environment. Once a worker has handed its PR to you (`pr-open`), `crew tick` notices when every check on the PR's latest commit has finished and one failed, and sends the worker the failure as a review round of its own, once for each commit. You don't have to ask. Red CI before the hand-over is the worker's own business, and crew leaves it alone.
+
+The worker finds out why. If its branch caused the failure, it fixes it and pushes. If not (a flaky test, a problem with the CI service, the base branch already red), it changes no code, reruns the failed jobs once, and asks you if they fail again. Either way it posts one comment on the PR saying which checks failed, why, and what it did, so your collaborators can see why the extra commits are there. In a round that also has your comments, it fixes CI first.
+
+A task gets `MAX_CI_FIXES` of these rounds (2 by default). After that, red CI on a new commit waits on you instead: the task turns `needs-input`, with the question under Open questions; look into it yourself, or tell the worker to try again. `MAX_CI_FIXES=0` turns this off. Rounds that only report red CI don't count toward `MAX_REVIEW_ROUNDS`.
+
+**CI other than GitHub Actions.** Workers read GitHub Actions logs and rerun its failed jobs with `gh run`, which their settings allow. For any other CI, say in the project's `AGENTS.md` or its crew memory how to read the logs and rerun failed jobs, and allow those commands in `projects/<project>/worker-settings.json`. Without that, a worker reproduces the failure locally from the CI config in the repo, and asks you rather than rerun it.
+
 ### After merging
 
 `crew tick` notices the merge and cleans up. By hand:
@@ -474,7 +484,8 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `PRE_PR_REVIEW` | `yes` | Default for new tasks: casual-observer pass before the PR |
 | `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready`, or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
-| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds (the plan may need a rethink) |
+| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI don't count |
+| `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
 | `CODEX_REVIEW` | `no` | `yes` adds Codex to automated review, beside the reviewer agent (see [Codex in automated review](#codex-in-automated-review)) |
 | `CODEX_MODEL` | `gpt-6-astra` | The model Codex reviews with |

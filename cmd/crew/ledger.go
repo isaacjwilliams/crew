@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -360,6 +361,74 @@ func (t Task) NewestReview() int {
 	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
 		if num, ok := strings.CutPrefix(l, "### Automated review "); ok {
 			n = atoiOr0(num)
+		}
+	}
+	return n
+}
+
+// The lines that report red CI on a PR's head commit (its short SHA): a review
+// round's, which sends it to the worker, and an open question's, which asks the
+// user once the worker has had MAX_CI_FIXES rounds of them. They are the only
+// record of what was reported: crew ci-fix writes them, the Task methods below
+// read them back, and the worker ticks them, so their wording is a contract.
+const (
+	ciFailedOn   = "CI failed on "       // - [ ] CI failed on <sha>: <check>, <check>
+	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
+)
+
+// ciLineHead is the head commit an item reports red CI on, when it's a line of
+// that kind (ciFailedOn or ciStillRedOn), checked or not.
+func ciLineHead(l, kind string) (string, bool) {
+	rest, ok := strings.CutPrefix(l, "- [")
+	if !ok || len(rest) < 3 || rest[1:3] != "] " {
+		return "", false
+	}
+	if rest, ok = strings.CutPrefix(rest[3:], kind); !ok {
+		return "", false
+	}
+	head, _, _ := strings.Cut(rest, " ")
+	return strings.TrimSuffix(head, ":"), true
+}
+
+// CIFailures is the head commits the task's review rounds reported red CI on,
+// oldest first: one for each time its worker was sent a red build to fix.
+func (t Task) CIFailures() []string {
+	var heads []string
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		if head, ok := ciLineHead(l, ciFailedOn); ok {
+			heads = append(heads, head)
+		}
+	}
+	return heads
+}
+
+// CIReported: red CI on head was sent to the worker in a review round, or put
+// to the user under Open questions.
+func (t Task) CIReported(head string) bool {
+	if slices.Contains(t.CIFailures(), head) {
+		return true
+	}
+	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
+		if h, ok := ciLineHead(l, ciStillRedOn); ok && h == head {
+			return true
+		}
+	}
+	return false
+}
+
+// FeedbackRounds counts the review rounds that hold the user's feedback: every
+// round but those that only report red CI. MAX_REVIEW_ROUNDS limits these.
+func (t Task) FeedbackRounds() int {
+	n := 0
+	hasFeedback := true // nothing before the first round counts
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		_, ci := ciLineHead(l, ciFailedOn)
+		switch {
+		case strings.HasPrefix(l, "### Round "):
+			hasFeedback = false
+		case !ci && !hasFeedback:
+			n++
+			hasFeedback = true
 		}
 	}
 	return n

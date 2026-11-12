@@ -73,6 +73,13 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    PR: picked up, or being changed (used by workers)
   crew review-summary TASK FILE    Post FILE as the automated-review summary on the
                                    task's PR, or edit the one there (used by workers)
+  crew ci-fix TASK                 If CI is red on the head of the task's open PR, and
+                                   the worker handed it over, send it the failure as a
+                                   review round, once a commit; past MAX_CI_FIXES,
+                                   ask you instead (run by crew tick)
+  crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on
+                                   commit SHA, which the task reports, or edit the
+                                   one there (used by workers)
   crew codex ROOT PROMPT_FILE OUT_PREFIX
                                    A read-only Codex review in ROOT: its reply in
                                    OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl;
@@ -85,9 +92,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    report stacked tasks that need a restack
   crew tick                        Do what needs no decision, across all projects:
-                                   sync, record new PR comments, send review rounds
-                                   and restacks to idle workers, mark tasks waiting
-                                   on you, clean up merged ones (run by a timer)
+                                   sync, record new PR comments and red CI, send
+                                   review rounds and restacks to idle workers, mark
+                                   tasks waiting on you, clean up merged ones (run
+                                   by a timer)
   crew list [--all|--project P] [--status S]
                                    Compact task list
   crew show TASK | crew path TASK  Print a task file / its path

@@ -47,6 +47,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"react":          cmdReact,
 	"review":         cmdReview,
 	"review-summary": cmdReviewSummary,
+	"ci-fix":         cmdCIFix,
+	"ci-summary":     cmdCISummary,
 	"codex":          cmdCodex,
 	"sync":           cmdSync,
 	"dispatch":       cmdDispatch,

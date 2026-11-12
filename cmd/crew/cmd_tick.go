@@ -1,11 +1,12 @@
 package main
 
 // crew tick is one pass over every project, doing what needs no decision: sync
-// with GitHub, record new PR comments, send review rounds and restacks to idle
-// workers, mark tasks that wait on the user, clean up merged ones, pass goal
-// leads their input and close finished goals. Last, it dispatches the ready tasks
-// of running goals, highest priority first. The crew-tick service runs it every
-// few minutes; the lead runs it too. It prints one line per thing it did.
+// with GitHub, record new PR comments and red CI on PRs handed to the user, send
+// review rounds and restacks to idle workers, mark tasks that wait on the user,
+// clean up merged ones, pass goal leads their input and close finished goals.
+// Last, it dispatches the ready tasks of running goals, highest priority first.
+// The crew-tick service runs it every few minutes; the lead runs it too. It
+// prints one line per thing it did.
 //
 // Every step is a crew command run as a process of its own, so one that refuses
 // skips that step and not the rest. The stand-down and the lease check are gates,
@@ -132,6 +133,19 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 			}
 		}
 	}
+	// crew sync's ci_state is only a filter: crew ci-fix reads the checks again,
+	// and decides. It exits 0 when it recorded a round or a question.
+	if st == PROpen && t.Get("ci_state") == string(ciFailing) {
+		rounds := t.Get("review_rounds")
+		if c.step(nil, "ci-fix", t.Path) == 0 {
+			failures := t.CIFailures()
+			if now := t.Get("review_rounds"); now != rounds {
+				fmt.Printf("%s: CI round %s recorded: red on %s\n", id, now, failures[len(failures)-1])
+			} else {
+				fmt.Printf("%s: CI still red after %d CI rounds, for you\n", id, len(failures))
+			}
+		}
+	}
 	job := t.WorkerJob()
 	if movedHere(t, as) {
 		var errs strings.Builder
@@ -169,7 +183,9 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 			return
 		}
 	}
-	if waiting := t.OpenQuestions(); st != NeedsInput && waiting > 0 {
+	// Read the status again: the task may have been merged or abandoned while
+	// the steps above waited on GitHub.
+	if st, waiting := t.Status(), t.OpenQuestions(); st.InFlight() && st != NeedsInput && waiting > 0 {
 		if c.step(nil, "set", t.Path, "status", string(NeedsInput)) == 0 {
 			fmt.Printf("%s: waiting on you (%d open question(s))\n", id, waiting)
 		}

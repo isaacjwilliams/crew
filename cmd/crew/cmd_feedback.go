@@ -299,7 +299,7 @@ func cmdFeedback(c *Crew, args []string) error {
 		return nil
 	}
 	fmt.Print(round)
-	warnManyRounds(p, n)
+	warnManyRounds(p, t)
 	return nil
 }
 
@@ -336,7 +336,7 @@ func cmdReview(c *Crew, args []string) error {
 	c.commit("review " + p.Name + "/" + t.ID())
 	c.unlock()
 	if as, job := c.agents(), t.WorkerJob(); as.jobBusy(job) {
-		warnManyRounds(p, n) // otherwise followup warns
+		warnManyRounds(p, t) // otherwise followup warns
 		fmt.Printf("round %d asks for another automated review; crew tick sends it once worker %s is free (%s)\n", n, job, as.jobState(job))
 		return nil
 	}
@@ -352,14 +352,16 @@ func isReviewRequest(cm ghComment) bool {
 
 // A review round: the user's new comments on the PR, for the worker that wrote
 // it, and their requests for another automated review pass, if they made any.
-// The worker runs one pass for them all, and reacts to each request comment.
+// The worker runs one pass for them all, and reacts to each request comment. A
+// round from crew ci-fix holds only the red CI it reports.
 type reviewRound struct {
 	reviews, inline, convo []ghComment
 	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
+	redCI                  *redCI
 }
 
 func (r reviewRound) empty() bool {
-	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0
+	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil
 }
 
 // add writes the round into the task as its next, before ## Log, and counts it
@@ -369,6 +371,9 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format("2006-01-02 15:04"), prNumber)
+	if r.redCI != nil {
+		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
+	}
 	if len(r.reviews) > 0 {
 		b.WriteString("**Review summaries**\n")
 		for _, rv := range r.reviews {
@@ -405,10 +410,13 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	return n, b.String()
 }
 
-// warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds.
-func warnManyRounds(p *Project, n int) {
-	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil && n > max {
-		warn("this is round %d (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", n, max)
+// warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of
+// the user's feedback. Rounds that only report red CI don't count.
+func warnManyRounds(p *Project, t Task) {
+	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil {
+		if n := t.FeedbackRounds(); n > max {
+			warn("%s has had %d rounds of review (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", t.ID(), n, max)
+		}
 	}
 }
 
@@ -622,12 +630,9 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	text, err := os.ReadFile(args[1])
+	text, err := commentFile(args[1])
 	if err != nil {
-		return fail("can't read %s: %v", args[1], err)
-	}
-	if strings.TrimSpace(string(text)) == "" {
-		return fail("%s is empty", args[1])
+		return err
 	}
 	if t.PR() == "" {
 		return fail("task has no PR")
@@ -644,27 +649,51 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	repo, num := p.Repo(), t.PRNumber()
-	// summaryMarker finds this comment again; replyMarker keeps crew feedback from
-	// reading it back as the user's feedback.
-	marker := summaryMarker(review)
-	body := strings.TrimRight(string(text), "\n") + "\n\n" + marker + "\n" + replyMarker
-	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
+	num := t.PRNumber()
+	edited, err := postOrEditComment(p.Repo(), num, me, summaryMarker(review), text)
 	if err != nil {
 		return err
+	}
+	if edited {
+		fmt.Printf("updated the automated-review summary on PR #%s\n", num)
+	} else {
+		fmt.Printf("posted the automated-review summary on PR #%s\n", num)
+	}
+	return nil
+}
+
+// commentFile is the text of a comment a worker wrote to a file, to post.
+func commentFile(path string) (string, error) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return "", fail("can't read %s: %v", path, err)
+	}
+	if strings.TrimSpace(string(text)) == "" {
+		return "", fail("%s is empty", path)
+	}
+	return string(text), nil
+}
+
+// postOrEditComment posts text on PR #num, tagged with marker, which finds it
+// again, and with replyMarker, which keeps crew feedback from reading it back as
+// the user's feedback. When this GitHub account (me) has a comment with that
+// marker there already, it edits that one to text instead, and says so.
+func postOrEditComment(repo, num, me, marker, text string) (edited bool, err error) {
+	body := strings.TrimRight(text, "\n") + "\n\n" + marker + "\n" + replyMarker
+	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
+	if err != nil {
+		return false, err
 	}
 	for _, cm := range comments {
 		if cm.whose(me) == "me" && strings.Contains(cm.Body, marker) {
 			if _, err := gh(repo, "api", "--silent", "--method", "PATCH", "repos/{owner}/{repo}/issues/comments/"+cm.ID.String(), "-f", "body="+body); err != nil {
-				return quietly(err)
+				return false, quietly(err)
 			}
-			fmt.Printf("updated the automated-review summary on PR #%s\n", num)
-			return nil
+			return true, nil
 		}
 	}
 	if _, err := gh(repo, "api", "--silent", "repos/{owner}/{repo}/issues/"+num+"/comments", "-f", "body="+body); err != nil {
-		return quietly(err)
+		return false, quietly(err)
 	}
-	fmt.Printf("posted the automated-review summary on PR #%s\n", num)
-	return nil
+	return false, nil
 }
