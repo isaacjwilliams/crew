@@ -50,24 +50,39 @@ func cmdLead(c *Crew, args []string) error {
 	}
 	flags := append([]string{"--name", name, "--permission-mode", settings["LEAD_PERMISSION_MODE"]}, mcp...)
 	cmd := c.claude(append(flags, claudeArgs...)...)
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint())
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(settings))
 	return c.execLead(cmd)
 }
 
-// leadFingerprint is the fingerprint of what a lead loads when it starts: its
-// settings and its agent files (see fingerprint).
-func (c *Crew) leadFingerprint() string {
-	return c.fingerprint(nil, append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
+// leadFingerprint is the fingerprint of what a lead started with settings loads:
+// its permission mode, its settings file and its agent files (see fingerprint).
+func (c *Crew) leadFingerprint(settings Settings) string {
+	return c.fingerprint([]string{"--permission-mode", settings["LEAD_PERMISSION_MODE"]},
+		append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
 
 // crew lead --hook, the lead's UserPromptSubmit hook: Claude Code adds what it
 // prints to the prompt. A lead runs on the instructions and settings it started
 // with, so once they've changed, it tells the session to have the user start a
 // new lead. Sessions crew lead didn't start, such as goal leads and the phone
-// lead, have no CREW_LEAD_FINGERPRINT and hear nothing.
+// lead, have no CREW_LEAD_FINGERPRINT, or an empty one, and hear nothing.
 func (c *Crew) leadHook() error {
 	started := os.Getenv("CREW_LEAD_FINGERPRINT")
-	if started != "" && started != c.leadFingerprint() {
+	if started == "" {
+		return nil
+	}
+	// The settings of the project crew lead gave the session in CREW_PROJECT.
+	proj, err := c.scope("", false)
+	if err != nil {
+		return err
+	}
+	settings := c.Settings
+	if proj != "" {
+		if settings, err = c.projectSettings(proj); err != nil {
+			return err
+		}
+	}
+	if started != c.leadFingerprint(settings) {
 		fmt.Printf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
 	}
 	return nil

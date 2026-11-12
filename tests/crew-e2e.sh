@@ -78,6 +78,12 @@ check "after agents/lead.md changes, the lead's hook tells the session to have t
 out=$(env -u CREW_LEAD_FINGERPRINT crew lead --hook); st=$?
 check "the lead's hook says nothing in a session crew lead didn't start" '((st == 0)) && [[ -z $out ]]'
 git -C "$L" checkout -q -- agents; install_agents
+echo 'LEAD_PERMISSION_MODE=default' >>"$PE"
+out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook)
+check "after the lead's project changes its permission mode, the lead's hook tells the session too" '[[ $out == "crew'"'"'s lead instructions or settings changed since this session started"* ]]'
+sed -i '/^LEAD_PERMISSION_MODE=default$/d' "$PE"
+out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook)
+check "and says nothing once everything a lead loads is as it was" '[[ -z $out ]]'
 mv "$PD/local.env" "$HOME/local.env.saved"
 out=$(crew new "No clone here" --project "$P" 2>&1)
 check "a project with no clone on this machine fails clearly" '[[ $out == *"no clone of $P on this machine"* ]]'
