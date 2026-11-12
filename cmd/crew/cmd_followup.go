@@ -67,9 +67,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if !newRound && note == "" {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
-	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil && rounds > max {
-		warn("round %d exceeds MAX_REVIEW_ROUNDS=%d", rounds, max)
-	}
+	warnManyRounds(p, t)
 	// The worktree may not be on this machine: the task moved here, say.
 	if err := c.ensureWorktree(p, t); err != nil {
 		return err

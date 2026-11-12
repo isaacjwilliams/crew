@@ -533,6 +533,56 @@ setstate "done" null; out=$(crew tick 2>/dev/null)
 check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
 crew set 13 status pr-open; setstate "done" null
 check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+# Red CI on a PR: crew tick sends it to the worker as a review round once the worker has
+# handed the PR over (pr-open), once for each head commit, and asks you past MAX_CI_FIXES.
+ci() {  # head name:conclusion…: the PR's head commit and its check runs; a conclusion of - is one still running
+  echo "$1" >"$HOME/gh-pr-head"; shift
+  local c; for c in "$@"; do
+    jq -cn --arg n "${c%%:*}" --arg c "${c#*:}" '{__typename: "CheckRun", name: $n} + if $c == "-" then {status: "IN_PROGRESS"} else {status: "COMPLETED", conclusion: $c} end'
+  done | jq -cs . >"$HOME/gh-pr-checks"
+}
+sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
+setstate "done" null; crew set 13 status working; n=$(resumes)
+ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED
+out=$(crew tick 2>/dev/null)
+check "red CI before the worker hands its PR over is recorded by sync, and left to the worker" '[[ $(crew get 13 ci_state) == failing && $(crew get 13 review_rounds) == 8 && $out != *CI* && $(resumes) == "$n" ]] && ! grep -q "CI failed on" "$F13"'
+out=$(crew ci-fix 13); code=$?
+check "crew ci-fix, run by hand before the hand-over, leaves it alone too" '[[ $out == *"is working, and its CI is its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == 8 ]]'
+crew set 13 status pr-open; ci aaaa1111ffff test:FAILURE lint:-
+out=$(crew tick 2>/dev/null)
+check "red CI while another check on the head is still running is left alone" '[[ $(crew get 13 ci_state) == running && $(crew get 13 review_rounds) == 8 && -z $out ]]'
+ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED build:CANCELLED
+out=$(crew tick 2>/dev/null)
+check "once every check has finished, a tick records the red CI as a round and sends it to the idle worker" '[[ $out == $'"'"'013-tick-routing: CI round 9 recorded: red on aaaa111\n013-tick-routing: round 9 sent to its worker'"'"' && $(round "$F13" 9) == "- [ ] CI failed on aaaa111: test" && $(crew get 13 last_round_sent) == 9 && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+setstate "done" null; crew set 13 status pr-open
+out=$(crew tick 2>/dev/null)
+check "a second tick on the same red head records nothing" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(resumes) == $((n + 1)) ]]'
+echo 'MAX_CI_FIXES=0' >>"$PE"; ci bbbb2222ffff test:FAILURE
+out=$(crew tick 2>/dev/null)
+check "with MAX_CI_FIXES=0, crew leaves red CI alone" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == pr-open ]] && ! grep -q bbbb222 "$F13"'
+sed -i '/^MAX_CI_FIXES=0$/d' "$PE"
+crew tick >/dev/null 2>&1; setstate "done" null; crew set 13 status pr-open; ci cccc3333ffff test:FAILURE lint:FAILURE
+out=$(crew tick 2>/dev/null)
+check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 fix attempts, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 fix attempts (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
+crew set 13 status pr-open; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
+out=$(crew tick 2>/dev/null)
+check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
+out=$(crew ci-fix 13); code=$?
+check "crew ci-fix by hand says why it does nothing, and exits 3" '[[ $out == *"the red CI on cccc333 is reported already"* && $code == 3 ]]'
+# The worker's comment on why CI was red: one for each head a round reported.
+printf 'CI was red\n\nA flaky test.\n' >"$HOME/ci.md"
+out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
+check "ci-summary posts the file for the newest head a round reported, tagged as crew's" '[[ $out == "posted the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == $'"'"'CI was red\n\nA flaky test.\n\n<!-- crew ci-summary: bbbb222 -->\n<!-- crew -->'"'"' ]]'
+printf 'CI was red\n\nA flaky test; the rerun passed.\n' >"$HOME/ci.md"
+out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
+check "a second ci-summary for the same head edits the first" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"the rerun passed."* && ! -e $HOME/gh-summaries/121 ]]'
+echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew ci-fix 13 >/dev/null; sed -i '/^MAX_CI_FIXES=3$/d' "$PE"
+out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
+check "a round for a new head gets a comment of its own" '[[ $out == "posted the CI summary for dddd444 on PR #12" && $(cat "$HOME/gh-summaries/121") == *"<!-- crew ci-summary: dddd444 -->"* && $(cat "$HOME/gh-summaries/120") == *"bbbb222"* ]]'
+out=$(crew feedback 13 --since 1970-01-01T00:00:00Z)
+check "crew feedback doesn't read the CI summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]]'
+check "ci-summary refuses a task whose rounds report no red CI" '[[ $(crew ci-summary 1 "$HOME/ci.md" 2>&1) == *"records no red CI to summarize"* ]]'
+rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set 13 last_round_sent "$(crew get 13 review_rounds)"
 setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'

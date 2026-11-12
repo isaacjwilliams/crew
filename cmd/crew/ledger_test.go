@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,46 @@ func TestNewestReview(t *testing.T) {
 		"## Review rounds\n### Round 1\n  > ### Automated review 9\n\n## Log\n")}
 	if n := two.NewestReview(); n != 2 {
 		t.Errorf("NewestReview = %d, want 2", n)
+	}
+}
+
+// Two CI rounds, one of them ticked, a round of comments with a CI line, and a
+// question about a head that stayed red. A line quoted in a comment, or in the
+// brief, reports nothing.
+const ciTask = "## Context\n- [ ] CI failed on 0000000: brief\n\n" +
+	"## Open questions\n- [ ] CI is still red on ccc3333 after 2 fix attempts (MAX_CI_FIXES=2): test. Look at it yourself.\n\n" +
+	"## Review rounds\n" +
+	"### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test, lint\n\n" +
+	"### Round 2 — 2026-11-11 11:00 (PR #12)\n\n- [ ] CI failed on bbb2222: test\n\n**Conversation comments**\n- [ ] comment 5 — [link](u5)\n  > - [ ] CI failed on 9999999: quoted\n\n" +
+	"### Round 3 — 2026-11-11 12:00 (PR #12)\n\n- [ ] Automated review requested (crew review)\n\n" +
+	"## Log\n"
+
+func TestCIFailures(t *testing.T) {
+	task := Task{docWith(t, ciTask)}
+	if got := task.CIFailures(); !slices.Equal(got, []string{"aaa1111", "bbb2222"}) {
+		t.Errorf("CIFailures = %q", got)
+	}
+	if got := (Task{docWith(t, sampleTask)}).CIFailures(); got != nil {
+		t.Errorf("a task without review rounds: CIFailures = %q", got)
+	}
+}
+
+func TestCIReported(t *testing.T) {
+	task := Task{docWith(t, ciTask)}
+	for head, want := range map[string]bool{"aaa1111": true, "bbb2222": true, "ccc3333": true, "0000000": false, "9999999": false, "ddd4444": false} {
+		if got := task.CIReported(head); got != want {
+			t.Errorf("CIReported(%s) = %v, want %v", head, got, want)
+		}
+	}
+}
+
+func TestFeedbackRounds(t *testing.T) {
+	// Round 1 only reports red CI; round 2 has a comment besides; round 3 asks for a review.
+	if n := (Task{docWith(t, ciTask)}).FeedbackRounds(); n != 2 {
+		t.Errorf("FeedbackRounds = %d, want 2", n)
+	}
+	if n := (Task{docWith(t, sampleTask)}).FeedbackRounds(); n != 0 {
+		t.Errorf("a task without review rounds: FeedbackRounds = %d", n)
 	}
 }
 
