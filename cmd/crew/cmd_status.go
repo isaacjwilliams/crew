@@ -50,7 +50,6 @@ func cmdStatus(c *Crew, args []string) error {
 	fmt.Printf("workers running: %d/%s\n", c.runningWorkers(s.agents), c.Settings["MAX_WORKERS"])
 	for _, p := range projects {
 		fmt.Println()
-		fmt.Println(p)
 		s.project(p)
 	}
 	if scope != "" {
@@ -114,12 +113,19 @@ func (s *statusView) shown(status string) bool {
 	return s.doneToo || (status != "merged" && status != "done" && status != "abandoned")
 }
 
+// project lists one project's goals and tasks under its name, which says when
+// it's paused.
 func (s *statusView) project(name string) {
 	s.branches = s.Crew.branches(name)
 	s.repo, s.settings = "", s.Settings
+	heading := name
 	if p, err := s.loadProject(name); err == nil {
 		s.repo, s.settings = p.Repo(), p.Settings
+		if p.Paused() {
+			heading += "  paused (crew resume --project " + name + ")"
+		}
 	}
+	fmt.Println(heading)
 	s.kids = map[string][]Task{}
 	var goals []Goal
 	shownGoals := map[string]bool{}
@@ -220,6 +226,9 @@ func (s *statusView) taskRow(t Task, indent string) {
 	}
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
+	}
+	if t.Get("interrupted") != "" {
+		notes = append(notes, "interrupted by a pause")
 	}
 	if Status(st) == Ready && t.Goal() != "" {
 		// Only a goal's ready tasks are dispatched in priority order.

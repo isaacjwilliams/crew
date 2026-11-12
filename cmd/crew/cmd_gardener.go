@@ -54,11 +54,15 @@ func cmdGardener(c *Crew, args []string) error {
 	return nil
 }
 
-// garden runs the gardener over one project.
+// garden runs the gardener over one project, unless it's paused.
 func (c *Crew) garden(name string) error {
 	p, err := c.loadProject(name)
 	if err != nil {
 		return err
+	}
+	if p.Paused() {
+		fmt.Printf("%s: paused; skipped\n", name)
+		return nil
 	}
 	wt := filepath.Join(p.WorkRoot(), name, "_gardener")
 	if err := p.detachedCheckout(wt); err != nil {

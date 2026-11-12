@@ -66,6 +66,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"setup":          cmdSetup,
 	"upgrade":        cmdUpgrade,
 	"tick":           cmdTick,
+	"pause":          cmdPause,
+	"resume":         cmdResume,
 }
 
 func main() {

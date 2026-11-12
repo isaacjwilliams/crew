@@ -174,6 +174,12 @@ func (as Agents) jobBusy(job string) bool {
 	return a != nil && a.busy()
 }
 
+// jobOpen: the job is listed, and its process is running.
+func (as Agents) jobOpen(job string) bool {
+	a := as.find(job)
+	return a != nil && a.open()
+}
+
 // jobListed: claude agents on this machine knows the job.
 func (as Agents) jobListed(job string) bool { return as.find(job) != nil }
 
@@ -478,18 +484,37 @@ func readSettings(f string) (*object, error) {
 
 // sessionSettings is the --settings value of a session crew starts for project
 // p: settings, with CREW_PROJECT and CREW_HOME set in its env, so the session's
-// crew commands and hooks work on p in this home. It changes the settings it's
-// given. Every session crew starts for a project gets them this way, and never
-// through the environment crew runs claude with: a background session gets the
-// environment of Claude Code's daemon, which serves every project at once.
+// crew commands and hooks work on p in this home, and the hook that tells it to
+// wrap up when p is paused. It changes the settings it's given. Every session
+// crew starts for a project gets them this way, and never through the
+// environment crew runs claude with: a background session gets the environment
+// of Claude Code's daemon, which serves every project at once.
 // CREW_LEAD_FINGERPRINT is set empty for the same reason: a daemon a lead's own
 // shell started would hand every session the lead's (see crew lead --hook).
+//
+// The pause hook is added here, not listed in the settings files, so the user's
+// own leads, which run lead/.claude/settings.json too, never get it.
 func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	env := settings.child("env")
 	env.set("CREW_PROJECT", p.Name)
 	env.set("CREW_HOME", c.Home)
 	env.set("CREW_LEAD_FINGERPRINT", "")
+	hooks := settings.child("hooks")
+	after, _ := hooks.vals["PostToolUse"].([]any)
+	hooks.set("PostToolUse", append(after, pauseHookEntry()))
 	return encodeJSON(settings, false)
+}
+
+// pauseHookEntry is the PostToolUse entry that runs crew pause --hook after
+// every tool call.
+func pauseHookEntry() *object {
+	run := newObject()
+	run.set("type", "command")
+	run.set("command", `"${CREW_HOME:-$HOME/crew}/bin/crew" pause --hook`)
+	entry := newObject()
+	entry.set("matcher", "*")
+	entry.set("hooks", []any{run})
+	return entry
 }
 
 // workerSettings is the --settings value workers run with:

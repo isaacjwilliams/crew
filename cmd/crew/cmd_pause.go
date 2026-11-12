@@ -1,0 +1,337 @@
+package main
+
+// Pausing a project's work: crew pause stops it without losing any, and crew
+// resume lets it go on. While a project is paused, no command starts a session
+// for it, and crew tick sends its workers and goal leads nothing.
+//
+// A paused project has a mark in the ledger, projects/<p>/paused, so the pause is
+// committed, pushed, and holds on whichever machine runs the crew. Sessions that
+// are mid-turn when it's written are told to wrap up by their pause hook (crew
+// pause --hook), and stopped if they're still mid-turn when the wait runs out.
+// Their files get an interrupted key, which crew followup and crew goal followup
+// deliver once the project is resumed.
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+)
+
+// pausedByUpgrade is the by of a mark crew upgrade writes. Any other pause
+// replaces it, so the user's pause outlasts the upgrade.
+const pausedByUpgrade = "crew upgrade"
+
+// carryOn is what a worker or goal lead is told when it's followed up after a
+// pause cut its turn short.
+const carryOn = "crew was paused while you were working. Carry on from where your Log says you stopped."
+
+// pauseMark is the file that says the project is paused. It has only front
+// matter: by (what paused it), at and host.
+func (p *Project) pauseMark() Doc { return Doc{filepath.Join(p.Dir, "paused")} }
+
+// Paused: the project's work is paused, and no session may start for it.
+func (p *Project) Paused() bool { return isFile(p.pauseMark().Path) }
+
+// PausedBy is what paused the project: crew pause, crew pause --force or crew
+// upgrade. It's empty when the project isn't paused.
+func (p *Project) PausedBy() string { return p.pauseMark().Get("by") }
+
+// refuseIfPaused holds back a command that would start a session for p while
+// it's paused. Session-starting commands call it before their first side effect,
+// and again under the ledger lock.
+func refuseIfPaused(p *Project) error {
+	if p.Paused() {
+		return notYet("%s is paused; 'crew resume --project %s' lets its work go on", p.Name, p.Name)
+	}
+	return nil
+}
+
+// crew pause [--project P|--all] [--force] | crew pause --hook
+func cmdPause(c *Crew, args []string) error {
+	if len(args) == 1 && args[0] == "--hook" {
+		c.pauseHook()
+		return nil
+	}
+	const use = "crew pause [--project P|--all] [--force]"
+	proj, all, force := "", false, false
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--all":
+			all, args = true, args[1:]
+		case args[0] == "--force":
+			force, args = true, args[1:]
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[2:]
+		default:
+			return usage(use)
+		}
+	}
+	if err := need("claude"); err != nil {
+		return err
+	}
+	scope, err := c.scope(proj, all)
+	if err != nil {
+		return err
+	}
+	projects, err := c.loadProjects(scope)
+	if err != nil {
+		return err
+	}
+	by := "crew pause"
+	if force {
+		by += " --force"
+	}
+	if err := c.pause(projects, by, force); err != nil {
+		return err
+	}
+	fmt.Println("'crew resume " + scopeFlag(scope) + "' lets the work go on")
+	return nil
+}
+
+// crew resume [--project P|--all]
+func cmdResume(c *Crew, args []string) error {
+	proj, all := "", false
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--all":
+			all, args = true, args[1:]
+		case args[0] == "--project" && len(args) > 1:
+			proj, args = args[1], args[2:]
+		default:
+			return usage("crew resume [--project P|--all]")
+		}
+	}
+	scope, err := c.scope(proj, all)
+	if err != nil {
+		return err
+	}
+	projects, err := c.loadProjects(scope)
+	if err != nil {
+		return err
+	}
+	return c.resume(projects)
+}
+
+// scopeFlag is the flag that names scope on a command line: --project P, or
+// --all for every project.
+func scopeFlag(scope string) string {
+	if scope == "" {
+		return "--all"
+	}
+	return "--project " + scope
+}
+
+// loadProjects loads every project in scope. It fails if one can't be loaded
+// here, before anything changes.
+func (c *Crew) loadProjects(scope string) ([]*Project, error) {
+	var ps []*Project
+	for _, name := range c.projects(scope) {
+		p, err := c.loadProject(name)
+		if err != nil {
+			return nil, err
+		}
+		ps = append(ps, p)
+	}
+	return ps, nil
+}
+
+// A session is the background session a ledger file records: a task's worker
+// or a goal's goal lead.
+type session struct {
+	Doc          // the task or goal file
+	job   string // its job in claude agents
+	label string // the task's ID, or "goal <ID>"
+}
+
+// sessions are the sessions recorded for the projects' unfinished tasks and
+// running goals.
+func (c *Crew) sessions(projects []*Project) []session {
+	var ss []session
+	for _, p := range projects {
+		for _, t := range c.tasks(p.Name) {
+			if !t.Status().Finished() && t.WorkerJob() != "" {
+				ss = append(ss, session{t.Doc, t.WorkerJob(), t.ID()})
+			}
+		}
+		for _, g := range c.goals(p.Name) {
+			if g.Status() == GoalRunning && g.LeadJob() != "" {
+				ss = append(ss, session{g.Doc, g.LeadJob(), "goal " + g.ID()})
+			}
+		}
+	}
+	return ss
+}
+
+// busySessions are the projects' sessions that are mid-turn (see busy).
+func (c *Crew) busySessions(projects []*Project) []session {
+	as := c.agents()
+	return slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobBusy(s.job) })
+}
+
+func labels(ss []session) string {
+	var ls []string
+	for _, s := range ss {
+		ls = append(ls, s.label)
+	}
+	return strings.Join(ls, ", ")
+}
+
+// pause marks the projects paused, by by, and marks the files of the sessions
+// mid-turn as interrupted. Then it gives those sessions up to WRAP_UP_SECONDS to
+// end their turn, and stops the ones that haven't. With force, it stops every
+// open session of the projects at once instead, busy or idle. A mark that's
+// there already stays as it is, unless crew upgrade wrote it.
+//
+// It holds the ledger lock only while it writes, never while it waits, so
+// workers can log where they stopped.
+func (c *Crew) pause(projects []*Project, by string, force bool) error {
+	wait, err := intSetting(c.Settings, "WRAP_UP_SECONDS")
+	if err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	var names []string
+	for _, p := range projects {
+		names = append(names, p.Name)
+		if p.Paused() && p.PausedBy() != pausedByUpgrade {
+			fmt.Printf("%s was already paused\n", p.Name)
+			continue
+		}
+		mark := fmt.Sprintf("---\nby: %s\nat: %s\nhost: %s\n---\n", by, now(), c.Host)
+		if err := os.WriteFile(p.pauseMark().Path, []byte(mark), 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("paused %s\n", p.Name)
+	}
+	// Set before the wait, so a pause cut short still leaves the record.
+	busy := c.busySessions(projects)
+	for _, s := range busy {
+		s.Set("interrupted", now())
+		s.Touch()
+	}
+	c.commit("pause " + strings.Join(names, " "))
+	c.unlock()
+
+	if force {
+		as := c.agents()
+		open := slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobOpen(s.job) })
+		return c.stopSessions(open, "stopped by "+by)
+	}
+	if len(busy) == 0 {
+		return nil
+	}
+	fmt.Printf("waiting up to %s for %d session(s) to wrap up: %s\n", plainDuration(wait), len(busy), labels(busy))
+	left := c.waitForTurnsToEnd(busy, time.Duration(wait)*time.Second)
+	return c.stopSessions(left, "stopped by "+by+" before it ended its turn")
+}
+
+// waitForTurnsToEnd waits up to wait for the sessions to end their turn, saying
+// so as each one does, and returns those still mid-turn.
+func (c *Crew) waitForTurnsToEnd(busy []session, wait time.Duration) []session {
+	deadline := time.Now().Add(wait)
+	for len(busy) > 0 && time.Now().Before(deadline) {
+		time.Sleep(min(5*time.Second, time.Until(deadline)))
+		as := c.agents()
+		busy = slices.DeleteFunc(busy, func(s session) bool {
+			if as.jobBusy(s.job) {
+				return false
+			}
+			fmt.Printf("%s ended its turn\n", s.label)
+			return true
+		})
+	}
+	return busy
+}
+
+// stopSessions stops the sessions, and logs why on each one's file. Their
+// conversations and worktrees are kept.
+func (c *Crew) stopSessions(ss []session, why string) error {
+	if len(ss) == 0 {
+		return nil
+	}
+	for _, s := range ss {
+		if !c.stopJob(s.job) {
+			warn("%s: job %s didn't stop; stop it in claude agents", s.label, s.job)
+		}
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	for _, s := range ss {
+		s.Log(why)
+		s.Touch()
+	}
+	c.commit("pause: stopped " + labels(ss))
+	c.unlock()
+	fmt.Printf("stopped %d session(s): %s\n", len(ss), labels(ss))
+	return nil
+}
+
+// plainDuration is a number of seconds as a person says it: "3 minutes", or
+// "45 seconds" when it isn't whole minutes.
+func plainDuration(secs int) string {
+	n, unit := secs, "second"
+	if secs >= 60 && secs%60 == 0 {
+		n, unit = secs/60, "minute"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
+// resume removes the projects' pause marks. It starts no session: crew tick
+// follows up the work a pause interrupted.
+func (c *Crew) resume(projects []*Project) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	var resumed []string
+	for _, p := range projects {
+		if !p.Paused() {
+			fmt.Printf("%s isn't paused\n", p.Name)
+			continue
+		}
+		if err := os.Remove(p.pauseMark().Path); err != nil {
+			return err
+		}
+		resumed = append(resumed, p.Name)
+		fmt.Printf("resumed %s\n", p.Name)
+	}
+	if len(resumed) == 0 {
+		return nil
+	}
+	c.commit("resume " + strings.Join(resumed, " "))
+	fmt.Println("the next crew tick follows up the work the pause interrupted")
+	return nil
+}
+
+// crew pause --hook, the PostToolUse hook of every session crew starts: once
+// the session's project is paused, Claude Code hands the session the text it
+// prints, telling it to wrap up. It reads only the environment and the mark, as
+// it runs after every tool call.
+func (c *Crew) pauseHook() {
+	name := os.Getenv("CREW_PROJECT")
+	if name == "" || name == allProjects {
+		return
+	}
+	p, err := c.loadProject(name)
+	if err != nil || !p.Paused() {
+		return
+	}
+	type output struct {
+		HookEventName     string `json:"hookEventName"`
+		AdditionalContext string `json:"additionalContext"`
+	}
+	b, _ := json.Marshal(map[string]output{"hookSpecificOutput": {"PostToolUse", fmt.Sprintf(
+		"crew is pausing project %s. Stop at the next safe point. Write in your task file's Log (a goal lead: the goal file's Log) "+
+			"where you are and what comes next, so a fresh session can pick up from there. Leave uncommitted work in your worktree: "+
+			"it's kept. Start nothing new, and end your turn now.", name)}})
+	fmt.Println(string(b))
+}

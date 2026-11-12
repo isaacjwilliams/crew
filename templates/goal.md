@@ -9,6 +9,7 @@ lead_job:
 lead_session:
 lead_fingerprint:
 unsent_notes: 0
+interrupted:
 max_in_flight:
 created: {{NOW}}
 updated: {{NOW}}
