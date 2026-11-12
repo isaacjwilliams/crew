@@ -286,7 +286,6 @@ crew tick
   ├─ crew sync --all
   ├─ crew mcp sync: every project's mcp.local.json, then lead/.mcp.json
   ├─ for each task:
-  │    ready, its goal running                   → crew dispatch (exit 4, a dispatch that has to wait: nothing said)
   │    merged, worktree still recorded           → crew cleanup
   │    in flight, PR changed since last read     → crew feedback (the user's comments → a round;
   │                                                  collaborators' → unchecked Open questions)
@@ -297,9 +296,13 @@ crew tick
   │    pr-open, needs a restack, parent doesn't, → crew restack
   │      and restack_sent isn't the target yet
   │    not needs-input, unchecked Open questions → crew set TASK status needs-input
-  └─ for each running goal:
-       a note or a worker question it hasn't had → crew goal followup, once the goal lead is free (saying so if it isn't)
-       every task merged or abandoned            → crew goal done
+  ├─ for each running goal:
+  │    a note or a worker question it hasn't had → crew goal followup, once the goal lead is free (saying so if it isn't)
+  │    every task merged or abandoned            → crew goal done
+  ├─ dispatchReady: the ready tasks of running goals, every project's together,
+  │    highest priority first, then by project and ID
+  │                                              → crew dispatch, each in turn (exit 4, a dispatch that has to
+  │                                                  wait: nothing said, and the next task is tried)
   └─ push_ledger in the foreground (soft): whatever a background push missed
 ```
 
@@ -309,6 +312,8 @@ The stand-down and the lease check are gates, not steps: they decide whether the
 - **Rounds wait for the end of the worker's turn.** Delivering one mid-turn would need `SendMessage`, which only a Claude session can call.
 - **Only changed PRs are read.** `crew sync` records each PR's `updatedAt` as `pr_updated`, and `crew tick` runs `crew feedback` only when that is newer than `feedback_since`. A quiet PR then costs one API call per tick instead of four.
 - **Nothing is sent twice:** `last_round_sent` for rounds, `restack_sent` for restacks.
+- **Dispatch comes last.** A review round or a restack resumes an idle worker without checking `MAX_WORKERS`, and a merged task's cleanup can stop a worker that is still busy. Dispatching after every other step means `crew dispatch`, which counts busy workers afresh, sees what this tick has already done. Rounds and restacks still don't check `MAX_WORKERS` themselves, so one sent while every worker slot is taken puts the crew over it until that worker's turn ends.
+- **A task's `priority` orders the dispatch** (a whole number, higher first, empty is 0; set with `crew set`). It's one order across every goal and project, because `MAX_WORKERS` counts busy workers across them all: a free worker slot goes to the highest-priority task that its caps and dependencies let through. A task they hold doesn't hold back the ones after it, since caps are per goal and dependencies per task. (A project can set a lower `MAX_WORKERS` of its own, which holds back its tasks while another project's go ahead.) A value written by hand that isn't a whole number counts as 0, with a warning.
 - **Restacks need no word from the user any more.** `crew sync` still never restacks; `crew tick` does, bottom-up, only for a task whose PR is open and whose worker is idle. A restack force-pushes the task's branch.
 
 ### Goals
@@ -323,7 +328,7 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
                --permission-mode <LEAD_PERMISSION_MODE> --settings "<lead settings without agent, env: project and home>" "<prompt>"
   goal lead, for every item, in one turn: crew new … --goal GOAL → intake to the brief standard
         → plan-reviewer → findings settled → crew ready TASK, or parked (draft, with Open questions)
-  crew tick: dispatches the goal's ready tasks as MAX_WORKERS / the goal's max_in_flight allow;
+  crew tick: dispatches the goal's ready tasks, highest priority first, as MAX_WORKERS / the goal's max_in_flight allow;
              resumes the goal lead (crew goal followup) with the user's notes and its workers' questions;
              closes the goal (crew goal done) once every task is merged or abandoned
 ```
@@ -584,9 +589,9 @@ Changing any of these means updating every side listed.
 | Front-matter key names | `templates/task.md`, `templates/goal.md`, `templates/proposal.md`, `crew`, the agent prompts (`crew set TASK status pr-open`, …), `LEDGER.md` |
 | A proposal's or memory suggestion's `source` is `gardener`, `user`, `lead` or `worker:<task id>` | `crew propose` and `crew remember` (`ledgerSource`), the gardener → `Proposal.Author` (`crew promote`), `crew proposals`, `lead.md`, `implementer.md`, `gardener.md`, `LEDGER.md` |
 | Proposal section headings (`## Why it matters`, `## Proposal`, `## First step`, `## Log` last) | `templates/proposal.md`, the gardener → `crew propose`, `Proposal.TaskContext` (`crew promote`) |
-| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalRunning` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
+| A task's `goal` is its goal file's ID, in the same project | `crew new --goal` → `goalTasks`, `taskGoal` (`goalReady` for `crew tick` dispatch, `max_in_flight` in `dispatchChecks`), `crew status` |
 | Goal status values `draft running done abandoned` | `crew goal`, `tickGoal`, `crew status`, `lead.md`, `LEDGER.md` |
-| A dispatch that only has to wait exits 4 (`notYet`) | `dispatchChecks`, `crew dispatch` → `tickTask` |
+| A dispatch that only has to wait exits 4 (`notYet`) | `dispatchChecks`, `crew dispatch` → `dispatchReady` |
 | The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks" of the installed `lead.md` | `lead.md` → `goal-lead.md`; checked in `tests/guard.sh` |
 | A goal task's worker question that the goal lead leaves for the user gets a "For the user: …" Log line | `goal-lead.md` → `lead.md` "Goals"; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |

@@ -2,21 +2,24 @@ package main
 
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments, send review rounds and restacks to idle
-// workers, mark tasks that wait on the user, clean up merged ones, and dispatch
-// and close goals. The crew-tick service runs it every few minutes; the lead runs
-// it too. It prints one line per thing it did.
+// workers, mark tasks that wait on the user, clean up merged ones, pass goal
+// leads their input and close finished goals. Last, it dispatches the ready tasks
+// of running goals, highest priority first. The crew-tick service runs it every
+// few minutes; the lead runs it too. It prints one line per thing it did.
 //
 // Every step is a crew command run as a process of its own, so one that refuses
 // skips that step and not the rest. The stand-down and the lease check are gates,
 // not steps: they decide whether the tick does anything, so they run here.
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -71,6 +74,7 @@ func cmdTick(c *Crew, args []string) error {
 			c.tickGoal(g, as)
 		}
 	}
+	c.dispatchReady()
 	// A catch-all for background pushes that failed, or that a crash cut short.
 	if gitOK(c.Home, "remote", "get-url", "origin") && !c.pushNow(os.Stderr) {
 		warn("couldn't push the ledger to origin; the next tick tries again")
@@ -100,22 +104,11 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 	return 0
 }
 
-// tickTask is one task's share of a tick.
+// tickTask is one task's share of a tick, for a task already under way: its
+// cleanup once merged, or what its worker is sent while it's in flight.
+// Dispatching ready tasks is dispatchReady's.
 func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	id, st := t.ID(), t.Status()
-	if st == Ready && c.goalRunning(t) {
-		// The goal lead marked it ready, which is the go-ahead. A dispatch that has to
-		// wait for a cap or a dependency (exit 4) is tried again on the next tick.
-		var errs strings.Builder
-		switch c.step(&errs, "dispatch", t.Path) {
-		case 0:
-			fmt.Printf("%s: dispatched for goal %s\n", id, t.Goal())
-		case exitNotYet: // held by a cap or a dependency; the next tick tries again
-		default:
-			warn("%s: dispatch failed: %s", id, strings.TrimRight(errs.String(), "\n"))
-		}
-		return
-	}
 	if st == Merged {
 		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
 		if t.Worktree() != "" && c.step(nil, "cleanup", t.Path) == 0 {
@@ -183,10 +176,56 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	}
 }
 
-// goalRunning: the task belongs to a running goal.
-func (c *Crew) goalRunning(t Task) bool {
+// dispatchReady dispatches the ready tasks of running goals, across every
+// project, highest priority first and then in ledger order. The goal lead marked
+// each one ready, which is the go-ahead. It's the tick's last step, so workers
+// made busy by this tick's review rounds and restacks count against MAX_WORKERS.
+// A task held by a cap or a dependency (exit 4) waits for the next tick, and the
+// next task is tried: caps are per goal, and dependencies per task. Each task is
+// checked again just before its dispatch, since an earlier one can take minutes
+// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
+// abandoned or the task dispatched by hand.
+func (c *Crew) dispatchReady() {
+	type candidate struct {
+		Task
+		priority int
+	}
+	var ready []candidate
+	for _, name := range c.projects("") {
+		if _, err := c.loadProject(name); err != nil {
+			continue // no clone here, say: the tick warned of it and skipped it above
+		}
+		for _, t := range c.tasks(name) {
+			if !c.goalReady(t) {
+				continue
+			}
+			n, err := t.Priority()
+			if err != nil {
+				warn("%v; treating it as 0", err)
+			}
+			ready = append(ready, candidate{t, n})
+		}
+	}
+	slices.SortStableFunc(ready, func(a, b candidate) int { return cmp.Compare(b.priority, a.priority) })
+	for _, t := range ready {
+		if !c.goalReady(t.Task) {
+			continue
+		}
+		var errs strings.Builder
+		switch c.step(&errs, "dispatch", t.Path) {
+		case 0:
+			fmt.Printf("%s: dispatched for goal %s\n", t.ID(), t.Goal())
+		case exitNotYet: // held by a cap or a dependency; the next tick tries again
+		default:
+			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
+		}
+	}
+}
+
+// goalReady: the task is ready and its goal running, so crew tick dispatches it.
+func (c *Crew) goalReady(t Task) bool {
 	g, ok := c.taskGoal(t)
-	return ok && g.Status() == GoalRunning
+	return t.Status() == Ready && ok && g.Status() == GoalRunning
 }
 
 // prMayHaveNewComments: GitHub moves a PR's updatedAt (recorded as pr_updated by

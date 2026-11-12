@@ -693,6 +693,49 @@ setstate "done" null
 out=$(crew tick 2>&1)
 check "an abandoned goal's ready task is left for the lead to dispatch" '[[ $out != *"$(basename "$GT3" .md)"* && $(crew get "$GT3" status) == ready ]]'
 check "a task can't join an abandoned goal" '! crew new "Late" --goal 1 2>/dev/null'
+# crew tick dispatches the ready tasks of running goals highest priority first,
+# then by ID, across every goal.
+GF3=$(crew goal new "Season extras" --max-in-flight 1); G3=$(basename "$GF3" .md)
+sed -i '/^## Goal$/a "Ship the extras."' "$GF3"; crew goal start "$GF3" >/dev/null
+goal_task() { local f; f=$(crew new "$2" --goal "$1"); fill "$f"; crew ready "$f" >/dev/null; echo "$f"; }
+PA=$(goal_task "$GF3" "Extras A"); PB=$(goal_task "$GF3" "Extras B"); PC=$(goal_task "$GF3" "Extras C"); PH=$(goal_task "$GF3" "Extras held")
+TA=$(basename "$PA" .md); TB=$(basename "$PB" .md); TC=$(basename "$PC" .md); TH=$(basename "$PH" .md)
+crew set "$PB" priority 1; crew set "$PC" priority 1; crew set "$PH" priority 5; crew set "$PH" depends_on "$(basename "$GT3" .md)"
+crew set "$NG" priority 2
+sum=$(cksum <"$PC")
+check "crew set refuses a priority that isn't a whole number, and leaves the file as it was" '! crew set "$PC" priority x 2>/dev/null && ! crew set "$PC" priority 1.5 2>/dev/null && [[ $(cksum <"$PC") == "$sum" ]]'
+check "crew set takes a negative priority, or an empty one" 'crew set "$PA" priority -2 && [[ $(crew get "$PA" priority) == -2 ]] && crew set "$PA" priority && [[ -z $(crew get "$PA" priority) ]]'
+st=$(crew status)
+check "status shows the priority beside a goal's ready task, and not beside one outside a goal" '[[ $(grep "$TB" <<<"$st") == *"ready"*"priority 1" && $(grep "$TA" <<<"$st") != *priority* && $(grep "$(basename "$NG" .md)" <<<"$st") != *priority* ]]'
+sed -i 's/^priority: *$/priority: x/' "$PA"   # written by hand
+setstate "done" null
+out=$(crew tick 2>&1)
+check "tick dispatches the highest priority ready task first, a tie going to the lower ID, past one a dependency holds" '[[ $out == *"$TB: dispatched for goal $G3"* && $out != *"$TA: dispatched"* && $out != *"$TC: dispatched"* && $out != *"$TH: dispatched"* && $(crew get "$PB" status) == working && $(crew get "$PC" status) == ready && $(crew get "$PH" status) == ready ]]'
+check "tick warns of a priority that isn't a whole number, and status shows it as ?" '[[ $out == *"$TA: priority '"'"'x'"'"' isn'"'"'t a whole number; treating it as 0"* && $(crew status | grep "$TA") == *"priority ?" ]]'
+# With room for one more worker, a review round sent in the tick takes it before
+# a ready task (a lower ID than the round's task) can.
+GF4=$(crew goal new "Season promos" --max-in-flight 1); G4=$(basename "$GF4" .md)
+sed -i '/^## Goal$/a "Ship the promos."' "$GF4"; crew goal start "$GF4" >/dev/null
+PQ=$(goal_task "$GF4" "Promo banner"); TQ=$(basename "$PQ" .md); crew set "$PQ" priority 2
+crew goal cap "$GF3" 3 >/dev/null; crew set "$PB" feedback_since 2099-01-01T00:00:00Z; crew set "$PB" review_rounds 1
+echo "MAX_WORKERS=1" >>"$PE"; setstate "done" null
+out=$(crew tick 2>&1)
+check "tick sends review rounds before it dispatches, so they count against MAX_WORKERS" '[[ $out == *"$TB: round 1 sent to its worker"* && $out != *"dispatched"* && $(crew get "$PA" status) == ready ]]'
+setstate "done" null
+out=$(crew tick 2>&1)
+check "the one free worker slot goes to the highest priority task of any goal" '[[ $out == *"$TQ: dispatched for goal $G4"* && $out != *"$TC: dispatched"* && $(crew get "$PC" status) == ready ]]'
+sed -i '/^MAX_WORKERS=1$/d' "$PE"
+# A goal abandoned while the tick dispatches an earlier task (its worktree hooks
+# running) has none of its tasks dispatched after.
+crew goal cap "$GF4" 3 >/dev/null; PR=$(goal_task "$GF4" "Promo footer"); TR=$(basename "$PR" .md); crew set "$PR" priority 3
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PE"
+printf 'crew goal abandon %s >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$G3" >"$HOME/wt-hook-cmd"
+setstate "done" null
+out=$(crew tick 2>&1)
+check "a goal abandoned during an earlier dispatch in the tick has none of its tasks dispatched" '[[ $out == *"$TR: dispatched for goal $G4"* && $(gget "$GF3" status) == abandoned && $out != *"$TC"* && $(crew get "$PC" status) == ready ]]'
+sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
+crew goal abandon "$GF4" >/dev/null 2>&1
+for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$NG"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
