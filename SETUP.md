@@ -374,6 +374,19 @@ A task gets `MAX_CI_FIXES` of these rounds (2 by default). After that, red CI on
 
 **CI other than GitHub Actions.** Workers read GitHub Actions logs and rerun its failed jobs with `gh run`, which their settings allow. For any other CI, say in the project's `AGENTS.md` or its crew memory how to read the logs and rerun failed jobs, and allow those commands in `projects/<project>/worker-settings.json`. Without that, a worker reproduces the failure locally from the CI config in the repo, and asks you rather than rerun it.
 
+### Pausing
+
+To stop work on a project without losing any (before an upgrade, or when your usage is running low), tell the lead, or run:
+
+```sh
+crew pause --project <p>      # --all for every project; without either, the lead's or this repo's project
+crew resume --project <p>     # let it go on
+```
+
+While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments and red CI), the gardener skips it, and `crew dispatch`, `crew followup` and `crew goal start` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped. Idle ones are left alone. `crew pause --force` stops every session of the project at once, busy or idle, with no time to wrap up. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
+
+Nothing is lost: worktrees, branches and conversations stay. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
+
 ### After merging
 
 `crew tick` notices the merge and cleans up. By hand:
@@ -495,6 +508,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
 | `GARDENER_MAX_TURNS` | 150 | Turn limit for a gardener run |
+| `WRAP_UP_SECONDS` | 180 | How long `crew pause` gives workers and goal leads mid-turn to note where they are and end their turn, before it stops them. Crew-wide: `config/crew.env` only |
 
 Per-project overrides go in `projects/<project>/project.env`. `crew config` shows the effective values. Per-project additions to the worker settings go in `projects/<project>/worker-settings.json`.
 
