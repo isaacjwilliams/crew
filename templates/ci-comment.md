@@ -1,7 +1,7 @@
 <!-- Why CI was red on a worker's PR, and what was done about it.
      - One comment for each commit a review round's "CI failed on <sha>" line reports.
      - Fill it in when you're done with that line: CI is green again, or you're about to ask the
-       user. Post it with `crew ci-summary <task> <file>`.
+       user. Post it with `crew ci-summary <task> <sha> <file>`.
      - Leave out this comment and the <…> placeholders. Keep each part to a sentence or two.
      - It's for the user's collaborators too: never mention the ledger, tasks, review rounds or agents.
 

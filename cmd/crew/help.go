@@ -77,9 +77,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    worker handed the PR over, send it the failure as a
                                    review round, once a commit; past MAX_CI_FIXES,
                                    ask you instead (run by crew tick)
-  crew ci-summary TASK FILE        Post FILE on the task's PR as why CI was red on the
-                                   newest commit a round reported, or edit the one
-                                   there (used by workers)
+  crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on
+                                   commit SHA, which the task reports, or edit the
+                                   one there (used by workers)
   crew codex ROOT PROMPT_FILE OUT_PREFIX
                                    A read-only Codex review in ROOT: its reply in
                                    OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl;

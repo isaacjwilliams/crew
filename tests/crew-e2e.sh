@@ -569,19 +569,24 @@ out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
 out=$(crew ci-fix 13); code=$?
 check "crew ci-fix by hand says why it does nothing, and exits 3" '[[ $out == *"the red CI on cccc333 is reported already"* && $code == 3 ]]'
-# The worker's comment on why CI was red: one for each head a round reported.
+# The worker's comment on why CI was red: one for each commit the task file reports.
 printf 'CI was red\n\nA flaky test.\n' >"$HOME/ci.md"
-out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
-check "ci-summary posts the file for the newest head a round reported, tagged as crew's" '[[ $out == "posted the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == $'"'"'CI was red\n\nA flaky test.\n\n<!-- crew ci-summary: bbbb222 -->\n<!-- crew -->'"'"' ]]'
+out=$(crew ci-summary 13 bbbb222 "$HOME/ci.md" 2>&1)
+check "ci-summary posts the file for the commit it names, tagged as crew's" '[[ $out == "posted the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == $'"'"'CI was red\n\nA flaky test.\n\n<!-- crew ci-summary: bbbb222 -->\n<!-- crew -->'"'"' ]]'
 printf 'CI was red\n\nA flaky test; the rerun passed.\n' >"$HOME/ci.md"
-out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
-check "a second ci-summary for the same head edits the first" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"the rerun passed."* && ! -e $HOME/gh-summaries/121 ]]'
-echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew ci-fix 13 >/dev/null; sed -i '/^MAX_CI_FIXES=3$/d' "$PE"
-out=$(crew ci-summary 13 "$HOME/ci.md" 2>&1)
-check "a round for a new head gets a comment of its own" '[[ $out == "posted the CI summary for dddd444 on PR #12" && $(cat "$HOME/gh-summaries/121") == *"<!-- crew ci-summary: dddd444 -->"* && $(cat "$HOME/gh-summaries/120") == *"bbbb222"* ]]'
+out=$(crew ci-summary 13 bbbb2222ffff "$HOME/ci.md" 2>&1)
+check "a second ci-summary for the same commit edits the first, given its full SHA too" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"the rerun passed."* && ! -e $HOME/gh-summaries/121 ]]'
+printf 'CI was red\n\nStill red.\n' >"$HOME/ci.md"
+out=$(crew ci-summary 13 cccc333 "$HOME/ci.md" 2>&1)
+check "the commit the open question past MAX_CI_FIXES names gets a comment of its own, and the earlier one is left alone" '[[ $out == "posted the CI summary for cccc333 on PR #12" && $(cat "$HOME/gh-summaries/121") == *"<!-- crew ci-summary: cccc333 -->"* && $(cat "$HOME/gh-summaries/120") == *"the rerun passed."* ]]'
+echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew set 13 status pr-open; crew ci-fix 13 >/dev/null; sed -i '/^MAX_CI_FIXES=3$/d' "$PE"
+printf 'CI was red\n\nOlder round, written last.\n' >"$HOME/ci.md"
+out=$(crew ci-summary 13 bbbb222 "$HOME/ci.md" 2>&1)
+check "with a newer CI round recorded, a comment for an older one still goes to its own commit" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"written last."* && ! -e $HOME/gh-summaries/122 ]]'
+rm -f "$HOME/gh-last-body"
+check "ci-summary refuses a commit the task reports no red CI on" '[[ $(crew ci-summary 13 eeee555 "$HOME/ci.md" 2>&1) == *"reports no red CI on eeee555"* && ! -e $HOME/gh-last-body ]]'
 out=$(crew feedback 13 --since 1970-01-01T00:00:00Z)
 check "crew feedback doesn't read the CI summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]]'
-check "ci-summary refuses a task whose rounds report no red CI" '[[ $(crew ci-summary 1 "$HOME/ci.md" 2>&1) == *"records no red CI to summarize"* ]]'
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set 13 last_round_sent "$(crew get 13 review_rounds)"
 setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)

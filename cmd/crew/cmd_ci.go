@@ -174,33 +174,32 @@ func ciSummaryMarker(head string) string {
 	return fmt.Sprintf("<!-- crew ci-summary: %s -->", head)
 }
 
-// crew ci-summary TASK FILE: posts FILE on the task's PR as the worker's account
-// of the newest red CI a review round reported: why it was red, and what was
-// done. Each head commit reported gets a comment of its own: when this GitHub
-// account's comment for that head is there already, it is edited to FILE.
+// crew ci-summary TASK SHA FILE: posts FILE on the task's PR as the worker's
+// account of the red CI the task file reports on commit SHA: why it was red, and
+// what was done. Each commit gets a comment of its own: when this GitHub
+// account's comment for SHA is there already, it is edited to FILE.
 func cmdCISummary(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
 	}
-	if len(args) != 2 {
-		return usage("crew ci-summary TASK FILE")
+	if len(args) != 3 {
+		return usage("crew ci-summary TASK SHA FILE")
 	}
 	t, err := c.resolveTask(args[0])
 	if err != nil {
 		return err
 	}
-	text, err := commentFile(args[1])
+	head := shortSHA(args[1])
+	text, err := commentFile(args[2])
 	if err != nil {
 		return err
 	}
 	if t.PR() == "" {
 		return fail("task has no PR")
 	}
-	failures := t.CIFailures()
-	if len(failures) == 0 {
-		return fail("%s records no red CI to summarize (no '%s' line under '## Review rounds')", t.ID(), strings.TrimSpace(ciFailedOn))
+	if !t.CIReported(head) {
+		return fail("%s reports no red CI on %s (no '%s' or '%s' line names it)", t.ID(), head, strings.TrimSpace(ciFailedOn), strings.TrimSpace(ciStillRedOn))
 	}
-	head := failures[len(failures)-1]
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
