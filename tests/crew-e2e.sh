@@ -567,7 +567,7 @@ check "red CI on a PR closed without merging is left alone, by tick and by hand"
 echo OPEN >"$HOME/gh-pr-state"
 crew tick >/dev/null 2>&1; setstate "done" null; crew set 13 status pr-open; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
-check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 fix attempts, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 fix attempts (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
+check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
 crew set 13 status pr-open; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
 out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'

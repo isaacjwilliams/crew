@@ -160,7 +160,7 @@ func TestNewestReview(t *testing.T) {
 // question about a head that stayed red. A line quoted in a comment, or in the
 // brief, reports nothing.
 const ciTask = "## Context\n- [ ] CI failed on 0000000: brief\n\n" +
-	"## Open questions\n- [ ] CI is still red on ccc3333 after 2 fix attempts (MAX_CI_FIXES=2): test. Look at it yourself.\n\n" +
+	"## Open questions\n- [ ] CI is still red on ccc3333 after 2 CI rounds (MAX_CI_FIXES=2): test. Look at it yourself.\n\n" +
 	"## Review rounds\n" +
 	"### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test, lint\n\n" +
 	"### Round 2 — 2026-11-11 11:00 (PR #12)\n\n- [ ] CI failed on bbb2222: test\n\n**Conversation comments**\n- [ ] comment 5 — [link](u5)\n  > - [ ] CI failed on 9999999: quoted\n\n" +

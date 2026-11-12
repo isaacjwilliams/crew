@@ -158,9 +158,9 @@ func cmdCIFix(c *Crew, args []string) error {
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {
-		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d fix attempts (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
-		t.Log(fmt.Sprintf("CI still red on %s after %d fix attempts; recorded under Open questions for the user", head, fixes))
-		fmt.Printf("CI is still red on %s after %d fix attempts (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
+		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d CI rounds (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
+		t.Log(fmt.Sprintf("CI still red on %s after %d CI rounds; recorded under Open questions for the user", head, fixes))
+		fmt.Printf("CI is still red on %s after %d CI rounds (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
 	}
 	t.Touch()
 	c.commit("ci-fix " + p.Name + "/" + t.ID())

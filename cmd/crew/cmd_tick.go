@@ -142,7 +142,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 			if now := t.Get("review_rounds"); now != rounds {
 				fmt.Printf("%s: CI round %s recorded: red on %s\n", id, now, failures[len(failures)-1])
 			} else {
-				fmt.Printf("%s: CI still red after %d fix attempts, for you\n", id, len(failures))
+				fmt.Printf("%s: CI still red after %d CI rounds, for you\n", id, len(failures))
 			}
 		}
 	}
