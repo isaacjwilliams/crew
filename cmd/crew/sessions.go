@@ -241,8 +241,9 @@ func (c *Crew) removeSession(job string) bool {
 }
 
 // A launcher starts or resumes the session a ledger file records: a task's
-// worker, or a goal's goal lead. launchWorker and launchGoalLead build one; they
-// are the only places a session's command line is built.
+// worker, or a goal's goal lead. launchWorker and launchGoalLead build one, and
+// are the only places a worker's or goal lead's launch flags are chosen;
+// launchSession builds the command line around them.
 type launcher struct {
 	p      *Project
 	prefix string   // of the file's keys for the session: worker_name, lead_session, …
