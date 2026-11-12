@@ -43,7 +43,8 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.workerSettings(p); err != nil {
+	start, err := c.launchWorker(p)
+	if err != nil {
 		return err
 	}
 	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
@@ -97,16 +98,13 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
-	l, err := c.relaunch(c.launchWorker(p), "worker", t.Doc, wt, prompt, fmt.Sprintf(
+	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
 		t.ID(), p.Name, t.Path, wt), fresh)
 	if err != nil {
 		return err
 	}
-	t.Set("worker_job", l.job)
-	if l.session != "" {
-		t.Set("worker_session", l.session)
-	}
+	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
 	if newRound {
 		t.Set("status", string(AddressingFeedback))

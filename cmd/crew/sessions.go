@@ -237,10 +237,33 @@ func (c *Crew) removeSession(job string) bool {
 	return true
 }
 
+// A launcher starts or resumes the session a ledger file records: a task's
+// worker, or a goal's goal lead. launchWorker and launchGoalLead build one; they
+// are the only places a session's command line is built.
+type launcher struct {
+	p      *Project
+	prefix string   // of the file's keys for the session: worker_name, lead_session, …
+	flags  []string // a fresh session's launch flags, but for its name and MCP config
+}
+
+// newLauncher is the launcher of agent's sessions for project p, whose keys
+// start with prefix, with these launch flags besides the agent.
+func newLauncher(p *Project, prefix, agent string, flags ...string) launcher {
+	return launcher{p: p, prefix: prefix, flags: append([]string{"--agent", agent}, flags...)}
+}
+
 // A started (or resumed) background session.
 type launch struct {
 	job, session string
-	mode         string // "fresh" or "resume"
+	mode         string   // "fresh" or "resume"
+	by           launcher // what started it
+}
+
+// record notes the session in d, the ledger file it was launched for. It's the
+// only place a session's keys are set.
+func (l launch) record(d Doc) {
+	d.Set(l.by.prefix+"_job", l.job)
+	d.Set(l.by.prefix+"_session", l.session)
 }
 
 // errNotStarted: claude started no session, so starting a fresh one instead is safe.
@@ -252,14 +275,19 @@ var (
 )
 
 // launchSession starts a background session for a ledger file in wt, or resumes
-// the one it records as <role>_session, and confirms it started. A fresh session
-// gets the launch flags, the file's <role>_name and the ledger as an extra
-// directory. A resume passes only the session and the prompt: a background
-// session keeps the options it was started with (agent, permission mode,
-// settings, --add-dir), and passing any launch flag again makes Claude Code start
-// a copy under a new session instead of continuing this one.
-func (c *Crew) launchSession(d Doc, role, wt, prompt string, resume bool, flags ...string) (launch, error) {
-	session := d.Get(role + "_session")
+// the one it records as <prefix>_session, and confirms it started. A fresh
+// session gets the launcher's flags, the file's <prefix>_name and the ledger as
+// an extra directory. A resume passes only the session and the prompt: a
+// background session keeps the options it was started with (agent, permission
+// mode, settings, --add-dir), and passing any launch flag again makes Claude Code
+// start a copy under a new session instead of continuing this one. Both refresh
+// the project's MCP config first (refreshMCPConfig).
+func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
+	mcp, err := c.refreshMCPConfig(start.p)
+	if err != nil {
+		return launch{}, err
+	}
+	session := d.Get(start.prefix + "_session")
 	var cmd *exec.Cmd
 	if resume {
 		// So does a process that's still open.
@@ -267,9 +295,8 @@ func (c *Crew) launchSession(d Doc, role, wt, prompt string, resume bool, flags 
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
-		// before the prompt.
-		args := append([]string{"--name", d.Get(role + "_name"), "--add-dir", c.Home, "--bg"}, flags...)
-		cmd = c.claude(append(args, prompt)...)
+		// before the prompt. The MCP flags go first: see refreshMCPConfig.
+		cmd = c.claude(slices.Concat([]string{"--name", d.Get(start.prefix + "_name"), "--add-dir", c.Home, "--bg"}, mcp, start.flags, []string{prompt})...)
 	}
 	cmd.Dir = wt
 	raw, _ := cmd.CombinedOutput()
@@ -303,15 +330,19 @@ func (c *Crew) launchSession(d Doc, role, wt, prompt string, resume bool, flags 
 		warn("claude started job %s, but it failed straight away (see 'claude agents')", job)
 		return launch{}, errNotStarted
 	case started == "":
-		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, role, d.Path)
+		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
 	case resume && started != session:
 		warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
 	}
-	mode := "fresh"
+	l := launch{job: job, session: started, mode: "fresh", by: start}
 	if resume {
-		mode = "resume"
+		l.mode = "resume"
+		// It continues the session it was asked to, unless it said otherwise.
+		if started == "" {
+			l.session = session
+		}
 	}
-	return launch{job: job, session: started, mode: mode}, nil
+	return l, nil
 }
 
 // waitForLaunch waits for a job's own process to report the session it loaded,
@@ -335,22 +366,19 @@ func (c *Crew) waitForLaunch(job string) (session string, ok bool) {
 	return "", true
 }
 
-// A launcher starts or resumes the session of a ledger file.
-type launcher func(d Doc, wt, prompt string, resume bool) (launch, error)
-
-// relaunch resumes the session a file records as <role>_session, or starts a
+// relaunch resumes the session a file records as <prefix>_session, or starts a
 // fresh one when it records none, when fresh is set, or when the resume fails. A
 // fresh session gets freshPrompt and then prompt.
-func (c *Crew) relaunch(start launcher, role string, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
-	session := d.Get(role + "_session")
+func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
+	session := d.Get(start.prefix + "_session")
 	if !fresh && session != "" {
-		l, err := start(d, wt, prompt, true)
+		l, err := c.launchSession(start, d, wt, prompt, true)
 		if err != errNotStarted {
 			return l, err
 		}
 		warn("couldn't resume session %s; starting a fresh session instead", session)
 	}
-	l, err := start(d, wt, freshPrompt+"\n"+prompt, false)
+	l, err := c.launchSession(start, d, wt, freshPrompt+"\n"+prompt, false)
 	if err == errNotStarted {
 		return l, fail("could not start a session (see output above)")
 	}
@@ -411,23 +439,27 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 	return c.sessionSettings(settings, p), nil
 }
 
-// launchWorker starts or resumes a task's worker in its worktree. It's the only
-// place a worker's command line is built.
-func (c *Crew) launchWorker(p *Project) launcher {
-	return func(d Doc, wt, prompt string, resume bool) (launch, error) {
-		mcp, err := c.refreshMCPConfig(p)
-		if err != nil {
-			return launch{}, err
-		}
-		settings := ""
-		if !resume {
-			if settings, err = c.workerSettings(p); err != nil {
-				return launch{}, err
-			}
-		}
-		// The MCP flags go first: see refreshMCPConfig.
-		flags := append(mcp, "--agent", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
-			"--autocompact", p.Settings["WORKER_AUTOCOMPACT_WINDOW"], "--settings", settings)
-		return c.launchSession(d, "worker", wt, prompt, resume, flags...)
+// goalLeadSettings is the --settings value goal leads run with: the lead's
+// settings, lead/.claude/settings.json, all but their "agent", as
+// sessionSettings. The lead's session takes its agent from that file, a goal lead
+// from --agent. Not the lead's settings.local.json: a goal lead works in its own
+// checkout.
+func (c *Crew) goalLeadSettings(p *Project) (string, error) {
+	lead, err := readSettings(c.path("lead/.claude/settings.json"))
+	if err != nil {
+		return "", err
 	}
+	lead.del("agent")
+	return c.sessionSettings(lead, p), nil
+}
+
+// launchWorker is the launcher of project p's workers. It fails when their
+// settings do (workerSettings).
+func (c *Crew) launchWorker(p *Project) (launcher, error) {
+	settings, err := c.workerSettings(p)
+	if err != nil {
+		return launcher{}, err
+	}
+	return newLauncher(p, "worker", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
+		"--autocompact", p.Settings["WORKER_AUTOCOMPACT_WINDOW"], "--settings", settings), nil
 }
