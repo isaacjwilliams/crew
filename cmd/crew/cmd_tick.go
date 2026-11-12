@@ -157,31 +157,16 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 		return
 	}
 	// The rest needs the worker free (see busy); a busy one is left for a later
-	// tick. It does at most one thing, in this order: send an unsent review round,
-	// send a restack, or mark the task as waiting on the user. Nothing goes out
-	// twice: last_round_sent and restack_sent record what was sent.
-	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
+	// tick. It does at most one thing, in this order: send what the worker hasn't
+	// had (sendToWorker), or mark the task as waiting on the user.
 	if as.jobBusy(job) {
-		if rounds > sent {
+		if rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent")); rounds > sent {
 			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
 		}
 		return
 	}
-	if rounds > sent {
-		unsent := unsentRounds(t)
-		if c.step(nil, "followup", t.Path) == 0 {
-			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
-		}
+	if c.sendToWorker(p, idx, t) {
 		return
-	}
-	reason := idx.restackReason(t, p.Repo())
-	if st == PROpen && reason != "" && !strings.HasSuffix(reason, " abandoned") && !idx.parentNeedsRestack(t, p.Repo()) {
-		if target := idx.restackTarget(t, p.Repo()); target != "" && t.Get("restack_sent") != target {
-			if c.step(nil, "restack", t.Path) == 0 {
-				fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
-			}
-			return
-		}
 	}
 	// Read the status again: the task may have been merged or abandoned while
 	// the steps above waited on GitHub.
@@ -190,6 +175,30 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 			fmt.Printf("%s: waiting on you (%d open question(s))\n", id, waiting)
 		}
 	}
+}
+
+// sendToWorker resumes a task's idle worker with the first of these it hasn't
+// had: unsent review rounds, or a restack. It reports whether it tried. Nothing
+// goes out twice: last_round_sent and restack_sent record what was sent.
+func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
+	id := t.ID()
+	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
+		unsent := unsentRounds(t)
+		if c.step(nil, "followup", t.Path) == 0 {
+			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
+		}
+		return true
+	}
+	reason := idx.restackReason(t, p.Repo())
+	if t.Status() == PROpen && reason != "" && !strings.HasSuffix(reason, " abandoned") && !idx.parentNeedsRestack(t, p.Repo()) {
+		if target := idx.restackTarget(t, p.Repo()); target != "" && t.Get("restack_sent") != target {
+			if c.step(nil, "restack", t.Path) == 0 {
+				fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // dispatchReady dispatches the ready tasks of running goals, across every
