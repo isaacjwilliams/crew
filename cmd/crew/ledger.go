@@ -368,7 +368,9 @@ func (t Task) NewestReview() int {
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
-// user once the worker has had MAX_CI_FIXES rounds of them.
+// user once the worker has had MAX_CI_FIXES rounds of them. They are the only
+// record of what was reported: crew ci-fix writes them, the Task methods below
+// read them back, and the worker ticks them, so their wording is a contract.
 const (
 	ciFailedOn   = "CI failed on "       // - [ ] CI failed on <sha>: <check>, <check>
 	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
@@ -417,13 +419,16 @@ func (t Task) CIReported(head string) bool {
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
 // round but those that only report red CI. MAX_REVIEW_ROUNDS limits these.
 func (t Task) FeedbackRounds() int {
-	n, counted := 0, true
+	n := 0
+	hasFeedback := true // nothing before the first round counts
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		if strings.HasPrefix(l, "### Round ") {
-			counted = false
-		} else if _, ci := ciLineHead(l, ciFailedOn); !counted && !ci {
+		_, ci := ciLineHead(l, ciFailedOn)
+		switch {
+		case strings.HasPrefix(l, "### Round "):
+			hasFeedback = false
+		case !ci && !hasFeedback:
 			n++
-			counted = true
+			hasFeedback = true
 		}
 	}
 	return n

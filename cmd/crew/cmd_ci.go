@@ -110,20 +110,18 @@ func cmdCIFix(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	max, err := intSetting(p.Settings, "MAX_CI_FIXES")
+	maxFixes, err := intSetting(p.Settings, "MAX_CI_FIXES")
 	if err != nil {
 		return err
 	}
 	if t.PR() == "" {
 		return fail("%s has no PR", t.ID())
 	}
-	if max == 0 {
-		fmt.Println("nothing to do: MAX_CI_FIXES is 0, so crew leaves CI alone")
-		return exitQuietly(3)
+	if maxFixes == 0 {
+		return nothingToDo("MAX_CI_FIXES is 0, so crew leaves CI alone")
 	}
 	if st := t.Status(); st != PROpen {
-		fmt.Printf("nothing to do: %s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)\n", t.ID(), st)
-		return exitQuietly(3)
+		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
 	// Read the PR's head and checks afresh: ci_state is only crew tick's filter.
 	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "headRefOid,statusCheckRollup")
@@ -140,29 +138,34 @@ func cmdCIFix(c *Crew, args []string) error {
 	head := shortSHA(pr.HeadRefOid)
 	state, failed := rollup(pr.StatusCheckRollup)
 	if state != ciFailing {
-		fmt.Printf("nothing to do: CI on %s is %s\n", head, cmp.Or(string(state), "not set up (no checks)"))
-		return exitQuietly(3)
+		return nothingToDo("CI on %s is %s", head, cmp.Or(string(state), "not set up (no checks)"))
 	}
+	// Under the lock, so two runs can't both report the same head.
 	if err := c.lock(); err != nil {
 		return err
 	}
 	if t.CIReported(head) {
-		fmt.Printf("nothing to do: the red CI on %s is reported already\n", head)
-		return exitQuietly(3)
+		return nothingToDo("the red CI on %s is reported already", head)
 	}
 	checks := strings.Join(failed, ", ")
-	if fixes := len(t.CIFailures()); fixes < max {
+	if fixes := len(t.CIFailures()); fixes < maxFixes {
 		n, _ := reviewRound{redCI: &redCI{head, failed}}.add(t, t.PRNumber())
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {
-		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d fix attempts (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, max, checks))
+		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d fix attempts (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
 		t.Log(fmt.Sprintf("CI still red on %s after %d fix attempts; recorded under Open questions for the user", head, fixes))
-		fmt.Printf("CI is still red on %s after %d fix attempts (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, max)
+		fmt.Printf("CI is still red on %s after %d fix attempts (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
 	}
 	t.Touch()
 	c.commit("ci-fix " + p.Name + "/" + t.ID())
 	return nil
+}
+
+// nothingToDo ends crew ci-fix with exit 3, saying why.
+func nothingToDo(format string, a ...any) error {
+	fmt.Printf("nothing to do: "+format+"\n", a...)
+	return exitQuietly(3)
 }
 
 // ciSummaryMarker tags a worker's comment on why CI was red on head, so crew
