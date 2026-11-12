@@ -89,7 +89,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | — | `bin/release/crew-<version>` | The binary for this machine, from the release; gitignored |
 | `cmd/crew/` | — | The CLI, in Go (below); `go.mod` names the module |
 | `.github/workflows/release.yml` | — | On a pushed `v*` tag in the public repo: tests (the Go tests on macOS too), builds the Linux and macOS binaries and publishes them as the release |
-| `.github/release-notes.md` | — | The template for a release's notes, the annotated tag's message, which the lead fills in when a bump PR merges |
+| `.github/release-notes.md` | — | The template for a release's notes, the annotated tag's message. No tool reads it: the lead fills it in by hand when a bump PR merges |
 | `config/defaults.env` | — | Every setting, its default and its comment; read by `crew` |
 | `templates/crew.env` | — | The short starting point for a person's `config/crew.env` (their overrides of `defaults.env`) |
 | `lead/.claude/settings.json` | — | The lead's session, in `lead/`: `"agent": "lead"`, its permission `allow`/`deny` rules, the `crew-guard` hook (role `lead`), which covers its subagents, and the SessionStart hook that loads project memory. Goal leads get the same file without `agent`, with their project in its `env` (`sessionSettings`), as a JSON string to `--settings` |
