@@ -34,6 +34,6 @@
 **Upgrading.**
 - Before you upgrade: <a step>
 - After upgrading: <a step>
-- <Which agents' instructions changed.> Sessions started before the upgrade keep their old instructions until they're compacted or started fresh (a new `lead`, or `crew followup TASK --fresh` for a worker): <what that means for this release's change>.
+- <Which agents' instructions changed.> Sessions started before the upgrade keep their old instructions until they're compacted or started fresh (a new `lead`, or `crew followup TASK --fresh --note "crew was upgraded"` for a worker): <what that means for this release's change>.
 
 **Skipping versions?** Read the v<x.y.z> notes too: <what that release needs you to do>.
