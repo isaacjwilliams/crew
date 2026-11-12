@@ -235,7 +235,7 @@ func (c *Crew) removeSession(job string) bool {
 		return false
 	}
 	if c.claude("rm", job).Run() != nil {
-		warn("couldn't remove worker %s from agent view; delete it in claude agents", job)
+		warn("couldn't remove job %s from agent view; delete it in claude agents", job)
 	}
 	return true
 }
@@ -339,19 +339,19 @@ var (
 // an extra directory. A resume passes only the session and the prompt: a
 // background session keeps the options it was started with (agent, permission
 // mode, settings, --add-dir), and passing any launch flag again makes Claude Code
-// start a copy under a new session instead of continuing this one. Both refresh
-// the project's MCP config first (refreshMCPConfig).
+// start a copy under a new session instead of continuing this one. A fresh
+// session takes the one it replaces out of agent view once it has started. Both
+// refresh the project's MCP config first (refreshMCPConfig).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {
 		return launch{}, err
 	}
 	session := d.Get(start.prefix + "_session")
-	// A resume continues the recorded session, and a fresh start replaces it, so
-	// its process mustn't be left open either way.
-	c.stopIdleSession(c.agents(), session)
 	var cmd *exec.Cmd
 	if resume {
+		// A process that's still open would also make Claude Code start a copy.
+		c.stopIdleSession(c.agents(), session)
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
@@ -393,6 +393,11 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
 	case resume && started != session:
 		warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
+	}
+	// A fresh session replaces the one the file records, so take that one out of
+	// agent view, unless someone is using it.
+	if replaced := d.Get(start.prefix + "_job"); !resume && replaced != "" && !c.agents().jobBusy(replaced) {
+		c.removeSession(replaced)
 	}
 	l := launch{job: job, session: started, mode: "fresh", by: start}
 	if resume {

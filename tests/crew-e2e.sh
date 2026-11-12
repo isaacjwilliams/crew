@@ -292,8 +292,8 @@ sed -i 's/^worker_fingerprint: .*/worker_fingerprint:/' "$F1"; setstate "done" 4
 out=$(crew followup 1 --note "dispatched before fingerprints" 2>&1)
 check "a worker started before crew recorded fingerprints starts fresh on its next followup, and says why" \
   '[[ $out == *"(fresh: its instructions or settings changed)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]] && ! resumed'
-check "a fresh start stops the idle process of the session it replaces" \
-  'grep -qx "claude stop $job" "$HOME/claude-calls.log" && [[ $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .pid" "$HOME/agents.json") == null && $(crew get 1 worker_job) != "$job" ]]'
+check "a fresh start takes the session it replaces out of agent view" \
+  'grep -qx "claude rm $job" "$HOME/claude-calls.log" && [[ -z $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .id" "$HOME/agents.json") && $(crew get 1 worker_job) != "$job" ]]'
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'
 setstate blocked null
 check "a worker that ended its turn on a question doesn't count as running" '[[ $(crew status) == *"workers running: 0/"* ]]'
@@ -699,7 +699,7 @@ check "tick doesn't send the same restack again when the worker didn't manage it
 echo MERGED >"$HOME/gh-pr-state"; setstate "done" null; touch "$HOME/rm-fail"
 out=$(crew tick 2>&1)
 check "tick cleans up merged tasks" '[[ $out == *"014-tick-parent: merged; worktree cleaned up"* && ! -d $WT14 && $(crew get 14 status) == merged ]]'
-check "a worker that won't leave agent view is reported, not a reason to keep the worktree" '[[ $out == *"couldn'"'"'t remove worker $(crew get 14 worker_job) from agent view"* ]]'
+check "a worker that won't leave agent view is reported, not a reason to keep the worktree" '[[ $out == *"couldn'"'"'t remove job $(crew get 14 worker_job) from agent view"* ]]'
 rm -f "$HOME/rm-fail"
 rm -f "$HOME/gh-pr-state"
 
