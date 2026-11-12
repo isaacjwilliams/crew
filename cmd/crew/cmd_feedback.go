@@ -622,12 +622,9 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	text, err := os.ReadFile(args[1])
+	text, err := commentFile(args[1])
 	if err != nil {
-		return fail("can't read %s: %v", args[1], err)
-	}
-	if strings.TrimSpace(string(text)) == "" {
-		return fail("%s is empty", args[1])
+		return err
 	}
 	if t.PR() == "" {
 		return fail("task has no PR")
@@ -644,27 +641,51 @@ func cmdReviewSummary(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	repo, num := p.Repo(), t.PRNumber()
-	// summaryMarker finds this comment again; replyMarker keeps crew feedback from
-	// reading it back as the user's feedback.
-	marker := summaryMarker(review)
-	body := strings.TrimRight(string(text), "\n") + "\n\n" + marker + "\n" + replyMarker
-	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
+	num := t.PRNumber()
+	edited, err := postOrEditComment(p.Repo(), num, me, summaryMarker(review), text)
 	if err != nil {
 		return err
+	}
+	if edited {
+		fmt.Printf("updated the automated-review summary on PR #%s\n", num)
+	} else {
+		fmt.Printf("posted the automated-review summary on PR #%s\n", num)
+	}
+	return nil
+}
+
+// commentFile is the text of a comment a worker wrote to a file, to post.
+func commentFile(path string) (string, error) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return "", fail("can't read %s: %v", path, err)
+	}
+	if strings.TrimSpace(string(text)) == "" {
+		return "", fail("%s is empty", path)
+	}
+	return string(text), nil
+}
+
+// postOrEditComment posts text on PR #num, tagged with marker, which finds it
+// again, and with replyMarker, which keeps crew feedback from reading it back as
+// the user's feedback. When this GitHub account (me) has a comment with that
+// marker there already, it edits that one to text instead, and says so.
+func postOrEditComment(repo, num, me, marker, text string) (edited bool, err error) {
+	body := strings.TrimRight(text, "\n") + "\n\n" + marker + "\n" + replyMarker
+	comments, err := ghList(repo, "repos/{owner}/{repo}/issues/"+num+"/comments")
+	if err != nil {
+		return false, err
 	}
 	for _, cm := range comments {
 		if cm.whose(me) == "me" && strings.Contains(cm.Body, marker) {
 			if _, err := gh(repo, "api", "--silent", "--method", "PATCH", "repos/{owner}/{repo}/issues/comments/"+cm.ID.String(), "-f", "body="+body); err != nil {
-				return quietly(err)
+				return false, quietly(err)
 			}
-			fmt.Printf("updated the automated-review summary on PR #%s\n", num)
-			return nil
+			return true, nil
 		}
 	}
 	if _, err := gh(repo, "api", "--silent", "repos/{owner}/{repo}/issues/"+num+"/comments", "-f", "body="+body); err != nil {
-		return quietly(err)
+		return false, quietly(err)
 	}
-	fmt.Printf("posted the automated-review summary on PR #%s\n", num)
-	return nil
+	return false, nil
 }
