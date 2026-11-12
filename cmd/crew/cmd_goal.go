@@ -267,12 +267,14 @@ func (c *Crew) goalInFlight(g Goal) int {
 }
 
 // workerQuestions are a task's open questions from its worker: the unchecked
-// items under Open questions, leaving out the collaborators' PR comments crew
-// feedback records there ("@login …"), which are for the user.
+// items under Open questions, leaving out the two kinds crew records there for
+// the user: collaborators' PR comments from crew feedback ("@login …"), and
+// crew ci-fix's question once CI is still red past MAX_CI_FIXES.
 func workerQuestions(t Task) string {
 	var qs []string
 	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
-		if strings.HasPrefix(l, "- [ ]") && !strings.HasPrefix(l, "- [ ] @") {
+		_, redCI := ciLineHead(l, ciStillRedOn)
+		if strings.HasPrefix(l, "- [ ]") && !strings.HasPrefix(l, "- [ ] @") && !redCI {
 			qs = append(qs, l)
 		}
 	}
