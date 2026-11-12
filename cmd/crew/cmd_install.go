@@ -32,6 +32,13 @@ import (
 // enabled services.
 var runtimeTools = []string{"git", "gh", "claude", "curl"}
 
+// installedAgents is where crew install puts the home's agents, and where Claude
+// Code loads them from: a session's --agent and the subagents it runs.
+func installedAgents() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "agents")
+}
+
 const minClaude = "2.1.281"
 
 // linkedCommands are the home's bin/ commands crew install links into
@@ -108,12 +115,12 @@ func cmdInstall(c *Crew, args []string) error {
 	say("Installing agent profiles → ~/.claude/agents/")
 	agents, _ := filepath.Glob(c.path("agents", "*.md"))
 	for _, f := range agents {
-		if err := in.install("agents", f, filepath.Join(home, ".claude/agents", filepath.Base(f))); err != nil {
+		if err := in.install("agents", f, filepath.Join(installedAgents(), filepath.Base(f))); err != nil {
 			return err
 		}
 		note("%s", strings.TrimSuffix(filepath.Base(f), ".md"))
 	}
-	in.prune("agents", filepath.Join(home, ".claude/agents"), nil)
+	in.prune("agents", installedAgents(), nil)
 
 	// Hooks find crew-guard through CREW_HOME, and so do sessions that run crew.
 	say("Crew home: %s", c.Home)

@@ -53,7 +53,7 @@ func cmdDoctor(c *Crew, args []string) error {
 	d.check(fmt.Sprintf("crew's binary is version %s, as VERSION says", version), version == c.crewVersion(), "run crew install, or remove bin/release/ so bin/crew fetches the right one")
 	fmt.Println("Agents")
 	for _, a := range []string{"lead", "implementer", "casual-observer", "plan-reviewer", "reviewer", "gardener", "goal-lead"} {
-		d.check(a, isFile(filepath.Join(home, ".claude/agents", a+".md")), "run crew install")
+		d.check(a, isFile(filepath.Join(installedAgents(), a+".md")), "run crew install")
 	}
 	// Your shell finds crew and lead through these links, and so do the workers
 	// of a Claude Code daemon started from your shell.

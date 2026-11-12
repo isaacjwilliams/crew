@@ -369,7 +369,9 @@ func TestAgentFilesAreTheAgentsOwnAndEverySubagents(t *testing.T) {
 	for _, a := range []string{"lead", "goal-lead", "implementer", "gardener", "reviewer", "casual-observer"} {
 		os.WriteFile(c.path("agents", a+".md"), []byte(a), 0o644)
 	}
-	want := []string{"agents/implementer.md", "agents/casual-observer.md", "agents/reviewer.md"}
+	t.Setenv("HOME", t.TempDir())
+	installed := installedAgents()
+	want := []string{installed + "/implementer.md", installed + "/casual-observer.md", installed + "/reviewer.md"}
 	if got := c.agentFiles("implementer"); !slices.Equal(got, want) {
 		t.Errorf("agentFiles(implementer) = %v, want %v", got, want)
 	}
@@ -394,16 +396,17 @@ func TestSessionRolesAreTheAgentsTheLeadMayNotRunAsSubagents(t *testing.T) {
 }
 
 func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
-	c := &Crew{Home: t.TempDir()}
-	missing := c.fingerprint([]string{"--agent", "x"}, "agents/x.md")
-	os.Mkdir(c.path("agents"), 0o755)
-	os.WriteFile(c.path("agents", "x.md"), nil, 0o644)
-	empty := c.fingerprint([]string{"--agent", "x"}, "agents/x.md")
+	c, f := &Crew{}, filepath.Join(t.TempDir(), "x.md")
+	missing := c.fingerprint([]string{"--agent", "x"}, f)
+	os.WriteFile(f, nil, 0o644)
+	empty := c.fingerprint([]string{"--agent", "x"}, f)
 	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(missing) || missing == empty {
 		t.Errorf("fingerprint with the file missing = %q, empty = %q", missing, empty)
 	}
-	if c.fingerprint([]string{"--agent", "x"}, "agents/x.md") != empty {
-		t.Error("the same flags and files fingerprint differently")
+	moved := filepath.Join(t.TempDir(), "x.md")
+	os.WriteFile(moved, nil, 0o644)
+	if c.fingerprint([]string{"--agent", "x"}, moved) != empty {
+		t.Error("the same file in another directory fingerprints differently")
 	}
 }
 

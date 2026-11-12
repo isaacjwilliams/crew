@@ -57,7 +57,7 @@ func cmdLead(c *Crew, args []string) error {
 // leadFingerprint is the fingerprint of what a lead loads when it starts: its
 // settings and its agent files (see fingerprint).
 func (c *Crew) leadFingerprint() string {
-	return c.fingerprint(nil, append([]string{"lead/.claude/settings.json"}, c.agentFiles("lead")...)...)
+	return c.fingerprint(nil, append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
 
 // crew lead --hook, the lead's UserPromptSubmit hook: Claude Code adds what it

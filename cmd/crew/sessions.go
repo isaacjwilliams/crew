@@ -265,24 +265,27 @@ func (c *Crew) newLauncher(p *Project, prefix, agent string, flags ...string) la
 // them as a subagent, and a test checks the two lists agree.
 var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener"}
 
-// agentFiles are the files in the home that a session of agent loads its
-// instructions from: its own agent file, and every subagent's. Which subagents
-// it runs is said only in its instructions, so they all count.
+// agentFiles are the files a session of agent loads its instructions from: the
+// installed copies (installedAgents) of its own agent file and of every
+// subagent's that the home ships. Which subagents it runs is said only in its
+// instructions, so they all count. The installed copies are what Claude Code
+// loads, so an agent the home has but crew install hasn't copied yet doesn't
+// count until it has.
 func (c *Crew) agentFiles(agent string) []string {
-	files := []string{"agents/" + agent + ".md"}
-	all, _ := filepath.Glob(c.path("agents", "*.md"))
-	for _, f := range all {
+	files := []string{filepath.Join(installedAgents(), agent+".md")}
+	shipped, _ := filepath.Glob(c.path("agents", "*.md"))
+	for _, f := range shipped {
 		if name := strings.TrimSuffix(filepath.Base(f), ".md"); !slices.Contains(sessionRoles, name) {
-			files = append(files, "agents/"+name+".md")
+			files = append(files, filepath.Join(installedAgents(), name+".md"))
 		}
 	}
 	return files
 }
 
 // fingerprint is a short hash of what a session loads when it starts: args, its
-// launch flags, and files, paths in the home, each with what it holds. Skills
-// don't count: a session loads them from the home each time it uses one. A
-// missing file counts as missing, so a home without it still works.
+// launch flags, and files, each by its name and what it holds. Skills don't
+// count: a session loads them from the home each time it uses one. A missing
+// file counts as missing, so a home without it still works.
 func (c *Crew) fingerprint(args []string, files ...string) string {
 	h := sha256.New()
 	// Each part goes in with its length, so no two lists of parts hash alike.
@@ -291,11 +294,14 @@ func (c *Crew) fingerprint(args []string, files ...string) string {
 		add(a)
 	}
 	for _, f := range files {
-		if b, err := os.ReadFile(c.path(f)); err == nil {
-			add(f)
+		// By name, not path: a task that moves to a machine with another home
+		// directory loads the same files.
+		name := filepath.Base(f)
+		if b, err := os.ReadFile(f); err == nil {
+			add(name)
 			add(string(b))
 		} else {
-			add(f + " is missing")
+			add(name + " is missing")
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]

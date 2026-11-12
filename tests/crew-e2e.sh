@@ -10,6 +10,9 @@ isolate_home "$SB/home"
 export CLAUDECODE=1          # crew must strip this before launching claude
 L=$HOME/crew
 make_home "$L"
+# Copies the home's agents to where Claude Code loads them from, as crew install does.
+install_agents() { mkdir -p "$HOME/.claude/agents" && cp "$L"/agents/*.md "$HOME/.claude/agents/"; }
+install_agents
 # The home's origin: the person's private repo, which the ledger is pushed to.
 git init -q --bare "$SB/home.git" && git -C "$L" remote add origin "$SB/home.git" && git -C "$L" push -q -u origin main
 # This machine runs the crew: it holds the lease, as `crew host up` would leave it.
@@ -68,13 +71,13 @@ crew lead hello >/dev/null 2>&1; fp=$(tail -1 "$HOME/claude-fingerprint.log" | c
 check "crew lead passes claude the fingerprint of what a lead loads" '[[ $fp =~ ^[0-9a-f]{12}$ && $(tail -1 "$HOME/claude-fingerprint.log") == "$fp claude --name lead"*" hello" ]]'
 out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook); st=$?
 check "the lead's hook says nothing while what a lead loads is unchanged" '((st == 0)) && [[ -z $out ]]'
-echo "# changed" >>"$L/agents/lead.md"
+echo "# changed" >>"$L/agents/lead.md"; install_agents
 out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook); st=$?
 check "after agents/lead.md changes, the lead's hook tells the session to have the user start a new lead" \
   '((st == 0)) && [[ $out == "crew'"'"'s lead instructions or settings changed since this session started (crew is now $(cat "$L/VERSION")). Tell the user once, briefly, that they should quit and start a new lead to get them." ]]'
 out=$(env -u CREW_LEAD_FINGERPRINT crew lead --hook); st=$?
 check "the lead's hook says nothing in a session crew lead didn't start" '((st == 0)) && [[ -z $out ]]'
-git -C "$L" checkout -q -- agents
+git -C "$L" checkout -q -- agents; install_agents
 mv "$PD/local.env" "$HOME/local.env.saved"
 out=$(crew new "No clone here" --project "$P" 2>&1)
 check "a project with no clone on this machine fails clearly" '[[ $out == *"no clone of $P on this machine"* ]]'
@@ -258,7 +261,7 @@ version=$(cat "$L/VERSION"); echo 99.0.0 >"$L/VERSION"
 out=$(CREW_VERSION=$version followup1 "a new version")
 git -C "$L" checkout -q -- VERSION
 check "with nothing a worker loads changed, a followup resumes it, even after the home's VERSION changes" '[[ $out == *"(resume)"* ]] && resumed'
-echo "# changed" >>"$L/agents/lead.md"; echo "# changed" >>"$L/.claude/skills/pr-review/SKILL.md"
+echo "# changed" >>"$L/agents/lead.md"; install_agents; echo "# changed" >>"$L/.claude/skills/pr-review/SKILL.md"
 out=$(followup1 "the lead and a skill changed")
 check "a change to the lead's agent file or a skill doesn't start a worker fresh" '[[ $out == *"(resume)"* ]] && resumed'
 # starts_fresh WHAT: a followup after WHAT changed starts the worker fresh, records
@@ -269,12 +272,14 @@ starts_fresh() {
   check "a followup after $1 changes starts the worker fresh, records the new fingerprint, and logs why" \
     '[[ $out == *"(fresh: its instructions or settings changed)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ && $(crew get 1 worker_fingerprint) != "$before" && $(tail -1 "$F1") == *"followup (fresh: its instructions or settings changed): worker $(crew get 1 worker_job)"* ]] && ! resumed && [[ $(last_launch) == *"--agent implementer "*"You are picking up task"* ]]'
 }
-echo "# changed" >>"$L/agents/implementer.md"; starts_fresh agents/implementer.md
-echo "# changed" >>"$L/agents/reviewer.md"; starts_fresh "a subagent's file, agents/reviewer.md,"
+echo "# changed" >>"$L/agents/implementer.md"; out=$(followup1 "the home's implementer changed, not installed yet")
+check "a change to an agent in the home that crew install hasn't copied yet doesn't start a worker fresh" '[[ $out == *"(resume)"* ]] && resumed'
+install_agents; starts_fresh agents/implementer.md
+echo "# changed" >>"$L/agents/reviewer.md"; install_agents; starts_fresh "a subagent's file, agents/reviewer.md,"
 jq '.permissions.allow += ["Bash(make test)"]' "$L/config/worker-settings.json" >"$HOME/ws" && mv "$HOME/ws" "$L/config/worker-settings.json"
 starts_fresh config/worker-settings.json
 echo 'WORKER_PERMISSION_MODE=acceptEdits' >>"$PE"; starts_fresh WORKER_PERMISSION_MODE
-sed -i '/^WORKER_PERMISSION_MODE=acceptEdits$/d' "$PE"; git -C "$L" checkout -q -- agents config .claude
+sed -i '/^WORKER_PERMISSION_MODE=acceptEdits$/d' "$PE"; git -C "$L" checkout -q -- agents config .claude; install_agents
 followup1 "back as it was" >/dev/null; out=$(followup1 "nothing changed since")
 check "the next followup resumes the worker it started fresh" '[[ $out == *"(resume)"* ]] && resumed'
 sed -i 's/^worker_fingerprint: .*/worker_fingerprint:/' "$F1"; setstate "done" 4242; job=$(crew get 1 worker_job)
@@ -808,11 +813,11 @@ check "tick sends the note once the goal lead is free" '[[ $out == *"goal $G: in
 rm -rf "$CO"; setstate "done" null   # as on a machine the goal moved to
 crew goal note 1 "Keep the header small" >/dev/null 2>&1
 check "a goal followup brings back a goal lead's checkout that isn't here" '[[ -d $CO && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) && $(last_launch) == "claude --resume "*"New input for goal $G"* ]]'
-before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; setstate "done" null
+before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; install_agents; setstate "done" null
 out=$(crew goal note 1 "Keep the footer small" 2>&1)
 check "a goal followup after agents/goal-lead.md changes starts the goal lead fresh, records the new fingerprint, and logs why" \
   '[[ $out == *"input sent to its goal lead (fresh: its instructions or settings changed)"* && $(gget "$GF" lead_fingerprint) != "$before" && $(tail -1 "$GF") == *"followup (fresh: its instructions or settings changed): goal lead "* && $(last_launch) == *"--agent goal-lead "*"is already under way"* ]]'
-git -C "$L" checkout -q -- agents; GJ=$(gget "$GF" lead_job)
+git -C "$L" checkout -q -- agents; install_agents; GJ=$(gget "$GF" lead_job)
 crew set "$GT1" status merged; crew set "$GT2" status abandoned; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick closes a goal once every task is merged or abandoned, removing its goal lead and checkout" '[[ $out == *"goal $G: done"* && $(gget "$GF" status) == done && ! -d $CO && -z $(gget "$GF" checkout) ]] && grep -qx "claude rm $GJ" "$HOME/claude-calls.log"'
