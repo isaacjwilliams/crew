@@ -561,6 +561,13 @@ echo 'MAX_CI_FIXES=0' >>"$PE"; ci bbbb2222ffff test:FAILURE
 out=$(crew tick 2>/dev/null)
 check "with MAX_CI_FIXES=0, crew leaves red CI alone" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == pr-open ]] && ! grep -q bbbb222 "$F13"'
 sed -i '/^MAX_CI_FIXES=0$/d' "$PE"
+printf '#!/bin/sh\ncrew set 13 status abandoned\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
+out=$(crew ci-fix 13)
+check "a task abandoned while crew ci-fix reads GitHub is sent nothing" '[[ $out == *"is abandoned"* && $(crew get 13 review_rounds) == 9 && $(crew get 13 status) == abandoned ]] && ! grep -q bbbb222 "$F13"'
+rm "$HOME/gh-pr-view-hook"; n=$(resumes)
+out=$(crew followup 13 --note "carry on" 2>&1)
+check "crew followup won't resume the worker of an abandoned task" '[[ $out == *"013-tick-routing is abandoned; not resuming its worker"* && $(resumes) == "$n" && $(crew get 13 status) == abandoned ]]'
+crew set 13 status pr-open
 echo CLOSED >"$HOME/gh-pr-state"
 out=$(crew tick 2>/dev/null); byhand=$(crew ci-fix 13)
 check "red CI on a PR closed without merging is left alone, by tick and by hand" '[[ -z $out && $byhand == *"PR #12 is closed"* && $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open && $(crew get 13 review_rounds) == 9 ]]'

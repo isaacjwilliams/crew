@@ -120,9 +120,6 @@ func cmdCIFix(c *Crew, args []string) error {
 	if maxFixes == 0 {
 		return nothingToDo("MAX_CI_FIXES is 0, so crew leaves CI alone")
 	}
-	if st := t.Status(); st != PROpen {
-		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
-	}
 	// Read the PR afresh: ci_state is only crew tick's filter, and crew sync leaves
 	// the status of a task whose PR was closed unmerged as it was.
 	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,headRefOid,statusCheckRollup")
@@ -145,9 +142,13 @@ func cmdCIFix(c *Crew, args []string) error {
 	if state != ciFailing {
 		return nothingToDo("CI on %s is %s", head, cmp.Or(string(state), "not set up (no checks)"))
 	}
-	// Under the lock, so two runs can't both report the same head.
+	// The task's status is read under the lock, so one abandoned while gh ran
+	// isn't sent anything, and two runs can't both report the same head.
 	if err := c.lock(); err != nil {
 		return err
+	}
+	if st := t.Status(); st != PROpen {
+		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
 	if t.CIReported(head) {
 		return nothingToDo("the red CI on %s is reported already", head)

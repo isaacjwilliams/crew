@@ -219,6 +219,7 @@ you review on GitHub → tell the lead (or run it yourself):
                          # skips: anyone else's comments, replies tagged <!-- crew -->,
                          #        comments in PENDING reviews; inline comments timed by review submitted_at
   crew followup TASK     # refuses if the worker is busy (mid-turn or on an open prompt), or if there's no new round and no --note
+                         # refuses a merged or abandoned task, checked under the ledger lock
                          # a worker that isn't busy but whose process is still open (pid set) → claude stop <job> first
                          # resume: claude --resume <worker_session> --bg "<prompt>" in the worktree, with no launch flags:
                          #   the session keeps its own agent, permission mode, settings and --add-dir, and

@@ -89,6 +89,11 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Under the lock: a task merged or abandoned since crew tick looked at it, or
+	// while crew feedback or crew ci-fix read GitHub, keeps its worker stopped.
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
 	l, err := c.relaunch(c.launchWorker(p), "worker", t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
 		t.ID(), p.Name, t.Path, wt), fresh)
