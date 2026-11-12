@@ -99,7 +99,7 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    Then run the checks and push.
 3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and this pass has run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-5. If the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 7 of "Workflow: review rounds".
+5. If the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
 
 After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3.
 
