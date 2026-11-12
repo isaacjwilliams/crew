@@ -4,6 +4,8 @@ package main
 // running claude itself.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -244,26 +246,73 @@ type launcher struct {
 	p      *Project
 	prefix string   // of the file's keys for the session: worker_name, lead_session, …
 	flags  []string // a fresh session's launch flags, but for its name and MCP config
+	// fingerprint is what a fresh session loads now: its flags and agent files.
+	fingerprint string
 }
 
 // newLauncher is the launcher of agent's sessions for project p, whose keys
 // start with prefix, with these launch flags besides the agent.
-func newLauncher(p *Project, prefix, agent string, flags ...string) launcher {
-	return launcher{p: p, prefix: prefix, flags: append([]string{"--agent", agent}, flags...)}
+func (c *Crew) newLauncher(p *Project, prefix, agent string, flags ...string) launcher {
+	flags = append([]string{"--agent", agent}, flags...)
+	return launcher{p: p, prefix: prefix, flags: flags, fingerprint: c.fingerprint(flags, c.agentFiles(agent)...)}
+}
+
+// sessionRoles are the agents that run as sessions of their own. Every other
+// agent is a subagent, which a session may run.
+var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener"}
+
+// agentFiles are the files in the home that a session of agent loads its
+// instructions from: its own agent file, and every subagent's. Which subagents
+// it runs is said only in its instructions, so they all count.
+func (c *Crew) agentFiles(agent string) []string {
+	files := []string{"agents/" + agent + ".md"}
+	all, _ := filepath.Glob(c.path("agents", "*.md"))
+	for _, f := range all {
+		if name := strings.TrimSuffix(filepath.Base(f), ".md"); !slices.Contains(sessionRoles, name) {
+			files = append(files, "agents/"+name+".md")
+		}
+	}
+	return files
+}
+
+// fingerprint is a short hash of what a session loads when it starts: args, its
+// launch flags, and files, paths in the home, each with what it holds. Skills
+// don't count: a session loads them from the home each time it uses one. A
+// missing file counts as missing, so a home without it still works.
+func (c *Crew) fingerprint(args []string, files ...string) string {
+	h := sha256.New()
+	// Each part goes in with its length, so no two lists of parts hash alike.
+	add := func(s string) { fmt.Fprintf(h, "%d:%s", len(s), s) }
+	for _, a := range args {
+		add(a)
+	}
+	for _, f := range files {
+		if b, err := os.ReadFile(c.path(f)); err == nil {
+			add(f)
+			add(string(b))
+		} else {
+			add(f + " is missing")
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // A started (or resumed) background session.
 type launch struct {
 	job, session string
-	mode         string   // "fresh" or "resume"
+	mode         string   // "resume", "fresh", or "fresh: <why>" when crew chose it
 	by           launcher // what started it
 }
 
-// record notes the session in d, the ledger file it was launched for. It's the
-// only place a session's keys are set.
+// record notes the session in d, the ledger file it was launched for: its job
+// and session, and for a fresh session, the fingerprint of what it loaded. It's
+// the only place a session's keys are set.
 func (l launch) record(d Doc) {
 	d.Set(l.by.prefix+"_job", l.job)
 	d.Set(l.by.prefix+"_session", l.session)
+	if l.mode != "resume" {
+		d.Set(l.by.prefix+"_fingerprint", l.by.fingerprint)
+	}
 }
 
 // errNotStarted: claude started no session, so starting a fresh one instead is safe.
@@ -288,10 +337,11 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 		return launch{}, err
 	}
 	session := d.Get(start.prefix + "_session")
+	// A resume continues the recorded session, and a fresh start replaces it, so
+	// its process mustn't be left open either way.
+	c.stopIdleSession(c.agents(), session)
 	var cmd *exec.Cmd
 	if resume {
-		// So does a process that's still open.
-		c.stopIdleSession(c.agents(), session)
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
@@ -367,11 +417,20 @@ func (c *Crew) waitForLaunch(job string) (session string, ok bool) {
 }
 
 // relaunch resumes the session a file records as <prefix>_session, or starts a
-// fresh one when it records none, when fresh is set, or when the resume fails. A
-// fresh session gets freshPrompt and then prompt.
+// fresh one when it records none, when fresh is set, when the resume fails, or
+// when the session would run on old instructions or settings: its recorded
+// <prefix>_fingerprint isn't the launcher's. A fresh session gets freshPrompt and
+// then prompt.
 func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
-	session := d.Get(start.prefix + "_session")
-	if !fresh && session != "" {
+	session, why := d.Get(start.prefix+"_session"), ""
+	switch recorded := d.Get(start.prefix + "_fingerprint"); {
+	case fresh || session == "":
+		// Fresh already, and nothing more to say why.
+	case recorded == "":
+		why = "started before crew recorded what sessions load"
+	case recorded != start.fingerprint:
+		why = "its instructions or settings changed"
+	default:
 		l, err := c.launchSession(start, d, wt, prompt, true)
 		if err != errNotStarted {
 			return l, err
@@ -381,6 +440,9 @@ func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, f
 	l, err := c.launchSession(start, d, wt, freshPrompt+"\n"+prompt, false)
 	if err == errNotStarted {
 		return l, fail("could not start a session (see output above)")
+	}
+	if why != "" {
+		l.mode = "fresh: " + why
 	}
 	return l, err
 }
@@ -460,6 +522,6 @@ func (c *Crew) launchWorker(p *Project) (launcher, error) {
 	if err != nil {
 		return launcher{}, err
 	}
-	return newLauncher(p, "worker", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
+	return c.newLauncher(p, "worker", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
 		"--autocompact", p.Settings["WORKER_AUTOCOMPACT_WINDOW"], "--settings", settings), nil
 }

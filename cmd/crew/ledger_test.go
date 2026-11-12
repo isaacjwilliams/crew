@@ -363,6 +363,32 @@ echo '[{"id":"a1","state":"working","pid":4242,"status":"busy","sessionId":"a1-s
 	}
 }
 
+func TestAgentFilesAreTheAgentsOwnAndEverySubagents(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	os.Mkdir(c.path("agents"), 0o755)
+	for _, a := range []string{"lead", "goal-lead", "implementer", "gardener", "reviewer", "casual-observer"} {
+		os.WriteFile(c.path("agents", a+".md"), []byte(a), 0o644)
+	}
+	want := []string{"agents/implementer.md", "agents/casual-observer.md", "agents/reviewer.md"}
+	if got := c.agentFiles("implementer"); !slices.Equal(got, want) {
+		t.Errorf("agentFiles(implementer) = %v, want %v", got, want)
+	}
+}
+
+func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	missing := c.fingerprint([]string{"--agent", "x"}, "agents/x.md")
+	os.Mkdir(c.path("agents"), 0o755)
+	os.WriteFile(c.path("agents", "x.md"), nil, 0o644)
+	empty := c.fingerprint([]string{"--agent", "x"}, "agents/x.md")
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(missing) || missing == empty {
+		t.Errorf("fingerprint with the file missing = %q, empty = %q", missing, empty)
+	}
+	if c.fingerprint([]string{"--agent", "x"}, "agents/x.md") != empty {
+		t.Error("the same flags and files fingerprint differently")
+	}
+}
+
 func TestProposalAuthor(t *testing.T) {
 	for source, want := range map[string]string{
 		"gardener": "the gardener", "user": "the user", "lead": "a lead",

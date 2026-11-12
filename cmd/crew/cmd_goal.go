@@ -109,7 +109,7 @@ func (c *Crew) launchGoalLead(p *Project) (launcher, error) {
 	if err != nil {
 		return launcher{}, err
 	}
-	return newLauncher(p, "lead", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings), nil
+	return c.newLauncher(p, "lead", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings), nil
 }
 
 // crew goal start GOAL: starts its goal lead, which plans every item.
