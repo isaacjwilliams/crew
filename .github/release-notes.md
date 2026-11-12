@@ -16,8 +16,9 @@
        collaborators will see (comments, reactions, reruns).
      - Upgrading is always there. When there are no steps, it's just "**Upgrading.** Nothing to do:
        `crew upgrade` installs everything." When an agent's instructions changed
-       (`git diff <last tag>..<merge sha> -- agents/ .claude/`), add the line about sessions
-       started before the upgrade, and say what it means for this release's change.
+       (`git diff <last tag>..<merge sha> -- agents/`), add the line about sessions started
+       before the upgrade, and say what it means for this release's change. A skill's changes
+       (`.claude/skills/`) reach running sessions the next time they use it, so they need no line.
      - Skipping versions: only when an earlier release has upgrade steps that someone skipping it
        would miss. -->
 **<What changed for people who run crew, in a sentence.>** <What it does, for whom, and any new command or setting with its default.>
