@@ -135,7 +135,13 @@ func (c *Crew) installRelease(tag string, yes bool) error {
 
 // liftUpgradePause lifts the pauses crew upgrade made: this run's, and any a
 // run cut short left. It knows them by their mark, so it leaves the user's own.
+// It reads the marks under the ledger lock, so a crew pause that takes one over
+// meanwhile keeps it.
 func (c *Crew) liftUpgradePause(projects []*Project) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
 	ours := slices.DeleteFunc(slices.Clone(projects), func(p *Project) bool { return p.PausedBy() != pausedByUpgrade })
 	return c.resume(ours)
 }
