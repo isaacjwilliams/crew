@@ -187,7 +187,7 @@ func cmdInstall(c *Crew, args []string) error {
 	if askAgentsMD && !exists(declined) && !agentsMDOn(home) {
 		say("AGENTS.md loading")
 		note("Claude Code reads AGENTS.md automatically, but only when a repo has no CLAUDE.md.")
-		if yes || confirm("In repos that have both, load CLAUDE.md and AGENTS.md together?") {
+		if yes || confirm("In repos that have both, load CLAUDE.md and AGENTS.md together?", true) {
 			in.mergeSettings(func(o *object) {
 				o.child("pluginConfigs").child("agents-md@builtin").child("options").set("instructionFiles", "claude-md-and-agents-md")
 			})
@@ -450,15 +450,22 @@ func (in *installer) writeLeadLocalSettings() {
 	note("wrote %s", tilde(in.home, f))
 }
 
-// confirm asks a yes-or-no question, yes unless the user answers no. Without a
-// terminal it reads the answer from stdin, and no answer is yes.
-func confirm(question string) bool {
+// confirm asks a yes-or-no question. An empty answer is byDefault. Without a
+// terminal it reads the answer from stdin, and no answer is byDefault too.
+func confirm(question string, byDefault bool) bool {
 	if stdinIsTerminal() {
-		fmt.Fprintf(os.Stderr, "  %s [Y/n] ", question)
+		hint := "[y/N]"
+		if byDefault {
+			hint = "[Y/n]"
+		}
+		fmt.Fprintf(os.Stderr, "  %s %s ", question, hint)
 	}
 	a, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	a = strings.TrimSpace(a)
-	return a == "" || regexp.MustCompile(`^[Yy]`).MatchString(a)
+	if a == "" {
+		return byDefault
+	}
+	return regexp.MustCompile(`^[Yy]`).MatchString(a)
 }
 
 // stdinIsTerminal: a person can answer on stdin, rather than a script or a test.

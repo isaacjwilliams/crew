@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// pausedByUpgrade is the by of the mark crew upgrade is to write, and lift once
+// pausedByUpgrade is the by of the mark crew upgrade writes, and lifts once
 // it's done. Any other pause replaces it, so the user's pause outlasts the
 // upgrade.
 const pausedByUpgrade = "crew upgrade"
@@ -246,8 +246,8 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 	var names []string
 	for _, p := range projects {
 		names = append(names, p.Name)
-		// crew upgrade's pause gives way to any other: the upgrade is to lift only
-		// a mark it wrote, so it won't lift the user's.
+		// crew upgrade's pause gives way to any other: the upgrade lifts only a
+		// mark it wrote, so it won't lift the user's.
 		if p.Paused() && p.PausedBy() != pausedByUpgrade {
 			fmt.Printf("%s was already paused\n", p.Name)
 			continue
@@ -382,6 +382,7 @@ func (c *Crew) resume(projects []*Project) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	defer c.unlock()
 	var resumed []string
 	for _, p := range projects {
 		if !p.Paused() {

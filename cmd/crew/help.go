@@ -18,8 +18,11 @@ Setup
   crew setup [--name NAME]         Once, in a fresh clone of the public crew repo: make
                                    your private repo (NAME, default crew) its origin,
                                    with the public one as upstream, and run the crew here
-  crew upgrade                     Merge the public repo's new version, install it,
-                                   push, and restart the lead's server
+  crew upgrade [--yes]             Pause the crew while sessions wrap up, merge the
+                                   public repo's new version, install it, push,
+                                   restart the lead's server, and lift the pause.
+                                   It asks first; --yes is the answer without a
+                                   terminal, and answers crew install's questions
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
                                    to crew and lead in ~/.local/bin, fish
