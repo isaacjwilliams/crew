@@ -403,11 +403,6 @@ func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
 	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(missing) || missing == empty {
 		t.Errorf("fingerprint with the file missing = %q, empty = %q", missing, empty)
 	}
-	moved := filepath.Join(t.TempDir(), "x.md")
-	os.WriteFile(moved, nil, 0o644)
-	if c.fingerprint([]string{"--agent", "x"}, moved) != empty {
-		t.Error("the same file in another directory fingerprints differently")
-	}
 }
 
 func TestProposalAuthor(t *testing.T) {

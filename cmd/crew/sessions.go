@@ -283,7 +283,7 @@ func (c *Crew) agentFiles(agent string) []string {
 }
 
 // fingerprint is a short hash of what a session loads when it starts: args, its
-// launch flags, and files, each by its name and what it holds. Skills don't
+// launch flags, and files, each by its path and what it holds. Skills don't
 // count: a session loads them from the home each time it uses one. A missing
 // file counts as missing, so a home without it still works.
 func (c *Crew) fingerprint(args []string, files ...string) string {
@@ -294,14 +294,11 @@ func (c *Crew) fingerprint(args []string, files ...string) string {
 		add(a)
 	}
 	for _, f := range files {
-		// By name, not path: a task that moves to a machine with another home
-		// directory loads the same files.
-		name := filepath.Base(f)
 		if b, err := os.ReadFile(f); err == nil {
-			add(name)
+			add(f)
 			add(string(b))
 		} else {
-			add(name + " is missing")
+			add(f + " is missing")
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
