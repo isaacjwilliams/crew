@@ -22,6 +22,7 @@ worker_session:
 worker_fingerprint:
 review_rounds: 0
 last_round_sent: 0
+interrupted:
 feedback_since:
 questions_routed:
 created: {{NOW}}

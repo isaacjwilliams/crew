@@ -36,8 +36,9 @@ func cmdFollowup(c *Crew, args []string) error {
 	return c.followup(t, fresh, note)
 }
 
-// followup resumes a task's worker with the review rounds it hasn't been sent, or
-// a note, or both; or starts a fresh worker when fresh is set or the resume fails.
+// followup resumes a task's worker with the review rounds it hasn't been sent, a
+// note, or word that a pause cut its last turn short (interrupted), or several of
+// these; or starts a fresh worker when fresh is set or the resume fails.
 func (c *Crew) followup(t Task, fresh bool, note string) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -57,9 +58,12 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if !t.Dispatched() {
 		return fail("%s has no worker yet; dispatch it first", t.ID())
 	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	as := c.agents()
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
-	newRound := rounds > sent
+	newRound, interrupted := rounds > sent, t.Get("interrupted") != ""
 	if as.jobBusy(job) {
 		// A round sent any other way would go out again: only crew records last_round_sent.
 		if newRound {
@@ -67,7 +71,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
-	if !newRound && note == "" {
+	if !newRound && note == "" && !interrupted {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
 	if st := t.Status(); st.Finished() {
@@ -89,6 +93,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 			prompt += " Don't reply to the comments on the PR: this project has REPLY_TO_THREADS off."
 		}
 	}
+	if interrupted {
+		prompt += " " + carryOn
+	}
 	if note != "" {
 		prompt += " Note from the lead (also check Decisions in the task file): " + note
 	}
@@ -96,9 +103,13 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		return err
 	}
 	// Again under the lock: a task merged or abandoned since crew tick looked at
-	// it, or while crew feedback or crew ci-fix read GitHub, keeps its worker stopped.
+	// it, or while crew feedback or crew ci-fix read GitHub, keeps its worker
+	// stopped, and so does a pause.
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
@@ -108,13 +119,20 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	}
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
-	if newRound {
+	t.Set("interrupted", "")
+	// Word of a pause alone leaves the status as the worker last set it: a pause
+	// can land after it set pr-open.
+	switch {
+	case newRound:
 		t.Set("status", string(AddressingFeedback))
-	} else {
+	case note != "":
 		t.Set("status", string(Working))
 	}
 	t.Touch()
 	msg := fmt.Sprintf("followup (%s): worker %s", l.mode, l.job)
+	if interrupted {
+		msg += ", carrying on after a pause"
+	}
 	if note != "" {
 		msg += " — note: " + note
 	}
@@ -194,6 +212,9 @@ func cmdRestack(c *Crew, args []string) error {
 	pid := parent.ID()
 	if !t.Dispatched() {
 		return fail("%s has no branch yet; dispatch it first", t.ID())
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
 	}
 	// On a machine the task moved to, its branch may be on origin only.
 	if err := c.ensureWorktree(p, t); err != nil {

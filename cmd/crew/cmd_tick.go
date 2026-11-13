@@ -67,12 +67,15 @@ func cmdTick(c *Crew, args []string) error {
 			warn("%s: skipped", name)
 			continue
 		}
-		idx := c.branches(name)
+		// A paused project still gets the steps that only record (cleanup,
+		// feedback, ci-fix, needs-input, goal done); those that would start a
+		// session wait, quietly, for crew resume.
+		paused, idx := p.Paused(), c.branches(name)
 		for _, t := range c.tasks(name) {
-			c.tickTask(p, idx, t, as)
+			c.tickTask(p, idx, t, as, paused)
 		}
 		for _, g := range c.goals(name) {
-			c.tickGoal(g, as)
+			c.tickGoal(g, as, paused)
 		}
 	}
 	c.dispatchReady()
@@ -106,9 +109,9 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 }
 
 // tickTask is one task's share of a tick, for a task already under way: its
-// cleanup once merged, or what its worker is sent while it's in flight.
-// Dispatching ready tasks is dispatchReady's.
-func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
+// cleanup once merged, or what its worker is sent while it's in flight, which is
+// nothing while its project is paused. Dispatching ready tasks is dispatchReady's.
+func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool) {
 	id, st := t.ID(), t.Status()
 	if st == Merged {
 		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
@@ -147,7 +150,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 		}
 	}
 	job := t.WorkerJob()
-	if movedHere(t, as) {
+	if !paused && movedHere(t, as) {
 		var errs strings.Builder
 		if c.step(&errs, "followup", t.Path, "--fresh", "--note", "This task moved to "+c.Host+"; your earlier session is gone. Rebuild context from the task file and the branch.") == 0 {
 			fmt.Printf("%s: its worker and worktree aren't on this machine; a fresh worker picks it up\n", id)
@@ -157,31 +160,16 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 		return
 	}
 	// The rest needs the worker free (see busy); a busy one is left for a later
-	// tick. It does at most one thing, in this order: send an unsent review round,
-	// send a restack, or mark the task as waiting on the user. Nothing goes out
-	// twice: last_round_sent and restack_sent record what was sent.
-	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
+	// tick. It does at most one thing, in this order: send what the worker hasn't
+	// had (sendToWorker), or mark the task as waiting on the user.
 	if as.jobBusy(job) {
-		if rounds > sent {
+		if rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent")); rounds > sent {
 			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
 		}
 		return
 	}
-	if rounds > sent {
-		unsent := unsentRounds(t)
-		if c.step(nil, "followup", t.Path) == 0 {
-			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
-		}
+	if !paused && c.sendToWorker(p, idx, t) {
 		return
-	}
-	reason := idx.restackReason(t, p.Repo())
-	if st == PROpen && reason != "" && !strings.HasSuffix(reason, " abandoned") && !idx.parentNeedsRestack(t, p.Repo()) {
-		if target := idx.restackTarget(t, p.Repo()); target != "" && t.Get("restack_sent") != target {
-			if c.step(nil, "restack", t.Path) == 0 {
-				fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
-			}
-			return
-		}
 	}
 	// Read the status again: the task may have been merged or abandoned while
 	// the steps above waited on GitHub.
@@ -192,15 +180,47 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents) {
 	}
 }
 
+// sendToWorker resumes a task's idle worker with the first of these it hasn't
+// had: unsent review rounds, word that a pause cut its last turn short, or a
+// restack. It reports whether it tried. Nothing goes out twice: last_round_sent,
+// interrupted and restack_sent record what was sent.
+func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
+	id := t.ID()
+	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
+		unsent := unsentRounds(t)
+		if c.step(nil, "followup", t.Path) == 0 {
+			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
+		}
+		return true
+	}
+	if t.Get("interrupted") != "" {
+		if c.step(nil, "followup", t.Path) == 0 {
+			fmt.Printf("%s: its worker carries on after the pause\n", id)
+		}
+		return true
+	}
+	reason := idx.restackReason(t, p.Repo())
+	if t.Status() == PROpen && reason != "" && !strings.HasSuffix(reason, " abandoned") && !idx.parentNeedsRestack(t, p.Repo()) {
+		if target := idx.restackTarget(t, p.Repo()); target != "" && t.Get("restack_sent") != target {
+			if c.step(nil, "restack", t.Path) == 0 {
+				fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // dispatchReady dispatches the ready tasks of running goals, across every
-// project, highest priority first and then in ledger order. The goal lead marked
-// each one ready, which is the go-ahead. It's the tick's last step, so workers
-// made busy by this tick's review rounds and restacks count against MAX_WORKERS.
-// A task held by a cap or a dependency (exit 4) waits for the next tick, and the
-// next task is tried: caps are per goal, and dependencies per task. Each task is
-// checked again just before its dispatch, since an earlier one can take minutes
-// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
-// abandoned or the task dispatched by hand.
+// project but the paused ones, highest priority first and then in ledger order.
+// The goal lead marked each one ready, which is the go-ahead. It's the tick's
+// last step, so workers made busy by this tick's review rounds and restacks
+// count against MAX_WORKERS. A task held by a cap or a dependency (exit 4) waits
+// for the next tick, and the next task is tried: caps are per goal, and
+// dependencies per task. Each task is checked again just before its dispatch,
+// since an earlier one can take minutes (worktree hooks) while the ledger is
+// unlocked, time enough for its goal to be abandoned or the task dispatched by
+// hand.
 func (c *Crew) dispatchReady() {
 	type candidate struct {
 		Task
@@ -208,8 +228,9 @@ func (c *Crew) dispatchReady() {
 	}
 	var ready []candidate
 	for _, name := range c.projects("") {
-		if _, err := c.loadProject(name); err != nil {
-			continue // no clone here, say: the tick warned of it and skipped it above
+		// No clone here, say: the tick warned of it and skipped it above.
+		if p, err := c.loadProject(name); err != nil || p.Paused() {
+			continue
 		}
 		for _, t := range c.tasks(name) {
 			if !c.goalReady(t) {
@@ -263,8 +284,9 @@ func movedHere(t Task, as Agents) bool {
 }
 
 // tickGoal is one running goal's share of a tick: pass the goal lead its input
-// once it's free, or close the goal once its tasks are all merged or abandoned.
-func (c *Crew) tickGoal(g Goal, as Agents) {
+// once it's free and its project isn't paused, or close the goal once its tasks
+// are all merged or abandoned.
+func (c *Crew) tickGoal(g Goal, as Agents, paused bool) {
 	if g.Status() != GoalRunning {
 		return
 	}
@@ -272,7 +294,7 @@ func (c *Crew) tickGoal(g Goal, as Agents) {
 	if c.goalHasInput(g) {
 		if as.jobBusy(job) {
 			fmt.Printf("goal %s: input waits for its goal lead (%s)\n", id, as.jobState(job))
-		} else if c.step(nil, "goal", "followup", g.Path) == 0 {
+		} else if !paused && c.step(nil, "goal", "followup", g.Path) == 0 {
 			fmt.Printf("goal %s: input sent to its goal lead\n", id)
 		}
 	} else if c.goalFinished(g) && !as.jobBusy(job) {
@@ -282,9 +304,10 @@ func (c *Crew) tickGoal(g Goal, as Agents) {
 	}
 }
 
-// goalHasInput: the user's notes, or a worker's questions, wait for the goal lead.
+// goalHasInput: the user's notes, a worker's questions, or word that a pause cut
+// its last turn short wait for the goal lead.
 func (c *Crew) goalHasInput(g Goal) bool {
-	if atoiOr0(g.Get("unsent_notes")) != 0 {
+	if atoiOr0(g.Get("unsent_notes")) != 0 || g.Get("interrupted") != "" {
 		return true
 	}
 	for _, t := range c.goalTasks(g) {

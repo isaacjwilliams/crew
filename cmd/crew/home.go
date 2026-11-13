@@ -97,15 +97,24 @@ func (p *Project) WorkRoot() string      { return p.Settings["WORK_ROOT"] }
 
 // loadProject is a project that's cloned on this machine, with its settings.
 func (c *Crew) loadProject(name string) (*Project, error) {
-	s, err := c.projectSettings(name)
+	p, err := c.ledgerProject(name)
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{Name: name, Dir: c.path("projects", name), Home: c.Home, Settings: s}
 	if p.Repo() == "" || !isDir(p.Repo()) {
 		return nil, fail("no clone of %s on this machine (crew host up makes one, or run 'crew project add' in your clone of it)", name)
 	}
 	return p, nil
+}
+
+// ledgerProject is a project with its settings, cloned on this machine or not:
+// for commands that need only its ledger files.
+func (c *Crew) ledgerProject(name string) (*Project, error) {
+	s, err := c.projectSettings(name)
+	if err != nil {
+		return nil, err
+	}
+	return &Project{Name: name, Dir: c.path("projects", name), Home: c.Home, Settings: s}, nil
 }
 
 // projectSettings is a project's settings: the shared ones, then its

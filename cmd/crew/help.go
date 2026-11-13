@@ -99,6 +99,17 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    review rounds and restacks to idle workers, mark
                                    tasks waiting on you, clean up merged ones (run
                                    by a timer)
+  crew pause [--project P|--all] [--force]
+                                   Stop the project's work without losing any:
+                                   nothing new starts, sessions mid-turn are told to
+                                   record where they are, and any still mid-turn
+                                   after WRAP_UP_SECONDS are stopped. --force stops
+                                   every session of the project now
+  crew pause --hook                From a PostToolUse hook: tell a session crew
+                                   started to wrap up once its project is paused
+                                   (always exits 0)
+  crew resume [--project P|--all]  Let a paused project's work go on; the next tick
+                                   follows up what the pause interrupted
   crew list [--all|--project P] [--status S]
                                    Compact task list
   crew show TASK | crew path TASK  Print a task file / its path

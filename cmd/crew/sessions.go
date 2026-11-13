@@ -66,14 +66,25 @@ func environWithout(names ...string) []string {
 	return env
 }
 
-// agents is what `claude agents --json --all` lists, or nothing when it fails.
-// Each field is read on its own, as a string or not at all, so a field whose
-// type changes in a later Claude Code loses only that field, not every entry.
+// agents is what `claude agents --json --all` lists, or nothing when it fails
+// (listAgents).
 func (c *Crew) agents() Agents {
+	as, _ := c.listAgents()
+	return as
+}
+
+// listAgents is what `claude agents --json --all` lists, for the callers that
+// mustn't take a failure for nothing running. Each field is read on its own, as
+// a string or not at all, so a field whose type changes in a later Claude Code
+// loses only that field, not every entry.
+func (c *Crew) listAgents() (Agents, error) {
 	out, err := c.claude("agents", "--json", "--all").Output()
+	if err != nil {
+		return Agents{}, fail("couldn't list the sessions with claude agents: %v", err)
+	}
 	var entries []map[string]json.RawMessage
-	if err != nil || json.Unmarshal(out, &entries) != nil {
-		return Agents{}
+	if json.Unmarshal(out, &entries) != nil {
+		return Agents{}, fail("couldn't read what claude agents listed")
 	}
 	text := func(e map[string]json.RawMessage, k string) string {
 		var s string
@@ -89,7 +100,7 @@ func (c *Crew) agents() Agents {
 		}
 		as = append(as, a)
 	}
-	return as
+	return as, nil
 }
 
 // turnEnded reads a session's transcript: Claude Code writes a turn_duration
@@ -174,6 +185,12 @@ func (as Agents) jobBusy(job string) bool {
 	return a != nil && a.busy()
 }
 
+// jobOpen: the job is listed, and its process is running.
+func (as Agents) jobOpen(job string) bool {
+	a := as.find(job)
+	return a != nil && a.open()
+}
+
 // jobListed: claude agents on this machine knows the job.
 func (as Agents) jobListed(job string) bool { return as.find(job) != nil }
 
@@ -197,15 +214,26 @@ func (c *Crew) runningWorkers(as Agents) int {
 // close. Its conversation is saved, and background shells it started, such as a
 // dev server, keep running for its next process. It reports whether the process
 // closed.
-func (c *Crew) stopJob(job string) bool {
-	c.claude("stop", job).Run()
+func (c *Crew) stopJob(job string) bool { return len(c.stopJobs([]string{job})) == 0 }
+
+// stopJobs stops several jobs as stopJob does, all at once, so the wait is 10
+// seconds in all rather than for each. It returns the jobs still open: a job is
+// stopped once claude agents lists it closed, or not at all.
+func (c *Crew) stopJobs(jobs []string) []string {
+	for _, job := range jobs {
+		c.claude("stop", job).Run()
+	}
+	open := slices.Clone(jobs)
 	for range 20 {
-		if a := c.agents().find(job); a == nil || !a.open() {
-			return true
+		if as, err := c.listAgents(); err == nil {
+			open = slices.DeleteFunc(open, func(job string) bool { a := as.find(job); return a == nil || !a.open() })
+		}
+		if len(open) == 0 {
+			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return false
+	return open
 }
 
 // stopIdleSession stops the open process of a session that isn't busy. A
@@ -492,13 +520,31 @@ func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	return encodeJSON(settings, false)
 }
 
+// addPauseHook adds the PostToolUse hook that runs crew pause --hook after every
+// tool call, for the sessions a pause asks to wrap up: workers and goal leads.
+// It's added here, not listed in a settings file, so the user's own leads (crew
+// lead, crew serve) never get it. Nor does the gardener: it has no file to note
+// where it stopped, and garden would take its early end for a finished review.
+func addPauseHook(settings *object) {
+	run := newObject()
+	run.set("type", "command")
+	run.set("command", `"${CREW_HOME:-$HOME/crew}/bin/crew" pause --hook`)
+	entry := newObject()
+	entry.set("matcher", "*")
+	entry.set("hooks", []any{run})
+	hooks := settings.child("hooks")
+	after, _ := hooks.vals["PostToolUse"].([]any)
+	hooks.set("PostToolUse", append(after, entry))
+}
+
 // workerSettings is the --settings value workers run with:
 // config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
-// when it has one (allow rules or env for that project's test commands, say), as
-// sessionSettings. The project file can only add: objects are merged and arrays
-// appended, but any value the shipped file sets wins, so a project can't drop a
-// deny rule. It also checks WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a
-// dispatch before its worktree exists.
+// when it has one (allow rules or env for that project's test commands, say),
+// with the pause hook, as sessionSettings. The project file can only add:
+// objects are merged and arrays appended, but any value the shipped file sets
+// wins, so a project can't drop a deny rule. It also checks
+// WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its
+// worktree exists.
 func (c *Crew) workerSettings(p *Project) (string, error) {
 	if w := p.Settings["WORKER_AUTOCOMPACT_WINDOW"]; !autocompactWindow.MatchString(w) {
 		return "", fail("WORKER_AUTOCOMPACT_WINDOW must be auto or a token count like 400k, not '%s'", w)
@@ -514,12 +560,13 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 		}
 		settings = addOnly(settings, more).(*object)
 	}
+	addPauseHook(settings)
 	return c.sessionSettings(settings, p), nil
 }
 
 // goalLeadSettings is the --settings value goal leads run with: the lead's
-// settings, lead/.claude/settings.json, all but their "agent", as
-// sessionSettings. The lead's session takes its agent from that file, a goal lead
+// settings, lead/.claude/settings.json, all but their "agent", with the pause
+// hook, as sessionSettings. The lead's session takes its agent from that file, a goal lead
 // from --agent. Not the lead's settings.local.json: a goal lead works in its own
 // checkout.
 func (c *Crew) goalLeadSettings(p *Project) (string, error) {
@@ -528,6 +575,7 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 		return "", err
 	}
 	lead.del("agent")
+	addPauseHook(lead)
 	return c.sessionSettings(lead, p), nil
 }
 

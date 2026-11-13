@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready dispatch feedback followup attach restack review reply react review-summary ci-fix ci-summary codex status sync tick list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready dispatch feedback followup attach restack review reply react review-summary ci-fix ci-summary codex status sync tick pause resume list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -8,7 +8,7 @@ complete -c crew -n "__fish_seen_subcommand_from ready dispatch feedback followu
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status list sync cleanup gardener config" -l project -x -d 'Work on this project' \
+complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status list sync cleanup gardener config pause resume" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea, and why it is worth keeping'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
@@ -25,11 +25,13 @@ complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a re
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
-complete -c crew -n "__fish_seen_subcommand_from status list sync proposals" -l all -d 'Every project, not just this one'
+complete -c crew -n "__fish_seen_subcommand_from status list sync proposals pause resume" -l all -d 'Every project, not just this one'
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/abandoned'
 complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r
 complete -c crew -n "__fish_seen_subcommand_from gardener" -l all
+complete -c crew -n "__fish_seen_subcommand_from pause" -l force -d 'Stop its sessions now, without letting them wrap up'
+complete -c crew -n "__fish_seen_subcommand_from pause" -l hook -d 'For a PostToolUse hook: tell a session to wrap up'
 complete -c crew -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from goal" -l goal -x -d 'Make it one of this goal\'s tasks' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
 complete -c crew -n "__fish_seen_subcommand_from goal; and not __fish_seen_subcommand_from $goal_cmds" -a "$goal_cmds"

@@ -51,6 +51,13 @@ section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # CREW_LEAD_FINGERPRINT to nothing: a background session takes its environment from
 # Claude Code's daemon, not from crew, and a lead's own shell may have started that.
 session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h and .env.CREW_LEAD_FINGERPRINT == ""' "$HOME/claude-settings.last" >/dev/null; }
+# The latest --settings run crew pause --hook after every tool call.
+has_pause_hook() { jq -e '.hooks.PostToolUse | any(.matcher == "*" and .hooks == [{type: "command", command: "\"${CREW_HOME:-$HOME/crew}/bin/crew\" pause --hook"}])' "$HOME/claude-settings.last" >/dev/null; }
+# The latest --settings without what crew adds: its env and, for a worker or goal lead, the pause hook.
+given_settings() {
+  jq -c 'del(.env) | if .hooks.PostToolUse == null then . else
+           .hooks.PostToolUse |= map(select(.hooks[0].command | endswith(" pause --hook") | not))
+           | if .hooks.PostToolUse == [] then del(.hooks.PostToolUse) else . end end' "$HOME/claude-settings.last"; }
 
 crew project add >/dev/null
 PE=$(ls "$L"/projects/*/project.env); PD=$(dirname "$PE"); P=$(basename "$PD")
@@ -199,8 +206,8 @@ check "session id recorded, starting with the job id" '[[ $(crew get 1 worker_se
 check "job id recorded without color codes" '[[ $(crew get 1 worker_job) =~ ^[0-9a-f]{8}$ ]]'
 check "dispatch records the fingerprint of what the worker loaded" '[[ $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]]'
 check "workers start with the configured auto-compact window" 'grep -- "--agent implementer" "$HOME/claude-calls.log" | tail -1 | grep -q -- " --autocompact 400k "'
-check "workers get the shipped settings, with their project and the home, when the project adds none" \
-  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P"'
+check "workers get the shipped settings, with their project, the home and the pause hook, when the project adds none" \
+  '[[ $(given_settings) == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P" && has_pause_hook'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
@@ -768,8 +775,8 @@ sed -i '/^## Goal$/a "Ship every card in the Season column." (tracker: the Seaso
 out=$(crew goal start 1); GJ=$(gget "$GF" lead_job); CO=$(gget "$GF" checkout)
 gl=$(grep -- "--agent goal-lead" "$HOME/claude-calls.log" | tail -1)
 check "goal start launches the goal lead with the home as an extra directory" '[[ $(gget "$GF" status) == running && -n $GJ && $gl == *"--add-dir $L --bg --mcp-config $L/projects/$(gget "$GF" project)/mcp.local.json --agent goal-lead --permission-mode auto --settings {"*"} You are the goal lead for goal $G "* ]]'
-check "the goal lead gets the lead's settings, all but their agent, with its project and the home" \
-  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null && session_env "$(gget "$GF" project)"'
+check "the goal lead gets the lead's settings, all but their agent, with its project, the home and the pause hook" \
+  '[[ $(given_settings) == "$(jq -c "del(.agent)" "$L/lead/.claude/settings.json")" ]] && has_pause_hook && jq -e ".hooks.PreToolUse and (has(\"agent\") | not)" "$HOME/claude-settings.last" >/dev/null && session_env "$(gget "$GF" project)"'
 check "the goal lead works in a detached checkout of the default branch" '[[ $(jq -r --arg id "$GJ" ".[] | select(.id == \$id) | .cwd" "$HOME/agents.json") == "$CO" && -z $(git -C "$CO" branch --show-current) && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) ]]'
 check "goal start records the fingerprint of what the goal lead loaded" '[[ $(gget "$GF" lead_fingerprint) =~ ^[0-9a-f]{12}$ ]]'
 GT1=$(crew new "Season header" --goal 1); T1=$(basename "$GT1" .md)
@@ -959,8 +966,8 @@ fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 check "a worker's settings name its task's project, not the caller's" 'session_env "$P2"'
 check "a worker's launch sets no CREW_PROJECT, which its session wouldn't get" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
 (cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
-check "the gardener runs with its own settings, which load project memory, and its project" \
-  '[[ $(jq -c "del(.env)" "$HOME/claude-settings.last") == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2"'
+check "the gardener runs with its own settings, which load project memory, and its project, but no pause hook" \
+  '[[ $(given_settings) == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2" && ! has_pause_hook'
 (cd "$HOME" && CREW_PROJECT=$P2 crew gardener --project "$PJ" >/dev/null 2>&1)
 check "the gardener of another project gets that project" 'session_env "$PJ"'
 (cd "$SB/shop" && CREW_PROJECT=$P2 crew observe >/dev/null 2>&1)
@@ -1053,5 +1060,166 @@ err=$(crew tick 2>&1 >/dev/null); rc=$?
 check "crew tick brings mcp.local.json and the leads' servers up to date" \
   '[[ $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$MLJ") == https://docs.example/mcp && $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$L/lead/.mcp.json") == https://docs.example/mcp ]]'
 check "a project whose mcp.json is broken is reported, keeps the mcp.local.json it had, and the tick carries on" '[[ $rc == 0 && $err == *"$M2: server"*"\${NOT_SET} isn"*"set"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
+
+
+# Pausing: crew pause stops a project's work without losing any. Sessions mid-turn
+# are told to wrap up, and stopped once WRAP_UP_SECONDS run out; crew resume lets
+# the work go on, and the next tick tells them to carry on.
+git -C "$L" rm -q "$M2"; git -C "$L" commit -qm "no mcp.json for $P2 again"
+for f in "$L"/projects/*/tasks/*.md; do
+  case $(crew get "$f" status) in merged | abandoned) ;; *) crew set "$f" status abandoned ;; esac
+done
+jobstate() {  # job state pid [status]: setstate, for one job
+  jq --arg id "$1" --arg s "$2" --argjson pid "$3" --arg st "${4:-}" \
+    'map(if .id == $id then .state=$s | .pid=$pid | (if $st == "" then del(.status) else .status=$st end) else . end)' \
+    "$HOME/agents.json" >"$HOME/a" && mv "$HOME/a" "$HOME/agents.json"; }
+calls() { wc -l <"$HOME/claude-calls.log"; }
+since() { tail -n "+$(($1 + 1))" "$HOME/claude-calls.log"; }  # the claude calls after the first $1
+launches() { grep -c -- " --bg" "$HOME/claude-calls.log"; }
+MARK=$L/projects/$PJ/paused
+CARRY="crew was paused while you were working. Carry on from where your Log says you stopped."
+GPF=$(crew goal new "Paused goal" --project "$PJ"); TGP=$(basename "$GPF" .md); sed -i '/^## Goal$/a "Keep going."' "$GPF"
+setstate "done" null; crew goal start "$GPF" >/dev/null
+# A dispatched task in project $1, titled $2, with an open PR whose comments crew has read.
+paused_task() {
+  local f; f=$(crew new "$2" --project "$1"); fill "$f"; crew ready "$f" >/dev/null; setstate "done" null; crew dispatch "$f" >/dev/null 2>&1
+  crew set "$f" pr https://github.com/isaac/webapp/pull/12; crew set "$f" feedback_since 2099-01-01T00:00:00Z; echo "$f"; }
+echo OPEN >"$HOME/gh-pr-state"
+PT=$(paused_task "$PJ" "Busy when paused"); TPT=$(basename "$PT" .md)
+Q2=$(paused_task "$P2" "Shop goes on")
+PI=$(paused_task "$PJ" "Idle when paused"); TPI=$(basename "$PI" .md)
+check "lead/.claude/settings.json has no pause hook, so the user's own leads never wrap up" '! grep -q "pause --hook" "$L/lead/.claude/settings.json"'
+hook=$(jq -r '.hooks.PostToolUse[-1].hooks[0].command' "$HOME/claude-settings.last")
+setstate "done" null
+jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(gget "$GPF" lead_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242
+echo "WRAP_UP_SECONDS=60" >>"$L/config/crew.env"
+n=$(calls)
+out=$(timeout 3 crew pause --project "$PJ" 2>&1)
+check "crew pause marks the project paused by crew pause, on this host, and commits the mark" \
+  '[[ $(sed -n "s/^by: //p" "$MARK") == "crew pause" && $(sed -n "s/^host: //p" "$MARK") == tower && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s -- "$MARK") == "pause $PJ" ]]'
+check "it waits for the sessions mid-turn to wrap up, naming them" '[[ $out == *"paused $PJ"*"waiting up to 1 minute for 2 session(s) to wrap up: $TPT, goal $TGP"* ]]'
+check "a pause cut short in its wait has already marked the busy sessions interrupted, and stopped none" \
+  '[[ -n $(crew get "$PT" interrupted) && -n $(gget "$GPF" interrupted) && -z $(crew get "$PI" interrupted) && $(since "$n") != *"claude stop"* ]]'
+out=$(cd "$HOME" && CREW_PROJECT=$PJ bash -c "$hook" </dev/null); st=$?
+check "the pause hook, run as a worker's settings give it, tells a session of a paused project to wrap up, as PostToolUse context" \
+  '((st == 0)) && [[ $(jq -r .hookSpecificOutput.hookEventName <<<"$out") == PostToolUse && $(jq -r .hookSpecificOutput.additionalContext <<<"$out") == "crew is pausing project $PJ. "*"Log"*"end your turn now." ]]'
+out=$(CREW_PROJECT=$P2 crew pause --hook); st=$?
+check "the pause hook says nothing to a session of a project that isn't paused, or of every project, and exits 0" \
+  '((st == 0)) && [[ -z $out && -z $(CREW_PROJECT=all crew pause --hook) ]] && CREW_PROJECT=nope crew pause --hook'
+out=$(crew status --project "$PJ")
+check "status shows the project paused, and the task a pause interrupted" \
+  '[[ $out == *"$NL$PJ  paused (crew resume --project $PJ)$NL"* && $(grep "$TPT" <<<"$out") == *"interrupted by a pause"* && $(grep "$TPI" <<<"$out") != *interrupted* ]]'
+sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
+n=$(calls)
+out=$(crew pause --project "$PJ" 2>&1)
+check "when the wait runs out, crew pause stops the sessions still mid-turn, and logs it on their files" \
+  '[[ $out == *"$PJ was already paused"*"stopped 2 session(s): $TPT, goal $TGP"* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(gget "$GPF" lead_job)"* ]] &&
+   [[ $(tail -1 "$PT") == *"stopped by crew pause before it ended its turn" && $(tail -1 "$GPF") == *"stopped by crew pause before it ended its turn" ]]'
+check "an idle session isn't stopped or marked interrupted" '[[ $(since "$n") != *"claude stop $(crew get "$PI" worker_job)"* && -z $(crew get "$PI" interrupted) ]]'
+check "crew pause says how to undo it" '[[ $out == *"'"'"'crew resume --project $PJ'"'"' lets the work go on" ]]'
+out=$(jq -n --arg s "$(crew get "$PI" worker_session)" '{session_id: $s}' | (cd "$HOME" && CREW_PROJECT=$PJ bash -c "$hook"))
+check "the pause hook marks the work of a session it tells to stop interrupted, though it was idle when the pause began" \
+  '[[ $out == *"end your turn now"* && -n $(crew get "$PI" interrupted) && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "pause: $TPI interrupted" ]]'
+crew set "$PI" interrupted ""
+out=$(crew pause --project "$PJ" 2>&1); st=$?
+check "pausing a paused project with no session mid-turn says so, and exits 0" '((st == 0)) && [[ $out == "$PJ was already paused"* && $out != *waiting* ]]'
+sed -i 's/^by: .*/by: crew upgrade/' "$MARK"; git -C "$L" commit -qm "paused by an upgrade" -- projects
+crew pause --project "$PJ" >/dev/null 2>&1
+check "crew pause takes over a pause crew upgrade made, so it outlasts the upgrade" '[[ $(sed -n "s/^by: //p" "$MARK") == "crew pause" ]]'
+# Nothing starts a session for a paused project.
+GPT=$(crew new "Paused goal task" --goal "$GPF" --project "$PJ"); fill "$GPT"; crew ready "$GPT" >/dev/null
+GDF=$(crew goal new "Not started" --project "$PJ"); sed -i '/^## Goal$/a "Later."' "$GDF"; crew commit >/dev/null
+PS=$(crew new "Stacked while paused" --project "$PJ" --on "$TPI"); crew set "$PS" worker_job s7ack3d0
+PM=$(crew new "Merged parent" --project "$PJ")
+PSM=$(crew new "Stacked on a merged task" --project "$PJ" --on "$(basename "$PM" .md)"); fill "$PSM"; crew ready "$PSM" >/dev/null
+crew set "$PM" status merged; psm_base=$(crew get "$PSM" base)
+head=$(git -C "$L" rev-parse @); n=$(launches)
+out=$(crew followup "$PI" --note "go on" 2>&1); st=$?
+check "while paused, crew followup holds back with exit 4, naming crew resume" '((st == 4)) && [[ $out == "crew: $PJ is paused; '"'"'crew resume --project $PJ'"'"' lets its work go on" ]]'
+out=$(crew dispatch "$GPT" 2>&1); st=$?
+check "while paused, crew dispatch holds back with exit 4 and makes no worktree" \
+  '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && ! -d $HOME/agent-work/$PJ/$(basename "$GPT" .md) && $(crew get "$GPT" status) == ready ]]'
+out=$(crew goal start "$GDF" 2>&1); st=$?
+check "while paused, crew goal start holds back with exit 4 and makes no checkout" \
+  '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && ! -d $HOME/agent-work/$PJ/_goal-$(basename "$GDF" .md) && $(gget "$GDF" status) == draft ]]'
+out=$(crew dispatch "$PSM" 2>&1); st=$?
+check "while paused, crew dispatch holds back before it rebases a task whose parent merged" '((st == 4)) && [[ $(crew get "$PSM" base) == "$psm_base" ]]'
+out=$(crew restack "$PS" 2>&1); st=$?
+check "while paused, crew restack holds back with exit 4" '((st == 4)) && [[ $out == *"crew resume --project $PJ"* ]]'
+out=$(crew goal followup "$GPF" 2>&1); st=$?
+check "while paused, crew goal followup holds back with exit 4, keeping interrupted for later" \
+  '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && -n $(gget "$GPF" interrupted) ]]'
+check "and they change nothing in the ledger and start no session" '[[ $(git -C "$L" rev-parse @) == "$head" && -z $(git -C "$L" status --porcelain -- projects) && $(launches) == "$n" ]]'
+rounds=$(crew get "$PI" review_rounds)
+out=$(crew review "$PI" 2>&1); st=$?
+check "while paused, crew review records the round and says it goes out after crew resume" \
+  '((st == 0)) && [[ $out == *"is paused, so crew tick sends it once '"'"'crew resume --project $PJ'"'"'"* && $(crew get "$PI" review_rounds) == $((rounds + 1)) && $(launches) == "$n" ]]'
+out=$(crew gardener --project "$PJ" 2>&1)
+check "crew gardener skips a paused project" '[[ $out == "$PJ: paused; skipped" && $(launches) == "$n" ]]'
+crew set "$PT" review_rounds $(($(crew get "$PT" review_rounds) + 1)); crew set "$Q2" review_rounds $(($(crew get "$Q2" review_rounds) + 1))
+setstate "done" null; n=$(launches)
+out=$(crew tick 2>&1)
+check "while paused, crew tick quietly sends the project's workers and goal leads nothing and dispatches none of its tasks, but serves another project" \
+  '[[ $out == *"$(basename "$Q2" .md): round"*"sent to its worker"* && $out != *paused* && $out != *"$TPT"* && $out != *"$TGP"* && $(launches) == $((n + 1)) && $(crew get "$GPT" status) == ready && -n $(crew get "$PT" interrupted) && -n $(gget "$GPF" interrupted) ]]'
+out=$(crew resume --project "$PJ")
+check "crew resume removes the mark, commits, and says the next tick follows up" \
+  '[[ ! -e $MARK && $out == "resumed $PJ$NL""the next crew tick follows up the work the pause interrupted" && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "resume $PJ" ]]'
+setstate "done" null; decisions=$(section "$GPF" "## Decisions"); n=$(calls)
+out=$(crew tick 2>&1); new=$(since "$n"); ptline=$(grep -F "New input for task $TPT (" <<<"$new")
+check "after crew resume, the next tick follows up the interrupted worker, telling it to carry on, and clears interrupted" \
+  '[[ $out == *"$TPT: round"*"sent to its worker"* && $ptline == *"$CARRY"* && -z $(crew get "$PT" interrupted) ]]'
+check "it follows up the interrupted goal lead the same way, writing nothing under the goal's Decisions" \
+  '[[ $out == *"goal $TGP: input sent to its goal lead"* && $new == *"New input for goal $TGP (goal file: $GPF):$NL- $CARRY$NL"* && -z $(gget "$GPF" interrupted) && $(section "$GPF" "## Decisions") == "$decisions" ]]'
+crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
+crew followup "$PI" --note "check the docs" >/dev/null 2>&1
+check "a hand-run crew followup --note also tells the worker to carry on, and clears interrupted" \
+  '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY Note from the lead"*"check the docs"* && -z $(crew get "$PI" interrupted) ]]'
+crew set "$PI" status pr-open; crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
+crew followup "$PI" >/dev/null 2>&1
+check "a followup whose only news is the pause leaves the status as the worker last set it" \
+  '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY"* && $(crew get "$PI" status) == pr-open && -z $(crew get "$PI" interrupted) ]]'
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; touch "$HOME/stop-noop"; log=$(section "$PT" "## Log")
+out=$(crew pause --project "$PJ" 2>&1); st=$?
+check "crew pause fails when a session doesn't stop, names it, and logs nothing on its file" \
+  '((st == 1)) && [[ $out == *"1 session(s) didn'"'"'t stop: $TPT"* && $out != *"stopped 1"* && $(section "$PT" "## Log") == "$log" ]]'
+rm -f "$HOME/stop-noop"; crew resume --project "$PJ" >/dev/null
+sed -i 's/^WRAP_UP_SECONDS=0$/WRAP_UP_SECONDS=60/' "$L/config/crew.env"
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; n=$(calls)
+timeout 20 crew pause --project "$PJ" >"$HOME/pause.out" 2>&1 &
+pid=$!
+for _ in {1..50}; do [[ -e $MARK ]] && break; sleep 0.1; done
+crew resume --project "$PJ" >/dev/null; wait "$pid"; st=$?
+check "a pause still waiting when its project is resumed stops nothing, and says the session goes on" \
+  '((st == 0)) && [[ $(<"$HOME/pause.out") == *"$PJ was resumed; $TPT goes on"* && $(since "$n") != *"claude stop"* ]]'
+sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
+PF=$(paused_task "$PJ" "Abandoned but running"); crew set "$PF" status abandoned
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242
+jobstate "$(crew get "$PF" worker_job)" working 4242 busy; n=$(calls)
+(cd "$(crew get "$PT" worktree)" && exec setsid sleep 300) & IN_PT=$!
+(cd "$(gget "$GPF" checkout)" && exec setsid sleep 300) & IN_GPF=$!
+out=$(crew pause --project "$PJ" --force 2>&1)
+check "crew pause --force stops the project's sessions at once, busy or idle, and logs it" \
+  '[[ $(sed -n "s/^by: //p" "$MARK") == "crew pause --force" && $out != *waiting* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(crew get "$PI" worker_job)"* ]] &&
+   [[ $(tail -1 "$PT") == *"stopped by crew pause --force" && $(tail -1 "$PI") == *"stopped by crew pause --force" && $(since "$n") != *"claude stop $(crew get "$Q2" worker_job)"* ]]'
+check "stopping a session also ends what it left running in its worktree" '[[ $out == *"stopping 1 process(es) still running in $(crew get "$PT" worktree)"* && ! -e /proc/$IN_PT/cwd ]]'
+check "--force also ends what a session that had already closed left running in its checkout" \
+  '[[ $out == *"stopping 1 process(es) still running in $(gget "$GPF" checkout)"* && ! -e /proc/$IN_GPF/cwd && $(tail -1 "$GPF") != *"stopped by crew pause --force" ]]'
+kill "$IN_PT" "$IN_GPF" 2>/dev/null || true
+check "--force marks the work of every session it stops interrupted, idle ones too" '[[ -n $(crew get "$PT" interrupted) && -n $(crew get "$PI" interrupted) ]]'
+check "--force also stops a worker still running for an abandoned task, without marking its work interrupted" \
+  '[[ $(since "$n") == *"claude stop $(crew get "$PF" worker_job)"* && -z $(crew get "$PF" interrupted) ]]'
+crew resume --project "$PJ" >/dev/null
+touch "$HOME/agents-fail"
+out=$(crew pause --project "$PJ" 2>&1); st=$?
+check "crew pause fails, changing nothing, when claude agents can't say which sessions are mid-turn" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t list the sessions with claude agents"* && ! -e $MARK && -z $(git -C "$L" status --porcelain -- projects) ]]'
+rm -f "$HOME/agents-fail"
+mv "$L/projects/$P2/local.env" "$HOME/local.env.saved"
+out=$(crew pause --all 2>&1); st=$?
+check "crew pause --all also pauses a project with no clone on this machine" '((st == 0)) && [[ -e $L/projects/$P2/paused && -e $MARK ]]'
+check "crew status shows the pause of a project with no clone here" '[[ $(crew status --project "$P2") == *"$P2  paused (crew resume --project $P2)"* ]]'
+out=$(crew resume --all 2>&1); st=$?
+check "and crew resume --all lifts its pause" '((st == 0)) && [[ ! -e $L/projects/$P2/paused && ! -e $MARK ]]'
+mv "$HOME/local.env.saved" "$L/projects/$P2/local.env"
 
 summary crew-e2e

@@ -56,6 +56,11 @@ func cmdDispatch(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Before the stacked base below is rewritten: dispatchChecks checks again
+	// after the worktree is made.
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	idx := c.branches(p.Name)
 	parent, stacked := idx.parentOf(t)
 	// A parent that merged before this task started leaves nothing to stack on, so
@@ -131,11 +136,14 @@ func orUnknown(s string) string {
 }
 
 // dispatchChecks refuses a dispatch the user hasn't readied, and holds back
-// (notYet) one whose dependencies aren't merged, or that would exceed MAX_WORKERS
-// or its goal's max_in_flight. The task's parent, if it's stacked, is the one
-// dependency that needn't be merged: dispatch requires its branch on origin
-// instead. Call it with the lock held.
+// (notYet) one for a paused project, one whose dependencies aren't merged, or one
+// that would exceed MAX_WORKERS or its goal's max_in_flight. The task's parent,
+// if it's stacked, is the one dependency that needn't be merged: dispatch
+// requires its branch on origin instead. Call it with the lock held.
 func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
 	}

@@ -129,6 +129,9 @@ func (c *Crew) goalStart(g Goal) error {
 	if g.Section("## Goal") == "" {
 		return fail("goal %s has no Goal yet: write the user's own words into its ## Goal section", g.ID())
 	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	start, err := c.launchGoalLead(p)
 	if err != nil {
 		return err
@@ -139,6 +142,10 @@ func (c *Crew) goalStart(g Goal) error {
 	}
 	name := cut("crew-"+p.Name+"-goal-"+g.ID(), 80)
 	if err := c.lock(); err != nil {
+		return err
+	}
+	// Again under the lock: a pause written while the checkout was made holds.
+	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
 	g.Set("checkout", co)
@@ -283,8 +290,8 @@ func unroutedQuestions(t Task) (string, bool) {
 }
 
 // crew goal followup GOAL: resumes the goal lead with what's waiting for it: the
-// user's unsent notes, and questions its tasks' workers have asked. Exits 3 if
-// there's nothing.
+// user's unsent notes, questions its tasks' workers have asked, and word that a
+// pause cut its last turn short (interrupted). Exits 3 if there's nothing.
 func (c *Crew) goalFollowup(g Goal) error {
 	for _, tool := range []string{"git", "claude"} {
 		if err := need(tool); err != nil {
@@ -298,7 +305,13 @@ func (c *Crew) goalFollowup(g Goal) error {
 	if st := g.Status(); st != GoalRunning {
 		return fail("goal %s is '%s', not running", g.ID(), st)
 	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	input := ""
+	if g.Get("interrupted") != "" {
+		input += "\n- " + carryOn
+	}
 	if n := atoiOr0(g.Get("unsent_notes")); n != 0 {
 		input += fmt.Sprintf("\n- %d new note(s) from the user under Decisions in the goal file", n)
 	}
@@ -332,6 +345,10 @@ func (c *Crew) goalFollowup(g Goal) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Again under the lock: a pause written while the checkout was made holds.
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	g.Set("checkout", co)
 	l, err := c.relaunch(start, g.Doc, co,
 		fmt.Sprintf("New input for goal %s (goal file: %s):%s\nFollow your workflow for new input.", g.ID(), g.Path, input),
@@ -342,6 +359,7 @@ func (c *Crew) goalFollowup(g Goal) error {
 	}
 	l.record(g.Doc)
 	g.Set("unsent_notes", "0")
+	g.Set("interrupted", "")
 	g.Touch()
 	g.Log(fmt.Sprintf("followup (%s): goal lead %s", l.mode, l.job))
 	for _, r := range routed {
