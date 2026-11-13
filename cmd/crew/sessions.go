@@ -493,44 +493,41 @@ func readSettings(f string) (*object, error) {
 
 // sessionSettings is the --settings value of a session crew starts for project
 // p: settings, with CREW_PROJECT and CREW_HOME set in its env, so the session's
-// crew commands and hooks work on p in this home, and the hook that tells it to
-// wrap up when p is paused. It changes the settings it's given. Every session
-// crew starts for a project gets them this way, and never through the
-// environment crew runs claude with: a background session gets the environment
-// of Claude Code's daemon, which serves every project at once.
+// crew commands and hooks work on p in this home. It changes the settings it's
+// given. Every session crew starts for a project gets them this way, and never
+// through the environment crew runs claude with: a background session gets the
+// environment of Claude Code's daemon, which serves every project at once.
 // CREW_LEAD_FINGERPRINT is set empty for the same reason: a daemon a lead's own
 // shell started would hand every session the lead's (see crew lead --hook).
-//
-// The pause hook is added here, not listed in the settings files, so the user's
-// own leads (crew lead, crew serve), which run lead/.claude/settings.json without
-// coming through here, never get it.
 func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	env := settings.child("env")
 	env.set("CREW_PROJECT", p.Name)
 	env.set("CREW_HOME", c.Home)
 	env.set("CREW_LEAD_FINGERPRINT", "")
-	hooks := settings.child("hooks")
-	after, _ := hooks.vals["PostToolUse"].([]any)
-	hooks.set("PostToolUse", append(after, pauseHookEntry()))
 	return encodeJSON(settings, false)
 }
 
-// pauseHookEntry is the PostToolUse entry that runs crew pause --hook after
-// every tool call.
-func pauseHookEntry() *object {
+// addPauseHook adds the PostToolUse hook that runs crew pause --hook after every
+// tool call, for the sessions a pause asks to wrap up: workers and goal leads.
+// It's added here, not listed in a settings file, so the user's own leads (crew
+// lead, crew serve) never get it. Nor does the gardener: it has no file to note
+// where it stopped, and garden would take its early end for a finished review.
+func addPauseHook(settings *object) {
 	run := newObject()
 	run.set("type", "command")
 	run.set("command", `"${CREW_HOME:-$HOME/crew}/bin/crew" pause --hook`)
 	entry := newObject()
 	entry.set("matcher", "*")
 	entry.set("hooks", []any{run})
-	return entry
+	hooks := settings.child("hooks")
+	after, _ := hooks.vals["PostToolUse"].([]any)
+	hooks.set("PostToolUse", append(after, entry))
 }
 
 // workerSettings is the --settings value workers run with:
 // config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
-// when it has one (allow rules or env for that project's test commands, say), as
-// sessionSettings. The project file can only add: objects are merged and arrays
+// when it has one (allow rules or env for that project's test commands, say),
+// with the pause hook, as sessionSettings. The project file can only add: objects are merged and arrays
 // appended, but any value the shipped file sets wins, so a project can't drop a
 // deny rule. It also checks WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a
 // dispatch before its worktree exists.
@@ -549,12 +546,13 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 		}
 		settings = addOnly(settings, more).(*object)
 	}
+	addPauseHook(settings)
 	return c.sessionSettings(settings, p), nil
 }
 
 // goalLeadSettings is the --settings value goal leads run with: the lead's
-// settings, lead/.claude/settings.json, all but their "agent", as
-// sessionSettings. The lead's session takes its agent from that file, a goal lead
+// settings, lead/.claude/settings.json, all but their "agent", with the pause
+// hook, as sessionSettings. The lead's session takes its agent from that file, a goal lead
 // from --agent. Not the lead's settings.local.json: a goal lead works in its own
 // checkout.
 func (c *Crew) goalLeadSettings(p *Project) (string, error) {
@@ -563,6 +561,7 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 		return "", err
 	}
 	lead.del("agent")
+	addPauseHook(lead)
 	return c.sessionSettings(lead, p), nil
 }
 

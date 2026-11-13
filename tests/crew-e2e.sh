@@ -53,10 +53,11 @@ section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h and .env.CREW_LEAD_FINGERPRINT == ""' "$HOME/claude-settings.last" >/dev/null; }
 # The latest --settings run crew pause --hook after every tool call.
 has_pause_hook() { jq -e '.hooks.PostToolUse | any(.matcher == "*" and .hooks == [{type: "command", command: "\"${CREW_HOME:-$HOME/crew}/bin/crew\" pause --hook"}])' "$HOME/claude-settings.last" >/dev/null; }
-# The latest --settings without what crew adds to every session's: its env and the pause hook.
+# The latest --settings without what crew adds: its env and, for a worker or goal lead, the pause hook.
 given_settings() {
-  jq -c 'del(.env) | .hooks.PostToolUse |= map(select(.hooks[0].command | endswith(" pause --hook") | not))
-         | if .hooks.PostToolUse == [] then del(.hooks.PostToolUse) else . end' "$HOME/claude-settings.last"; }
+  jq -c 'del(.env) | if .hooks.PostToolUse == null then . else
+           .hooks.PostToolUse |= map(select(.hooks[0].command | endswith(" pause --hook") | not))
+           | if .hooks.PostToolUse == [] then del(.hooks.PostToolUse) else . end end' "$HOME/claude-settings.last"; }
 
 crew project add >/dev/null
 PE=$(ls "$L"/projects/*/project.env); PD=$(dirname "$PE"); P=$(basename "$PD")
@@ -965,8 +966,8 @@ fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 check "a worker's settings name its task's project, not the caller's" 'session_env "$P2"'
 check "a worker's launch sets no CREW_PROJECT, which its session wouldn't get" '[[ $(grep -- "--name crew-$P2-001-shop-checkout" "$HOME/claude-env.log" | tail -1) == "unset claude "* ]]'
 (cd "$HOME" && CREW_PROJECT=$PJ crew gardener --project "$P2" >/dev/null 2>&1)
-check "the gardener runs with its own settings, which load project memory, its project and the pause hook" \
-  '[[ $(given_settings) == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2" && has_pause_hook'
+check "the gardener runs with its own settings, which load project memory, and its project, but no pause hook" \
+  '[[ $(given_settings) == "$(jq -c . "$L/config/gardener-settings.json")" ]] && session_env "$P2" && ! has_pause_hook'
 (cd "$HOME" && CREW_PROJECT=$P2 crew gardener --project "$PJ" >/dev/null 2>&1)
 check "the gardener of another project gets that project" 'session_env "$PJ"'
 (cd "$SB/shop" && CREW_PROJECT=$P2 crew observe >/dev/null 2>&1)

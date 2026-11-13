@@ -348,9 +348,8 @@ func (c *Crew) resume(projects []*Project) error {
 	return nil
 }
 
-// crew pause --hook, the PostToolUse hook of every session crew starts (added by
-// sessionSettings, and in no settings file): once the session's project is
-// paused, Claude Code hands the session the text it prints, telling it to wrap
+// crew pause --hook, the PostToolUse hook of every worker and goal lead (added by
+// addPauseHook, and in no settings file): once the session's project is paused, Claude Code hands the session the text it prints, telling it to wrap
 // up. It reads only the environment and the mark, as it runs after every tool
 // call.
 func (c *Crew) pauseHook() {
