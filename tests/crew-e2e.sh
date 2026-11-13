@@ -1126,6 +1126,9 @@ check "crew pause takes over a pause crew upgrade made, so it outlasts the upgra
 GPT=$(crew new "Paused goal task" --goal "$GPF" --project "$PJ"); fill "$GPT"; crew ready "$GPT" >/dev/null
 GDF=$(crew goal new "Not started" --project "$PJ"); sed -i '/^## Goal$/a "Later."' "$GDF"; crew commit >/dev/null
 PS=$(crew new "Stacked while paused" --project "$PJ" --on "$TPI"); crew set "$PS" worker_job s7ack3d0
+PM=$(crew new "Merged parent" --project "$PJ")
+PSM=$(crew new "Stacked on a merged task" --project "$PJ" --on "$(basename "$PM" .md)"); fill "$PSM"; crew ready "$PSM" >/dev/null
+crew set "$PM" status merged; psm_base=$(crew get "$PSM" base)
 head=$(git -C "$L" rev-parse @); n=$(launches)
 out=$(crew followup "$PI" --note "go on" 2>&1); st=$?
 check "while paused, crew followup holds back with exit 4, naming crew resume" '((st == 4)) && [[ $out == "crew: $PJ is paused; '"'"'crew resume --project $PJ'"'"' lets its work go on" ]]'
@@ -1135,6 +1138,8 @@ check "while paused, crew dispatch holds back with exit 4 and makes no worktree"
 out=$(crew goal start "$GDF" 2>&1); st=$?
 check "while paused, crew goal start holds back with exit 4 and makes no checkout" \
   '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && ! -d $HOME/agent-work/$PJ/_goal-$(basename "$GDF" .md) && $(gget "$GDF" status) == draft ]]'
+out=$(crew dispatch "$PSM" 2>&1); st=$?
+check "while paused, crew dispatch holds back before it rebases a task whose parent merged" '((st == 4)) && [[ $(crew get "$PSM" base) == "$psm_base" ]]'
 out=$(crew restack "$PS" 2>&1); st=$?
 check "while paused, crew restack holds back with exit 4" '((st == 4)) && [[ $out == *"crew resume --project $PJ"* ]]'
 out=$(crew goal followup "$GPF" 2>&1); st=$?

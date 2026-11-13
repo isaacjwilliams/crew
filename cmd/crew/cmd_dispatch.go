@@ -56,6 +56,11 @@ func cmdDispatch(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Before the stacked base below is rewritten: dispatchChecks checks again
+	// after the worktree is made.
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 	idx := c.branches(p.Name)
 	parent, stacked := idx.parentOf(t)
 	// A parent that merged before this task started leaves nothing to stack on, so
