@@ -122,10 +122,13 @@ func (c *Crew) confirmUpgrade(projects []*Project, next string, merged, yes bool
 }
 
 // pauseAndMerge pauses every project, and merges the release once their
-// sessions have wrapped up. If it stops before the merge, it lifts the pause
-// again. A merge left in progress keeps it: git takes no ledger commit until
-// the merge is settled, and the crew upgrade run after that lifts it.
+// sessions have wrapped up. If it stops before the merge, it lifts the pause it
+// made, but not one an earlier run left: that run's release may be merged and
+// not yet installed. A merge left in progress keeps the pause: git takes no
+// ledger commit until the merge is settled, and the crew upgrade run after that
+// lifts it.
 func (c *Crew) pauseAndMerge(tag string, projects []*Project) error {
+	thisRun := slices.DeleteFunc(slices.Clone(projects), func(p *Project) bool { return p.PausedBy() == pausedByUpgrade })
 	err := c.pause(projects, pausedByUpgrade, false)
 	if err == nil {
 		err = c.mergeRelease(tag, projects)
@@ -133,7 +136,7 @@ func (c *Crew) pauseAndMerge(tag string, projects []*Project) error {
 	if err == nil || gitOK(c.Home, "rev-parse", "-q", "--verify", "MERGE_HEAD") {
 		return err
 	}
-	return errors.Join(err, c.liftUpgradePause(projects))
+	return errors.Join(err, c.liftUpgradePause(thisRun))
 }
 
 // installNewVersion runs the merged version's crew install, so a change to

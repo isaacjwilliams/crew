@@ -489,7 +489,7 @@ crew upgrade [--yes]
                    → stillPaused: refuse a project resumed or added during the wait, or a session mid-turn
                      (one that woke during it)
                  → git merge --no-edit v<version> → unlock
-                 a refusal lifts the pause; a conflict (only the person's own edits to crew's files can
+                 a refusal lifts this run's marks, not an earlier run's; a conflict (only the person's own edits to crew's files can
                  conflict) stops with the merge left in progress, the crew still paused
                → the new version's bin/crew install (--yes with --yes); a failure stops, the crew still paused
                → resume the projects whose mark says crew upgrade
@@ -498,7 +498,7 @@ crew upgrade [--yes]
 ```
 
 - **The upgrade pauses the crew**, so no worker or goal lead is mid-turn when the release is merged. A session that wakes during the install isn't caught: the install takes seconds. It's what `crew upgrade` always does, behind a yes: the user chose a confirmation over an option to wrap up or a refusal while sessions work. A lead runs it once without `--yes` to get the text to show the user, then again with `--yes` on their go-ahead.
-- **The upgrade knows its pause by the mark**, not by memory: it lifts every mark whose `by` is `crew upgrade`, so a run cut short (Ctrl-C, a closed terminal, a lead's Bash timeout) leaves marks the next one lifts. A project the user paused keeps its own mark. A failure before the merge lifts the pause too. Once the merge has begun, the crew stays paused until the release is installed: after a conflict git takes no ledger commit until the merge is settled, and after a failed install the sessions would resume on a half-installed release. `crew upgrade` run again then finds the tag in HEAD, so it pauses nothing, installs, and lifts the marks.
+- **The upgrade knows its pause by the mark**, not by memory: it lifts every mark whose `by` is `crew upgrade`, so a run cut short (Ctrl-C, a closed terminal, a lead's Bash timeout) leaves marks the next one lifts. A project the user paused keeps its own mark. A failure before the merge lifts the pause it made, but not marks an earlier run left, whose release may be merged and not installed. Once the merge has begun, the crew stays paused until the release is installed: after a conflict git takes no ledger commit until the merge is settled, and after a failed install the sessions would resume on a half-installed release. `crew upgrade` run again then finds the tag in HEAD, so it pauses nothing, installs, and lifts the marks.
 
 A session keeps the agent file and settings it started with, so after an upgrade:
 

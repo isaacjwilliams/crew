@@ -378,9 +378,15 @@ git -C "$H" checkout -q --theirs agents/gardener.md; git -C "$H" add agents/gard
 chmod a-w "$HOME/.claude/agents"; rc=0; out=$(up --yes) || rc=$?; chmod u+w "$HOME/.claude/agents"
 check "an install that fails after the merge keeps the crew paused, and says to run upgrade again" \
   '[[ $rc == 1 && $out == *"couldn'"'"'t install the new version, so the crew stays paused; run crew upgrade again to finish" && -e $H/projects/busy/paused ]]'
-out=$(up --yes)
-check "once the merge is settled, upgrade run again finishes, and lifts the pause" \
-  '[[ $out == *"crew upgraded to 9.9.10"* && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && committed projects/mine/paused'
+release 9.9.11; release_binary 9.9.11
+busy idle working; up --yes >"$HOME/up.out" & upgrading=$!
+wait_for 'grep -q "waiting up to" "$HOME/up.out"'
+busy working idle; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
+check "a run for a newer release that stops before its merge keeps the pause the failed install left" \
+  '[[ $rc == 1 && $out == *"001-busy started working while sessions wrapped up"* && $(sed -n "s/^by: //p" "$H/projects/busy/paused") == "crew upgrade" ]] && committed projects/busy/paused'
+busy idle; out=$(up --yes)
+check "and a later run that goes through installs the newer release, and lifts the pause" \
+  '[[ $out == *"crew upgraded to 9.9.11"* && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && committed projects/mine/paused'
 
 # 12. bin/crew, the launcher, runs the binary for the home's VERSION, and fetches
 #     it from the release the first time.
