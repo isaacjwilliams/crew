@@ -21,25 +21,30 @@ type process struct {
 	zombie   bool   // it has exited, and waits for its parent to reap it
 }
 
-// stopProcessesIn ends the background processes still running in a directory,
-// such as a dev server a worker started in a background shell: stopping the
-// worker leaves those running. It sends TERM, then KILL to any still running
-// after 10 seconds.
-func stopProcessesIn(dir string) {
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return
-	}
+// stopProcessesIn ends the background processes still running in the
+// directories, such as a dev server a worker started in a background shell:
+// stopping the worker leaves those running. It sends TERM, then KILL to any
+// still running after 10 seconds: one wait for all the directories.
+func stopProcessesIn(dirs ...string) {
 	procs, err := processes()
 	if err != nil {
-		warn("couldn't list the processes still running in %s, so they're left running: %v", dir, err)
+		warn("couldn't list the processes still running in %s, so they're left running: %v", strings.Join(dirs, ", "), err)
 		return
 	}
-	pids := processesToStop(procs, os.Getpid(), real)
+	var pids []int
+	for _, dir := range dirs {
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			continue
+		}
+		if in := processesToStop(procs, os.Getpid(), real); len(in) > 0 {
+			fmt.Printf("stopping %d process(es) still running in %s\n", len(in), dir)
+			pids = append(pids, in...)
+		}
+	}
 	if len(pids) == 0 {
 		return
 	}
-	fmt.Printf("stopping %d process(es) still running in %s\n", len(pids), dir)
 	for _, pid := range pids {
 		syscall.Kill(pid, syscall.SIGTERM)
 	}
@@ -50,7 +55,7 @@ func stopProcessesIn(dir string) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	warn("killing %d process(es) in %s that ignored TERM", len(left), dir)
+	warn("killing %d process(es) that ignored TERM", len(left))
 	for _, pid := range left {
 		syscall.Kill(pid, syscall.SIGKILL)
 	}

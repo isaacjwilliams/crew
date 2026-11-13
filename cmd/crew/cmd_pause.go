@@ -309,16 +309,18 @@ func (c *Crew) stopSessions(ss []session, why string) error {
 	}
 	open := c.stopJobs(jobs)
 	var stopped, failed []session
+	var dirs []string
 	for _, s := range ss {
 		if slices.Contains(open, s.job) {
 			failed = append(failed, s)
 			continue
 		}
 		stopped = append(stopped, s)
-		stopProcessesIn(s.dir)
+		dirs = append(dirs, s.dir)
 		s.Log(why)
 		s.Touch()
 	}
+	stopProcessesIn(dirs...)
 	if len(stopped) > 0 {
 		c.commit("pause: stopped " + labels(stopped))
 		fmt.Printf("stopped %d session(s): %s\n", len(stopped), labels(stopped))
