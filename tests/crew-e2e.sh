@@ -823,6 +823,12 @@ before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.m
 out=$(crew goal note 1 "Keep the footer small" 2>&1)
 check "a goal followup after agents/goal-lead.md changes starts the goal lead fresh, records the new fingerprint, and logs why" \
   '[[ $out == *"input sent to its goal lead (fresh: its instructions or settings changed)"* && $(gget "$GF" lead_fingerprint) != "$before" && $(tail -1 "$GF") == *"followup (fresh: its instructions or settings changed): goal lead "* && $(last_launch) == *"--agent goal-lead "*"is already under way"* ]]'
+git -C "$L" checkout -q -- agents; install_agents; setstate "done" null
+crew goal note 1 "Back as it was" >/dev/null 2>&1; setstate "done" null
+echo "# changed" >>"$L/agents/lead.md"; install_agents
+out=$(crew goal note 1 "Keep the logo small" 2>&1)
+check "a goal followup after agents/lead.md changes starts the goal lead fresh: it follows the lead's intake" \
+  '[[ $out == *"input sent to its goal lead (fresh: its instructions or settings changed)"* ]]'
 git -C "$L" checkout -q -- agents; install_agents; GJ=$(gget "$GF" lead_job)
 crew set "$GT1" status merged; crew set "$GT2" status abandoned; setstate "done" null
 out=$(crew tick 2>&1)

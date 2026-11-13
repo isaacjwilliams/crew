@@ -268,11 +268,15 @@ var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener"}
 // agentFiles are the files a session of agent loads its instructions from: the
 // installed copies (installedAgents) of its own agent file and of every
 // subagent's that the home ships. Which subagents it runs is said only in its
-// instructions, so they all count. The installed copies are what Claude Code
+// instructions, so they all count. A goal lead also follows the lead's intake
+// sections, so it counts lead.md. The installed copies are what Claude Code
 // loads, so an agent the home has but crew install hasn't copied yet doesn't
 // count until it has.
 func (c *Crew) agentFiles(agent string) []string {
 	files := []string{filepath.Join(installedAgents(), agent+".md")}
+	if agent == "goal-lead" {
+		files = append(files, filepath.Join(installedAgents(), "lead.md"))
+	}
 	shipped, _ := filepath.Glob(c.path("agents", "*.md"))
 	for _, f := range shipped {
 		if name := strings.TrimSuffix(filepath.Base(f), ".md"); !slices.Contains(sessionRoles, name) {

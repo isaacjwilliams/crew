@@ -375,6 +375,10 @@ func TestAgentFilesAreTheAgentsOwnAndEverySubagents(t *testing.T) {
 	if got := c.agentFiles("implementer"); !slices.Equal(got, want) {
 		t.Errorf("agentFiles(implementer) = %v, want %v", got, want)
 	}
+	want = []string{installed + "/goal-lead.md", installed + "/lead.md", installed + "/casual-observer.md", installed + "/reviewer.md"}
+	if got := c.agentFiles("goal-lead"); !slices.Equal(got, want) {
+		t.Errorf("agentFiles(goal-lead) = %v, want %v: a goal lead follows the lead's intake", got, want)
+	}
 }
 
 func TestSessionRolesAreTheAgentsTheLeadMayNotRunAsSubagents(t *testing.T) {
