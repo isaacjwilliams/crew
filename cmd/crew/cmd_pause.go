@@ -382,6 +382,7 @@ func (c *Crew) resume(projects []*Project) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	defer c.unlock()
 	var resumed []string
 	for _, p := range projects {
 		if !p.Paused() {
