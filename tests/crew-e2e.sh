@@ -866,6 +866,10 @@ st=$(crew status)
 check "status shows the priority beside a goal's ready task, and not beside one outside a goal" '[[ $(grep "$TB" <<<"$st") == *"ready"*"priority 1" && $(grep "$TA" <<<"$st") != *priority* && $(grep "$(basename "$NG" .md)" <<<"$st") != *priority* ]]'
 sed -i 's/^priority: *$/priority: x/' "$PA"   # written by hand
 setstate "done" null
+echo "WORKER_AUTOCOMPACT_WINDOW=bad" >>"$PE"   # so every dispatch tick runs fails, and says so
+out=$(crew tick 2>&1)
+check "tick runs crew dispatch for the ready tasks that can go, and not for one waiting on another" '[[ $out == *"$TB: dispatch failed:"*"WORKER_AUTOCOMPACT_WINDOW"* && $out != *"$TH"* ]]'
+sed -i '/^WORKER_AUTOCOMPACT_WINDOW=bad$/d' "$PE"
 out=$(crew tick 2>&1)
 check "tick dispatches the highest priority ready task first, a tie going to the lower ID, past one a dependency holds" '[[ $out == *"$TB: dispatched for goal $G3"* && $out != *"$TA: dispatched"* && $out != *"$TC: dispatched"* && $out != *"$TH: dispatched"* && $(crew get "$PB" status) == working && $(crew get "$PC" status) == ready && $(crew get "$PH" status) == ready ]]'
 check "tick warns of a priority that isn't a whole number, and status shows it as ?" '[[ $out == *"$TA: priority '"'"'x'"'"' isn'"'"'t a whole number; treating it as 0"* && $(crew status | grep "$TA") == *"priority ?" ]]'

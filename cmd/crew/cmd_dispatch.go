@@ -179,9 +179,10 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 }
 
 // unmergedDeps are the tasks this one waits on: its dependencies that haven't
-// merged. A stacked task's parent needn't merge, since dispatch needs only its
-// branch on origin, so it's listed only when it's abandoned, whether or not it's
-// in depends_on. A dependency that doesn't name exactly one task is an error.
+// merged. A stacked task's parent (liveParent, the one dispatch stacks it on)
+// needn't merge, since dispatch needs only its branch on origin, so it's listed
+// only when it's abandoned, whether or not it's in depends_on. A dependency
+// that doesn't name exactly one task is an error.
 // idx indexes the task's project, or every project: building it reads every
 // task file, so a caller checking many tasks builds it once.
 func (c *Crew) unmergedDeps(idx Branches, t Task) ([]Task, error) {
@@ -190,7 +191,7 @@ func (c *Crew) unmergedDeps(idx Branches, t Task) ([]Task, error) {
 	if parent, ok := idx.abandonedParent(t); ok {
 		deps = append(deps, parent)
 	}
-	parent, stacked := idx.parentOf(t)
+	parent, stacked := idx.liveParent(t)
 	names := strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on"))
 	files := c.files("tasks", project)
 	for _, dep := range strings.Fields(names) {

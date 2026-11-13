@@ -35,10 +35,24 @@ func (idx Branches) parentOf(t Task) (Task, bool) {
 	return p, true
 }
 
-// abandonedParent is the task t is stacked on, when that task is abandoned: it
-// will never push or merge, so t can't dispatch on it.
+// liveParent is the task t is stacked on once crew dispatch has moved it past
+// any parents that have merged (effectiveBase): its parent, or the first task
+// further down the stack that hasn't merged.
+func (idx Branches) liveParent(t Task) (Task, bool) {
+	for range 50 {
+		p, ok := idx.parentOf(t)
+		if !ok || p.Status() != Merged {
+			return p, ok
+		}
+		t = p
+	}
+	return Task{}, false
+}
+
+// abandonedParent is the task t is stacked on (liveParent), when that task is
+// abandoned: it will never push or merge, so t can't dispatch on it.
 func (idx Branches) abandonedParent(t Task) (Task, bool) {
-	p, ok := idx.parentOf(t)
+	p, ok := idx.liveParent(t)
 	return p, ok && p.Status() == Abandoned
 }
 
