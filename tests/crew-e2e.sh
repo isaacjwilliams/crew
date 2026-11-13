@@ -1150,6 +1150,10 @@ out=$(crew goal followup "$GPF" 2>&1); st=$?
 check "while paused, crew goal followup holds back with exit 4, keeping interrupted for later" \
   '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && -n $(gget "$GPF" interrupted) ]]'
 check "and they change nothing in the ledger and start no session" '[[ $(git -C "$L" rev-parse @) == "$head" && -z $(git -C "$L" status --porcelain -- projects) && $(launches) == "$n" ]]'
+rounds=$(crew get "$PI" review_rounds)
+out=$(crew review "$PI" 2>&1); st=$?
+check "while paused, crew review records the round and says it goes out after crew resume" \
+  '((st == 0)) && [[ $out == *"is paused, so crew tick sends it once '"'"'crew resume --project $PJ'"'"'"* && $(crew get "$PI" review_rounds) == $((rounds + 1)) && $(launches) == "$n" ]]'
 out=$(crew gardener --project "$PJ" 2>&1)
 check "crew gardener skips a paused project" '[[ $out == "$PJ: paused; skipped" && $(launches) == "$n" ]]'
 crew set "$PT" review_rounds $(($(crew get "$PT" review_rounds) + 1)); crew set "$Q2" review_rounds $(($(crew get "$Q2" review_rounds) + 1))
