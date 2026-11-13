@@ -385,7 +385,7 @@ crew resume --project <p>     # let it go on
 
 While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments and red CI), the gardener skips it, and `crew dispatch`, `crew followup` and `crew goal start` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
 
-Nothing is lost: worktrees, branches and conversations stay. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
+Nothing is lost: worktrees, branches and conversations stay. When crew stops a session, it also ends what that session left running in the background in its worktree, such as a dev server or a Codex review, as cleanup does. A background subagent the session started may still run on: Claude Code carries those over to the session's next process. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
 
 ### After merging
 

@@ -149,6 +149,7 @@ type session struct {
 	project *Project // the project it works on
 	job     string   // its job in claude agents
 	label   string   // the task's ID, or "goal <ID>"
+	dir     string   // where it works: the task's worktree, or the goal lead's checkout
 	// finished: its task is merged or abandoned, or its goal isn't running, so
 	// nothing will carry its work on. Its process may still be running.
 	finished bool
@@ -161,12 +162,12 @@ func (c *Crew) sessions(projects []*Project) []session {
 	for _, p := range projects {
 		for _, t := range c.tasks(p.Name) {
 			if t.WorkerJob() != "" {
-				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID(), t.Status().Finished()})
+				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID(), t.Worktree(), t.Status().Finished()})
 			}
 		}
 		for _, g := range c.goals(p.Name) {
 			if g.LeadJob() != "" {
-				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID(), g.Status() != GoalRunning})
+				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID(), g.Get("checkout"), g.Status() != GoalRunning})
 			}
 		}
 	}
@@ -290,7 +291,9 @@ func (c *Crew) waitForTurnsToEnd(busy []session, wait time.Duration) []session {
 // stopSessions stops the sessions whose project is still paused, and logs why
 // on each file. It holds the ledger lock throughout, so no resume or followup
 // comes between the check and the stop. Their conversations and worktrees are
-// kept. It fails if any of them didn't stop.
+// kept, but what they left running in the background there (a crew codex
+// review, a dev server) is ended, as crew cleanup does: a stopped session's
+// background shells would otherwise run on. It fails if any of them didn't stop.
 func (c *Crew) stopSessions(ss []session, why string) error {
 	if err := c.lock(); err != nil {
 		return err
@@ -312,6 +315,7 @@ func (c *Crew) stopSessions(ss []session, why string) error {
 			continue
 		}
 		stopped = append(stopped, s)
+		stopProcessesIn(s.dir)
 		s.Log(why)
 		s.Touch()
 	}

@@ -1182,10 +1182,13 @@ sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
 PF=$(paused_task "$PJ" "Abandoned but running"); crew set "$PF" status abandoned
 setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242
 jobstate "$(crew get "$PF" worker_job)" working 4242 busy; n=$(calls)
+(cd "$(crew get "$PT" worktree)" && exec setsid sleep 300) & IN_PT=$!
 out=$(crew pause --project "$PJ" --force 2>&1)
 check "crew pause --force stops the project's sessions at once, busy or idle, and logs it" \
   '[[ $(sed -n "s/^by: //p" "$MARK") == "crew pause --force" && $out != *waiting* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(crew get "$PI" worker_job)"* ]] &&
    [[ $(tail -1 "$PT") == *"stopped by crew pause --force" && $(tail -1 "$PI") == *"stopped by crew pause --force" && $(since "$n") != *"claude stop $(crew get "$Q2" worker_job)"* ]]'
+check "stopping a session also ends what it left running in its worktree" '[[ $out == *"stopping 1 process(es) still running in $(crew get "$PT" worktree)"* && ! -e /proc/$IN_PT/cwd ]]'
+kill "$IN_PT" 2>/dev/null || true
 check "--force marks only the busy session's work interrupted" '[[ -n $(crew get "$PT" interrupted) && -z $(crew get "$PI" interrupted) ]]'
 check "--force also stops a worker still running for an abandoned task, without marking its work interrupted" \
   '[[ $(since "$n") == *"claude stop $(crew get "$PF" worker_job)"* && -z $(crew get "$PF" interrupted) ]]'
