@@ -215,48 +215,60 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 // project but the paused ones, highest priority first and then in ledger order.
 // The goal lead marked each one ready, which is the go-ahead. It's the tick's
 // last step, so workers made busy by this tick's review rounds and restacks
-// count against MAX_WORKERS. A task held by a cap or a dependency (exit 4) waits
-// for the next tick, and the next task is tried: caps are per goal, and
-// dependencies per task. Each task is checked again just before its dispatch,
-// since an earlier one can take minutes (worktree hooks) while the ledger is
-// unlocked, time enough for its goal to be abandoned or the task dispatched by
-// hand.
+// count against MAX_WORKERS. A task waiting on other tasks is skipped without
+// running crew dispatch, which saves a process; one that dispatch holds back
+// (exit 4), by a cap say, is left for the next tick. Either way the next task is
+// tried: dependencies are per task, and caps per goal. Each task is checked
+// again just before its dispatch, since an earlier one can take minutes
+// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
+// abandoned or the task dispatched by hand.
 func (c *Crew) dispatchReady() {
-	type candidate struct {
-		Task
-		priority int
-	}
-	var ready []candidate
+	var ready []Task
 	for _, name := range c.projects("") {
 		// No clone here, say: the tick warned of it and skipped it above.
 		if p, err := c.loadProject(name); err != nil || p.Paused() {
 			continue
 		}
 		for _, t := range c.tasks(name) {
-			if !c.goalReady(t) {
-				continue
+			if c.goalReady(t) {
+				ready = append(ready, t)
 			}
-			n, err := t.Priority()
-			if err != nil {
-				warn("%v; treating it as 0", err)
-			}
-			ready = append(ready, candidate{t, n})
 		}
 	}
-	slices.SortStableFunc(ready, func(a, b candidate) int { return cmp.Compare(b.priority, a.priority) })
+	sortForDispatch(ready)
+	idx := c.branches("")
 	for _, t := range ready {
-		if !c.goalReady(t.Task) {
+		if !c.goalReady(t) {
+			continue
+		}
+		// A dependency that doesn't name exactly one task is crew dispatch's to report.
+		if deps, err := c.unmergedDeps(idx, t); err == nil && len(deps) > 0 {
 			continue
 		}
 		var errs strings.Builder
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
 			fmt.Printf("%s: dispatched for goal %s\n", t.ID(), t.Goal())
-		case exitNotYet: // held by a cap or a dependency; the next tick tries again
+		case exitNotYet: // held back, by a cap say; the next tick tries again
 		default:
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
 		}
 	}
+}
+
+// sortForDispatch puts tasks in the order crew tick tries them: highest priority
+// first, the order they came in breaking ties. It warns of a priority that isn't
+// a whole number, and treats it as 0.
+func sortForDispatch(ts []Task) {
+	priority := map[string]int{}
+	for _, t := range ts {
+		n, err := t.Priority()
+		if err != nil {
+			warn("%v; treating it as 0", err)
+		}
+		priority[t.Path] = n
+	}
+	slices.SortStableFunc(ts, func(a, b Task) int { return cmp.Compare(priority[b.Path], priority[a.Path]) })
 }
 
 // goalReady: the task is ready and its goal running, so crew tick dispatches it.

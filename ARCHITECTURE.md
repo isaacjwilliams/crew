@@ -262,7 +262,8 @@ crew dispatch TASK               # needs origin/<parent branch>, not a merged pa
 worker                           # gh pr create --base <parent branch>; PR body starts "Stacked on #N."
 crew sync                        # after the PR pass: git fetch origin (only for projects with a live stacked task),
                                  #   move base_sha forward, print "<task>: needs a restack, <parent> moved|merged"
-crew status                      # children listed under their parent, with "needs restack: …"
+crew status                      # children listed under their parent, with "needs restack: …"; a ready child
+                                 #   of a parent in flight is listed on its own, "on <parent>"
 crew restack TASK                # refuses while a live parent needs a restack itself (bottom-up),
                                  #   and a restack onto the commit it already sent (restack_sent) unless --again
   ├─ git fetch origin; target = origin/<effective base>:
@@ -317,8 +318,9 @@ crew tick
   │      or interrupted                             and its project isn't paused
   │    every task merged or abandoned            → crew goal done
   ├─ dispatchReady: the ready tasks of running goals, every unpaused project's together,
-  │    highest priority first, then by project and ID
-  │                                              → crew dispatch, each in turn (exit 4, a dispatch that has to
+  │    highest priority first, then by project and ID (sortForDispatch)
+  │    waiting on other tasks (unmergedDeps)     → skipped, without a word
+  │    the rest                                  → crew dispatch, each in turn (exit 4, a dispatch that has to
   │                                                  wait: nothing said, and the next task is tried)
   └─ push_ledger in the foreground (soft): whatever a background push missed
 ```
@@ -353,11 +355,20 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 ```
 
 - **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job`, `lead_session` and `lead_fingerprint`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's record, and the session can be replaced.
-- **A task belongs to a goal through its `goal:` key**, set by `crew new --goal`. `crew status` lists each goal with its tasks under it.
+- **A task belongs to a goal through its `goal:` key**, set by `crew new --goal`. `crew status` lists each goal with its tasks under it, grouped by where they stand: in flight; next, numbered in the order `crew tick` dispatches them (`sortForDispatch`); waiting on other tasks, with `after <tasks>`; drafts with open questions, under `parked`; and the other drafts, under `planning`. A goal that isn't running lists its ready tasks under `ready`, unnumbered.
 - **Parked is a task state, not a goal one.** The goal lead parks an item by leaving its task in `draft` with unchecked Open questions, so the rest of the goal carries on. The user answers through the lead, which records the answer in the task and passes it on with `crew goal note`.
 - **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. `crew goal followup` sends both, once the goal lead is free, and resets them.
 - **The goal lead works one turn per input** and never polls (its prompt, and `disallowedTools` without `ScheduleWakeup` or cron). Every turn starts in a freshly fetched checkout. It doesn't count toward `MAX_WORKERS`, which caps workers: what it produces is capped where it reaches the user, by the goal's `max_in_flight`.
-- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a cap, an unmerged dependency, a stacked parent that hasn't pushed. `crew tick` prints nothing for those and tries again; any other refusal is a warning.
+- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a paused project (checked first), an unmerged dependency (`unmergedDeps`), a cap, or a stacked parent that hasn't pushed. It counts the caps only once the dependencies have merged, since counting the workers running asks `claude agents`. `crew tick` leaves out paused projects' tasks, skips a task with unmerged dependencies without running `crew dispatch` for it, and prints nothing for exit 4; it tries both again next tick. Any other refusal is a warning.
+- **`crew status` shows what holds dispatch back**, from the same `unmergedDeps`, `workerSlots`, `goalSlots` and `sortForDispatch`, so the two agree on dependencies, caps and order. It counts the caps once for each project and goal, not for each task. A cap set to something that isn't a whole number shows as `?`, with the error on that project's or goal's line. Each note means one thing:
+  - `after <tasks>`: the dependencies that haven't merged. An abandoned one is always named, `<task> (abandoned)`, since it never will. A stacked task's abandoned parent counts, whether it's in `depends_on` or only the `base`.
+  - `on <parent>`: a ready task whose parent is in flight. It can go once the parent's branch is on origin, which status can't see. When the task's own parent has merged, the parent named is the first task down the stack that hasn't (`liveParent`), since that's where `crew dispatch` puts the task.
+  - `full` on a goal's line: the goal is at its `max_in_flight`.
+  - `full` on the `workers running` line: no project has a worker slot free. A project may set its own `MAX_WORKERS`, higher or lower, so each full project's line says `workers full` with its own limit.
+  - `dispatch by hand`: a ready task no running or draft goal will dispatch. `goal <id> full` beside it means a done or abandoned goal's cap still holds it; a bad cap on that goal is said there too, since status doesn't list the goal.
+  - `N draft(s)`: drafts outside a goal with no open questions, counted rather than listed.
+  - `paused (crew resume --project <p>)` on a project's line: nothing dispatches for it, whatever its groups say, until it's resumed. `interrupted by a pause` on a task: the pause cut its worker's turn short, and `crew tick` tells it to carry on once the project is resumed.
+  - Status lists a project's next tasks even when it isn't cloned here, though `crew tick` dispatches only projects cloned on its machine.
 - **Ending a goal** (`crew goal done` or `abandon`) stops and removes the goal lead, any background process still running in its checkout, and the checkout, and leaves the tasks alone. A note to a done goal reopens it, for items added later. The ready tasks of an abandoned goal are the lead's to dispatch.
 - **Items come from wherever the goal says.** If that's an external tracker, the goal lead reads it with the tools its session has and changes nothing there. How to reach a project's tracker belongs in that project's `AGENTS.md`, never in this repo.
 

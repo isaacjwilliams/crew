@@ -489,7 +489,7 @@ check "the stacked worktree starts on the parent's tip, which is recorded" '[[ $
 check "the worker is told which task and PR it is stacked on" 'grep -q "stacked on task 009-season-model (PR #21): agent/season-model" "$HOME/claude-calls.log"'
 work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; crew set 10 status pr-open
 out=$(crew status)
-check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                 pr-open "* ]]'
+check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                      pr-open "* ]]'
 out=$(crew sync)
 check "sync leaves a stack alone while the parent hasn't moved" '[[ $out != *restack* && $(crew get 9 status) == pr-open ]]'
 
@@ -785,7 +785,7 @@ NG=$(crew new "Not in a goal"); fill "$NG"; crew ready "$NG" >/dev/null
 check "new --goal makes the task one of the goal's" '[[ $(crew get "$GT1" goal) == "$G" && -z $(crew get "$NG" goal) ]]'
 check "new --goal refuses a goal that doesn't exist" '! crew new "Stray" --goal 9 2>/dev/null'
 sed -i '/^## Open questions$/a - [ ] Add a standings table? It needs a migration. I recommend yes.' "$GT2"
-check "status lists the goal with its tasks under it, and a parked task's open questions" '[[ $(crew status) == *"goal $G"*"running"*"0 of 2 task(s) merged, 0/3 in flight"$'"'"'\n'"'"'"    $T1"*$'"'"'\n'"'"'"    $T2"*"draft"*"1 open question(s)"* ]]'
+check "status lists a goal's drafts with open questions under parked, and the rest under planning" '[[ $(crew status) == *"goal $G"*"running"*"0 of 2 task(s) merged, 0/3 in flight$NL    parked$NL         $T2"*"draft"*"1 open question(s)$NL    planning$NL         $T1"* ]]'
 fill "$GT1"; crew ready "$GT1" >/dev/null
 crew goal cap 1 0 >/dev/null
 out=$(crew tick 2>&1)
@@ -866,6 +866,10 @@ st=$(crew status)
 check "status shows the priority beside a goal's ready task, and not beside one outside a goal" '[[ $(grep "$TB" <<<"$st") == *"ready"*"priority 1" && $(grep "$TA" <<<"$st") != *priority* && $(grep "$(basename "$NG" .md)" <<<"$st") != *priority* ]]'
 sed -i 's/^priority: *$/priority: x/' "$PA"   # written by hand
 setstate "done" null
+echo "WORKER_AUTOCOMPACT_WINDOW=bad" >>"$PE"   # so every dispatch tick runs fails, and says so
+out=$(crew tick 2>&1)
+check "tick runs crew dispatch for the ready tasks that can go, and not for one waiting on another" '[[ $out == *"$TB: dispatch failed:"*"WORKER_AUTOCOMPACT_WINDOW"* && $out != *"$TH"* ]]'
+sed -i '/^WORKER_AUTOCOMPACT_WINDOW=bad$/d' "$PE"
 out=$(crew tick 2>&1)
 check "tick dispatches the highest priority ready task first, a tie going to the lower ID, past one a dependency holds" '[[ $out == *"$TB: dispatched for goal $G3"* && $out != *"$TA: dispatched"* && $out != *"$TC: dispatched"* && $out != *"$TH: dispatched"* && $(crew get "$PB" status) == working && $(crew get "$PC" status) == ready && $(crew get "$PH" status) == ready ]]'
 check "tick warns of a priority that isn't a whole number, and status shows it as ?" '[[ $out == *"$TA: priority '"'"'x'"'"' isn'"'"'t a whole number; treating it as 0"* && $(crew status | grep "$TA") == *"priority ?" ]]'
@@ -893,6 +897,95 @@ check "a goal abandoned during an earlier dispatch in the tick has none of its t
 sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
 crew goal abandon "$GF4" >/dev/null 2>&1
 for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$NG"; do crew set "$f" status abandoned; done
+# crew status groups a goal's tasks by where they stand, in the order crew tick
+# dispatches them, and says what each one not yet dispatched waits for.
+num() { basename "$1" .md | cut -d- -f1; }
+row() { grep -- "$1" <<<"$st"; }   # the status line of a task, from $st
+heading() { awk -v h="    $2" '$0 == h {on = 1; next} on && /^(    [a-z]|  [^ ])/ {exit} on' <<<"$1"; }   # a group's rows
+GF5=$(crew goal new "Status groups" --max-in-flight 1); G5=$(basename "$GF5" .md)
+sed -i '/^## Goal$/a "Group the tasks."' "$GF5"; crew goal start "$GF5" >/dev/null
+SI=$(goal_task "$GF5" "Groups in flight"); crew set "$SI" status working
+SM=$(goal_task "$GF5" "Groups merged"); crew set "$SM" status merged
+SH=$(goal_task "$GF5" "Groups held"); crew set "$SH" priority 2; crew set "$SH" depends_on "$(basename "$SI" .md)"
+SN=$(goal_task "$GF5" "Groups next"); crew set "$SN" depends_on "$(basename "$SM" .md)"
+SK=$(crew new "Groups stacked" --goal "$GF5" --on "$SN"); fill "$SK"; crew ready "$SK" >/dev/null
+st=$(crew status)
+check "status says a goal at its max_in_flight is full" '[[ $st == *"goal $G5"*"1/1 in flight: full"$NL* ]]'
+check "status lists a goal's in-flight tasks under their own heading" '[[ $(heading "$st" "in flight") == *"$(basename "$SI" .md)"*working* ]]'
+check "status numbers the next task to dispatch, though a higher priority one waits on another task" '[[ $(heading "$st" "next, in dispatch order") == "      1  $(basename "$SN" .md)"* ]]'
+check "status lists a held task under waiting, saying what it waits for" '[[ $(heading "$st" "waiting on other tasks") == "         $(basename "$SH" .md)"*"priority 2  after $(num "$SI")" ]]'
+check "status leaves a merged dependency out of a task's after" '[[ $(heading "$st" "next, in dispatch order" | head -1) == *"$(basename "$SN" .md)"* && $(row "$(basename "$SN" .md)") != *after* ]]'
+check "status lists a task stacked on a ready one once, under its parent, and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(grep -A1 "1  $(basename "$SN" .md)" <<<"$st" | tail -1) == "         └ $(basename "$SK" .md)"* && $(row "$(basename "$SK" .md)") != *after* ]]'
+crew goal cap "$GF5" 3 >/dev/null; crew set "$SN" status working
+for i in 1 2 3 4 5; do SL=$(goal_task "$GF5" "Groups more $i"); done
+st=$(crew status)
+check "status doesn't call a goal under its max_in_flight full" '[[ $st == *"goal $G5"*"2/3 in flight"$'"'"'\n'"'"'"    in flight"* && $st != *"in flight: full"* ]]'
+check "status numbers a ready task stacked on one in flight in next, on its parent and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(heading "$st" "next, in dispatch order" | head -1) == "      1  $(basename "$SK" .md)"*"on $(num "$SN")" ]]'
+check "status shows the first 5 tasks that can go next, and how many more there are" '[[ $(heading "$st" "next, in dispatch order" | grep -c "^      [1-5]  ") == 5 && $(heading "$st" "next, in dispatch order" | tail -1) == "         … (1 more)" ]]'
+SQ=$(crew new "Groups question on the sixth" --goal "$GF5" --on "$SL"); sed -i '/^## Open questions$/a - [ ] Which way? I recommend this one.' "$SQ"
+st=$(crew status)
+check "status still lists a task past the first 5 that has a question in its stack, with its number" '[[ $(heading "$st" "next, in dispatch order" | grep -A1 "^      6  $(basename "$SL" .md)" | tail -1) == "         └ $(num "$SQ")"*"1 open question(s)" && $(heading "$st" "next, in dispatch order") != *"more)"* ]]'
+crew set "$SQ" status abandoned
+SA=$(goal_task "$GF5" "Groups abandoned parent"); SC=$(crew new "Groups orphan" --goal "$GF5" --on "$SA"); fill "$SC"; crew ready "$SC" >/dev/null
+crew set "$SA" status abandoned
+st=$(crew status)
+check "status lists a task stacked on an abandoned one as waiting, after it" '[[ $(heading "$st" "waiting on other tasks") == *"$(basename "$SC" .md)"*"after $(num "$SA") (abandoned)"* ]]'
+crew set "$SC" status abandoned
+SR=$(goal_task "$GF5" "Groups parent by base"); SY=$(goal_task "$GF5" "Groups child by base"); crew set "$SY" base "$(crew get "$SR" branch)"
+crew set "$SR" status abandoned
+st=$(crew status)
+check "status lists a task stacked through its base on an abandoned one as waiting, after it" '[[ $(heading "$st" "waiting on other tasks") == *"$(num "$SY")-"*"after $(num "$SR") (abandoned)"* ]]'
+crew set "$SY" status abandoned
+SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK")"
+st=$(crew status)
+check "status names an abandoned dependency even where it only counts the rest" '[[ $(row "$(num "$SZ")-") == *"after 5 tasks, $(num "$SA") abandoned" ]]'
+crew set "$SZ" status abandoned
+# Dispatch moves a task whose parent merged onto the first task down the stack
+# that hasn't, so that one needn't merge first, even when depends_on names it.
+SG=$(goal_task "$GF5" "Groups grandparent"); crew set "$SG" status working
+SP=$(goal_task "$GF5" "Groups merged middle"); crew set "$SP" base "$(crew get "$SG" branch)"; crew set "$SP" status merged
+SU=$(goal_task "$GF5" "Groups on a merged middle"); crew set "$SU" base "$(crew get "$SP" branch)"; crew set "$SU" depends_on "$(num "$SG") $(num "$SP")"; crew set "$SU" priority 9
+st=$(crew status)
+check "status lists a task whose parent merged as next, on the first task down its stack that hasn't, and not after it" '[[ $(heading "$st" "next, in dispatch order") == *"$(num "$SU")-"*"on $(num "$SG")"* && $(row "$(num "$SU")-") != *after* ]]'
+for f in "$SG" "$SP" "$SU"; do crew set "$f" status abandoned; done
+GF7=$(crew goal new "Status abandoned cap" --max-in-flight 1); G7=$(basename "$GF7" .md)
+SW=$(crew new "Abandoned cap working" --goal "$GF7"); crew set "$SW" status working
+SV=$(crew new "Abandoned cap ready" --goal "$GF7"); fill "$SV"; crew ready "$SV" >/dev/null
+crew goal abandon "$GF7" >/dev/null 2>&1
+st=$(crew status)
+check "status says an abandoned goal's cap still holds a task to dispatch by hand" '[[ $(row "$(num "$SV")-") == *"goal $G7 full  dispatch by hand" ]]'
+sed -i 's/^max_in_flight: .*/max_in_flight: x/' "$GF7"
+st=$(crew status)
+check "status reports an abandoned goal's bad cap on its ready task's row, since the goal isn't listed" '[[ $(row "$(num "$SV")-") == *"goal $G7: max_in_flight must be a whole number"*"  dispatch by hand" ]]'
+crew set "$SW" status abandoned; crew set "$SV" status abandoned
+SX=$(goal_task "$GF5" "Groups on a merged parent"); crew set "$SX" base "$(crew get "$SM" branch)"; crew set "$SX" priority 9
+st=$(crew status --done)
+check "with --done, a task whose parent merged is listed in its own group, not under the parent" '[[ $(row "$(num "$SX")-") == "      1  $(num "$SX")-"* ]]'
+crew set "$SX" status abandoned
+GF6=$(crew goal new "Status draft goal"); SD=$(goal_task "$GF6" "Draft goal task")
+st=$(crew status)
+check "status lists a draft goal's ready task under ready, unnumbered" '[[ $(heading "$st" "ready") == "         $(basename "$SD" .md)"*ready* ]]'
+mv "$PD/local.env" "$HOME/local.env.saved"
+st=$(crew status --project "$(basename "$PD")")
+check "status lists a goal's tasks in their groups for a project with no clone here" '[[ $(heading "$st" "waiting on other tasks") == *"$(basename "$SH" .md)"*"after $(num "$SI")" && $(heading "$st" "next, in dispatch order") == *"1  $(basename "$SK" .md)"* ]]'
+mv "$HOME/local.env.saved" "$PD/local.env"
+echo "MAX_WORKERS=x" >>"$PE"; sed -i 's/^max_in_flight: .*/max_in_flight: x/' "$GF5"
+st=$(crew status)
+check "status reports a cap that isn't a number once, on the project's or the goal's line, and groups the tasks as before" \
+  '[[ $(grep -c "MAX_WORKERS must be a whole number" <<<"$st") == 1 && $st == *"$NL$(basename "$PD")  MAX_WORKERS must be a whole number, not '"'"'x'"'"'$NL"* && $(grep -c "max_in_flight must be a whole number" <<<"$st") == 1 && $(row "goal $G5") == *"/? in flight  goal $G5: max_in_flight must be a whole number"* && $(heading "$st" "next, in dispatch order") == *"1  $(basename "$SK" .md)"* && $(heading "$st" "waiting on other tasks") == *"$(basename "$SH" .md)"*"after $(num "$SI")" ]]'
+sed -i '/^MAX_WORKERS=x$/d' "$PE"; crew goal cap "$GF5" 3 >/dev/null
+# Outside a goal: a ready task waits for someone to dispatch it, and drafts with
+# nothing to ask fold into a count.
+OR=$(crew new "Outside ready"); fill "$OR"; crew ready "$OR" >/dev/null
+crew new "Outside draft one" >/dev/null; crew new "Outside draft two" >/dev/null
+OQ=$(crew new "Outside question"); sed -i '/^## Open questions$/a - [ ] Which way? I recommend this one.' "$OQ"
+st=$(crew status)
+check "status says a ready task outside a goal is dispatched by hand" '[[ $(row "$(basename "$OR" .md)") == *"ready"*"dispatch by hand" ]]'
+check "status folds drafts outside a goal into a count, and lists one with an open question" '[[ $st == *$'"'"'\n'"'"'"  2 draft(s)  (crew list --project $(basename "$PD") --status draft)"* && $st != *"outside-draft"* && $(row "$(basename "$OQ" .md)") == *"draft"*"1 open question(s)"* ]]'
+check "status says when the workers running have reached MAX_WORKERS" 'echo "MAX_WORKERS=0" >>"$L/config/crew.env" && st=$(crew status) && [[ $(head -1 <<<"$st") == "workers running: "*"/0: full, nothing dispatches" && $st == *"$NL$(basename "$PD")  workers full (MAX_WORKERS 0 here)$NL"* ]]'
+sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
+crew goal abandon "$GF5" >/dev/null 2>&1; crew goal abandon "$GF6" >/dev/null 2>&1
+for f in "$PD"/tasks/*.md; do case $(crew get "$f" status) in merged|abandoned) ;; *) crew set "$f" status abandoned ;; esac; done
 rm -f "$HOME/gh-pr-state"
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
@@ -954,12 +1047,25 @@ out=$(CREW_PROJECT=all crew new "Nowhere" 2>&1)
 check "with every project in scope, crew new asks which one" '[[ $out == *"which project?"* ]]'
 out=$(crew status --project all)
 check "--project all is every project, like --all" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* ]]'
+# With two projects, no worker slot is free for the crew only when none is for either.
+echo "MAX_WORKERS=0" >>"$PE"
+out=$(crew status --all)
+check "status says when only a project's own MAX_WORKERS is reached, on that project's line" '[[ $(head -1 <<<"$out") == "workers running: "*"/3" && $out == *"$NL$PJ  workers full (MAX_WORKERS 0 here)$NL"* && $out == *"$NL$P2$NL"* ]]'
+sed -i '/^MAX_WORKERS=0$/d' "$PE"; echo "MAX_WORKERS=0" >>"$L/config/crew.env"; echo "MAX_WORKERS=5" >>"$PE"
+out=$(crew status --all)
+check "status doesn't say nothing dispatches while a project's own higher MAX_WORKERS isn't reached" '[[ $(head -1 <<<"$out") == "workers running: "*"/0" && $out == *"$NL$P2  workers full (MAX_WORKERS 0 here)$NL"* && $out == *"$NL$PJ$NL"* ]]'
+sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"; sed -i '/^MAX_WORKERS=5$/d' "$PE"
+echo "MAX_WORKERS=0" >>"$PE"; echo "MAX_WORKERS=0" >>"$L/projects/$P2/project.env"
+out=$(crew status --all)
+check "status names each project's own MAX_WORKERS when every project is full at a limit that isn't the crew's" '[[ $(head -1 <<<"$out") == "workers running: "*"/3: full, nothing dispatches" && $out == *"$NL$PJ  workers full (MAX_WORKERS 0 here)$NL"* && $out == *"$NL$P2  workers full (MAX_WORKERS 0 here)$NL"* ]]'
+sed -i '/^MAX_WORKERS=0$/d' "$PE" "$L/projects/$P2/project.env"
 out=$(CREW_PROJECT=nope crew status 2>&1)
 check "an unknown CREW_PROJECT fails clearly" '[[ $out == *"CREW_PROJECT is '"'"'nope'"'"', which isn'"'"'t a project registered with crew"* ]]'
 out=$(cd "$HOME" && crew list --project "$P2")
 check "list takes --project" '[[ $out == *001-shop-checkout* && $out != *saved-search* ]]'
 PP=$(crew propose "Ship to Canada" --project "$P2")
 check "proposals --all is every project" '[[ $(crew proposals --all) == *"$(basename "$PP" .md)"* && $(crew proposals) != *"$(basename "$PP" .md)"* ]]'
+check "status points each project's counts at that project, not the default one" '[[ $(crew status --all) == *"$NL$P2$NL"*"  open proposals: 1  (crew proposals --project $P2)"* ]]'
 check "sync and cleanup --merged take --project" '(cd "$HOME" && crew sync --project "$P2" >/dev/null && [[ $(crew cleanup --merged --project "$P2") == "Nothing to clean up." ]])'
 fill "$S1"; crew ready "$S1" >/dev/null; setstate "done" null
 (cd "$HOME" && CREW_PROJECT=$PJ crew dispatch "$S1" >/dev/null 2>&1)

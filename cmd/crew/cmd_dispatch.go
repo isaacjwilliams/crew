@@ -135,11 +135,12 @@ func orUnknown(s string) string {
 	return s
 }
 
-// dispatchChecks refuses a dispatch the user hasn't readied, and holds back
-// (notYet) one for a paused project, one whose dependencies aren't merged, or one
-// that would exceed MAX_WORKERS or its goal's max_in_flight. The task's parent,
-// if it's stacked, is the one dependency that needn't be merged: dispatch
-// requires its branch on origin instead. Call it with the lock held.
+// dispatchChecks refuses a dispatch the user hasn't readied, or one stacked on an
+// abandoned task, and holds back (notYet) one for a paused project, one whose
+// dependencies haven't merged, or one that would go over MAX_WORKERS or its
+// goal's max_in_flight. The caps are counted only once the dependencies have
+// merged, since counting the workers running asks claude. Call it with the lock
+// held.
 func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
@@ -147,39 +148,83 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
 	}
-	parent, stacked := c.branches(p.Name).parentOf(t)
-	if stacked && parent.Status() == Abandoned {
+	idx := c.branches(p.Name)
+	if parent, ok := idx.abandonedParent(t); ok {
 		return fail("%s is stacked on %s, which is abandoned; give it another base with 'crew set %s base <branch>'", t.ID(), parent.ID(), t.ID())
 	}
-	deps := strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on"))
-	files := c.files("tasks", p.Name)
-	for _, dep := range strings.Fields(deps) {
+	deps, err := c.unmergedDeps(idx, t)
+	if err != nil {
+		return err
+	}
+	if len(deps) > 0 {
+		return notYet("%s depends on %s, which is '%s' (must be merged)", t.ID(), deps[0].ID(), deps[0].Status())
+	}
+	workers, err := workerSlots(p.Settings, c.runningWorkers(c.agents()))
+	if err != nil {
+		return err
+	}
+	if workers.full() {
+		return notYet("%d workers already running (MAX_WORKERS=%d); leaving %s ready", workers.used, workers.limit, t.ID())
+	}
+	if g, ok := c.taskGoal(t); ok {
+		goal, err := c.goalSlots(p.Settings, g)
+		if err != nil {
+			return err
+		}
+		if goal.full() {
+			return notYet("goal %s already has %d task(s) in flight (max_in_flight %d); leaving %s ready", g.ID(), goal.used, goal.limit, t.ID())
+		}
+	}
+	return nil
+}
+
+// unmergedDeps are the tasks this one waits on: its dependencies that haven't
+// merged. A stacked task's parent (liveParent, the one dispatch stacks it on)
+// needn't merge, since dispatch needs only its branch on origin, so it's listed
+// only when it's abandoned, whether or not it's in depends_on. A dependency
+// that doesn't name exactly one task is an error.
+// idx indexes the task's project, or every project: building it reads every
+// task file, so a caller checking many tasks builds it once.
+func (c *Crew) unmergedDeps(idx Branches, t Task) ([]Task, error) {
+	var deps []Task
+	project := taskProjectDir(t)
+	if parent, ok := idx.abandonedParent(t); ok {
+		deps = append(deps, parent)
+	}
+	parent, stacked := idx.liveParent(t)
+	names := strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on"))
+	files := c.files("tasks", project)
+	for _, dep := range strings.Fields(names) {
 		f, matches := resolveIn(dep, files)
 		if f == "" {
-			return ambiguousFail(dep, matches, "%s depends on '%s', which doesn't match exactly one task in %s", t.ID(), dep, p.Name)
+			return nil, ambiguousFail(dep, matches, "%s depends on '%s', which doesn't match exactly one task in %s", t.ID(), dep, project)
 		}
 		if stacked && f == parent.Path {
 			continue
 		}
 		if d := (Task{Doc{f}}); d.Status() != Merged {
-			return notYet("%s depends on %s, which is '%s' (must be merged)", t.ID(), d.ID(), d.Status())
+			deps = append(deps, d)
 		}
 	}
-	maxWorkers, err := intSetting(p.Settings, "MAX_WORKERS")
-	if err != nil {
-		return err
-	}
-	if running := c.runningWorkers(c.agents()); running >= maxWorkers {
-		return notYet("%d workers already running (MAX_WORKERS=%d); leaving %s ready", running, maxWorkers, t.ID())
-	}
-	if g, ok := c.taskGoal(t); ok {
-		limit, err := goalMaxInFlight(p.Settings, g)
-		if err != nil {
-			return err
-		}
-		if n := c.goalInFlight(g); n >= limit {
-			return notYet("goal %s already has %d task(s) in flight (max_in_flight %d); leaving %s ready", g.ID(), n, limit, t.ID())
-		}
-	}
-	return nil
+	return deps, nil
+}
+
+// slots is a count against its limit: workers running against MAX_WORKERS, or a
+// goal's tasks in flight against its max_in_flight.
+type slots struct{ used, limit int }
+
+func (s slots) full() bool { return s.used >= s.limit }
+
+// workerSlots are the workers running across the crew (runningWorkers) against
+// MAX_WORKERS in these settings. The count is there even when the setting is bad.
+func workerSlots(settings Settings, running int) (slots, error) {
+	limit, err := intSetting(settings, "MAX_WORKERS")
+	return slots{running, limit}, err
+}
+
+// goalSlots are the goal's tasks in flight against its max_in_flight. The count
+// is there even when the limit is bad.
+func (c *Crew) goalSlots(settings Settings, g Goal) (slots, error) {
+	limit, err := goalMaxInFlight(settings, g)
+	return slots{c.goalInFlight(g), limit}, err
 }
