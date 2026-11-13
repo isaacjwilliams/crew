@@ -323,6 +323,11 @@ rc=0; out=$(up) || rc=$?
 check "without a terminal or --yes, upgrade says what it will do to the sessions working now, and stops" \
   '[[ $rc == 1 && $out == "crew $old → 9.9.9$NL""Working now: 001-busy. They'"'"'ll be asked to wrap up, and stopped after up to 1 minute.$NL""Workers and goal leads whose instructions changed start fresh"*"crew: nothing has changed; run crew upgrade --yes to go ahead" ]]'
 check "and changes nothing" '[[ $(git -C "$H" rev-parse @) == "$before" ]] && ! paused'
+up --yes >"$HOME/up.out" & upgrading=$!
+wait_for '[[ -e $H/projects/busy/paused ]]'
+hcrew resume --project busy >/dev/null; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
+check "a project resumed while the upgrade waits stops it before the merge, and the rest of its pause is lifted" \
+  '[[ $rc == 1 && $out == *"busy was resumed while sessions wrapped up, so crew upgrade stopped before merging"* && $(cat "$H/VERSION") == "$old" ]] && ! paused'
 printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/left/paused"; hcrew commit "an upgrade cut short" >/dev/null
 hcrew pause --project mine >/dev/null
 up --yes >"$HOME/up.out" & upgrading=$!

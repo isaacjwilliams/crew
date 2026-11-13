@@ -484,7 +484,8 @@ crew upgrade [--yes]
                → confirmUpgrade: the versions, the sessions mid-turn (busySessions), what happens to them;
                  then the y/N prompt on a terminal, or --yes; without either, refuse, with nothing changed
                → pause every project, by: crew upgrade (see Pausing): the wait holds no lock
-               → lock → refuse a dirty home, or a newer tag → git fetch upstream tag v<version>
+               → lock → refuse a dirty home, a newer tag, or a project resumed during the wait
+                 → git fetch upstream tag v<version>
                  → git merge --no-edit v<version> → unlock
                  a conflict (only the person's own edits to crew's files can conflict) → stop, merge left in
                  progress, the crew still paused

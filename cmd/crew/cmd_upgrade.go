@@ -16,7 +16,7 @@ import (
 // binary is fetched first, by the launcher, so a release whose binaries aren't
 // up yet changes nothing. Then crew upgrade says what the upgrade does to the
 // sessions working now and asks to go ahead, and pauses every project, so they
-// wrap up before the release is merged and installed (installRelease). Then it
+// wrap up before the release is merged and installed. Then it
 // lifts the pause it made, pushes, restarts the lead's server, and removes the
 // binaries of other versions.
 func cmdUpgrade(c *Crew, args []string) error {
@@ -56,7 +56,10 @@ func cmdUpgrade(c *Crew, args []string) error {
 	}
 	err = c.pause(projects, pausedByUpgrade, false)
 	if err == nil {
-		err = c.installRelease(tag, yes)
+		err = c.mergeRelease(tag, projects)
+	}
+	if err == nil {
+		err = c.installNewVersion(yes)
 	}
 	// A merge left in progress keeps the crew paused: git takes no ledger commit
 	// until it's settled. The crew upgrade run after it lifts the pause.
@@ -116,12 +119,9 @@ func (c *Crew) confirmUpgrade(projects []*Project, next string, yes bool) error 
 	}
 }
 
-// installRelease merges the release tag into the home (mergeRelease), and the
-// new version installs itself, so a change to installing takes effect now.
-func (c *Crew) installRelease(tag string, yes bool) error {
-	if err := c.mergeRelease(tag); err != nil {
-		return err
-	}
+// installNewVersion runs the merged version's crew install, so a change to
+// installing takes effect now.
+func (c *Crew) installNewVersion(yes bool) error {
 	install := exec.Command(c.path("bin/crew"), "install")
 	if yes {
 		install.Args = append(install.Args, "--yes")
@@ -167,10 +167,12 @@ func (c *Crew) upgradeTarget() (string, error) {
 // so no ledger commit comes in the middle, and first checks again that the home
 // is clean and tag is still the newest release: crew upgrade let go of the lock
 // after its first check, so the sessions it paused could log where they stopped.
+// It also refuses if one of the paused projects was resumed meanwhile, since its
+// sessions may be working again.
 // The ledger and the person's settings are paths the public repo never has, so
 // the merge only meets their own edits to crew's code. A conflict there is
 // theirs to settle: it leaves the merge in progress and says how.
-func (c *Crew) mergeRelease(tag string) error {
+func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
@@ -181,6 +183,15 @@ func (c *Crew) mergeRelease(tag string) error {
 	}
 	if newest != tag {
 		return fail("upstream has released %s since this upgrade began; run crew upgrade again", newest)
+	}
+	var resumed []string
+	for _, p := range paused {
+		if !p.Paused() {
+			resumed = append(resumed, p.Name)
+		}
+	}
+	if len(resumed) > 0 {
+		return fail("%s was resumed while sessions wrapped up, so crew upgrade stopped before merging; run it again", strings.Join(resumed, ", "))
 	}
 	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
 		return fail("couldn't fetch %s from upstream", tag)
