@@ -1194,7 +1194,7 @@ check "crew pause --force stops the project's sessions at once, busy or idle, an
    [[ $(tail -1 "$PT") == *"stopped by crew pause --force" && $(tail -1 "$PI") == *"stopped by crew pause --force" && $(since "$n") != *"claude stop $(crew get "$Q2" worker_job)"* ]]'
 check "stopping a session also ends what it left running in its worktree" '[[ $out == *"stopping 1 process(es) still running in $(crew get "$PT" worktree)"* && ! -e /proc/$IN_PT/cwd ]]'
 kill "$IN_PT" 2>/dev/null || true
-check "--force marks only the busy session's work interrupted" '[[ -n $(crew get "$PT" interrupted) && -z $(crew get "$PI" interrupted) ]]'
+check "--force marks the work of every session it stops interrupted, idle ones too" '[[ -n $(crew get "$PT" interrupted) && -n $(crew get "$PI" interrupted) ]]'
 check "--force also stops a worker still running for an abandoned task, without marking its work interrupted" \
   '[[ $(since "$n") == *"claude stop $(crew get "$PF" worker_job)"* && -z $(crew get "$PF" interrupted) ]]'
 crew resume --project "$PJ" >/dev/null

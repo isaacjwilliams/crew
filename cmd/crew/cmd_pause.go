@@ -289,7 +289,7 @@ func (c *Crew) waitForTurnsToEnd(busy []session, wait time.Duration) []session {
 }
 
 // stopSessions stops the sessions whose project is still paused, and logs why
-// on each file. It holds the ledger lock throughout, so no resume or followup
+// on each file, with interrupted set unless the work is finished. It holds the ledger lock throughout, so no resume or followup
 // comes between the check and the stop. Their conversations and worktrees are
 // kept, but what they left running in the background there (a crew codex
 // review, a dev server) is ended, as crew cleanup does: a stopped session's
@@ -317,6 +317,11 @@ func (c *Crew) stopSessions(ss []session, why string) error {
 		}
 		stopped = append(stopped, s)
 		dirs = append(dirs, s.dir)
+		// An idle session too: it may have been waiting on a background
+		// review, which the stop ends.
+		if !s.finished && s.Get("interrupted") == "" {
+			s.Set("interrupted", now())
+		}
 		s.Log(why)
 		s.Touch()
 	}
