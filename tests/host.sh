@@ -301,15 +301,17 @@ NL=$'\n'
 committed() { git -C "$H" cat-file -e "HEAD:$1" 2>/dev/null; }  # PATH: the home's last commit has it
 paused() { compgen -G "$H/projects/*/paused" >/dev/null; }      # some project has a pause mark
 mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"
-# Three projects: one with a worker mid-turn, one the user pauses, and one an
-# upgrade cut short left paused.
+# Three projects: one with a worker mid-turn and one idle, one the user pauses,
+# and one an upgrade cut short left paused.
 for p in busy mine left; do mkdir -p "$H/projects/$p"; touch "$H/projects/$p/project.env"; done
 BT=$H/projects/busy/tasks/001-busy.md; mkdir -p "${BT%/*}"
 printf -- '---\nid: 001-busy\nstatus: working\nworker_job: b0b0b0b0\nworker_session: b0b0b0b0-s\n---\n# Busy\n\n## Log\n' >"$BT"
+printf -- '---\nid: 002-wakes\nstatus: working\nworker_job: w0w0w0w0\nworker_session: w0w0w0w0-s\n---\n# Wakes\n\n## Log\n' >"${BT%/*}/002-wakes.md"
 hcrew commit "a ledger note" >/dev/null
 echo "WRAP_UP_SECONDS=60" >>"$H/config/crew.env"; git -C "$H" commit -qam "a minute to wrap up"
-busy() {  # STATE: what claude agents says the busy project's worker is doing
-  echo "[{\"id\":\"b0b0b0b0\",\"kind\":\"background\",\"state\":\"$1\",\"pid\":4242,\"sessionId\":\"b0b0b0b0-s\"}]" >"$HOME/agents.json"; }
+busy() {  # STATE [STATE]: what claude agents says 001-busy's worker is doing, and 002-wakes's (idle)
+  echo "[{\"id\":\"b0b0b0b0\",\"kind\":\"background\",\"state\":\"$1\",\"pid\":4242,\"sessionId\":\"b0b0b0b0-s\"},
+         {\"id\":\"w0w0w0w0\",\"kind\":\"background\",\"state\":\"${2:-idle}\",\"pid\":4242,\"sessionId\":\"w0w0w0w0-s\"}]" >"$HOME/agents.json"; }
 busy working
 old=$(cat "$H/VERSION")
 echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; release 9.9.9
@@ -328,6 +330,12 @@ wait_for '[[ -e $H/projects/busy/paused ]]'
 hcrew resume --project busy >/dev/null; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
 check "a project resumed while the upgrade waits stops it before the merge, and the rest of its pause is lifted" \
   '[[ $rc == 1 && $out == *"busy was resumed while sessions wrapped up, so crew upgrade stopped before merging"* && $(cat "$H/VERSION") == "$old" ]] && ! paused'
+up --yes >"$HOME/up.out" & upgrading=$!
+wait_for '[[ -e $H/projects/busy/paused ]]'
+busy idle working; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
+check "a session that starts a turn while the upgrade waits stops it before the merge, and its pause is lifted" \
+  '[[ $rc == 1 && $out == *"001-busy ended its turn"*"002-wakes started working while sessions wrapped up, so crew upgrade stopped before merging"* && $(cat "$H/VERSION") == "$old" ]] && ! paused'
+busy working
 printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/left/paused"; hcrew commit "an upgrade cut short" >/dev/null
 hcrew pause --project mine >/dev/null
 up --yes >"$HOME/up.out" & upgrading=$!

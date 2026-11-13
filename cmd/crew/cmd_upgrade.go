@@ -184,8 +184,9 @@ func (c *Crew) upgradeTarget() (string, error) {
 // so no ledger commit comes in the middle, and first checks again that the home
 // is clean and tag is still the newest release: crew upgrade let go of the lock
 // after its first check, so the sessions it paused could log where they stopped.
-// It also refuses if one of the paused projects was resumed meanwhile, since its
-// sessions may be working again.
+// It also refuses if one of the paused projects was resumed meanwhile, or if a
+// session is mid-turn: one idle when the pause began may have started a turn
+// since, when a background review reported back.
 // The ledger and the person's settings are paths the public repo never has, so
 // the merge only meets their own edits to crew's code. A conflict there is
 // theirs to settle: it leaves the merge in progress and says how.
@@ -209,6 +210,13 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 	}
 	if len(resumed) > 0 {
 		return fail("%s was resumed while sessions wrapped up, so crew upgrade stopped before merging; run it again", strings.Join(resumed, ", "))
+	}
+	busy, err := c.busySessions(paused)
+	if err != nil {
+		return err
+	}
+	if len(busy) > 0 {
+		return fail("%s started working while sessions wrapped up, so crew upgrade stopped before merging; run it again", labels(busy))
 	}
 	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
 		return fail("couldn't fetch %s from upstream", tag)
