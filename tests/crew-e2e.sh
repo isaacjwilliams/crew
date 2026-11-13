@@ -1190,6 +1190,11 @@ check "--force marks only the busy session's work interrupted" '[[ -n $(crew get
 check "--force also stops a worker still running for an abandoned task, without marking its work interrupted" \
   '[[ $(since "$n") == *"claude stop $(crew get "$PF" worker_job)"* && -z $(crew get "$PF" interrupted) ]]'
 crew resume --project "$PJ" >/dev/null
+touch "$HOME/agents-fail"
+out=$(crew pause --project "$PJ" 2>&1); st=$?
+check "crew pause fails, changing nothing, when claude agents can't say which sessions are mid-turn" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t list the sessions with claude agents"* && ! -e $MARK && -z $(git -C "$L" status --porcelain -- projects) ]]'
+rm -f "$HOME/agents-fail"
 mv "$L/projects/$P2/local.env" "$HOME/local.env.saved"
 out=$(crew pause --all 2>&1); st=$?
 check "crew pause --all also pauses a project with no clone on this machine" '((st == 0)) && [[ -e $L/projects/$P2/paused && -e $MARK ]]'

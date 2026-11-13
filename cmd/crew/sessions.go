@@ -66,14 +66,25 @@ func environWithout(names ...string) []string {
 	return env
 }
 
-// agents is what `claude agents --json --all` lists, or nothing when it fails.
-// Each field is read on its own, as a string or not at all, so a field whose
-// type changes in a later Claude Code loses only that field, not every entry.
+// agents is what `claude agents --json --all` lists, or nothing when it fails
+// (listAgents).
 func (c *Crew) agents() Agents {
+	as, _ := c.listAgents()
+	return as
+}
+
+// listAgents is what `claude agents --json --all` lists, for the callers that
+// mustn't take a failure for nothing running. Each field is read on its own, as
+// a string or not at all, so a field whose type changes in a later Claude Code
+// loses only that field, not every entry.
+func (c *Crew) listAgents() (Agents, error) {
 	out, err := c.claude("agents", "--json", "--all").Output()
+	if err != nil {
+		return Agents{}, fail("couldn't list the sessions with claude agents: %v", err)
+	}
 	var entries []map[string]json.RawMessage
-	if err != nil || json.Unmarshal(out, &entries) != nil {
-		return Agents{}
+	if json.Unmarshal(out, &entries) != nil {
+		return Agents{}, fail("couldn't read what claude agents listed")
 	}
 	text := func(e map[string]json.RawMessage, k string) string {
 		var s string
@@ -89,7 +100,7 @@ func (c *Crew) agents() Agents {
 		}
 		as = append(as, a)
 	}
-	return as
+	return as, nil
 }
 
 // turnEnded reads a session's transcript: Claude Code writes a turn_duration
@@ -206,15 +217,17 @@ func (c *Crew) runningWorkers(as Agents) int {
 func (c *Crew) stopJob(job string) bool { return len(c.stopJobs([]string{job})) == 0 }
 
 // stopJobs stops several jobs as stopJob does, all at once, so the wait is 10
-// seconds in all rather than for each. It returns the jobs still open.
+// seconds in all rather than for each. It returns the jobs still open: a job is
+// stopped once claude agents lists it closed, or not at all.
 func (c *Crew) stopJobs(jobs []string) []string {
 	for _, job := range jobs {
 		c.claude("stop", job).Run()
 	}
 	open := slices.Clone(jobs)
 	for range 20 {
-		as := c.agents()
-		open = slices.DeleteFunc(open, func(job string) bool { a := as.find(job); return a == nil || !a.open() })
+		if as, err := c.listAgents(); err == nil {
+			open = slices.DeleteFunc(open, func(job string) bool { a := as.find(job); return a == nil || !a.open() })
+		}
 		if len(open) == 0 {
 			break
 		}

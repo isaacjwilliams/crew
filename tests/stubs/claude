@@ -8,6 +8,7 @@
 #                            the resumed job under a new session ID, as a process does
 #                            before it has loaded the session
 #   $HOME/stop-noop          if present, `claude stop` leaves the process open
+#   $HOME/agents-fail        if present, `claude agents` fails
 #   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/claude.cwd            the directory the latest call ran in
@@ -61,7 +62,9 @@ agents() {  # jq-filter [jq args...]: update agents.json in place
 case ${1:-} in
   --version) echo "2.1.290 (Claude Code)" ;;
   agents)
-    if [[ -f $HOME/placeholder-pending ]]; then
+    if [[ -f $HOME/agents-fail ]]; then
+      echo "Error: couldn't reach the supervisor" >&2; exit 1
+    elif [[ -f $HOME/placeholder-pending ]]; then
       jq --arg id "$(cat "$HOME/placeholder-pending")" 'map(if .id==$id then .sessionId="0badf00d-placeholder" else . end)' "$HOME/agents.json"
       rm -f "$HOME/placeholder-pending"
     else

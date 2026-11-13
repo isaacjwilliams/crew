@@ -174,10 +174,13 @@ func (c *Crew) sessions(projects []*Project) []session {
 }
 
 // busySessions are the projects' sessions that are mid-turn, or holding a
-// prompt open (see busy).
-func (c *Crew) busySessions(projects []*Project) []session {
-	as := c.agents()
-	return slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobBusy(s.job) })
+// prompt open (see busy). It fails if claude agents can't say.
+func (c *Crew) busySessions(projects []*Project) ([]session, error) {
+	as, err := c.listAgents()
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobBusy(s.job) }), nil
 }
 
 func labels(ss []session) string {
@@ -203,7 +206,10 @@ func (c *Crew) pause(projects []*Project, by string, force bool) error {
 		return err
 	}
 	if force {
-		as := c.agents()
+		as, err := c.listAgents()
+		if err != nil {
+			return err
+		}
 		open := slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobOpen(s.job) })
 		return c.stopSessions(open, "stopped by "+by)
 	}
@@ -217,12 +223,18 @@ func (c *Crew) pause(projects []*Project, by string, force bool) error {
 
 // markPaused writes the projects' marks and commits them, and returns the
 // sessions mid-turn. It sets interrupted on their files, unless their work is
-// finished, before any wait, so a pause cut short still leaves the record.
+// finished, before any wait, so a pause cut short still leaves the record. It
+// changes nothing if claude agents can't say which sessions are mid-turn.
 func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 	if err := c.lock(); err != nil {
 		return nil, err
 	}
 	defer c.unlock()
+	// Under the lock, so no followup starts a turn between this and the mark.
+	busy, err := c.busySessions(projects)
+	if err != nil {
+		return nil, err
+	}
 	var names []string
 	for _, p := range projects {
 		names = append(names, p.Name)
@@ -238,7 +250,6 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 		}
 		fmt.Printf("paused %s\n", p.Name)
 	}
-	busy := c.busySessions(projects)
 	for _, s := range busy {
 		if !s.finished {
 			s.Set("interrupted", now())
@@ -251,12 +262,16 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 
 // waitForTurnsToEnd waits up to wait for the sessions to end their turn, saying
 // so as each one does, and returns those still mid-turn. It stops waiting for a
-// session whose project is resumed meanwhile.
+// session whose project is resumed meanwhile. A poll claude agents fails counts
+// for nothing: those sessions are still mid-turn as far as it knows.
 func (c *Crew) waitForTurnsToEnd(busy []session, wait time.Duration) []session {
 	deadline := time.Now().Add(wait)
 	for len(busy) > 0 && time.Now().Before(deadline) {
 		time.Sleep(min(5*time.Second, time.Until(deadline)))
-		as := c.agents()
+		as, err := c.listAgents()
+		if err != nil {
+			continue
+		}
 		busy = slices.DeleteFunc(busy, func(s session) bool {
 			switch {
 			case !s.project.Paused():
