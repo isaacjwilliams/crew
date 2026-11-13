@@ -457,7 +457,8 @@ crew pause [--project P|--all] [--force]
            on any still mid-turn whose project is still paused, logged "stopped by crew pause before it ended
            its turn". Idle sessions are left as they are. A session that won't stop is named, and the pause exits 1
   --force: claude stop on every open worker and goal lead the projects' files record, busy or idle, finished
-           or not, logged "stopped by crew pause --force"
+           or not, logged "stopped by crew pause --force"; then ends what closed ones left running in the
+           background in their worktrees and checkouts (endBackgroundWork)
   every stop also ends the background processes in the session's worktree or checkout (stopProcessesIn), and
   sets interrupted on its file unless its task or goal is finished
   each worker's and goal lead's PostToolUse hook, crew pause --hook: CREW_PROJECT is paused → "record where you are, end your turn",

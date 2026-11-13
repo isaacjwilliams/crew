@@ -197,7 +197,8 @@ func labels(ss []session) string {
 // pause marks the projects paused, by by (markPaused). Then it gives the
 // sessions that were mid-turn up to WRAP_UP_SECONDS to end their turn, and
 // stops the ones that haven't. With force, it stops every open session of the
-// projects at once instead, busy or idle. It holds the ledger lock only while it
+// projects at once instead, busy or idle, and ends what closed ones left
+// running in the background. It holds the ledger lock only while it
 // writes, never while it waits, so workers can log where they stopped.
 func (c *Crew) pause(projects []*Project, by string, force bool) error {
 	wait, err := intSetting(c.Settings, "WRAP_UP_SECONDS")
@@ -213,8 +214,12 @@ func (c *Crew) pause(projects []*Project, by string, force bool) error {
 		if err != nil {
 			return err
 		}
-		open := slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobOpen(s.job) })
-		return c.stopSessions(open, "stopped by "+by)
+		ss := c.sessions(projects)
+		open := slices.DeleteFunc(slices.Clone(ss), func(s session) bool { return !as.jobOpen(s.job) })
+		if err := c.stopSessions(open, "stopped by "+by); err != nil {
+			return err
+		}
+		return c.endBackgroundWork(slices.DeleteFunc(ss, func(s session) bool { return as.jobOpen(s.job) }))
 	}
 	if len(busy) == 0 {
 		return nil
@@ -335,6 +340,25 @@ func (c *Crew) stopSessions(ss []session, why string) error {
 	if len(failed) > 0 {
 		return fail("%d session(s) didn't stop: %s; stop them in claude agents", len(failed), labels(failed))
 	}
+	return nil
+}
+
+// endBackgroundWork ends what the sessions, already closed, left running in the
+// background in their worktrees, if their project is still paused: a session's
+// background shells outlive its process, so a crew codex review can run on after
+// the session that started it is gone.
+func (c *Crew) endBackgroundWork(closed []session) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
+	var dirs []string
+	for _, s := range closed {
+		if s.project.Paused() {
+			dirs = append(dirs, s.dir)
+		}
+	}
+	stopProcessesIn(dirs...)
 	return nil
 }
 
