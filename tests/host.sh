@@ -336,6 +336,12 @@ busy idle working; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
 check "a session that starts a turn while the upgrade waits stops it before the merge, and its pause is lifted" \
   '[[ $rc == 1 && $out == *"001-busy ended its turn"*"002-wakes started working while sessions wrapped up, so crew upgrade stopped before merging"* && $(cat "$H/VERSION") == "$old" ]] && ! paused'
 busy working
+up --yes >"$HOME/up.out" & upgrading=$!
+wait_for '[[ -e $H/projects/busy/paused ]]'
+mkdir "$H/projects/late"; touch "$H/projects/late/project.env"; hcrew commit "add late" >/dev/null; busy idle; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")
+check "a project added while the upgrade waits, which it never paused, stops it before the merge" \
+  '[[ $rc == 1 && $out == *"late was added while sessions wrapped up, so crew upgrade stopped before merging"* && $(cat "$H/VERSION") == "$old" ]] && ! paused'
+git -C "$H" rm -rq projects/late; git -C "$H" commit -qm "no late"; busy working
 printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/left/paused"; hcrew commit "an upgrade cut short" >/dev/null
 hcrew pause --project mine >/dev/null
 up --yes >"$HOME/up.out" & upgrading=$!

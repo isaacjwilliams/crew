@@ -485,8 +485,9 @@ crew upgrade [--yes]
                  then the y/N prompt on a terminal, or --yes; without either, refuse, with nothing changed
                → unless HEAD has the tag already (a run that stopped after its merge), pauseAndMerge:
                  pause every project, by: crew upgrade (see Pausing): the wait holds no lock
-                 → lock → refuse a dirty home, a newer tag, a project resumed during the wait, or a session
-                   mid-turn (one that woke during it) → git fetch upstream tag v<version>
+                 → lock → refuse a dirty home or a newer tag → git fetch upstream tag v<version>
+                   → stillPaused: refuse a project resumed or added during the wait, or a session mid-turn
+                     (one that woke during it)
                  → git merge --no-edit v<version> → unlock
                  a refusal lifts the pause; a conflict (only the person's own edits to crew's files can
                  conflict) stops with the merge left in progress, the crew still paused

@@ -184,9 +184,7 @@ func (c *Crew) upgradeTarget() (string, error) {
 // so no ledger commit comes in the middle, and first checks again that the home
 // is clean and tag is still the newest release: crew upgrade let go of the lock
 // after its first check, so the sessions it paused could log where they stopped.
-// It also refuses if one of the paused projects was resumed meanwhile, or if a
-// session is mid-turn: one idle when the pause began may have started a turn
-// since, when a background review reported back.
+// It also refuses if the pause no longer holds (stillPaused).
 // The ledger and the person's settings are paths the public repo never has, so
 // the merge only meets their own edits to crew's code. A conflict there is
 // theirs to settle: it leaves the merge in progress and says how.
@@ -207,21 +205,8 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
 		return fail("couldn't fetch %s from upstream", tag)
 	}
-	var resumed []string
-	for _, p := range paused {
-		if !p.Paused() {
-			resumed = append(resumed, p.Name)
-		}
-	}
-	if len(resumed) > 0 {
-		return fail("%s was resumed while sessions wrapped up, so crew upgrade stopped before merging; run it again", strings.Join(resumed, ", "))
-	}
-	busy, err := c.busySessions(paused)
-	if err != nil {
+	if err := c.stillPaused(paused); err != nil {
 		return err
-	}
-	if len(busy) > 0 {
-		return fail("%s started working while sessions wrapped up, so crew upgrade stopped before merging; run it again", labels(busy))
 	}
 	if gitRun(c.Home, "merge", "-q", "--no-edit", "refs/tags/"+tag) != nil {
 		status := exec.Command("git", "-C", c.Home, "status", "--short")
@@ -238,6 +223,37 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 			lift = fmt.Sprintf(", and lift the pause with 'crew resume --project P' for each of %s", strings.Join(ours, ", "))
 		}
 		return fail("upstream's changes conflict with edits in your home. The merge is left in progress, and the crew stays paused until it's done: resolve the files above, then 'git -C %s commit' and run crew upgrade again, which lifts the pause. Or undo the merge with 'git -C %s merge --abort'%s.", c.Home, c.Home, lift)
+	}
+	return nil
+}
+
+// stillPaused checks, under the ledger lock, that the pause crew upgrade made
+// still holds: no project resumed or added since, and no session mid-turn, such
+// as one idle when the pause began that a background review has woken since.
+func (c *Crew) stillPaused(paused []*Project) error {
+	stopped := func(what string) error {
+		return fail("%s while sessions wrapped up, so crew upgrade stopped before merging; run it again", what)
+	}
+	var names, resumed []string
+	for _, p := range paused {
+		names = append(names, p.Name)
+		if !p.Paused() {
+			resumed = append(resumed, p.Name)
+		}
+	}
+	if len(resumed) > 0 {
+		return stopped(strings.Join(resumed, ", ") + " was resumed")
+	}
+	added := slices.DeleteFunc(c.projects(""), func(name string) bool { return slices.Contains(names, name) })
+	if len(added) > 0 {
+		return stopped(strings.Join(added, ", ") + " was added")
+	}
+	busy, err := c.busySessions(paused)
+	if err != nil {
+		return err
+	}
+	if len(busy) > 0 {
+		return stopped(labels(busy) + " started working")
 	}
 	return nil
 }
