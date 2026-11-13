@@ -540,10 +540,11 @@ func addPauseHook(settings *object) {
 // workerSettings is the --settings value workers run with:
 // config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
 // when it has one (allow rules or env for that project's test commands, say),
-// with the pause hook, as sessionSettings. The project file can only add: objects are merged and arrays
-// appended, but any value the shipped file sets wins, so a project can't drop a
-// deny rule. It also checks WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a
-// dispatch before its worktree exists.
+// with the pause hook, as sessionSettings. The project file can only add:
+// objects are merged and arrays appended, but any value the shipped file sets
+// wins, so a project can't drop a deny rule. It also checks
+// WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its
+// worktree exists.
 func (c *Crew) workerSettings(p *Project) (string, error) {
 	if w := p.Settings["WORKER_AUTOCOMPACT_WINDOW"]; !autocompactWindow.MatchString(w) {
 		return "", fail("WORKER_AUTOCOMPACT_WINDOW must be auto or a token count like 400k, not '%s'", w)
