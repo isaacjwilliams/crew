@@ -1154,6 +1154,10 @@ crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
 crew followup "$PI" --note "check the docs" >/dev/null 2>&1
 check "a hand-run crew followup --note also tells the worker to carry on, and clears interrupted" \
   '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY Note from the lead"*"check the docs"* && -z $(crew get "$PI" interrupted) ]]'
+crew set "$PI" status pr-open; crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
+crew followup "$PI" >/dev/null 2>&1
+check "a followup whose only news is the pause leaves the status as the worker last set it" \
+  '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY"* && $(crew get "$PI" status) == pr-open && -z $(crew get "$PI" interrupted) ]]'
 setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242; n=$(calls)
 out=$(crew pause --project "$PJ" --force 2>&1)
 check "crew pause --force stops the project's sessions at once, busy or idle, and logs it" \

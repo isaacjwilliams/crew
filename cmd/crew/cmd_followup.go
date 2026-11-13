@@ -120,9 +120,12 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
 	t.Set("interrupted", "")
-	if newRound {
+	// Word of a pause alone leaves the status as the worker last set it: a pause
+	// can land after it set pr-open.
+	switch {
+	case newRound:
 		t.Set("status", string(AddressingFeedback))
-	} else {
+	case note != "":
 		t.Set("status", string(Working))
 	}
 	t.Touch()
