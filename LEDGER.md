@@ -107,7 +107,7 @@ Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `
 
 `crew pause [--project P|--all] [--force]` writes `projects/<project>/paused`, a file of front matter only: `by` (`crew pause`, `crew pause --force` or `crew upgrade`), `at` and `host`. While it's there, nothing starts a session for the project: `crew dispatch`, `crew followup`, `crew restack`, `crew goal start` and `crew goal followup` refuse with exit 4, and `crew tick` sends its workers and goal leads nothing (it still records feedback, red CI and questions, and cleans up). `crew gardener` skips it. A pause leaves an existing mark alone, unless `crew upgrade` wrote it, so your own pause outlasts an upgrade.
 
-A session that's mid-turn when the pause starts gets `interrupted` set on its task or goal file, is told to record where it is and end its turn, and is stopped if it's still mid-turn after `WRAP_UP_SECONDS`. `--force` stops every session of the project at once instead. `crew resume [--project P|--all]` removes the file, and the next `crew tick` follows up each worker and goal lead whose file has `interrupted`, telling it to carry on.
+A session that's mid-turn when the pause starts gets `interrupted` set on its task or goal file, is told to record where it is and end its turn, and is stopped if it's still mid-turn after `WRAP_UP_SECONDS`. `--force` stops every worker and goal lead of the project at once instead, even one whose task or goal is finished. Only unfinished work gets `interrupted`. `crew resume [--project P|--all]` removes the file, and the next `crew tick` follows up each worker and goal lead whose file has `interrupted`, telling it to carry on.
 
 ## Stacked tasks
 

@@ -1172,12 +1172,16 @@ crew resume --project "$PJ" >/dev/null; wait "$pid"; st=$?
 check "a pause still waiting when its project is resumed stops nothing, and says the session goes on" \
   '((st == 0)) && [[ $(<"$HOME/pause.out") == *"$PJ was resumed; $TPT goes on"* && $(since "$n") != *"claude stop"* ]]'
 sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
-setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242; n=$(calls)
+PF=$(paused_task "$PJ" "Abandoned but running"); crew set "$PF" status abandoned
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242
+jobstate "$(crew get "$PF" worker_job)" working 4242 busy; n=$(calls)
 out=$(crew pause --project "$PJ" --force 2>&1)
 check "crew pause --force stops the project's sessions at once, busy or idle, and logs it" \
   '[[ $(sed -n "s/^by: //p" "$MARK") == "crew pause --force" && $out != *waiting* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(crew get "$PI" worker_job)"* ]] &&
    [[ $(tail -1 "$PT") == *"stopped by crew pause --force" && $(tail -1 "$PI") == *"stopped by crew pause --force" && $(since "$n") != *"claude stop $(crew get "$Q2" worker_job)"* ]]'
 check "--force marks only the busy session's work interrupted" '[[ -n $(crew get "$PT" interrupted) && -z $(crew get "$PI" interrupted) ]]'
+check "--force also stops a worker still running for an abandoned task, without marking its work interrupted" \
+  '[[ $(since "$n") == *"claude stop $(crew get "$PF" worker_job)"* && -z $(crew get "$PF" interrupted) ]]'
 crew resume --project "$PJ" >/dev/null
 mv "$L/projects/$P2/local.env" "$HOME/local.env.saved"
 out=$(crew pause --all 2>&1); st=$?

@@ -148,21 +148,24 @@ type session struct {
 	project *Project // the project it works on
 	job     string   // its job in claude agents
 	label   string   // the task's ID, or "goal <ID>"
+	// finished: its task is merged or abandoned, or its goal isn't running, so
+	// nothing will carry its work on. Its process may still be running.
+	finished bool
 }
 
-// sessions are the sessions recorded for the projects' unfinished tasks and
-// running goals.
+// sessions are the sessions recorded for the projects' tasks and goals,
+// finished or not.
 func (c *Crew) sessions(projects []*Project) []session {
 	var ss []session
 	for _, p := range projects {
 		for _, t := range c.tasks(p.Name) {
-			if !t.Status().Finished() && t.WorkerJob() != "" {
-				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID()})
+			if t.WorkerJob() != "" {
+				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID(), t.Status().Finished()})
 			}
 		}
 		for _, g := range c.goals(p.Name) {
-			if g.Status() == GoalRunning && g.LeadJob() != "" {
-				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID()})
+			if g.LeadJob() != "" {
+				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID(), g.Status() != GoalRunning})
 			}
 		}
 	}
@@ -211,9 +214,9 @@ func (c *Crew) pause(projects []*Project, by string, force bool) error {
 	return c.stopSessions(left, "stopped by "+by+" before it ended its turn")
 }
 
-// markPaused writes the projects' marks and commits them, with interrupted set
-// on the files of the sessions mid-turn, which it returns. It sets interrupted
-// before any wait, so a pause cut short still leaves the record.
+// markPaused writes the projects' marks and commits them, and returns the
+// sessions mid-turn. It sets interrupted on their files, unless their work is
+// finished, before any wait, so a pause cut short still leaves the record.
 func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 	if err := c.lock(); err != nil {
 		return nil, err
@@ -236,8 +239,10 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 	}
 	busy := c.busySessions(projects)
 	for _, s := range busy {
-		s.Set("interrupted", now())
-		s.Touch()
+		if !s.finished {
+			s.Set("interrupted", now())
+			s.Touch()
+		}
 	}
 	c.commit("pause " + strings.Join(names, " "))
 	return busy, nil

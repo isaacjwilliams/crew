@@ -450,12 +450,14 @@ another machine of the person's: git clone <their private repo> ~/crew; crew hos
 ```
 crew pause [--project P|--all] [--force]
   lock → projects/<p>/paused (by: crew pause, at, host), unless a pause other than crew upgrade's is there
-       → busySessions: the projects' workers and goal leads mid-turn → interrupted: <time> on each one's file
+       → busySessions: the projects' workers and goal leads mid-turn → interrupted: <time> on the file of each
+         whose task or goal isn't finished
        → commit → unlock
   wrap-up: up to WRAP_UP_SECONDS (180, one tick), polling claude agents; then, under the lock, claude stop
            on any still mid-turn whose project is still paused, logged "stopped by crew pause before it ended
            its turn". Idle sessions are left as they are. A session that won't stop is named, and the pause exits 1
-  --force: claude stop on every open session of the projects at once, busy or idle, logged "stopped by crew pause --force"
+  --force: claude stop on every open worker and goal lead the projects' files record, busy or idle, finished
+           or not, logged "stopped by crew pause --force"
   each session's PostToolUse hook, crew pause --hook: CREW_PROJECT is paused → "record where you are, end your turn"
 crew resume [--project P|--all]
   lock → remove the marks → commit; the next crew tick follows up each file with interrupted
