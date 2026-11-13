@@ -15,10 +15,9 @@
      - New on your repo: anything crew now does or posts on a project's repo that your
        collaborators will see (comments, reactions, reruns).
      - Upgrading is always there. When there are no steps, it's just "**Upgrading.** Nothing to do:
-       `crew upgrade` installs everything." When an agent's instructions changed
-       (`git diff <last tag>..<merge sha> -- agents/`), add the line about sessions started
-       before the upgrade, and say what it means for this release's change. A skill's changes
-       (`.claude/skills/`) reach running sessions the next time they use it, so they need no line.
+       `crew upgrade` installs everything." Changed agents, settings or skills are no step:
+       `crew upgrade` has sessions wrap up first, workers and goal leads start fresh on the new
+       instructions, and a lead says when to restart it.
      - Skipping versions: only when an earlier release has upgrade steps that someone skipping it
        would miss. -->
 **<What changed for people who run crew, in a sentence.>** <What it does, for whom, and any new command or setting with its default.>
@@ -35,6 +34,5 @@
 **Upgrading.**
 - Before you upgrade: <a step>
 - After upgrading: <a step>
-- <Which agents' instructions changed.> Sessions started before the upgrade keep their old instructions until they're compacted or started fresh (a new `lead`, or `crew followup TASK --fresh --note "crew was upgraded"` for a worker): <what that means for this release's change>.
 
 **Skipping versions?** Read the v<x.y.z> notes too: <what that release needs you to do>.
