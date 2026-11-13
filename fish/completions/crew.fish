@@ -38,6 +38,7 @@ complete -c crew -n "__fish_seen_subcommand_from goal; and not __fish_seen_subco
 complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from start note cap followup done abandon path" \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
 complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from new" -l max-in-flight -x -d 'How many of its tasks may be in flight at once'
+complete -c crew -n "__fish_seen_subcommand_from upgrade" -l yes -d 'Go ahead without asking'
 complete -c crew -n "__fish_seen_subcommand_from install" -l yes -d 'Answer yes to every question'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-fish -d 'Leave the fish files alone'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-services -d "Leave the crew's services alone"

@@ -290,34 +290,72 @@ out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'
 
 # 11. A new release from the public repo, merged into a home that has a ledger.
-up() { CREW_HOST=tower "$H/bin/crew" upgrade </dev/null 2>&1; }
+#     The upgrade pauses the crew while it runs, and lifts the pause it made.
+up() { CREW_HOST=tower "$H/bin/crew" upgrade "$@" </dev/null 2>&1; }
+hcrew() { CREW_HOST=tower "$H/bin/crew" "$@"; }
 release() {  # VERSION: commit VERSION in the public repo and tag it as that release
   echo "$1" >"$SB/public-tree/VERSION"; git -C "$SB/public-tree" commit -qam "crew $1"
   git -C "$SB/public-tree" tag -a -m "crew $1" "v$1"; git -C "$SB/public-tree" push -q "$SB/public.git" main "v$1"
 }
-mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"; CREW_HOST=tower "$H/bin/crew" commit "a ledger note" >/dev/null
+NL=$'\n'
+committed() { git -C "$H" cat-file -e "HEAD:$1" 2>/dev/null; }  # PATH: the home's last commit has it
+paused() { compgen -G "$H/projects/*/paused" >/dev/null; }      # some project has a pause mark
+mkdir -p "$H/reports"; echo "a note" >"$H/reports/n.md"
+# Three projects: one with a worker mid-turn, one the user pauses, and one an
+# upgrade cut short left paused.
+for p in busy mine left; do mkdir -p "$H/projects/$p"; touch "$H/projects/$p/project.env"; done
+BT=$H/projects/busy/tasks/001-busy.md; mkdir -p "${BT%/*}"
+printf -- '---\nid: 001-busy\nstatus: working\nworker_job: b0b0b0b0\nworker_session: b0b0b0b0-s\n---\n# Busy\n\n## Log\n' >"$BT"
+hcrew commit "a ledger note" >/dev/null
+echo "WRAP_UP_SECONDS=60" >>"$H/config/crew.env"; git -C "$H" commit -qam "a minute to wrap up"
+busy() {  # STATE: what claude agents says the busy project's worker is doing
+  echo "[{\"id\":\"b0b0b0b0\",\"kind\":\"background\",\"state\":\"$1\",\"pid\":4242,\"sessionId\":\"b0b0b0b0-s\"}]" >"$HOME/agents.json"; }
+busy working
 old=$(cat "$H/VERSION")
 echo "# new in v2" >>"$SB/public-tree/agents/lead.md"; release 9.9.9
 before=$(git -C "$H" rev-parse @)
-out=$(up)
+out=$(up --yes)
 check "upgrade refuses a release whose binary isn't up yet, and changes nothing" '[[ $out == *"couldn'"'"'t get crew 9.9.9'"'"'s binary, so nothing has changed"* && $(git -C "$H" rev-parse @) == "$before" && $(cat "$H/VERSION") == "$old" ]]'
+check "and neither asks nor pauses" '[[ $out != *"9.9.9 →"* && $out != *"→ 9.9.9"* ]] && ! paused'
 release_binary 9.9.9
 echo "unreleased" >>"$SB/public-tree/README.md"; git -C "$SB/public-tree" commit -qam "after 9.9.9" && git -C "$SB/public-tree" push -q "$SB/public.git" main
-out=$(up)
+rc=0; out=$(up) || rc=$?
+check "without a terminal or --yes, upgrade says what it will do to the sessions working now, and stops" \
+  '[[ $rc == 1 && $out == "crew $old → 9.9.9$NL""Working now: 001-busy. They'"'"'ll be asked to wrap up, and stopped after up to 1 minute.$NL""Workers and goal leads whose instructions changed start fresh"*"crew: nothing has changed; run crew upgrade --yes to go ahead" ]]'
+check "and changes nothing" '[[ $(git -C "$H" rev-parse @) == "$before" ]] && ! paused'
+printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/left/paused"; hcrew commit "an upgrade cut short" >/dev/null
+hcrew pause --project mine >/dev/null
+up --yes >"$HOME/up.out" & upgrading=$!
+wait_for '[[ -e $H/projects/busy/paused ]]'
+logged=0; hcrew log "$BT" "noted where I stopped" >/dev/null 2>&1 && kill -0 "$upgrading" 2>/dev/null && logged=1
+busy idle; wait "$upgrading"; out=$(<"$HOME/up.out")
+check "a session's crew log goes through while the upgrade waits for it to wrap up" '((logged)) && grep -q "noted where I stopped" "$BT"'
+check "upgrade pauses every project, and waits for the sessions mid-turn" \
+  '[[ $out == *"paused busy"* && $out == *"paused left"* && $out == *"mine was already paused"* && $out == *"waiting up to 1 minute for 1 session(s) to wrap up: 001-busy"*"001-busy ended its turn"* ]]'
 check "upgrade merges the newest release into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
+check "then lifts its pause, also the one an upgrade cut short left, and commits" \
+  '[[ ! -e $H/projects/busy/paused && ! -e $H/projects/left/paused ]] && ! committed projects/busy/paused && ! committed projects/left/paused'
+check "a project the user paused stays paused" '[[ $(sed -n "s/^by: //p" "$H/projects/mine/paused") == "crew pause" ]] && committed projects/mine/paused'
 check "a release, not whatever upstream's main has since" '! grep -q unreleased "$H/README.md"'
 check "the new version installs itself, with units that are on left unmentioned" '[[ $out == *"Done (crew 9.9.9)"* && $out != *"off on this machine"* ]]'
 check "and installs it: the changed agent is copied, the old one backed up" 'grep -q "# new in v2" "$HOME/.claude/agents/lead.md" && compgen -G "$HOME/.local/share/agent-crew/backups/*/.claude/agents/lead.md" >/dev/null && ! grep -q "# new in v2" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
-check "and pushes the merge to the private repo, and restarts the lead's server" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" rev-parse main) == $(git -C "$H" rev-parse @) ]] && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
+check "and pushes the merge and the lifted pause to the private repo, and restarts the lead's server" \
+  'wait_for "[[ \$(git --git-dir=\"$HOME/remotes/isaac/crew.git\" rev-parse main) == \$(git -C \"$H\" rev-parse @) ]]" && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
 check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew-9.9.9 ]]'
 echo "an edit" >>"$H/README.md"
-out=$(up)
-check "upgrade refuses a home with uncommitted changes" '[[ $out == *"uncommitted changes"* ]]'
+out=$(up --yes)
+check "upgrade refuses a home with uncommitted changes, and pauses nothing" '[[ $out == *"uncommitted changes"* && ! -e $H/projects/busy/paused ]]'
 git -C "$H" checkout -q -- README.md
 sed -i '1s/.*/# my own first line/' "$H/agents/gardener.md"; git -C "$H" commit -qam "my gardener"
 sed -i '1s/.*/# upstream first line/' "$SB/public-tree/agents/gardener.md"; release 9.9.10; release_binary 9.9.10
-out=$(up)
+out=$(up --yes)
 check "a conflict with an edit in the home stops with what to do, and leaves the merge to the person" '[[ $out == *"merge is left in progress"*"merge --abort"* ]] && git -C "$H" rev-parse -q --verify MERGE_HEAD >/dev/null'
+check "and leaves the crew paused, and says so" \
+  '[[ $out == *"the crew stays paused until it'"'"'s done"* && $(sed -n "s/^by: //p" "$H/projects/busy/paused") == "crew upgrade" ]] && committed projects/busy/paused'
+git -C "$H" checkout -q --theirs agents/gardener.md; git -C "$H" add agents/gardener.md; git -C "$H" commit -q --no-edit
+out=$(up --yes)
+check "once the merge is settled, upgrade run again finishes, and lifts the pause" \
+  '[[ $out == *"crew upgraded to 9.9.10"* && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && committed projects/mine/paused'
 
 # 12. bin/crew, the launcher, runs the binary for the home's VERSION, and fetches
 #     it from the release the first time.
