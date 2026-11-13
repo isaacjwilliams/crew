@@ -510,7 +510,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
 | `GARDENER_MAX_TURNS` | 150 | Turn limit for a gardener run |
-| `WRAP_UP_SECONDS` | 180 | How long `crew pause` gives workers and goal leads mid-turn to note where they are and end their turn, before it stops them. Crew-wide: `config/crew.env` only |
+| `WRAP_UP_SECONDS` | 180 | How long `crew pause` and `crew upgrade` give workers and goal leads mid-turn to note where they are and end their turn, before they stop them. Crew-wide: `config/crew.env` only |
 
 Per-project overrides go in `projects/<project>/project.env`. `crew config` shows the effective values. Per-project additions to the worker settings go in `projects/<project>/worker-settings.json`.
 
