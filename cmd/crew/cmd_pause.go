@@ -14,6 +14,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,7 +55,7 @@ func refuseIfPaused(p *Project) error {
 // crew pause [--project P|--all] [--force] | crew pause --hook
 func cmdPause(c *Crew, args []string) error {
 	if len(args) == 1 && args[0] == "--hook" {
-		c.pauseHook()
+		c.pauseHook(os.Stdin)
 		return nil
 	}
 	const use = "crew pause [--project P|--all] [--force]"
@@ -149,6 +150,7 @@ type session struct {
 	project *Project // the project it works on
 	job     string   // its job in claude agents
 	label   string   // the task's ID, or "goal <ID>"
+	id      string   // its session ID (worker_session or lead_session)
 	dir     string   // where it works: the task's worktree, or the goal lead's checkout
 	// finished: its task is merged or abandoned, or its goal isn't running, so
 	// nothing will carry its work on. Its process may still be running.
@@ -162,12 +164,12 @@ func (c *Crew) sessions(projects []*Project) []session {
 	for _, p := range projects {
 		for _, t := range c.tasks(p.Name) {
 			if t.WorkerJob() != "" {
-				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID(), t.Worktree(), t.Status().Finished()})
+				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID(), t.Get("worker_session"), t.Worktree(), t.Status().Finished()})
 			}
 		}
 		for _, g := range c.goals(p.Name) {
 			if g.LeadJob() != "" {
-				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID(), g.Get("checkout"), g.Status() != GoalRunning})
+				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID(), g.Get("lead_session"), g.Get("checkout"), g.Status() != GoalRunning})
 			}
 		}
 	}
@@ -375,11 +377,13 @@ func (c *Crew) resume(projects []*Project) error {
 	return nil
 }
 
-// crew pause --hook, the PostToolUse hook of every worker and goal lead (added by
-// addPauseHook, and in no settings file): once the session's project is paused, Claude Code hands the session the text it prints, telling it to wrap
-// up. It reads only the environment and the mark, as it runs after every tool
+// crew pause --hook, the PostToolUse hook of every worker and goal lead (added
+// by addPauseHook, and in no settings file): once the session's project is
+// paused, Claude Code hands the session the text it prints, telling it to wrap
+// up, and the hook marks the session's work interrupted (markInterrupted). Until
+// then it reads only the environment and the mark, as it runs after every tool
 // call.
-func (c *Crew) pauseHook() {
+func (c *Crew) pauseHook(in io.Reader) {
 	name := os.Getenv("CREW_PROJECT")
 	if name == "" || name == allProjects {
 		return
@@ -388,6 +392,11 @@ func (c *Crew) pauseHook() {
 	if err != nil || !p.Paused() {
 		return
 	}
+	var input struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(in).Decode(&input)
+	c.markInterrupted(p, input.SessionID)
 	type output struct {
 		HookEventName     string `json:"hookEventName"`
 		AdditionalContext string `json:"additionalContext"`
@@ -397,4 +406,27 @@ func (c *Crew) pauseHook() {
 			"where you are and what comes next, so a fresh session can pick up from there. Leave uncommitted work in your worktree: "+
 			"it's kept. Start nothing new, and end your turn now.", name)}})
 	fmt.Println(string(b))
+}
+
+// markInterrupted sets interrupted on the file of the session the pause hook
+// tells to stop, once, unless its work is finished. The pause marks the
+// sessions mid-turn when it starts, but one that was idle then can start a turn
+// later, when a background review it waited on reports back.
+func (c *Crew) markInterrupted(p *Project, id string) {
+	if id == "" {
+		return
+	}
+	for _, s := range c.sessions([]*Project{p}) {
+		if s.id != id || s.finished || s.Get("interrupted") != "" {
+			continue
+		}
+		if c.lock() != nil {
+			return
+		}
+		defer c.unlock()
+		s.Set("interrupted", now())
+		s.Touch()
+		c.commit("pause: " + s.label + " interrupted")
+		return
+	}
 }

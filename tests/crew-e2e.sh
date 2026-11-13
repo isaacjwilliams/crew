@@ -1117,6 +1117,10 @@ check "when the wait runs out, crew pause stops the sessions still mid-turn, and
    [[ $(tail -1 "$PT") == *"stopped by crew pause before it ended its turn" && $(tail -1 "$GPF") == *"stopped by crew pause before it ended its turn" ]]'
 check "an idle session isn't stopped or marked interrupted" '[[ $(since "$n") != *"claude stop $(crew get "$PI" worker_job)"* && -z $(crew get "$PI" interrupted) ]]'
 check "crew pause says how to undo it" '[[ $out == *"'"'"'crew resume --project $PJ'"'"' lets the work go on" ]]'
+out=$(jq -n --arg s "$(crew get "$PI" worker_session)" '{session_id: $s}' | (cd "$HOME" && CREW_PROJECT=$PJ bash -c "$hook"))
+check "the pause hook marks the work of a session it tells to stop interrupted, though it was idle when the pause began" \
+  '[[ $out == *"end your turn now"* && -n $(crew get "$PI" interrupted) && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "pause: $TPI interrupted" ]]'
+crew set "$PI" interrupted ""
 out=$(crew pause --project "$PJ" 2>&1); st=$?
 check "pausing a paused project with no session mid-turn says so, and exits 0" '((st == 0)) && [[ $out == "$PJ was already paused"* && $out != *waiting* ]]'
 sed -i 's/^by: .*/by: crew upgrade/' "$MARK"; git -C "$L" commit -qm "paused by an upgrade" -- projects
