@@ -119,11 +119,11 @@ func (s *statusView) project(name string) {
 	s.branches = s.Crew.branches(name)
 	s.repo, s.settings = "", s.Settings
 	heading := name
+	if p, err := s.ledgerProject(name); err == nil && p.Paused() {
+		heading += "  paused (crew resume --project " + name + ")"
+	}
 	if p, err := s.loadProject(name); err == nil {
 		s.repo, s.settings = p.Repo(), p.Settings
-		if p.Paused() {
-			heading += "  paused (crew resume --project " + name + ")"
-		}
 	}
 	fmt.Println(heading)
 	s.kids = map[string][]Task{}

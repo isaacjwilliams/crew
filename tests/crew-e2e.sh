@@ -1217,6 +1217,7 @@ rm -f "$HOME/agents-fail"
 mv "$L/projects/$P2/local.env" "$HOME/local.env.saved"
 out=$(crew pause --all 2>&1); st=$?
 check "crew pause --all also pauses a project with no clone on this machine" '((st == 0)) && [[ -e $L/projects/$P2/paused && -e $MARK ]]'
+check "crew status shows the pause of a project with no clone here" '[[ $(crew status --project "$P2") == *"$P2  paused (crew resume --project $P2)"* ]]'
 out=$(crew resume --all 2>&1); st=$?
 check "and crew resume --all lifts its pause" '((st == 0)) && [[ ! -e $L/projects/$P2/paused && ! -e $MARK ]]'
 mv "$HOME/local.env.saved" "$L/projects/$P2/local.env"
