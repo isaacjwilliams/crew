@@ -1113,7 +1113,7 @@ sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
 n=$(calls)
 out=$(crew pause --project "$PJ" 2>&1)
 check "when the wait runs out, crew pause stops the sessions still mid-turn, and logs it on their files" \
-  '[[ $out == *"$PJ was already paused"*"stopped 2 session(s): $TPT, goal $TGP"* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(gget "$GPF" lead_job)"* ]] && 
+  '[[ $out == *"$PJ was already paused"*"stopped 2 session(s): $TPT, goal $TGP"* && $(since "$n") == *"claude stop $(crew get "$PT" worker_job)"* && $(since "$n") == *"claude stop $(gget "$GPF" lead_job)"* ]] &&
    [[ $(tail -1 "$PT") == *"stopped by crew pause before it ended its turn" && $(tail -1 "$GPF") == *"stopped by crew pause before it ended its turn" ]]'
 check "an idle session isn't stopped or marked interrupted" '[[ $(since "$n") != *"claude stop $(crew get "$PI" worker_job)"* && -z $(crew get "$PI" interrupted) ]]'
 check "crew pause says how to undo it" '[[ $out == *"'"'"'crew resume --project $PJ'"'"' lets the work go on" ]]'
@@ -1125,6 +1125,7 @@ check "crew pause takes over a pause crew upgrade made, so it outlasts the upgra
 # Nothing starts a session for a paused project.
 GPT=$(crew new "Paused goal task" --goal "$GPF" --project "$PJ"); fill "$GPT"; crew ready "$GPT" >/dev/null
 GDF=$(crew goal new "Not started" --project "$PJ"); sed -i '/^## Goal$/a "Later."' "$GDF"; crew commit >/dev/null
+PS=$(crew new "Stacked while paused" --project "$PJ" --on "$TPI"); crew set "$PS" worker_job s7ack3d0
 head=$(git -C "$L" rev-parse @); n=$(launches)
 out=$(crew followup "$PI" --note "go on" 2>&1); st=$?
 check "while paused, crew followup holds back with exit 4, naming crew resume" '((st == 4)) && [[ $out == "crew: $PJ is paused; '"'"'crew resume --project $PJ'"'"' lets its work go on" ]]'
@@ -1134,6 +1135,11 @@ check "while paused, crew dispatch holds back with exit 4 and makes no worktree"
 out=$(crew goal start "$GDF" 2>&1); st=$?
 check "while paused, crew goal start holds back with exit 4 and makes no checkout" \
   '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && ! -d $HOME/agent-work/$PJ/_goal-$(basename "$GDF" .md) && $(gget "$GDF" status) == draft ]]'
+out=$(crew restack "$PS" 2>&1); st=$?
+check "while paused, crew restack holds back with exit 4" '((st == 4)) && [[ $out == *"crew resume --project $PJ"* ]]'
+out=$(crew goal followup "$GPF" 2>&1); st=$?
+check "while paused, crew goal followup holds back with exit 4, keeping interrupted for later" \
+  '((st == 4)) && [[ $out == *"crew resume --project $PJ"* && -n $(gget "$GPF" interrupted) ]]'
 check "and they change nothing in the ledger and start no session" '[[ $(git -C "$L" rev-parse @) == "$head" && -z $(git -C "$L" status --porcelain -- projects) && $(launches) == "$n" ]]'
 out=$(crew gardener --project "$PJ" 2>&1)
 check "crew gardener skips a paused project" '[[ $out == "$PJ: paused; skipped" && $(launches) == "$n" ]]'
