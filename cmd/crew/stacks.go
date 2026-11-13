@@ -35,6 +35,13 @@ func (idx Branches) parentOf(t Task) (Task, bool) {
 	return p, true
 }
 
+// abandonedParent is the task t is stacked on, when that task is abandoned: it
+// will never push or merge, so t can't dispatch on it.
+func (idx Branches) abandonedParent(t Task) (Task, bool) {
+	p, ok := idx.parentOf(t)
+	return p, ok && p.Status() == Abandoned
+}
+
 // effectiveBase is the branch a task belongs on now: its own base, or, once its
 // parent has merged, whatever the parent was based on (the default branch when a
 // stack merges bottom-up).
