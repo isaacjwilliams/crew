@@ -355,8 +355,8 @@ sed -i '1s/.*/# my own first line/' "$H/agents/gardener.md"; git -C "$H" commit 
 sed -i '1s/.*/# upstream first line/' "$SB/public-tree/agents/gardener.md"; release 9.9.10; release_binary 9.9.10
 out=$(up --yes)
 check "a conflict with an edit in the home stops with what to do, and leaves the merge to the person" '[[ $out == *"merge is left in progress"*"merge --abort"* ]] && git -C "$H" rev-parse -q --verify MERGE_HEAD >/dev/null'
-check "and leaves the crew paused, and says so" \
-  '[[ $out == *"the crew stays paused until it'"'"'s done"* && $(sed -n "s/^by: //p" "$H/projects/busy/paused") == "crew upgrade" ]] && committed projects/busy/paused'
+check "and leaves the crew paused, and says so, naming the projects to resume after an abort, not the user's own" \
+  '[[ $out == *"the crew stays paused until it'"'"'s done"*"'"'"'crew resume --project P'"'"' for each of busy, left." && $(sed -n "s/^by: //p" "$H/projects/busy/paused") == "crew upgrade" ]] && committed projects/busy/paused'
 git -C "$H" checkout -q --theirs agents/gardener.md; git -C "$H" add agents/gardener.md; git -C "$H" commit -q --no-edit
 out=$(up --yes)
 check "once the merge is settled, upgrade run again finishes, and lifts the pause" \
