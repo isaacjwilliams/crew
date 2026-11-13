@@ -30,6 +30,15 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if !gitOK(c.Home, "remote", "get-url", "upstream") {
 		return fail("the home has no upstream (the public crew repo) to upgrade from")
 	}
+	// One upgrade at a time: two would share the marks, and one that gave up
+	// would lift them under the other.
+	upgrading, err := flock(c.path(".crew-upgrade.lock"), 0)
+	if errors.Is(err, errLocked) {
+		return fail("another crew upgrade is running")
+	} else if err != nil {
+		return err
+	}
+	defer upgrading.Close()
 	if err := c.lock(); err != nil {
 		return err
 	}

@@ -325,6 +325,9 @@ rc=0; out=$(up) || rc=$?
 check "without a terminal or --yes, upgrade says what it will do to the sessions working now, and stops" \
   '[[ $rc == 1 && $out == "crew $old → 9.9.9$NL""Working now: 001-busy. They'"'"'ll be asked to wrap up, and stopped after up to 1 minute.$NL""Workers and goal leads whose instructions changed start fresh"*"crew: nothing has changed; run crew upgrade --yes to go ahead" ]]'
 check "and changes nothing" '[[ $(git -C "$H" rev-parse @) == "$before" ]] && ! paused'
+(exec 9>"$H/.crew-upgrade.lock"; flock 9; exec sleep 10) & holder=$!
+wait_for '! flock -n "$H/.crew-upgrade.lock" true'; rc=0; out=$(up --yes) || rc=$?; kill "$holder"; wait "$holder" 2>/dev/null
+check "a second crew upgrade refuses while one runs, and pauses nothing" '[[ $rc == 1 && $out == "crew: another crew upgrade is running" ]] && ! paused'
 up --yes >"$HOME/up.out" & upgrading=$!
 wait_for '[[ -e $H/projects/busy/paused ]]'
 hcrew resume --project busy >/dev/null; rc=0; wait "$upgrading" || rc=$?; out=$(<"$HOME/up.out")

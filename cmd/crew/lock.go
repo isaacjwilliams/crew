@@ -6,6 +6,7 @@ package main
 //	.crew.lock       every change to the ledger (lock)
 //	.crew-tick.lock  one crew tick at a time
 //	.crew-push.lock  one ledger push at a time
+//	.crew-upgrade.lock  one crew upgrade at a time
 //
 // A lock is held by its open file. Go opens files close-on-exec, so the sessions
 // and processes crew starts never hold one.
