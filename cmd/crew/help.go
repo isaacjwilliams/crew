@@ -91,9 +91,11 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl;
                                    exits 124 when Codex stalls (used by pr-review)
   crew status [--done] [--all|--project P]
-                                   Tasks with worker state; stacked tasks are listed
-                                   under their parent. For one project, it ends with
-                                   what's waiting on you in the others
+                                   Tasks with worker state, and what each one not yet
+                                   dispatched waits for. A goal's tasks are grouped,
+                                   the next ones in dispatch order; stacked tasks are
+                                   listed under their parent. For one project, it ends
+                                   with what's waiting on you in the others
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    report stacked tasks that need a restack

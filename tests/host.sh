@@ -215,7 +215,7 @@ wait_for '[[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-
 
 git clone -q "$SB/crew.git" "$LH"
 out=$(laptop "$LH/bin/crew" status 2>&1)
-check "a machine that doesn't run the crew reads it" '[[ $out == *"read-only: crew runs on tower"* && $out == *"001-lease-test"* ]]'
+check "a machine that doesn't run the crew reads it" '[[ $out == *"read-only: crew runs on tower"* && $out == *"1 draft(s)"* ]]'
 out=$(laptop "$LH/bin/crew" log 1 "from the laptop" 2>&1)
 check "and is refused a change, told which machine runs the crew" '[[ $out == *"crew runs on tower; this machine can only read (crew host up --take moves it here)"* && $(git -C "$LH" status --porcelain) == "" ]] && ! grep -q "from the laptop" "$LH"/projects/*/tasks/001-*.md'
 out=$(laptop "$LH/bin/crew" host 2>&1)
