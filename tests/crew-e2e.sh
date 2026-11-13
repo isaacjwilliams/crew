@@ -1158,6 +1158,20 @@ crew set "$PI" status pr-open; crew set "$PI" interrupted "$(date -Iseconds)"; s
 crew followup "$PI" >/dev/null 2>&1
 check "a followup whose only news is the pause leaves the status as the worker last set it" \
   '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY"* && $(crew get "$PI" status) == pr-open && -z $(crew get "$PI" interrupted) ]]'
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; touch "$HOME/stop-noop"; log=$(section "$PT" "## Log")
+out=$(crew pause --project "$PJ" 2>&1); st=$?
+check "crew pause fails when a session doesn't stop, names it, and logs nothing on its file" \
+  '((st == 1)) && [[ $out == *"1 session(s) didn'"'"'t stop: $TPT"* && $out != *"stopped 1"* && $(section "$PT" "## Log") == "$log" ]]'
+rm -f "$HOME/stop-noop"; crew resume --project "$PJ" >/dev/null
+sed -i 's/^WRAP_UP_SECONDS=0$/WRAP_UP_SECONDS=60/' "$L/config/crew.env"
+setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; n=$(calls)
+timeout 20 crew pause --project "$PJ" >"$HOME/pause.out" 2>&1 &
+pid=$!
+for _ in {1..50}; do [[ -e $MARK ]] && break; sleep 0.1; done
+crew resume --project "$PJ" >/dev/null; wait "$pid"; st=$?
+check "a pause still waiting when its project is resumed stops nothing, and says the session goes on" \
+  '((st == 0)) && [[ $(<"$HOME/pause.out") == *"$PJ was resumed; $TPT goes on"* && $(since "$n") != *"claude stop"* ]]'
+sed -i 's/^WRAP_UP_SECONDS=60$/WRAP_UP_SECONDS=0/' "$L/config/crew.env"
 setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; jobstate "$(crew get "$PI" worker_job)" idle 4242; n=$(calls)
 out=$(crew pause --project "$PJ" --force 2>&1)
 check "crew pause --force stops the project's sessions at once, busy or idle, and logs it" \

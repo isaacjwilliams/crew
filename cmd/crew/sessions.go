@@ -203,15 +203,24 @@ func (c *Crew) runningWorkers(as Agents) int {
 // close. Its conversation is saved, and background shells it started, such as a
 // dev server, keep running for its next process. It reports whether the process
 // closed.
-func (c *Crew) stopJob(job string) bool {
-	c.claude("stop", job).Run()
+func (c *Crew) stopJob(job string) bool { return len(c.stopJobs([]string{job})) == 0 }
+
+// stopJobs stops several jobs as stopJob does, all at once, so the wait is 10
+// seconds in all rather than for each. It returns the jobs still open.
+func (c *Crew) stopJobs(jobs []string) []string {
+	for _, job := range jobs {
+		c.claude("stop", job).Run()
+	}
+	open := slices.Clone(jobs)
 	for range 20 {
-		if a := c.agents().find(job); a == nil || !a.open() {
-			return true
+		as := c.agents()
+		open = slices.DeleteFunc(open, func(job string) bool { a := as.find(job); return a == nil || !a.open() })
+		if len(open) == 0 {
+			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return false
+	return open
 }
 
 // stopIdleSession stops the open process of a session that isn't busy. A

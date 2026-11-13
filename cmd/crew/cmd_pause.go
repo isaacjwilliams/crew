@@ -144,9 +144,10 @@ func (c *Crew) ledgerProjects(scope string) ([]*Project, error) {
 // or a goal's goal lead. (Not a session ID, like worker_session: its job is
 // what crew stops and asks claude agents about.)
 type session struct {
-	Doc          // the task or goal file
-	job   string // its job in claude agents
-	label string // the task's ID, or "goal <ID>"
+	Doc              // the task or goal file
+	project *Project // the project it works on
+	job     string   // its job in claude agents
+	label   string   // the task's ID, or "goal <ID>"
 }
 
 // sessions are the sessions recorded for the projects' unfinished tasks and
@@ -156,12 +157,12 @@ func (c *Crew) sessions(projects []*Project) []session {
 	for _, p := range projects {
 		for _, t := range c.tasks(p.Name) {
 			if !t.Status().Finished() && t.WorkerJob() != "" {
-				ss = append(ss, session{t.Doc, t.WorkerJob(), t.ID()})
+				ss = append(ss, session{t.Doc, p, t.WorkerJob(), t.ID()})
 			}
 		}
 		for _, g := range c.goals(p.Name) {
 			if g.Status() == GoalRunning && g.LeadJob() != "" {
-				ss = append(ss, session{g.Doc, g.LeadJob(), "goal " + g.ID()})
+				ss = append(ss, session{g.Doc, p, g.LeadJob(), "goal " + g.ID()})
 			}
 		}
 	}
@@ -243,44 +244,63 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 }
 
 // waitForTurnsToEnd waits up to wait for the sessions to end their turn, saying
-// so as each one does, and returns those still mid-turn.
+// so as each one does, and returns those still mid-turn. It stops waiting for a
+// session whose project is resumed meanwhile.
 func (c *Crew) waitForTurnsToEnd(busy []session, wait time.Duration) []session {
 	deadline := time.Now().Add(wait)
 	for len(busy) > 0 && time.Now().Before(deadline) {
 		time.Sleep(min(5*time.Second, time.Until(deadline)))
 		as := c.agents()
 		busy = slices.DeleteFunc(busy, func(s session) bool {
-			if as.jobBusy(s.job) {
+			switch {
+			case !s.project.Paused():
+				fmt.Printf("%s was resumed; %s goes on\n", s.project.Name, s.label)
+			case !as.jobBusy(s.job):
+				fmt.Printf("%s ended its turn\n", s.label)
+			default:
 				return false
 			}
-			fmt.Printf("%s ended its turn\n", s.label)
 			return true
 		})
 	}
 	return busy
 }
 
-// stopSessions stops the sessions, and logs why on each one's file. Their
-// conversations and worktrees are kept.
+// stopSessions stops the sessions whose project is still paused, and logs why
+// on each file. It holds the ledger lock throughout, so no resume or followup
+// comes between the check and the stop. Their conversations and worktrees are
+// kept. It fails if any of them didn't stop.
 func (c *Crew) stopSessions(ss []session, why string) error {
-	if len(ss) == 0 {
-		return nil
-	}
-	for _, s := range ss {
-		if !c.stopJob(s.job) {
-			warn("%s: job %s didn't stop; stop it in claude agents", s.label, s.job)
-		}
-	}
 	if err := c.lock(); err != nil {
 		return err
 	}
+	defer c.unlock()
+	ss = slices.DeleteFunc(ss, func(s session) bool { return !s.project.Paused() })
+	if len(ss) == 0 {
+		return nil
+	}
+	var jobs []string
 	for _, s := range ss {
+		jobs = append(jobs, s.job)
+	}
+	open := c.stopJobs(jobs)
+	var stopped, failed []session
+	for _, s := range ss {
+		if slices.Contains(open, s.job) {
+			failed = append(failed, s)
+			continue
+		}
+		stopped = append(stopped, s)
 		s.Log(why)
 		s.Touch()
 	}
-	c.commit("pause: stopped " + labels(ss))
-	c.unlock()
-	fmt.Printf("stopped %d session(s): %s\n", len(ss), labels(ss))
+	if len(stopped) > 0 {
+		c.commit("pause: stopped " + labels(stopped))
+		fmt.Printf("stopped %d session(s): %s\n", len(stopped), labels(stopped))
+	}
+	if len(failed) > 0 {
+		return fail("%d session(s) didn't stop: %s; stop them in claude agents", len(failed), labels(failed))
+	}
 	return nil
 }
 

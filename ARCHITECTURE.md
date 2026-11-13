@@ -452,8 +452,9 @@ crew pause [--project P|--all] [--force]
   lock → projects/<p>/paused (by: crew pause, at, host), unless a pause other than crew upgrade's is there
        → busySessions: the projects' workers and goal leads mid-turn → interrupted: <time> on each one's file
        → commit → unlock
-  wrap-up: up to WRAP_UP_SECONDS (180, one tick), polling claude agents; then claude stop on any still
-           mid-turn, logged "stopped by crew pause before it ended its turn". Idle sessions are left as they are
+  wrap-up: up to WRAP_UP_SECONDS (180, one tick), polling claude agents; then, under the lock, claude stop
+           on any still mid-turn whose project is still paused, logged "stopped by crew pause before it ended
+           its turn". Idle sessions are left as they are. A session that won't stop is named, and the pause exits 1
   --force: claude stop on every open session of the projects at once, busy or idle, logged "stopped by crew pause --force"
   each session's PostToolUse hook, crew pause --hook: CREW_PROJECT is paused → "record where you are, end your turn"
 crew resume [--project P|--all]
@@ -464,7 +465,7 @@ crew resume [--project P|--all]
 - **Nothing starts a session for a paused project.** `crew dispatch` (in `dispatchChecks`), `crew followup`, `crew restack`, `crew goal start` and `crew goal followup` refuse with exit 4 (`refuseIfPaused`), before their first side effect and again under the ledger lock, so a pause written in between holds. `launchSession` doesn't check: it has no project, and runs after its callers' side effects. `crew gardener` skips the project. The user's interactive leads are untouched.
 - **Interrupted work carries on.** `interrupted` is set before the wait, so a pause cut short (Ctrl-C, a Bash timeout) still records it. `crew followup` and `crew goal followup` deliver it ("crew was paused while you were working…", `carryOn`) and clear it once the session has started, the way `crew followup` owns `last_round_sent`. `crew tick` only reads it. A session started before its settings had the hook starts fresh (its fingerprint changed) and rebuilds from its file.
 - **The hook is added by `sessionSettings`**, not listed in a settings file, so only sessions crew starts get it: workers, goal leads and the gardener. A lead running `crew pause` would otherwise be told to stop itself. It reads only `CREW_PROJECT` and the mark, since it runs after every tool call.
-- **The wait holds no lock**, so workers can `crew log` where they stopped while it runs.
+- **The wait holds no lock**, so workers can `crew log` where they stopped while it runs. The stop holds it, and stops only the sessions whose project is still paused, so a `crew resume` during the wait lets them go on, and no followup can start one between the check and the stop. `stopJobs` stops them together, with one 10-second wait, to keep that hold short.
 
 ### Upgrading
 ```
