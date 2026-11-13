@@ -483,20 +483,21 @@ crew upgrade [--yes]
                  if it can't (the release may still be building), refuse, with nothing changed
                → confirmUpgrade: the versions, the sessions mid-turn (busySessions), what happens to them;
                  then the y/N prompt on a terminal, or --yes; without either, refuse, with nothing changed
-               → pause every project, by: crew upgrade (see Pausing): the wait holds no lock
-               → lock → refuse a dirty home, a newer tag, or a project resumed during the wait
-                 → git fetch upstream tag v<version>
+               → unless HEAD has the tag already (a run that stopped after its merge), pauseAndMerge:
+                 pause every project, by: crew upgrade (see Pausing): the wait holds no lock
+                 → lock → refuse a dirty home, a newer tag, or a project resumed during the wait
+                   → git fetch upstream tag v<version>
                  → git merge --no-edit v<version> → unlock
-                 a conflict (only the person's own edits to crew's files can conflict) → stop, merge left in
-                 progress, the crew still paused
-               → the new version's bin/crew install (--yes with --yes)
+                 a refusal lifts the pause; a conflict (only the person's own edits to crew's files can
+                 conflict) stops with the merge left in progress, the crew still paused
+               → the new version's bin/crew install (--yes with --yes); a failure stops, the crew still paused
                → resume the projects whose mark says crew upgrade
                → push → restartLeadService (systemctl restart, launchctl kickstart -k)
                → remove the other versions' binaries from bin/release/
 ```
 
-- **The upgrade pauses the crew**, so no worker or goal lead is mid-turn while the release is merged and installed. It's what `crew upgrade` always does, behind a yes: the user chose a confirmation over an option to wrap up or a refusal while sessions work. A lead runs it once without `--yes` to get the text to show the user, then again with `--yes` on their go-ahead.
-- **The upgrade knows its pause by the mark**, not by memory: it lifts every mark whose `by` is `crew upgrade`, so a run cut short (Ctrl-C, a closed terminal, a lead's Bash timeout) leaves marks the next one lifts. A project the user paused keeps its own mark. Any failure lifts the pause too, except a merge left in progress: git takes no ledger commit until it's settled, so the crew stays paused until `crew upgrade` runs again after it.
+- **The upgrade pauses the crew**, so the workers and goal leads mid-turn wrap up before the release is merged. It's what `crew upgrade` always does, behind a yes: the user chose a confirmation over an option to wrap up or a refusal while sessions work. A lead runs it once without `--yes` to get the text to show the user, then again with `--yes` on their go-ahead.
+- **The upgrade knows its pause by the mark**, not by memory: it lifts every mark whose `by` is `crew upgrade`, so a run cut short (Ctrl-C, a closed terminal, a lead's Bash timeout) leaves marks the next one lifts. A project the user paused keeps its own mark. A failure before the merge lifts the pause too. Once the merge has begun, the crew stays paused until the release is installed: after a conflict git takes no ledger commit until the merge is settled, and after a failed install the sessions would resume on a half-installed release. `crew upgrade` run again then finds the tag in HEAD, so it pauses nothing, installs, and lifts the marks.
 
 A session keeps the agent file and settings it started with, so after an upgrade:
 

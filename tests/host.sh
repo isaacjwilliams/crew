@@ -347,6 +347,9 @@ check "and installs it: the changed agent is copied, the old one backed up" 'gre
 check "and pushes the merge and the lifted pause to the private repo, and restarts the lead's server" \
   'wait_for "[[ \$(git --git-dir=\"$HOME/remotes/isaac/crew.git\" rev-parse main) == \$(git -C \"$H\" rev-parse @) ]]" && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
 check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew-9.9.9 ]]'
+head=$(git -C "$H" rev-parse @); out=$(up --yes)
+check "run again on the release it has, upgrade pauses nothing, and installs it again" \
+  '[[ $out == "crew 9.9.9 is merged into the home already, so nothing is paused"*"Done (crew 9.9.9)"*"crew upgraded to 9.9.9" && $out != *paused\ busy* && $(git -C "$H" rev-parse @) == "$head" ]]'
 echo "an edit" >>"$H/README.md"
 out=$(up --yes)
 check "upgrade refuses a home with uncommitted changes, and pauses nothing" '[[ $out == *"uncommitted changes"* && ! -e $H/projects/busy/paused ]]'
@@ -358,6 +361,9 @@ check "a conflict with an edit in the home stops with what to do, and leaves the
 check "and leaves the crew paused, and says so, naming the projects to resume after an abort, not the user's own" \
   '[[ $out == *"the crew stays paused until it'"'"'s done"*"'"'"'crew resume --project P'"'"' for each of busy, left." && $(sed -n "s/^by: //p" "$H/projects/busy/paused") == "crew upgrade" ]] && committed projects/busy/paused'
 git -C "$H" checkout -q --theirs agents/gardener.md; git -C "$H" add agents/gardener.md; git -C "$H" commit -q --no-edit
+chmod a-w "$HOME/.claude/agents"; rc=0; out=$(up --yes) || rc=$?; chmod u+w "$HOME/.claude/agents"
+check "an install that fails after the merge keeps the crew paused, and says to run upgrade again" \
+  '[[ $rc == 1 && $out == *"couldn'"'"'t install the new version, so the crew stays paused; run crew upgrade again to finish" && -e $H/projects/busy/paused ]]'
 out=$(up --yes)
 check "once the merge is settled, upgrade run again finishes, and lifts the pause" \
   '[[ $out == *"crew upgraded to 9.9.10"* && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && committed projects/mine/paused'

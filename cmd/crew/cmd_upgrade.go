@@ -16,9 +16,9 @@ import (
 // binary is fetched first, by the launcher, so a release whose binaries aren't
 // up yet changes nothing. Then crew upgrade says what the upgrade does to the
 // sessions working now and asks to go ahead, and pauses every project, so they
-// wrap up before the release is merged and installed. Then it
-// lifts the pause it made, pushes, restarts the lead's server, and removes the
-// binaries of other versions.
+// wrap up before the release is merged (pauseAndMerge). Once the release is
+// installed, it lifts the pause it made, pushes, restarts the lead's server, and
+// removes the binaries of other versions.
 func cmdUpgrade(c *Crew, args []string) error {
 	yes := false
 	switch {
@@ -51,24 +51,22 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.confirmUpgrade(projects, next, yes); err != nil {
+	// A release the home has merged already, by a run that stopped after its
+	// merge, only needs installing, so nothing is paused for it.
+	merged := gitOK(c.Home, "merge-base", "--is-ancestor", "refs/tags/"+tag, "HEAD")
+	if err := c.confirmUpgrade(projects, next, merged, yes); err != nil {
 		return err
 	}
-	err = c.pause(projects, pausedByUpgrade, false)
-	if err == nil {
-		err = c.mergeRelease(tag, projects)
+	if !merged {
+		if err := c.pauseAndMerge(tag, projects); err != nil {
+			return err
+		}
 	}
-	if err == nil {
-		err = c.installNewVersion(yes)
-	}
-	// A merge left in progress keeps the crew paused: git takes no ledger commit
-	// until it's settled. The crew upgrade run after it lifts the pause.
-	if gitOK(c.Home, "rev-parse", "-q", "--verify", "MERGE_HEAD") {
+	// Once the release is merged, the crew stays paused until it's installed.
+	if err := c.installNewVersion(yes); err != nil {
 		return err
 	}
-	// Otherwise the pause is lifted, whether the upgrade went through or not.
-	err = errors.Join(err, c.liftUpgradePause(projects))
-	if err != nil {
+	if err := c.liftUpgradePause(projects); err != nil {
 		return err
 	}
 	if !c.pushNow(os.Stdout) {
@@ -91,20 +89,24 @@ func cmdUpgrade(c *Crew, args []string) error {
 // do to them, and asks to go ahead. --yes is the go-ahead given beforehand.
 // Without it, it asks on the terminal, and fails if there's none rather than
 // read an answer from a pipe.
-func (c *Crew) confirmUpgrade(projects []*Project, next string, yes bool) error {
-	wait, err := intSetting(c.Settings, "WRAP_UP_SECONDS")
-	if err != nil {
-		return err
-	}
-	busy, err := c.busySessions(projects)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("crew %s → %s\n", c.crewVersion(), next)
-	if len(busy) == 0 {
-		fmt.Println("No sessions are working.")
+func (c *Crew) confirmUpgrade(projects []*Project, next string, merged, yes bool) error {
+	if merged {
+		fmt.Printf("crew %s is merged into the home already, so nothing is paused: this installs it, and lifts any pause an upgrade left.\n", next)
 	} else {
-		fmt.Printf("Working now: %s. They'll be asked to wrap up, and stopped after up to %s.\n", labels(busy), plainDuration(wait))
+		wait, err := intSetting(c.Settings, "WRAP_UP_SECONDS")
+		if err != nil {
+			return err
+		}
+		busy, err := c.busySessions(projects)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("crew %s → %s\n", c.crewVersion(), next)
+		if len(busy) == 0 {
+			fmt.Println("No sessions are working.")
+		} else {
+			fmt.Printf("Working now: %s. They'll be asked to wrap up, and stopped after up to %s.\n", labels(busy), plainDuration(wait))
+		}
 	}
 	fmt.Println("Workers and goal leads whose instructions changed start fresh when they next have work. Your own leads will tell you if they need restarting.")
 	switch {
@@ -119,6 +121,21 @@ func (c *Crew) confirmUpgrade(projects []*Project, next string, yes bool) error 
 	}
 }
 
+// pauseAndMerge pauses every project, and merges the release once their
+// sessions have wrapped up. If it stops before the merge, it lifts the pause
+// again. A merge left in progress keeps it: git takes no ledger commit until
+// the merge is settled, and the crew upgrade run after that lifts it.
+func (c *Crew) pauseAndMerge(tag string, projects []*Project) error {
+	err := c.pause(projects, pausedByUpgrade, false)
+	if err == nil {
+		err = c.mergeRelease(tag, projects)
+	}
+	if err == nil || gitOK(c.Home, "rev-parse", "-q", "--verify", "MERGE_HEAD") {
+		return err
+	}
+	return errors.Join(err, c.liftUpgradePause(projects))
+}
+
 // installNewVersion runs the merged version's crew install, so a change to
 // installing takes effect now.
 func (c *Crew) installNewVersion(yes bool) error {
@@ -128,7 +145,7 @@ func (c *Crew) installNewVersion(yes bool) error {
 	}
 	install.Stdin, install.Stdout, install.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if install.Run() != nil {
-		return fail("couldn't install the new version; run crew install to try again")
+		return fail("couldn't install the new version, so the crew stays paused; run crew upgrade again to finish")
 	}
 	return nil
 }
