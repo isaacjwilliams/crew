@@ -36,7 +36,10 @@ func cmdDispatch(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.workerSettings(p); err != nil {
+	// Building the launcher reads the worker settings, so a bad one stops here,
+	// before anything changes.
+	start, err := c.launchWorker(p)
+	if err != nil {
 		return err
 	}
 	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
@@ -103,14 +106,13 @@ func cmdDispatch(c *Crew, args []string) error {
 		}
 		prompt += fmt.Sprintf("\nThis task is stacked on task %s%s: %s is that task's branch, not the default branch. Your PR targets %s; see \"Stacked tasks\" in your instructions.", parent.ID(), pr, base, base)
 	}
-	l, err := c.launchWorker(p)(t.Doc, wt, prompt, false)
+	l, err := c.launchSession(start, t.Doc, wt, prompt, false)
 	if err == errNotStarted {
 		return fail("could not start the worker session (see output above)")
 	} else if err != nil {
 		return err
 	}
-	t.Set("worker_job", l.job)
-	t.Set("worker_session", l.session)
+	l.record(t.Doc)
 	t.Set("status", string(Working))
 	t.Touch()
 	t.Log(fmt.Sprintf("dispatched: worker %s (session %s) in %s on %s", l.job, orUnknown(l.session), wt, branch))

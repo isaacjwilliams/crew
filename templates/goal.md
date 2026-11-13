@@ -7,6 +7,7 @@ checkout:
 lead_name:
 lead_job:
 lead_session:
+lead_fingerprint:
 unsent_notes: 0
 max_in_flight:
 created: {{NOW}}

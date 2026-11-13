@@ -103,31 +103,13 @@ func goalCheckout(p *Project, g Goal) string {
 	return filepath.Join(p.WorkRoot(), p.Name, "_goal-"+g.ID())
 }
 
-// launchGoalLead starts or resumes a goal lead. It's the only place a goal
-// lead's command line is built. A goal lead runs with the lead's settings,
-// lead/.claude/settings.json, all but their "agent": the lead's session takes its
-// agent from that file, a goal lead from --agent. Not the lead's
-// settings.local.json: a goal lead works in its own checkout. Its settings carry
-// its project, as every session's do (sessionSettings).
-func (c *Crew) launchGoalLead(p *Project) launcher {
-	return func(d Doc, wt, prompt string, resume bool) (launch, error) {
-		mcp, err := c.refreshMCPConfig(p)
-		if err != nil {
-			return launch{}, err
-		}
-		settings := ""
-		if !resume {
-			lead, err := readSettings(c.path("lead/.claude/settings.json"))
-			if err != nil {
-				return launch{}, err
-			}
-			lead.del("agent")
-			settings = c.sessionSettings(lead, p)
-		}
-		// The MCP flags go first: see refreshMCPConfig.
-		flags := append(mcp, "--agent", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings)
-		return c.launchSession(d, "lead", wt, prompt, resume, flags...)
+// launchGoalLead is the launcher of project p's goal leads.
+func (c *Crew) launchGoalLead(p *Project) (launcher, error) {
+	settings, err := c.goalLeadSettings(p)
+	if err != nil {
+		return launcher{}, err
 	}
+	return c.newLauncher(p, "lead", "goal-lead", "--permission-mode", p.Settings["LEAD_PERMISSION_MODE"], "--settings", settings), nil
 }
 
 // crew goal start GOAL: starts its goal lead, which plans every item.
@@ -147,6 +129,10 @@ func (c *Crew) goalStart(g Goal) error {
 	if g.Section("## Goal") == "" {
 		return fail("goal %s has no Goal yet: write the user's own words into its ## Goal section", g.ID())
 	}
+	start, err := c.launchGoalLead(p)
+	if err != nil {
+		return err
+	}
 	co := goalCheckout(p, g)
 	if err := p.detachedCheckout(co); err != nil {
 		return err
@@ -157,15 +143,14 @@ func (c *Crew) goalStart(g Goal) error {
 	}
 	g.Set("checkout", co)
 	g.Set("lead_name", name)
-	l, err := c.launchGoalLead(p)(g.Doc, co, fmt.Sprintf("You are the goal lead for goal %s in project %s.\nGoal file: %s\nYour working directory is a checkout of origin/%s; read the code there.\nRead the goal file completely, then follow your workflow for a new goal.",
+	l, err := c.launchSession(start, g.Doc, co, fmt.Sprintf("You are the goal lead for goal %s in project %s.\nGoal file: %s\nYour working directory is a checkout of origin/%s; read the code there.\nRead the goal file completely, then follow your workflow for a new goal.",
 		g.ID(), p.Name, g.Path, p.DefaultBranch()), false)
 	if err == errNotStarted {
 		return fail("could not start the goal lead (see output above)")
 	} else if err != nil {
 		return err
 	}
-	g.Set("lead_job", l.job)
-	g.Set("lead_session", l.session)
+	l.record(g.Doc)
 	g.Set("status", string(GoalRunning))
 	g.Touch()
 	g.Log(fmt.Sprintf("started: goal lead %s (session %s) in %s", l.job, orUnknown(l.session), co))
@@ -336,6 +321,10 @@ func (c *Crew) goalFollowup(g Goal) error {
 	if as.jobBusy(job) {
 		return fail("goal lead %s is busy (%s); crew tick passes this on once it's free", job, as.jobState(job))
 	}
+	start, err := c.launchGoalLead(p)
+	if err != nil {
+		return err
+	}
 	co := goalCheckout(p, g)
 	if err := p.detachedCheckout(co); err != nil {
 		return err
@@ -344,17 +333,14 @@ func (c *Crew) goalFollowup(g Goal) error {
 		return err
 	}
 	g.Set("checkout", co)
-	l, err := c.relaunch(c.launchGoalLead(p), "lead", g.Doc, co,
+	l, err := c.relaunch(start, g.Doc, co,
 		fmt.Sprintf("New input for goal %s (goal file: %s):%s\nFollow your workflow for new input.", g.ID(), g.Path, input),
 		fmt.Sprintf("You are the goal lead for goal %s in project %s, which is already under way.\nGoal file: %s\nYour working directory is a checkout of origin/%s; read the code there.\nRead the goal file completely, and the files of the tasks under its Items, before acting.",
 			g.ID(), p.Name, g.Path, p.DefaultBranch()), false)
 	if err != nil {
 		return err
 	}
-	g.Set("lead_job", l.job)
-	if l.session != "" {
-		g.Set("lead_session", l.session)
-	}
+	l.record(g.Doc)
 	g.Set("unsent_notes", "0")
 	g.Touch()
 	g.Log(fmt.Sprintf("followup (%s): goal lead %s", l.mode, l.job))

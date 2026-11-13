@@ -363,6 +363,52 @@ echo '[{"id":"a1","state":"working","pid":4242,"status":"busy","sessionId":"a1-s
 	}
 }
 
+func TestAgentFilesAreTheAgentsOwnAndEverySubagents(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	os.Mkdir(c.path("agents"), 0o755)
+	for _, a := range []string{"lead", "goal-lead", "implementer", "gardener", "reviewer", "casual-observer"} {
+		os.WriteFile(c.path("agents", a+".md"), []byte(a), 0o644)
+	}
+	t.Setenv("HOME", t.TempDir())
+	installed := installedAgents()
+	want := []string{installed + "/implementer.md", installed + "/casual-observer.md", installed + "/reviewer.md"}
+	if got := c.agentFiles("implementer"); !slices.Equal(got, want) {
+		t.Errorf("agentFiles(implementer) = %v, want %v", got, want)
+	}
+	want = []string{installed + "/goal-lead.md", installed + "/lead.md", installed + "/casual-observer.md", installed + "/reviewer.md"}
+	if got := c.agentFiles("goal-lead"); !slices.Equal(got, want) {
+		t.Errorf("agentFiles(goal-lead) = %v, want %v: a goal lead follows the lead's intake", got, want)
+	}
+}
+
+func TestSessionRolesAreTheAgentsTheLeadMayNotRunAsSubagents(t *testing.T) {
+	settings, err := readSettings("../../lead/.claude/settings.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var denied []string
+	for _, rule := range settings.child("permissions").vals["deny"].([]any) {
+		if name, ok := strings.CutPrefix(rule.(string), "Agent("); ok {
+			denied = append(denied, strings.TrimSuffix(name, ")"))
+		}
+	}
+	slices.Sort(denied)
+	roles := slices.Sorted(slices.Values(sessionRoles))
+	if !slices.Equal(denied, roles) {
+		t.Errorf("the lead's settings deny the agents %v; sessionRoles is %v", denied, roles)
+	}
+}
+
+func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
+	c, f := &Crew{}, filepath.Join(t.TempDir(), "x.md")
+	missing := c.fingerprint([]string{"--agent", "x"}, f)
+	os.WriteFile(f, nil, 0o644)
+	empty := c.fingerprint([]string{"--agent", "x"}, f)
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(missing) || missing == empty {
+		t.Errorf("fingerprint with the file missing = %q, empty = %q", missing, empty)
+	}
+}
+
 func TestProposalAuthor(t *testing.T) {
 	for source, want := range map[string]string{
 		"gardener": "the gardener", "user": "the user", "lead": "a lead",

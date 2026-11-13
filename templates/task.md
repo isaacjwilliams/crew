@@ -19,6 +19,7 @@ ci_state:
 worker_name:
 worker_job:
 worker_session:
+worker_fingerprint:
 review_rounds: 0
 last_round_sent: 0
 feedback_since:
