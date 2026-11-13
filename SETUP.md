@@ -311,7 +311,7 @@ For a batch of work you'd rather not plan item by item (a list, or a column on y
 The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does the lead's intake for every item on its own, in a background session named `crew-<project>-goal-<goal>`: a brief to the usual standard, a plan review, the findings settled, and `crew ready`. `crew tick` dispatches the ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow. You see the work as PRs, and review them as usual.
 
 - **How far a goal runs ahead of you** is its `max_in_flight`: how many of its tasks may be dispatched and unmerged at once, each task of a stack included. Once it's reached, the goal's other ready tasks wait until one merges, so a goal that took a wrong turn has only a few PRs to undo. It's `GOAL_MAX_IN_FLIGHT` (3) unless you give the goal its own, when you start it ("at most 2 at a time") or later with `crew goal cap GOAL N`.
-- **Putting a task next** ("do the standings card next") is its `priority`, a whole number: higher goes first, and a task without one is 0. Ask the lead, which runs `crew set TASK priority N` with N above the other ready tasks'. `crew tick` dispatches the ready tasks of every running goal highest priority first, then by project and ID, so the next free worker goes to the task you put next. It doesn't get round a cap or a dependency: while its goal is at `max_in_flight`, or it waits on another task, the tasks after it go ahead. `crew status` shows a ready task's priority beside it when it isn't 0.
+- **Putting a task next** ("do the standings card next") is its `priority`, a whole number: higher goes first, and a task without one is 0. Ask the lead, which runs `crew set TASK priority N` with N above the other ready tasks'. `crew tick` dispatches the ready tasks of every running goal highest priority first, then by project and ID, so the next free worker goes to the task you put next. It doesn't get round a cap or a dependency: while its goal is at `max_in_flight`, or it waits on another task, the tasks after it go ahead. `crew status` shows a ready task's priority beside it when it isn't 0, and lists a running goal's ready tasks in the order they'll go.
 
 - **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a plan-review finding it can't settle. Each stays a draft task with its question under Open questions, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
 - **Workers' questions** go to the goal lead first. Ones it shouldn't answer reach you through the lead, like any worker question.
@@ -319,7 +319,30 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
 - **Stopping a goal** is `crew goal abandon GOAL`. Its tasks stay as they are.
 - The items come from where your Goal says. For a tracker, the goal lead reads it with the tools its session has (your connectors, the repo's MCP servers, or the project's own `mcp.json` servers) and changes nothing there. How to reach a project's tracker belongs in that repo's `AGENTS.md` or in the goal itself.
 
-`crew status` lists each goal with its tasks under it. The goal file, `projects/<project>/goals/NNN-<slug>.md`, records your words, the goal lead's list of items and their tasks, and your notes.
+`crew status` lists each goal with its tasks under it, grouped by where they stand:
+
+```
+  goal 002-do-next-column            running   lead: idle   4 of 37 task(s) merged, 3/3 in flight: full
+    in flight
+      146-passthrough-run-sources    pr-open   worker: done     #2303
+      147-remove-course-leader-board pr-open   worker: done     #2305
+      149-historical-stage-topology  working   worker: working  #2309
+    next, in dispatch order
+      1  174-authorize-cable-channel ready                      -      priority 2
+      2  164-course-standings-extern ready                      -      priority 1
+      3  150-todo-doc-triage         ready                      -
+      4  151-recaptcha-create-assess ready                      -
+      5  153-drop-stale-secondary-sa ready                      -
+         … (5 more)
+    waiting on other tasks
+         158-division-results-versio ready                      -      priority 2  after 146
+         160-retire-course-leader-bo ready                      -      after 11 tasks
+         └ 165-remove-course-leader- ready                      -
+    parked
+         154-final-invoice-on-cancel draft                      -      1 open question(s)
+```
+
+(The columns are narrower here than in a terminal.) `next` is the order `crew tick` will dispatch them in: the first 5, and any later one with a question for you in its stack. A goal that isn't running yet lists them under `ready`, unnumbered. A task waiting on others names them (`after 146, 149`, or `after 11 tasks`), and always names one that was abandoned, since that one will never merge. `parked` lists the drafts with a question for you, and `planning` the ones the goal lead is still working on. `full` on a goal's line means it's at its `max_in_flight`: its other ready tasks wait until enough of its tasks merge or are abandoned to bring it under. The `workers running` line says `full` when no project has a worker slot free, and each project without one says `workers full` on its own line, with its own limit. A cap set to something that isn't a whole number shows as `?`, with what's wrong on the project's or goal's line, or on the rows of a done or abandoned goal's ready tasks. The goal file, `projects/<project>/goals/NNN-<slug>.md`, records your words, the goal lead's list of items and their tasks, and your notes.
 
 ### Check status
 
@@ -329,6 +352,8 @@ Ask the lead "what's going on?", or from a shell:
 crew status        # the project whose repo you're in, or all of them elsewhere (--project P, --all)
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
+
+Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you.
 
 ### Automated review, before yours
 
@@ -406,7 +431,8 @@ When one piece of work builds on another that isn't merged yet, the second task 
 ```sh
 crew new "Season admin screens" --branch season-admin --on 044   # based on 044's branch, depends_on 044
 crew dispatch 045        # works as soon as 044's branch is on GitHub; 044 needn't be merged
-crew status              # a stack is listed bottom first, each task under its parent
+crew status              # a stack is listed bottom first, each task under its parent; a ready one whose
+                         #   parent is dispatched is listed on its own, "on <parent>", since it can go next
 ```
 
 ```
