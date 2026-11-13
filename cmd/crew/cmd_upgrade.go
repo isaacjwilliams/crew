@@ -1,7 +1,7 @@
 package main
 
 import (
-	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +34,8 @@ func cmdUpgrade(c *Crew, args []string) error {
 		return err
 	}
 	tag, err := c.upgradeTarget()
+	// Not held on through the wait for sessions to wrap up, so they can log
+	// where they stopped. mergeRelease takes it again.
 	c.unlock()
 	if err != nil {
 		return err
@@ -61,7 +63,9 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if gitOK(c.Home, "rev-parse", "-q", "--verify", "MERGE_HEAD") {
 		return err
 	}
-	if err := cmp.Or(err, c.liftUpgradePause(projects)); err != nil {
+	// Otherwise the pause is lifted, whether the upgrade went through or not.
+	err = errors.Join(err, c.liftUpgradePause(projects))
+	if err != nil {
 		return err
 	}
 	if !c.pushNow(os.Stdout) {
@@ -105,10 +109,11 @@ func (c *Crew) confirmUpgrade(projects []*Project, next string, yes bool) error 
 		return nil
 	case !stdinIsTerminal():
 		return fail("nothing has changed; run crew upgrade --yes to go ahead")
-	case !confirm("Upgrade now?", false):
+	case confirm("Upgrade now?", false):
+		return nil
+	default:
 		return fail("nothing has changed")
 	}
-	return nil
 }
 
 // installRelease merges the release tag into the home (mergeRelease), and the
