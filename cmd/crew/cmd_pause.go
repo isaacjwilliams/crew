@@ -21,8 +21,9 @@ import (
 	"time"
 )
 
-// pausedByUpgrade is the by of a mark crew upgrade writes. Any other pause
-// replaces it, so the user's pause outlasts the upgrade.
+// pausedByUpgrade is the by of the mark crew upgrade is to write, and lift once
+// it's done. Any other pause replaces it, so the user's pause outlasts the
+// upgrade.
 const pausedByUpgrade = "crew upgrade"
 
 // carryOn is what a worker or goal lead is told when it's followed up after a
@@ -225,8 +226,8 @@ func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
 	var names []string
 	for _, p := range projects {
 		names = append(names, p.Name)
-		// crew upgrade's own pause gives way to any other, so the upgrade, which
-		// lifts only its own, doesn't lift the user's.
+		// crew upgrade's pause gives way to any other: the upgrade is to lift only
+		// a mark it wrote, so it won't lift the user's.
 		if p.Paused() && p.PausedBy() != pausedByUpgrade {
 			fmt.Printf("%s was already paused\n", p.Name)
 			continue
