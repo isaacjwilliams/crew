@@ -493,7 +493,8 @@ func readSettings(f string) (*object, error) {
 // shell started would hand every session the lead's (see crew lead --hook).
 //
 // The pause hook is added here, not listed in the settings files, so the user's
-// own leads, which run lead/.claude/settings.json too, never get it.
+// own leads (crew lead, crew serve), which run lead/.claude/settings.json without
+// coming through here, never get it.
 func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	env := settings.child("env")
 	env.set("CREW_PROJECT", p.Name)

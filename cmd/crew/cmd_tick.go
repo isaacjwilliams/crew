@@ -67,8 +67,9 @@ func cmdTick(c *Crew, args []string) error {
 			warn("%s: skipped", name)
 			continue
 		}
-		// A paused project's steps that only record still run; those that would
-		// start a session wait, quietly, for crew resume.
+		// A paused project still gets the steps that only record (cleanup,
+		// feedback, ci-fix, needs-input, goal done); those that would start a
+		// session wait, quietly, for crew resume.
 		paused, idx := p.Paused(), c.branches(name)
 		for _, t := range c.tasks(name) {
 			c.tickTask(p, idx, t, as, paused)
@@ -211,14 +212,15 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 }
 
 // dispatchReady dispatches the ready tasks of running goals, across every
-// project but the paused ones, highest priority first and then in ledger order. The goal lead marked
-// each one ready, which is the go-ahead. It's the tick's last step, so workers
-// made busy by this tick's review rounds and restacks count against MAX_WORKERS.
-// A task held by a cap or a dependency (exit 4) waits for the next tick, and the
-// next task is tried: caps are per goal, and dependencies per task. Each task is
-// checked again just before its dispatch, since an earlier one can take minutes
-// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
-// abandoned or the task dispatched by hand.
+// project but the paused ones, highest priority first and then in ledger order.
+// The goal lead marked each one ready, which is the go-ahead. It's the tick's
+// last step, so workers made busy by this tick's review rounds and restacks
+// count against MAX_WORKERS. A task held by a cap or a dependency (exit 4) waits
+// for the next tick, and the next task is tried: caps are per goal, and
+// dependencies per task. Each task is checked again just before its dispatch,
+// since an earlier one can take minutes (worktree hooks) while the ledger is
+// unlocked, time enough for its goal to be abandoned or the task dispatched by
+// hand.
 func (c *Crew) dispatchReady() {
 	type candidate struct {
 		Task

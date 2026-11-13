@@ -140,7 +140,8 @@ func (c *Crew) loadProjects(scope string) ([]*Project, error) {
 }
 
 // A session is the background session a ledger file records: a task's worker
-// or a goal's goal lead.
+// or a goal's goal lead. (Not a session ID, like worker_session: its job is
+// what crew stops and asks claude agents about.)
 type session struct {
 	Doc          // the task or goal file
 	job   string // its job in claude agents
@@ -166,7 +167,8 @@ func (c *Crew) sessions(projects []*Project) []session {
 	return ss
 }
 
-// busySessions are the projects' sessions that are mid-turn (see busy).
+// busySessions are the projects' sessions that are mid-turn, or holding a
+// prompt open (see busy).
 func (c *Crew) busySessions(projects []*Project) []session {
 	as := c.agents()
 	return slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobBusy(s.job) })
@@ -180,44 +182,20 @@ func labels(ss []session) string {
 	return strings.Join(ls, ", ")
 }
 
-// pause marks the projects paused, by by, and marks the files of the sessions
-// mid-turn as interrupted. Then it gives those sessions up to WRAP_UP_SECONDS to
-// end their turn, and stops the ones that haven't. With force, it stops every
-// open session of the projects at once instead, busy or idle. A mark that's
-// there already stays as it is, unless crew upgrade wrote it.
-//
-// It holds the ledger lock only while it writes, never while it waits, so
-// workers can log where they stopped.
+// pause marks the projects paused, by by (markPaused). Then it gives the
+// sessions that were mid-turn up to WRAP_UP_SECONDS to end their turn, and
+// stops the ones that haven't. With force, it stops every open session of the
+// projects at once instead, busy or idle. It holds the ledger lock only while it
+// writes, never while it waits, so workers can log where they stopped.
 func (c *Crew) pause(projects []*Project, by string, force bool) error {
 	wait, err := intSetting(c.Settings, "WRAP_UP_SECONDS")
 	if err != nil {
 		return err
 	}
-	if err := c.lock(); err != nil {
+	busy, err := c.markPaused(projects, by)
+	if err != nil {
 		return err
 	}
-	var names []string
-	for _, p := range projects {
-		names = append(names, p.Name)
-		if p.Paused() && p.PausedBy() != pausedByUpgrade {
-			fmt.Printf("%s was already paused\n", p.Name)
-			continue
-		}
-		mark := fmt.Sprintf("---\nby: %s\nat: %s\nhost: %s\n---\n", by, now(), c.Host)
-		if err := os.WriteFile(p.pauseMark().Path, []byte(mark), 0o644); err != nil {
-			return err
-		}
-		fmt.Printf("paused %s\n", p.Name)
-	}
-	// Set before the wait, so a pause cut short still leaves the record.
-	busy := c.busySessions(projects)
-	for _, s := range busy {
-		s.Set("interrupted", now())
-		s.Touch()
-	}
-	c.commit("pause " + strings.Join(names, " "))
-	c.unlock()
-
 	if force {
 		as := c.agents()
 		open := slices.DeleteFunc(c.sessions(projects), func(s session) bool { return !as.jobOpen(s.job) })
@@ -229,6 +207,38 @@ func (c *Crew) pause(projects []*Project, by string, force bool) error {
 	fmt.Printf("waiting up to %s for %d session(s) to wrap up: %s\n", plainDuration(wait), len(busy), labels(busy))
 	left := c.waitForTurnsToEnd(busy, time.Duration(wait)*time.Second)
 	return c.stopSessions(left, "stopped by "+by+" before it ended its turn")
+}
+
+// markPaused writes the projects' marks and commits them, with interrupted set
+// on the files of the sessions mid-turn, which it returns. It sets interrupted
+// before any wait, so a pause cut short still leaves the record.
+func (c *Crew) markPaused(projects []*Project, by string) ([]session, error) {
+	if err := c.lock(); err != nil {
+		return nil, err
+	}
+	defer c.unlock()
+	var names []string
+	for _, p := range projects {
+		names = append(names, p.Name)
+		// crew upgrade's own pause gives way to any other, so the upgrade, which
+		// lifts only its own, doesn't lift the user's.
+		if p.Paused() && p.PausedBy() != pausedByUpgrade {
+			fmt.Printf("%s was already paused\n", p.Name)
+			continue
+		}
+		mark := fmt.Sprintf("---\nby: %s\nat: %s\nhost: %s\n---\n", by, now(), c.Host)
+		if err := os.WriteFile(p.pauseMark().Path, []byte(mark), 0o644); err != nil {
+			return nil, err
+		}
+		fmt.Printf("paused %s\n", p.Name)
+	}
+	busy := c.busySessions(projects)
+	for _, s := range busy {
+		s.Set("interrupted", now())
+		s.Touch()
+	}
+	c.commit("pause " + strings.Join(names, " "))
+	return busy, nil
 }
 
 // waitForTurnsToEnd waits up to wait for the sessions to end their turn, saying
@@ -312,10 +322,11 @@ func (c *Crew) resume(projects []*Project) error {
 	return nil
 }
 
-// crew pause --hook, the PostToolUse hook of every session crew starts: once
-// the session's project is paused, Claude Code hands the session the text it
-// prints, telling it to wrap up. It reads only the environment and the mark, as
-// it runs after every tool call.
+// crew pause --hook, the PostToolUse hook of every session crew starts (added by
+// sessionSettings, and in no settings file): once the session's project is
+// paused, Claude Code hands the session the text it prints, telling it to wrap
+// up. It reads only the environment and the mark, as it runs after every tool
+// call.
 func (c *Crew) pauseHook() {
 	name := os.Getenv("CREW_PROJECT")
 	if name == "" || name == allProjects {
