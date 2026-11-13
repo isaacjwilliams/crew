@@ -202,6 +202,11 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 	if newest != tag {
 		return fail("upstream has released %s since this upgrade began; run crew upgrade again", newest)
 	}
+	// Fetched before the last look at the sessions, so the network's time
+	// isn't added to the moments a session could start a turn before the merge.
+	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
+		return fail("couldn't fetch %s from upstream", tag)
+	}
 	var resumed []string
 	for _, p := range paused {
 		if !p.Paused() {
@@ -217,9 +222,6 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 	}
 	if len(busy) > 0 {
 		return fail("%s started working while sessions wrapped up, so crew upgrade stopped before merging; run it again", labels(busy))
-	}
-	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
-		return fail("couldn't fetch %s from upstream", tag)
 	}
 	if gitRun(c.Home, "merge", "-q", "--no-edit", "refs/tags/"+tag) != nil {
 		status := exec.Command("git", "-C", c.Home, "status", "--short")
