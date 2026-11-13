@@ -231,7 +231,11 @@ func (c *Crew) mergeRelease(tag string, paused []*Project) error {
 				ours = append(ours, p.Name)
 			}
 		}
-		return fail("upstream's changes conflict with edits in your home. The merge is left in progress, and the crew stays paused until it's done: resolve the files above, then 'git -C %s commit' and run crew upgrade again, which lifts the pause. Or undo the merge with 'git -C %s merge --abort', and lift the pause with 'crew resume --project P' for each of %s.", c.Home, c.Home, strings.Join(ours, ", "))
+		lift := ""
+		if len(ours) > 0 {
+			lift = fmt.Sprintf(", and lift the pause with 'crew resume --project P' for each of %s", strings.Join(ours, ", "))
+		}
+		return fail("upstream's changes conflict with edits in your home. The merge is left in progress, and the crew stays paused until it's done: resolve the files above, then 'git -C %s commit' and run crew upgrade again, which lifts the pause. Or undo the merge with 'git -C %s merge --abort'%s.", c.Home, c.Home, lift)
 	}
 	return nil
 }
