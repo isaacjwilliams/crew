@@ -1165,5 +1165,11 @@ check "crew pause --force stops the project's sessions at once, busy or idle, an
    [[ $(tail -1 "$PT") == *"stopped by crew pause --force" && $(tail -1 "$PI") == *"stopped by crew pause --force" && $(since "$n") != *"claude stop $(crew get "$Q2" worker_job)"* ]]'
 check "--force marks only the busy session's work interrupted" '[[ -n $(crew get "$PT" interrupted) && -z $(crew get "$PI" interrupted) ]]'
 crew resume --project "$PJ" >/dev/null
+mv "$L/projects/$P2/local.env" "$HOME/local.env.saved"
+out=$(crew pause --all 2>&1); st=$?
+check "crew pause --all also pauses a project with no clone on this machine" '((st == 0)) && [[ -e $L/projects/$P2/paused && -e $MARK ]]'
+out=$(crew resume --all 2>&1); st=$?
+check "and crew resume --all lifts its pause" '((st == 0)) && [[ ! -e $L/projects/$P2/paused && ! -e $MARK ]]'
+mv "$HOME/local.env.saved" "$L/projects/$P2/local.env"
 
 summary crew-e2e

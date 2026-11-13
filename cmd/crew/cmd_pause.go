@@ -77,7 +77,7 @@ func cmdPause(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	projects, err := c.loadProjects(scope)
+	projects, err := c.ledgerProjects(scope)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func cmdResume(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	projects, err := c.loadProjects(scope)
+	projects, err := c.ledgerProjects(scope)
 	if err != nil {
 		return err
 	}
@@ -125,12 +125,13 @@ func scopeFlag(scope string) string {
 	return "--project " + scope
 }
 
-// loadProjects loads every project in scope. It fails if one can't be loaded
-// here, before anything changes.
-func (c *Crew) loadProjects(scope string) ([]*Project, error) {
+// ledgerProjects are the projects in scope, cloned on this machine or not: a
+// pause needs only their ledger files. It fails before anything changes if one
+// can't be read.
+func (c *Crew) ledgerProjects(scope string) ([]*Project, error) {
 	var ps []*Project
 	for _, name := range c.projects(scope) {
-		p, err := c.loadProject(name)
+		p, err := c.ledgerProject(name)
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +333,7 @@ func (c *Crew) pauseHook() {
 	if name == "" || name == allProjects {
 		return
 	}
-	p, err := c.loadProject(name)
+	p, err := c.ledgerProject(name)
 	if err != nil || !p.Paused() {
 		return
 	}
