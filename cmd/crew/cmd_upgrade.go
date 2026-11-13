@@ -28,15 +28,10 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if out, _ := git(c.Home, "status", "--porcelain"); out != "" {
-		return fail("the home has uncommitted changes; commit or discard them first (git -C %s status)", c.Home)
-	}
-	tag, err := newestRelease(c.Home)
+	tag, err := c.upgradeTarget()
+	c.unlock()
 	if err != nil {
-		return fail("couldn't fetch upstream")
-	}
-	if tag == "" {
-		return fail("upstream has no release to upgrade to (no v<version> tag)")
+		return err
 	}
 	next := strings.TrimPrefix(tag, "v")
 	// Only the launcher knows how to download a binary, so it fetches this one.
@@ -45,18 +40,9 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if out, err := fetch.Output(); err != nil || strings.TrimSpace(string(out)) != next {
 		return fail("couldn't get crew %s's binary, so nothing has changed. Its release may still be building; try again in a few minutes.", next)
 	}
-	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
-		return fail("couldn't fetch %s from upstream", tag)
+	if err := c.mergeRelease(tag); err != nil {
+		return err
 	}
-	if gitRun(c.Home, "merge", "-q", "--no-edit", "refs/tags/"+tag) != nil {
-		status := exec.Command("git", "-C", c.Home, "status", "--short")
-		status.Stdout = os.Stderr
-		status.Run()
-		return fail("upstream's changes conflict with edits in your home. The merge is left in progress: resolve the files above, then 'git -C %s commit' and run crew upgrade again. Or undo it with 'git -C %s merge --abort'.", c.Home, c.Home)
-	}
-	// The merge needed the lock (no ledger commits in the middle of it); installing
-	// doesn't, and the push takes the lock itself if it has to rebase.
-	c.unlock()
 	// The new version installs itself, so a change to installing takes effect now.
 	install := exec.Command(c.path("bin/crew"), "install")
 	install.Stdin, install.Stdout, install.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -75,6 +61,52 @@ func cmdUpgrade(c *Crew, args []string) error {
 		}
 	}
 	fmt.Println("crew upgraded to " + now)
+	return nil
+}
+
+// upgradeTarget is the release crew upgrade is to merge: the newest one upstream
+// has. It refuses a home with uncommitted changes. Its callers hold the ledger
+// lock.
+func (c *Crew) upgradeTarget() (string, error) {
+	if out, _ := git(c.Home, "status", "--porcelain"); out != "" {
+		return "", fail("the home has uncommitted changes; commit or discard them first (git -C %s status)", c.Home)
+	}
+	tag, err := newestRelease(c.Home)
+	if err != nil {
+		return "", fail("couldn't fetch upstream")
+	}
+	if tag == "" {
+		return "", fail("upstream has no release to upgrade to (no v<version> tag)")
+	}
+	return tag, nil
+}
+
+// mergeRelease merges the release tag into the home. It holds the ledger lock,
+// so no ledger commit comes in the middle, and first checks again that the home
+// is clean and tag is still the newest release: crew upgrade let go of the lock
+// after its first check. On a conflict it leaves the merge in progress, for the
+// person to settle.
+func (c *Crew) mergeRelease(tag string) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
+	newest, err := c.upgradeTarget()
+	if err != nil {
+		return err
+	}
+	if newest != tag {
+		return fail("upstream has released %s since this upgrade began; run crew upgrade again", newest)
+	}
+	if gitRun(c.Home, "fetch", "-q", "upstream", "tag", tag) != nil {
+		return fail("couldn't fetch %s from upstream", tag)
+	}
+	if gitRun(c.Home, "merge", "-q", "--no-edit", "refs/tags/"+tag) != nil {
+		status := exec.Command("git", "-C", c.Home, "status", "--short")
+		status.Stdout = os.Stderr
+		status.Run()
+		return fail("upstream's changes conflict with edits in your home. The merge is left in progress: resolve the files above, then 'git -C %s commit' and run crew upgrade again. Or undo it with 'git -C %s merge --abort'.", c.Home, c.Home)
+	}
 	return nil
 }
 
