@@ -22,7 +22,7 @@ Setup
                                    public repo's new version, install it, push,
                                    restart the lead's server, and lift the pause.
                                    It asks first; --yes is the answer without a
-                                   terminal
+                                   terminal, and answers crew install's questions
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
                                    to crew and lead in ~/.local/bin, fish
