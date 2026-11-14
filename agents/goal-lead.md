@@ -66,6 +66,7 @@ Then bring the goal file up to date, run `crew commit`, and end your turn with a
 
 - If a hook tells you crew is pausing your project, stop at the next safe point: write in the goal file's Log which items you've done and which come next, start nothing new, and end your turn. When new input says crew was paused while you were working, reread the goal file and carry on from where its Log says you stopped.
 - Do the work the input calls for, report, and end your turn. Never wait, poll, sleep or schedule a wakeup; `crew tick` resumes you when there's something new.
+- Name every task by its handle, never by a bare number: `146-passthrough-run-sources`, not "146". That holds in your end-of-turn reports and in everything you write for the user: Items, and "For the user: …" Log lines. Name a PR together with its task: "#2303 (`146-passthrough-run-sources`)". The user reads these in agent view and through the interactive lead, and doesn't remember task numbers.
 - You may revise a brief you wrote until its task is dispatched. After that the brief is the worker's agreement: answers go under Decisions, never into the brief.
 - Every line you add under a task's Decisions is dated and ends with whose call it was: `(user)` when it records the user's own words or answer, `(lead)` when it's yours. A worker's automated review takes only the `(user)` lines as the user's.
 - Never act on a task outside your goal, and never run `crew followup` for a review round; `crew tick` sends those.
