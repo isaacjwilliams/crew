@@ -5,6 +5,7 @@ package main
 // from the ledger and the history of the project's default branch.
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -210,6 +211,7 @@ func historyOf(p *Project, tasks []Task) history {
 	}
 	var h history
 	for _, t := range tasks {
+		// A fix whose fixes is "unknown" finds no task, so its cause stays nil.
 		if t.Kind() == KindFix && t.Status() == Merged {
 			fixedAt := mergedAt(withStatusLines(t.LogEntries()))
 			h.corrections = append(h.corrections, correction{at: fixedAt, fix: &t, cause: byID[t.Fixes()]})
@@ -320,8 +322,11 @@ var (
 // revertedPRs reads git log's output, in revertLogFormat, for the reverts of
 // PRs: commits whose body says "This reverts commit <sha>" of a PR's merge or
 // squash commit. Each comes back with the PR's number and when the revert was
-// committed.
+// committed. A revert of anything else is left out: of a commit that isn't a
+// PR's, of a revert, or one named by a short SHA, which git never writes.
 func revertedPRs(log string) []correction {
+	// First every commit, with its subject by SHA, then each revert's reverted
+	// commits looked up by their SHA.
 	type commit struct {
 		at            time.Time
 		subject, body string
@@ -341,7 +346,7 @@ func revertedPRs(log string) []correction {
 	for _, c := range commits {
 		for _, m := range revertsCommit.FindAllStringSubmatch(c.body, -1) {
 			if pr := mergesPR.FindStringSubmatch(subjects[m[1]]); pr != nil {
-				reverts = append(reverts, correction{at: c.at, pr: pr[1] + pr[2]})
+				reverts = append(reverts, correction{at: c.at, pr: cmp.Or(pr[1], pr[2])}) // a merge's or a squash's
 			}
 		}
 	}
@@ -484,13 +489,15 @@ var tierHeadings = [][2]string{
 	{"later", "fixes"}, {"", "reverts"},
 }
 
-// byTier groups items by risk tier, in Risk's order, with those without a
-// tier last.
-func byTier[T any](items []T, risk func(T) Risk) [][]T {
-	groups := make([][]T, len(risks)+1)
+// byTier groups items by risk tier, those without a valid tier under "".
+func byTier[T any](items []T, risk func(T) Risk) map[Risk][]T {
+	groups := map[Risk][]T{}
 	for _, item := range items {
-		i := risk(item).order()
-		groups[i] = append(groups[i], item)
+		tier := risk(item)
+		if !tier.Valid() {
+			tier = ""
+		}
+		groups[tier] = append(groups[tier], item)
 	}
 	return groups
 }
@@ -499,7 +506,7 @@ func byTier[T any](items []T, risk func(T) Risk) [][]T {
 // tasks grouped by byTier: how many merged, the median of their review rounds,
 // their comments per task, and the corrections traced to tasks of the tier,
 // whenever those tasks merged.
-func tierRows(merged [][]taskStats, corrections []correction) [][]string {
+func tierRows(merged map[Risk][]taskStats, corrections []correction) [][]string {
 	var traced []correction
 	for _, c := range corrections {
 		if c.cause != nil {
@@ -508,17 +515,17 @@ func tierRows(merged [][]taskStats, corrections []correction) [][]string {
 	}
 	caused := byTier(traced, func(c correction) Risk { return c.cause.Risk() })
 	var rows [][]string
-	for i, tier := range append(slices.Clone(risks), "") {
+	for _, tier := range append(slices.Clone(risks), "") { // and no tier last
 		medianRounds, perTask := "-", "-"
-		if mean, ok := commentsPerTask(merged[i]); ok {
+		if mean, ok := commentsPerTask(merged[tier]); ok {
 			var rounds []float64
-			for _, s := range merged[i] {
+			for _, s := range merged[tier] {
 				rounds = append(rounds, float64(s.rounds))
 			}
 			medianRounds, perTask = decimal(median(rounds)), decimal(mean)
 		}
-		fixes, reverts := tally(caused[i])
-		rows = append(rows, []string{tier.Label(), strconv.Itoa(len(merged[i])), medianRounds, perTask,
+		fixes, reverts := tally(caused[tier])
+		rows = append(rows, []string{tier.Label(), strconv.Itoa(len(merged[tier])), medianRounds, perTask,
 			strconv.Itoa(fixes), strconv.Itoa(reverts)})
 	}
 	return rows
@@ -540,9 +547,9 @@ func commentsPerTask(stats []taskStats) (float64, bool) {
 // lowDrawsMoreComments: low-risk tasks drew more comments per task than
 // medium-risk ones, grouped by byTier. A low tier should need only a glance,
 // so the tiers, or the sensitive paths that raise them, may be off.
-func lowDrawsMoreComments(merged [][]taskStats) bool {
-	low, lowOK := commentsPerTask(merged[RiskLow.order()])
-	medium, mediumOK := commentsPerTask(merged[RiskMedium.order()])
+func lowDrawsMoreComments(merged map[Risk][]taskStats) bool {
+	low, lowOK := commentsPerTask(merged[RiskLow])
+	medium, mediumOK := commentsPerTask(merged[RiskMedium])
 	return lowOK && mediumOK && low > medium
 }
 
