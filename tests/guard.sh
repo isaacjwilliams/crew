@@ -251,6 +251,10 @@ check "a requested pass runs after the round's other comments are pushed, and th
   "grep -q 'Automated review requested (%s)' <<<\"\$SRC\" && awk '/^## Workflow: review rounds/ {w=1} w && /^6\\. Run checks, commit/ && !p {p=NR} w && /run a new pass of .Workflow: automated review./ && !r {r=NR} END {exit !(p && r && p < r)}' $A/implementer.md && grep -q 'Don.t .crew reply. to the comment that asked for it' $A/implementer.md"
 check "a review is clean only when nothing was fixed for it: the fixes need a review of their own" \
   "grep -q 'clean.. when you fixed nothing at must fix or should fix for it' $A/implementer.md && ! grep -q 'left nothing at must fix or should fix to change' $A/implementer.md"
+check "a fix later in the PR's own lines is fixed in the PR, or left for the user when it's big; only one outside them becomes a proposal" \
+  "awk '/^   - \\*\\*fix later\\*\\*:/ {f=1} f && /^   - \\*\\*nitpick/ {f=0} f && /^     - In lines this PR changed, .*small and inside the plan.*fixed in <short sha>/ {a=1} f && /^     - In those lines, with a bigger fix: .*left for the user: <the fix.s cost/ {b=1} f && /^     - Outside them: write a proposal/ {c=1} END {exit !(a && b && c)}' $A/implementer.md && grep -q 'A .pre-existing: fix later. follows the pre-existing bullet instead' $A/implementer.md && grep -q 'a small improvement automated review finds in those lines is fixed in the PR' $A/implementer.md && grep -q '.Left for later. holds only work outside the lines this PR changed' $C/../templates/review-comment.md"
+check "fix-later and nitpick fixes don't make a review unclean, and the summary says they weren't reviewed again" \
+  "grep -q 'Fix-later and nitpick fixes don.t count: they.re improvements, not defects' $A/implementer.md && grep -q 'improvements made after it haven.t been reviewed again' $C/../templates/review-comment.md"
 for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do
   check "$(basename "$f") ends every line it adds under Decisions with whose call it was" \
     "grep -q 'under .*Decisions is dated and ends with whose call it was: .(user). when it records the user.s own words or answer' $f"

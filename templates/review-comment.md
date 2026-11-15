@@ -5,8 +5,10 @@
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
      agents. Each finding is listed by its outcome. One whose outcome is "withdrawn in round <n>"
      isn't listed. A finding that repeats one from earlier in this pass is one line, from its latest
-     review's outcome. A finding left for the user because it already failed at the fork point goes
-     under "Already on <base branch>", not "Left for you".
+     review's outcome. A fix-later finding fixed in the PR goes under "Fixed", like any other;
+     "Left for later" holds only work outside the lines this PR changed. A finding left for the
+     user because it already failed at the fork point goes under "Already on <base branch>", not
+     "Left for you".
 
      <N> counts every review in this pass, including one whose reviewers failed. When the record
      has a "Summary posted" line before this pass's reviews, open instead of the line below with
@@ -33,6 +35,9 @@
        last finished review." (name the reviews that read the whole PR)
      The line after that says how the last review ended. When more than one fits, the first wins:
      - clean: "The last came back clean." ("It came back clean." after a single review)
+     - clean, with fix-later or nitpick fixes made for it: "The last came back clean; the <n> small
+       improvements made after it haven't been reviewed again." ("It came back clean; …" after a
+       single review; "the small improvement made after it hasn't …" for one)
      - it didn't converge (the limit ran out with fixes made for the last review): "Review didn't settle
        after <N> reviews, so this PR isn't ready yet. Proposed instead:", then the proposed pieces,
        one line each: what each smaller PR would cover. Call them "smaller PRs", never "tasks".
@@ -58,4 +63,4 @@
 - [<severity>] <the finding, in a line> — <the size of its fix, in a few words>
 
 **Left for you**
-- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / kept as the plan designed it / only a deploy window would close it, and what that costs in a few words / reviews disagreed about it / still open from an earlier review>
+- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / kept as the plan designed it / only a deploy window would close it, and what that costs in a few words / too big a fix for this PR, and its size in a few words / reviews disagreed about it / still open from an earlier review>

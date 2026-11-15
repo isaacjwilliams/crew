@@ -209,8 +209,9 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
           │    (each reviewer started fresh, with a round file: its report, earlier rounds, this round's items)
           └─ checks each finding and repeat mark, settles its severity (flipped: when an earlier review set it aside),
                appends "### Automated review N" under "## Automated reviews"
-        → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user (flips,
-          and repeats of what was already left for the user, among them) → its Outcome line
+        → per finding, by agreed severity: fix and push (a small fix later in the PR's own lines too) / crew propose
+          (a fix later outside them) / settle a split / left for the user (flips, and repeats of what was already
+          left for the user, among them) → its Outcome line
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
         → converged: gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
