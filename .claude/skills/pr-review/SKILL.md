@@ -258,9 +258,11 @@ raised and then withdrew.
 When a reviewer tagged the finding `pre-existing`, settle the tag from what step 5 found at the fork point, and cite
 that code on the Verdict line:
 
-- The same failure happens there: put `pre-existing: ` before the severity, wherever the agreed severity names one.
-  For example `pre-existing: should fix`, or `split: held at pre-existing: must fix, Codex refutes`.
-- It doesn't: the agreed severity stays as it is.
+- The same failure happens there, and every reviewer that raised the finding tagged it: put `pre-existing: ` before
+  the severity, wherever the agreed severity names one. For example `pre-existing: should fix`, or
+  `split: held at pre-existing: must fix, Codex refutes`.
+- Otherwise the agreed severity stays as it is. When both raised the finding and only one tagged it, the rounds never
+  weighed the tag, so it doesn't stand.
 
 ## 8. Record the review
 
