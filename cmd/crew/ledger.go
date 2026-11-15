@@ -383,11 +383,14 @@ type kindRules struct {
 	handedOver Status
 }
 
+// buildBrief is the sections a build's brief needs, and a fix's and a refine's.
+var buildBrief = []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"}
+
 // kinds are the kinds of task, build first.
 var kinds = []kindRules{
 	{
 		kind:       KindBuild,
-		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		brief:      buildBrief,
 		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
@@ -401,8 +404,10 @@ var kinds = []kindRules{
 		handedOver: Done,
 	},
 	{
+		// A spike needn't inform a draft, but a fix is ready only once it names
+		// the task it fixes, so fixes is one of its keys as well as its link.
 		kind:        KindFix,
-		brief:       []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		brief:       buildBrief,
 		pr:          true,
 		keys:        []string{"fixes", "missed_by"},
 		link:        "fixes",
@@ -413,7 +418,7 @@ var kinds = []kindRules{
 	},
 	{
 		kind:       KindRefine,
-		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		brief:      buildBrief,
 		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
@@ -430,6 +435,16 @@ func (k Kind) Valid() bool {
 func (k Kind) rules() (kindRules, bool) {
 	for _, r := range kinds {
 		if r.kind == k {
+			return r, true
+		}
+	}
+	return kindRules{}, false
+}
+
+// linkRules is the kind whose link key is key, and whether there is one.
+func linkRules(key string) (kindRules, bool) {
+	for _, r := range kinds {
+		if r.link != "" && r.link == key {
 			return r, true
 		}
 	}

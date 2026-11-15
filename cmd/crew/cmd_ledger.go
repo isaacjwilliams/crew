@@ -173,8 +173,9 @@ func cmdSet(c *Crew, args []string) error {
 	if len(args) < 2 || args[1] == "" {
 		return fail("key required")
 	}
-	key, value := args[1], strings.Join(args[2:], " ")
-	if value, err = c.checkValue(t.Project(), key, value); err != nil {
+	key := args[1]
+	value, err := c.checkValue(t.Project(), key, strings.Join(args[2:], " "))
+	if err != nil {
 		return err
 	}
 	// done means a spike's report is in, which crew hand-over checks.
@@ -227,9 +228,10 @@ func (c *Crew) checkStacks(t Task, key, value string) error {
 }
 
 // checkValue is the value crew set records for key, or a refusal that says what
-// the key takes. A link to another task is recorded as that task's ID. Keys crew
-// doesn't know take any value. crew ready checks the keys a task's kind needs
-// with it too.
+// the key takes. A key that links to another task (informs, fixes) names it, so
+// it's resolved as crew new resolves it, and recorded as that task's ID. Keys
+// crew doesn't check take any value. crew ready checks the keys a task's kind
+// needs with it too.
 func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	var ok bool
 	var takes string
@@ -247,10 +249,8 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 		ok = slices.Contains(missedBy, value)
 		takes = orList(missedBy)
 	default:
-		for _, r := range kinds {
-			if r.link == key {
-				return c.resolveLink(proj, r, value)
-			}
+		if r, ok := linkRules(key); ok {
+			return c.resolveLink(proj, r, value)
 		}
 		return value, nil
 	}

@@ -143,17 +143,17 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 
 // resolveLink is what a task of a kind with rules r records as its link: the ID
 // of the one task in proj that value names, which must have the status r.linkTo,
-// or "unknown" where r takes that.
+// or "unknown" where r takes that. A fix's "12" is recorded as "012-<slug>".
 func (c *Crew) resolveLink(proj string, r kindRules, value string) (string, error) {
 	takes := fmt.Sprintf("a %s task in %s", r.linkTo, proj)
 	if r.linkUnknown {
-		if value == "unknown" {
-			return value, nil
-		}
 		takes += ", or unknown"
 	}
 	if value == "" {
 		return "", mustBe(r.link, takes, value)
+	}
+	if r.linkUnknown && value == "unknown" {
+		return value, nil
 	}
 	f, matches := resolveIn(value, c.files("tasks", proj))
 	if f == "" {
