@@ -43,7 +43,8 @@ For each finding:
 - If the failure already happens at the fork point (the start of the range), for the same caller and input, tag the
   finding `pre-existing` and cite the code at the fork point that fails the same way. Unchanged lines aren't enough: an
   old defect that the range newly makes reachable (a new caller of a buggy function, say) is the range's own, so don't
-  tag it. The tag sits beside the severity; it doesn't change it.
+  tag it. The tag sits beside the severity; it doesn't change it. When some instances of a class already fail at the
+  fork point and others don't, report them as two findings, and tag only the old one.
 
 Do not inflate the review with findings that lack a demonstrated caller, behavioral consequence, or maintenance cost.
 

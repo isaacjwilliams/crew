@@ -287,8 +287,8 @@ check "the rubric tags a finding pre-existing by its failure at the fork point, 
   "grep -q 'If the failure already happens at the fork point' $SK/rubric.md && grep -q 'Unchanged lines aren.t enough' $SK/rubric.md && grep -qF '[must fix | should fix | fix later | nitpick] [pre-existing] <title>' $SK/rubric.md && [[ \$(grep -cE '^- .(must fix|should fix|fix later|nitpick).: ' $SK/rubric.md) == 4 ]] && ! grep -qE '^- .pre-existing.: ' $SK/rubric.md"
 check "only a reviewer tags a finding pre-existing: pr-review checks the tag at the fork point and settles it on the Agreed severity line" \
   "grep -qF 'git show <fork sha>:<path>' $SK/SKILL.md && grep -q 'Never add the tag to a finding no reviewer tagged' $SK/SKILL.md && grep -q '^- Agreed severity: .*| pre-existing: <severity> |' $SK/SKILL.md"
-check "the implementer fixes every instance of a finding's class" \
-  "grep -q 'fix every instance of the finding.s class' $A/implementer.md && grep -q 'fixed in <short sha> (<n> instances)' $A/implementer.md"
+check "the implementer fixes every instance of a finding's class, except the ones already failing at the fork point, which the rubric reports apart" \
+  "grep -q 'fix every instance of the finding.s class' $A/implementer.md && grep -q 'fixed in <short sha> (<n> instances)' $A/implementer.md && grep -q 'Leave alone an instance that already fails the same way at the fork point' $A/implementer.md && grep -q 'report them as two findings, and tag only the old one' $SK/rubric.md"
 check "the implementer changes no code for a pre-existing finding, and leaves it for the user with a proposal" \
   "grep -q '^   - \*\*pre-existing\*\* (.pre-existing: <severity>.):.*don.t change the code' $A/implementer.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <its file name>' $A/implementer.md"
 check "only a code change closes a must fix: one that only a deploy step or the docs could close is left for the user with its cost" \
