@@ -385,13 +385,16 @@ func (t Task) AcceptanceCriteria() []string {
 // an entry. It counts the entries and doesn't judge them.
 func (t Task) EvidenceGaps() []int {
 	recorded := map[int]bool{}
-	entry := 0 // the entry the line is in, or 0 outside one
-	fenced := false
+	entry := 0  // the entry the line is in, or 0 outside one
+	fence := "" // the fence the line is inside, or "" outside one
 	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		if strings.HasPrefix(l, "```") {
-			fenced = !fenced
+		inFence := fence != ""
+		if !inFence {
+			fence = fenceOpening(l)
+		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+			fence = ""
 		}
-		if rest, ok := strings.CutPrefix(l, "### "); ok && !fenced {
+		if rest, ok := strings.CutPrefix(l, "### "); ok && !inFence {
 			num, _, _ := strings.Cut(rest, ".")
 			entry, _ = strconv.Atoi(num)
 		} else if entry > 0 {
@@ -405,6 +408,19 @@ func (t Task) EvidenceGaps() []int {
 		}
 	}
 	return gaps
+}
+
+// fenceOpening is the run of three or more backticks or tildes that opens a
+// fenced block on line l, or "". A line of the same character at least as long
+// closes it.
+func fenceOpening(l string) string {
+	for _, c := range "`~" {
+		run := l[:len(l)-len(strings.TrimLeft(l, string(c)))]
+		if len(run) >= 3 {
+			return run
+		}
+	}
+	return ""
 }
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review
