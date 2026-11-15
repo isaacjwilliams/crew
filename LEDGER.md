@@ -28,10 +28,11 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     memory-suggestions.md  facts suggested for memory.md, waiting on the user
     gardener.last        last commit the gardener reviewed
     misses.last          newest merge time of the tasks the misses agent read
+    review-eval/*.md     one report per crew review-eval run, named for when it started (see Review eval)
     paused               there while the project is paused (see Pausing)
   reports/               free-form notes the lead keeps
   host                   the machine that runs the crew; `crew host up` claims it
-  logs/                  gardener and misses runs, Worktrunk hook output and background pushes (not committed)
+  logs/                  gardener, misses and review eval runs, Worktrunk hook output and background pushes (not committed)
 ```
 
 `<project>` is `<owner>-<repo>` from the `origin` remote.
@@ -141,6 +142,12 @@ A proposal is an idea worth keeping that isn't ready to be a task, in `proposals
 Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `misses`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener and the misses agent fill them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
 
 A proposal from the misses agent may target a file outside the project: your `~/.claude/CLAUDE.md`, or crew's review rubric (`.claude/skills/pr-review/rubric.md` in crew's repo). Its Proposal section then starts `Target: <file>. A change for you to make, not a task in this project.` You make the change by hand, and the lead sets the proposal `accepted`.
+
+## Review eval
+
+`crew review-eval` writes `review-eval/<YYYY-MM-DD-HHMMSS>.md` in the project's directory, one per run, and commits it. Nothing else reads or writes there. Its test set isn't stored: each run finds the cases in the task files again, from the user's comments in rounds after an automated review and from fix tasks' `fixes`.
+
+A report starts with `- Rubric:`, `- Reviewer:` and `- Claude Code:` lines naming what the run tested with (a path and a short hash of the file, or the version), then the totals and, from the second run on, a comparison with the newest earlier report. Under `## Cases`, a line per case: ``- `<task>/round-<n>/comment-<id>` **found** — `<fork>..<head>` — <the miss> — <the finding the judge matched>``. The verdict is `found`, `missed`, `not a review finding` or `not run`. The next run reads these lines back to compare, so keep their shape if you edit a report by hand.
 
 ## Project memory
 

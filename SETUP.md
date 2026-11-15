@@ -575,6 +575,23 @@ crew propose "Give each tax jurisdiction a PricingStrategy" --project isaac-weba
   --revisit-when "a second pricing rule beyond the tax rate varies by place"
 ```
 
+### Testing review on past misses
+
+The misses agent fixes the cause of a miss; the review eval tells you whether review now catches it. Run it after you change crew's review rubric, the reviewer's prompt (`agents/reviewer.md`) or its model:
+
+```sh
+crew review-eval --project isaac-webapp --limit 2   # a cheap trial: the first two cases
+crew review-eval --project isaac-webapp             # every case
+crew review-eval --task 042                         # only one task's cases
+crew review-eval --project isaac-webapp --rubric ~/code/crew/.claude/skills/pr-review/rubric.md
+```
+
+Each case is something you found on a merged task's PR after automated review had passed it: a comment of yours in a review round after an automated review, or a fix task naming the task. crew finds them in the ledger every time, so new cases join as tasks merge. For each one it reruns the reviewer on the PR as that review saw it, with only what existed then, and has a separate session judge whether the report raised what you found: **found**, **missed**, or **not a review finding** (a question or praise, a change of mind, something the brief or your decisions settled).
+
+The report goes to `~/crew/projects/<project>/review-eval/` and is committed. It names the rubric and reviewer prompt it used, each with a short hash, and the Claude Code version; then the totals, and one line per case with the finding the judge matched. From the second run on, it compares verdicts with the last run on the cases both have ("2 now found, 1 now missed, of 14 shared cases") and says which of the rubric, the reviewer's prompt and Claude Code changed. The briefings, reviewer reports and judgements are in `~/crew/logs/`, in the directory the report names, so you can check a verdict.
+
+It costs a review for each reviewed range, plus a short judgement per case, so crew never runs it on its own. `--rubric PATH` tests a rubric from another checkout before you release it; the reviewer's prompt is always the installed one, in `~/.claude/agents/`.
+
 ## 8. Safety model
 
 The crew enforces **where agents edit files** mechanically. For shell commands it gives the lead and workers the same trust as your own sessions in auto mode, and it relies on **instructions** for what they do on GitHub.

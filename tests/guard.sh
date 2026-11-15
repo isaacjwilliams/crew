@@ -303,6 +303,9 @@ check "worker-settings.json denies Agent(plan-reviewer) (plan review belongs to 
 SK=$REPO_DIR/.claude/skills/pr-review
 check "the pr-review skill is where --add-dir <home> loads it, and names its rubric by its own folder" \
   "[[ -f $SK/SKILL.md && -f $SK/rubric.md ]] && grep -q '\"--add-dir\", c.Home' <<<\"\$SRC\" && grep -qF '\${CLAUDE_SKILL_DIR}/rubric.md' $SK/SKILL.md && ! grep -q '~/.claude/skills' $SK/*.md"
+check "crew review-eval's briefing has SKILL.md step 3's first line and headings, in its order" \
+  "h=\$(awk '/^## 3\\. Write the briefing/ {w=1; next} /^## 4\\./ {w=0} w && /^### .## .*.\$/ {gsub(/^### .|.\$/, \"\"); printf \"%s\\\"%s\\\"\", s, \$0; s=\", \"}' $SK/SKILL.md) && [[ -n \$h ]] &&
+   grep -qF \"var briefingHeadings = []string{\$h}\" <<<\"\$SRC\" && grep -q '^.Code review.\\. Then exactly these four' $SK/SKILL.md && grep -qF 'b.WriteString(\"Code review\\n\")' <<<\"\$SRC\""
 check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-review' $SK/SKILL.md && ! grep -q '^disable-model-invocation' $SK/SKILL.md"
 check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
 check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"
