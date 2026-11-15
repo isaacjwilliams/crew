@@ -57,7 +57,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    branch without BRANCH_PREFIX (default: from title).
                                    --on stacks it on TASK's unmerged branch; --goal
                                    makes it one of GOAL's tasks
-  crew ready TASK                  Check the brief is complete and mark it ready
+  crew ready TASK                  Check the brief is complete and has a risk tier,
+                                   and mark it ready
   crew dispatch TASK [--force]     Create worktree + branch and start an implementer
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
@@ -74,7 +75,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    now if the worker is idle, else by crew tick
   crew hand-over TASK              Hand the task's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
-                                   under ## Evidence (used by workers)
+                                   under ## Evidence, and a high-risk task a security
+                                   review; a branch that touches SENSITIVE_PATHS makes
+                                   it high risk (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...

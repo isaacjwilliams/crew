@@ -13,7 +13,7 @@ import (
 var configKeys = []string{"MAX_WORKERS", "GOAL_MAX_IN_FLIGHT", "BRANCH_PREFIX", "WORK_ROOT", "WORKER_PERMISSION_MODE",
 	"WORKER_AUTOCOMPACT_WINDOW", "LEAD_PERMISSION_MODE", "PRE_PR_REVIEW", "PR_MODE", "REPLY_TO_THREADS", "MAX_REVIEW_ROUNDS", "MAX_CI_FIXES", "AUTO_REVIEWS",
 	"MAX_PR_LINES", "CODEX_REVIEW", "CODEX_MODEL", "CODEX_MODEL_EFFORT", "AUTO_REVIEW_REBUTTALS",
-	"WORKTREE_COPY", "WORKTREE_TOOL", "GARDENER_LOOKBACK", "GARDENER_MAX_TURNS", "REMOTE", "REPO", "DEFAULT_BRANCH"}
+	"SENSITIVE_PATHS", "WORKTREE_COPY", "WORKTREE_TOOL", "GARDENER_LOOKBACK", "GARDENER_MAX_TURNS", "REMOTE", "REPO", "DEFAULT_BRANCH"}
 
 // crew config [KEY] [--project P]: the effective settings, with the overrides
 // of P or the default project (defaultProject).
@@ -175,6 +175,9 @@ func cmdSet(c *Crew, args []string) error {
 	key, value := args[1], strings.Join(args[2:], " ")
 	if _, ok := parsePriority(value); key == "priority" && !ok {
 		return fail("priority must be a whole number, not '%s'", value)
+	}
+	if key == "risk" && !Risk(value).Valid() {
+		return fail("risk must be low, medium or high, not '%s'", value)
 	}
 	if err := c.lock(); err != nil {
 		return err

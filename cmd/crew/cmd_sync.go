@@ -7,8 +7,9 @@ import (
 )
 
 // crew sync [--quiet] [--all]: finds missing PR URLs, records each PR's state and
-// when it last changed, marks merged tasks, and reports stacked tasks that need a
-// restack, in the current project or all of them.
+// when it last changed, marks merged tasks, raises the risk of tasks that touch a
+// sensitive path, and reports stacked tasks that need a restack, in the current
+// project or all of them.
 func cmdSync(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -110,11 +111,17 @@ func cmdSync(c *Crew, args []string) error {
 				say("%s: PR closed without merging (status left as '%s')", t.ID(), st)
 			}
 		}
-		// Stacked tasks: say which need a restack, now that the merges above are known.
+		// Tasks in flight, now that the merges above are known: raise the risk of
+		// those whose branch touches a sensitive path, and say which stacked tasks
+		// need a restack.
 		idx, fetched := c.branches(name), false
 		for _, t := range c.tasks(name) {
 			if !t.Status().InFlight() {
 				continue
+			}
+			if raised := raiseRisk(t, p); raised != "" {
+				changed = true
+				fmt.Printf("%s: %s\n", t.ID(), raised)
 			}
 			parent, ok := idx.parentOf(t)
 			if !ok {

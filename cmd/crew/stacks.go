@@ -3,7 +3,11 @@ package main
 // A task is stacked when its base is another task's branch; that task is its
 // parent. Nothing else records the relationship, so it can't disagree with base.
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 // Branches indexes task files by project and branch, for parentOf.
 type Branches map[string]Task
@@ -93,6 +97,45 @@ func (idx Branches) restackReason(t Task, repo string) string {
 		return ""
 	}
 	return p.ID() + " moved"
+}
+
+// raiseRisk makes a task high risk when its branch changes a file that matches
+// one of the project's SENSITIVE_PATHS (git pathspecs), and logs the first such
+// file. It never lowers a tier. The branch is the local one, or origin's when the
+// local one is missing or behind it, as last fetched; its changes are those since
+// it left its base. It returns the line it logged, or nothing. Call it with the
+// lock held.
+func raiseRisk(t Task, p *Project) string {
+	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
+	if len(pathspecs) == 0 || t.Risk() == RiskHigh || t.Branch() == "" {
+		return ""
+	}
+	repo := p.Repo()
+	branch, origin := "refs/heads/"+t.Branch(), "refs/remotes/origin/"+t.Branch()
+	if !gitOK(repo, "show-ref", "--verify", "--quiet", branch) || gitOK(repo, "merge-base", "--is-ancestor", branch, origin) {
+		branch = origin
+	}
+	since, err := git(repo, "merge-base", "refs/remotes/origin/"+t.Base(), branch)
+	if err != nil {
+		return ""
+	}
+	out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, branch, "--"}, pathspecs...)...)
+	if err != nil {
+		warn("%s: couldn't check SENSITIVE_PATHS (%s): %v", t.ID(), strings.Join(pathspecs, " "), err)
+		return ""
+	}
+	touched := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
+	if len(touched) == 0 {
+		return ""
+	}
+	line := "risk → high: touches " + touched[0]
+	if len(touched) > 1 {
+		line += fmt.Sprintf(" (+%d more)", len(touched)-1)
+	}
+	t.Set("risk", string(RiskHigh))
+	t.Touch()
+	t.Log(line)
+	return line
 }
 
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of

@@ -300,6 +300,34 @@ func (s Status) InFlight() bool {
 // Finished is merged or abandoned: nothing more happens to the task.
 func (s Status) Finished() bool { return s == Merged || s == Abandoned }
 
+// A task's risk tier: what kind of look its PR needs from the user. The lead
+// sets it at intake, and crew raises it to high when the branch touches one of
+// the project's sensitive paths. Crew never lowers it.
+type Risk string
+
+const (
+	RiskLow    Risk = "low"
+	RiskMedium Risk = "medium"
+	RiskHigh   Risk = "high"
+)
+
+// risks are the tiers, cheapest look first.
+var risks = []Risk{RiskLow, RiskMedium, RiskHigh}
+
+func (r Risk) Valid() bool { return slices.Contains(risks, r) }
+
+// Look is what the tier asks of the user before they merge. A task without a
+// tier, dispatched before tiers existed, gets the safe look: the diff.
+func (r Risk) Look() string {
+	switch r {
+	case RiskLow:
+		return "approve from the evidence"
+	case RiskHigh:
+		return "read the diff; security review ran"
+	}
+	return "read the diff"
+}
+
 // A goal's status.
 type GoalStatus string
 
@@ -322,6 +350,7 @@ func (t Task) PR() string        { return t.Get("pr") }
 func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
+func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
 // goes first. A task without one has priority 0.
@@ -421,6 +450,18 @@ func fenceOpening(l string) string {
 		}
 	}
 	return ""
+}
+
+// SecurityReviewed: ## Evidence has a "### Security review" entry, which a
+// high-risk task needs before its hand-over. The entry isn't numbered, so
+// EvidenceGaps doesn't count it as a criterion's.
+func (t Task) SecurityReviewed() bool {
+	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
+		if strings.TrimRight(l, " \t") == "### Security review" {
+			return true
+		}
+	}
+	return false
 }
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review

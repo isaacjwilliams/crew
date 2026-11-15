@@ -188,6 +188,9 @@ func cmdReady(c *Crew, args []string) error {
 			return fail("write each acceptance criterion as a '- ' item, any detail indented under it; this line isn't one: %s", l)
 		}
 	}
+	if !t.Risk().Valid() {
+		return fail("set its risk: crew set %s risk low|medium|high", t.ID())
+	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)
 	}
@@ -203,14 +206,19 @@ func cmdReady(c *Crew, args []string) error {
 }
 
 // crew hand-over TASK: the worker's PR is ready for the user, with evidence for
-// every acceptance criterion. Workers run it once, at the end of their first
-// run; a review round may have started by then. Their later moves back to
-// pr-open are plain crew set, since the PR was handed over already.
+// every acceptance criterion, and a security review if it's high risk, which a
+// branch that touches a sensitive path makes it. Workers run it once, at the end
+// of their first run; a review round may have started by then. Their later moves
+// back to pr-open are plain crew set, since the PR was handed over already.
 func cmdHandOver(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew hand-over TASK")
 	}
 	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
 	}
@@ -236,6 +244,13 @@ func cmdHandOver(c *Crew, args []string) error {
 		}
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			strings.Join(nums, ", "), len(criteria))
+	}
+	if raised := raiseRisk(t, p); raised != "" {
+		fmt.Println(raised)
+		c.commit("raise risk " + t.ID())
+	}
+	if t.Risk() == RiskHigh && !t.SecurityReviewed() {
+		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '### Security review', then hand over again")
 	}
 	t.Set("status", string(PROpen))
 	t.Touch()

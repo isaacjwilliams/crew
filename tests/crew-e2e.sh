@@ -45,7 +45,7 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
-fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' "$1"; }
+fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # The latest --settings sets CREW_PROJECT to project $1, CREW_HOME to the home, and
 # CREW_LEAD_FINGERPRINT to nothing: a background session takes its environment from
@@ -193,13 +193,18 @@ check "malformed hook JSON exits 0" 'echo "{not json" | crew commit --hook && cr
 check "same title gets a unique branch" '[[ $(crew get 1 branch) != "$(crew get 2 branch)" ]]'
 check "non-ascii title falls back to task-N" '[[ $(basename "$F3") == 003-task-3.md && $(crew get 3 branch) == agent/task-3 ]]'
 check "ready refuses an empty brief" '! crew ready 1 2>/dev/null'
-fill "$F1"; sed -i '/^s$/d' "$F1"
+fill "$F1"; sed -i -e '/^s$/d' -e 's/^risk: low$/risk:/' "$F1"
 check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"fill in: Structure"* ]]'
 sed -i -e '/^## Structure$/a s' -e 's/^- z$/1. z/' "$F1"
 check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write each acceptance criterion as a '"'"'- '"'"' item"*"this line isn'"'"'t one: 1. z" ]]'
 sed -i -e 's/^1\. z$/- z/' -e '/^- z$/a \  in detail\nAlso: z holds.' "$F1"
 check "ready refuses a criterion beside the '- ' items, and takes detail indented under one" '[[ $(crew ready 1 2>&1) == *"this line isn'"'"'t one: Also: z holds." ]]'
-sed -i '/^Also: z holds\.$/d' "$F1"; crew ready 1 >/dev/null
+sed -i '/^Also: z holds\.$/d' "$F1"
+check "ready refuses a task without a risk tier, and says how to set one" \
+  '[[ $(crew ready 1 2>&1) == *"set its risk: crew set 001-saved-search-filters risk low|medium|high"* && $(crew get 1 status) == draft ]]'
+check "set refuses a risk that isn't low, medium or high" \
+  '[[ $(crew set 1 risk bogus 2>&1) == *"risk must be low, medium or high, not '"'"'bogus'"'"'"* && -z $(crew get 1 risk) ]]'
+crew set 1 risk low; crew ready 1 >/dev/null
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
@@ -238,8 +243,28 @@ check "a hand-over waiting on the lock refuses a task abandoned meanwhile" \
   'wait_for "grep -q abandoned \"\$HOME/hand-over.out\"" && [[ $(crew get 1 status) == abandoned ]]'
 # A task in flight may be waiting on a collaborator's question when its worker finishes.
 crew set 1 status needs-input
-check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence" \
-  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
+# Risk tiers: a branch that changes a file matching one of SENSITIVE_PATHS makes its
+# task high risk, at the hand-over and at every sync; high risk needs a security review.
+echo 'SENSITIVE_PATHS="db/migrate :(glob)**/auth*"' >>"$PE"
+commit_in() { (cd "$1" && shift && for f in "$@"; do mkdir -p "$(dirname "$f")" && echo x >"$f"; done && git add -A && git commit -qm "change $*"); }
+commit_in "$WT" src/search.ts src/oauth.ts
+check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
+check "status shows a pr-open task's look" '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  low: approve from the evidence"* ]]'
+commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
+echo OPEN >"$HOME/gh-pr-state"; out=$(crew sync 2>&1); rm "$HOME/gh-pr-state"
+check "sync raises the risk of a task whose branch touched a sensitive path after its hand-over, and logs the first path" \
+  '[[ $out == *"001-saved-search-filters: risk → high: touches app/auth.rb (+1 more)"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches app/auth.rb (+1 more)" ]]'
+check "status shows a pr-open task raised after its hand-over as waiting on its security review" \
+  '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* ]]'
+crew set 1 status working; crew set 1 risk medium
+out=$(crew hand-over 1 2>&1); st=$?
+check "hand-over raises the risk of a branch that touches a sensitive path, then refuses it without a security review" \
+  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+1 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
+sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
+check "hand-over hands a high-risk task over once its security review is under Evidence" \
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
+sed -i '/^SENSITIVE_PATHS=/d' "$PE"
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
@@ -520,6 +545,16 @@ check "the worker is told which task and PR it is stacked on" 'grep -q "stacked 
 work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; crew set 10 status pr-open
 out=$(crew status)
 check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                      pr-open "* ]]'
+# The PRs waiting on the user, by the look they need: 9 and 10 are pr-open, and 2
+# and 5 join them for a moment.
+crew set 2 pr https://github.com/isaac/webapp/pull/41; crew set 2 status pr-open
+crew set 5 pr https://github.com/isaac/webapp/pull/38; crew set 5 risk medium; crew set 5 status pr-open; crew set 10 risk high
+check "status ends a project's block with its PRs to review, cheapest look first, then by PR number" \
+  '[[ $(crew status | tail -1) == "  to review: #21 low, #41 low, #38 medium, #22 high" ]]'
+crew set 5 risk high; sed -i 's/^risk: high$/risk:/' "$F10"; out=$(crew status)
+check "a pr-open task without a risk tier needs the diff read, and comes last in to review" \
+  '[[ $(grep "└ 010-season-admin" <<<"$out") == *"  no risk tier: read the diff" && $(tail -1 <<<"$out") == "  to review: #21 low, #41 low, #38 high, #22 no risk tier" ]]'
+crew set 10 risk low; crew set 2 status working; crew set 2 pr ""; crew set 5 status working; crew set 5 pr ""; crew set 5 risk low
 out=$(crew sync)
 check "sync leaves a stack alone while the parent hasn't moved" '[[ $out != *restack* && $(crew get 9 status) == pr-open ]]'
 
