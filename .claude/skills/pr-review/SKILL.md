@@ -60,9 +60,9 @@ Read the PR's base and text: `gh pr view <pr> --json baseRefOid,baseRefName,head
   from a commit after it. Never `<base name>..HEAD`: a two-dot diff compares two endpoint trees, so once the base
   branch gains a commit after your fork, that commit shows up as a deletion the branch never made.
 - **Find the last reviewed head.** Take the newest review in the task's record in which the Claude reviewer reported:
-  its Reviewers line doesn't mark it `(failed: …)` (failing in a round still counts as reporting). The `HEAD` SHA on
-  its `Range:` line is the last reviewed head. Its fork point is the one in its `(fork point …)`, or, when the line
-  says `(fork point from the PR's base)`, the start of its range.
+  its Reviewers line doesn't mark it `(failed: …)` (failing in a round still counts as reporting). Its `Range:` line
+  (step 8) gives the last reviewed head, the `HEAD` SHA its range ends at, and that review's fork point, the SHA in
+  `(fork point …)`.
 - **Choose where the range starts**, the `<from sha>`. It's the last reviewed head when all of these hold:
   - there is a last reviewed head;
   - it's an ancestor of `HEAD` (`git merge-base --is-ancestor <last reviewed head> HEAD`);
@@ -142,8 +142,11 @@ reads the stated intent. It reads up to `## Stated intent` and stops there until
 change. A fifth `##` heading after it, or stated intent at another level, takes that boundary away, and nothing
 downstream can tell.
 
-**The earlier reviews.** When the task's record already has a review, write `earlier-reviews.md` beside the briefing.
-It isn't part of the briefing. For every review in the record, oldest first, quote from the record:
+**The earlier reviews.** A later reviewer gets the earlier reviews' findings and how each was settled, but only after
+it has written its own findings, so its first read of the code stays cold. They go in a file of their own, not in the
+briefing: the briefing's four headings and their order are what keep stated intent last. When the task's record
+already has a review, write `earlier-reviews.md` beside the briefing. For every review in the record, oldest first,
+quote from the record:
 
 ```markdown
 ### Automated review <N>
@@ -157,8 +160,7 @@ It isn't part of the briefing. For every review in the record, oldest first, quo
 ```
 
 For a review with no findings, write `No findings.` under its Range line. Nothing else goes in: no Verdict lines, no
-derived or stated intents, no rounds, no conclusions. A reviewer reads this file only after it has written its own
-findings, so its first read of the code stays cold. For the PR's first review there is no file.
+derived or stated intents, no rounds, no conclusions. For the PR's first review there is no file.
 
 ## 4. Launch the reviewers
 
@@ -283,8 +285,9 @@ wait for both answers before you close the round.
   > briefing `<briefing path>`, and the round `<briefing dir>/reviewer-round-<n>.md`.
 
 Label each item with where it came from (`Codex's finding`, `the Claude reviewer's refutation`, `the author's
-evidence`) and quote the reviewers verbatim, a finding's `Earlier:` mark included. Your counter-evidence is stated flat, as a fact with its citation:
-"`cmd/x.go:40` returns before the write when the file is missing". Never your reasons, what you meant, or why you
+evidence`) and quote the reviewers verbatim, a finding's `Earlier:` mark included. Your counter-evidence is stated
+flat, as a fact with its citation: "`cmd/x.go:40` returns before the write when the file is missing". Never your
+reasons, what you meant, or why you
 built it that way: that's the interpretation the one rule keeps out.
 
 A reviewer that fails in a round leaves the rounds; note it for the record, keep what it said earlier, and stop: the
@@ -351,7 +354,7 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 ```markdown
 ### Automated review <N> — <YYYY-MM-DD HH:MM>
 
-- Range: `<from sha>..<HEAD sha>`, <count> commits on `<branch>` since review <N> (fork point `<fork sha>`)
+- Range: `<from sha>..<HEAD sha>`, <count> commits on `<branch>` since <`<base branch>` | review <N>> (fork point `<fork sha>`)
 - Reviewers: <Claude reviewer, or Claude reviewer and Codex>
 - Rounds: <how many ran> of <AUTO_REVIEW_REBUTTALS>
 
@@ -377,9 +380,8 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 **Verification limits:** <what the reviewers couldn't check, and a reviewer that failed or stalled; or "none">
 ```
 
-When this review reads the whole PR, its Range line is
-`` - Range: `<fork sha>..<HEAD sha>`, <count> commits on `<branch>` since `<base branch>` (fork point from the PR's base) ``.
-The `Earlier:` line is the mark as the reviewers wrote it and you checked it: `new` for every finding of the PR's first
+The Range line says `since <base branch>` when this review reads the whole PR, and `since review <N>`, the review
+whose head it starts from, when it reads only the new commits. The `Earlier:` line is the mark as the reviewers wrote it and you checked it: `new` for every finding of the PR's first
 review, and for one whose repeat mark you rejected, with your evidence on the Verdict line.
 
 Leave out the Codex lines and `Rounds:` when Codex didn't run, and a `Round` line for each round that didn't address

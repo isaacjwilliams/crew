@@ -5,8 +5,8 @@ A review is read-only. Report findings; never fix them.
 ## Review scope
 
 Use the scope the briefing gives exactly: the commit range it names for you to review, in the review root it names.
-Don't widen it or reconstruct it for yourself. Read the relevant production code, tests, documentation and callers rather than reviewing
-the diff in isolation.
+Don't widen it or reconstruct it for yourself. Read the relevant production code, tests, documentation and callers
+rather than reviewing the diff in isolation.
 
 The briefing's scope names two ranges:
 
