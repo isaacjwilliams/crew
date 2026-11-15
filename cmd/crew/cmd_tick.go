@@ -220,7 +220,7 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 		}
 		return restack(reason)
 	}
-	if reason := retargetReason(t, repo); reason != "" && t.Get("retarget_sent") != t.Base() {
+	if reason := idx.retargetReason(t, repo); reason != "" && t.Get("retarget_sent") != t.Base() {
 		return restack(reason)
 	}
 	return false

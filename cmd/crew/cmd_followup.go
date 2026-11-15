@@ -230,7 +230,7 @@ func cmdRestack(c *Crew, args []string) error {
 	}
 	// With nothing to rebase, a retarget goes on its own, whatever the parent's
 	// state. Otherwise it goes in the rebase note, and waits with it.
-	retarget := retargetReason(t, repo)
+	retarget := idx.retargetReason(t, repo)
 	if retarget != "" && idx.restackReason(t, repo) == "" {
 		return c.sendRetarget(p, t, retarget, again)
 	}

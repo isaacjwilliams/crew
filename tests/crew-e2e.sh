@@ -599,6 +599,13 @@ check "sync reports the child of a merged parent" '[[ $out == *"010-season-admin
 check "cleanup of a merged parent leaves its stack workable" 'crew cleanup 9 >/dev/null && ! git show-ref --verify --quiet refs/heads/agent/season-model'
 crew observe 10 >/dev/null
 check "observe falls back to base_sha when the parent's branch is gone" 'grep -q "Review the change $T9b...HEAD" "$HOME/claude-calls.log"'
+# GitHub moved 10's PR to main itself when it deleted 9's branch, and this clone, fetching without
+# pruning, still has that branch.
+git update-ref refs/remotes/origin/agent/season-model "$T9b"; echo main >"$HOME/gh-pr-base-22"
+out=$(crew sync)
+check "after a merge, a PR GitHub already moved to what the parent merged into isn't sent back" \
+  '[[ $out == *"010-season-admin: needs a restack, 009-season-model merged"* && $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+git update-ref -d refs/remotes/origin/agent/season-model; rm -f "$HOME/gh-pr-base-22"
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
@@ -855,6 +862,16 @@ crew set "$F16" status abandoned >/dev/null; crew set "$F16" worktree "/elsewher
 out=$(crew cleanup "$F16" 2>&1)
 check "cleanup of a task whose worktree isn't here just clears it" '[[ $out == *"cleaned up"* && -z $(crew get "$F16" worktree) ]]'
 crew set "$F17" status abandoned >/dev/null
+# A PR's new base that only another clone has pushed, with no stack in flight for sync to fetch
+# for (12 steps aside): sync fetches for the PR itself.
+crew set 12 status abandoned >/dev/null
+FB=$(crew new "Moved base" --branch moved-base); fill "$FB"; crew ready "$FB" >/dev/null; setstate "done" null; crew dispatch "$FB" >/dev/null
+work "$(crew get "$FB" worktree)" b.txt; crew set "$FB" pr https://github.com/isaac/webapp/pull/34; crew set "$FB" status pr-open
+(cd "$SB/other-clone" && git fetch -q origin && git push -q origin origin/main:refs/heads/release/next)
+crew set "$FB" base release/next; echo main >"$HOME/gh-pr-base-34"
+out=$(crew sync)
+check "sync fetches a new base that a PR doesn't target yet, for a task that isn't stacked" '[[ $out == *"$(basename "$FB" .md): PR targets main, not release/next"* ]]'
+rm -f "$HOME/gh-pr-base-34"; crew set "$FB" status abandoned >/dev/null
 # crew tick re-homes a task in progress whose worker and worktree stayed on another machine.
 moved_away() {  # file: its job unknown here, its worktree gone, as on the machine it moved to
   local j; j=$(crew get "$1" worker_job)

@@ -163,18 +163,27 @@ func raiseRisk(t Task, p *Project) (string, error) {
 
 // retargetReason says why a task's open PR has to be pointed at another branch,
 // or nothing: "PR targets <pr_base>, not <base>" when the base crew sync last read
-// from GitHub isn't the task's. It applies to any task, stacked or not, and never
-// asks for a rebase: that's restackReason's. It stays quiet until origin has the
-// base, as last fetched, since GitHub can't target a branch it doesn't have.
-func retargetReason(t Task, repo string) string {
-	prBase, base := t.Get("pr_base"), t.Base()
-	if !t.HasOpenPR() || prBase == "" || prBase == base {
+// from GitHub isn't the one the task belongs on now (effectiveBase), so a PR that
+// GitHub moved itself when a parent merged isn't sent back. It applies to any
+// task, stacked or not, and never asks for a rebase: that's restackReason's. It
+// stays quiet until origin has the base, as last fetched, since GitHub can't
+// target a branch it doesn't have.
+func (idx Branches) retargetReason(t Task, repo string) string {
+	if !idx.prOffBase(t) {
 		return ""
 	}
+	base := idx.effectiveBase(t)
 	if !gitOK(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+base) {
 		return ""
 	}
-	return fmt.Sprintf("PR targets %s, not %s", prBase, base)
+	return fmt.Sprintf("PR targets %s, not %s", t.Get("pr_base"), base)
+}
+
+// prOffBase: crew sync last saw the task's open PR target a branch other than
+// the one the task belongs on now.
+func (idx Branches) prOffBase(t Task) bool {
+	prBase := t.Get("pr_base")
+	return t.HasOpenPR() && prBase != "" && prBase != idx.effectiveBase(t)
 }
 
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of

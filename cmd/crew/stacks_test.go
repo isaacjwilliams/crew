@@ -56,7 +56,7 @@ func TestRetargetReason(t *testing.T) {
 		{"a task that isn't in flight", []string{"status: merged", "pr: https://github.com/o/r/pull/7", "pr_state: merged", "base: agent/parent", "pr_base: main"}, ""},
 	} {
 		task := stackTask(t, t.TempDir(), "001-a", c.fields...)
-		if got := retargetReason(task, repo); got != c.want {
+		if got := (Branches{}).retargetReason(task, repo); got != c.want {
 			t.Errorf("%s: retargetReason = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -74,7 +74,7 @@ func TestRetargetIsNotARestack(t *testing.T) {
 		"pr: https://github.com/o/r/pull/3", "pr_state: open", "pr_base: agent/grand")
 	idx := (&Crew{Home: dir}).branches("p")
 
-	if got := retargetReason(parent, repo); got != "PR targets main, not agent/grand" {
+	if got := idx.retargetReason(parent, repo); got != "PR targets main, not agent/grand" {
 		t.Fatalf("parent's retargetReason = %q", got)
 	}
 	if got := idx.restackReason(parent, repo); got != "" {
@@ -90,7 +90,26 @@ func TestRetargetIsNotARestack(t *testing.T) {
 	if got := idx.restackReason(child, repo); got != "002-parent moved" {
 		t.Errorf("child's restackReason = %q, want 002-parent moved", got)
 	}
-	if got := retargetReason(child, repo); got != "PR targets agent/grand, not agent/parent" {
+	if got := idx.retargetReason(child, repo); got != "PR targets agent/grand, not agent/parent" {
 		t.Errorf("child's retargetReason = %q", got)
+	}
+}
+
+// Once a parent merges, a PR belongs on what the parent merged into. GitHub moves
+// it there itself when it deletes the parent's branch, and a clone that fetched
+// without pruning still has that branch: no retarget back to it.
+func TestRetargetAfterAParentMerged(t *testing.T) {
+	repo := stackRepo(t, "agent/parent", "agent/child")
+	dir := t.TempDir()
+	stackTask(t, dir, "001-parent", "status: merged", "base: main", "branch: agent/parent")
+	child := stackTask(t, dir, "002-child", "status: pr-open", "base: agent/parent", "branch: agent/child",
+		"pr: https://github.com/o/r/pull/2", "pr_state: open", "pr_base: main")
+	idx := (&Crew{Home: dir}).branches("p")
+	if got := idx.retargetReason(child, repo); got != "" {
+		t.Errorf("a PR GitHub moved to main is told to go back: %q", got)
+	}
+	child.Set("pr_base", "agent/parent")
+	if got := idx.retargetReason(child, repo); got != "PR targets agent/parent, not main" {
+		t.Errorf("a PR still on the merged parent's branch: retargetReason = %q", got)
 	}
 }

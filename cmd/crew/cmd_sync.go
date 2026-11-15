@@ -81,7 +81,7 @@ func cmdSync(c *Crew, args []string) error {
 				t.Set("pr_updated", info.UpdatedAt)
 				changed = true
 			}
-			// The branch the PR targets, which retargetReason compares with base.
+			// The branch the PR targets, which retargetReason compares with the task's.
 			if t.Get("pr_base") != info.BaseRefName {
 				t.Set("pr_base", info.BaseRefName)
 				changed = true
@@ -121,7 +121,8 @@ func cmdSync(c *Crew, args []string) error {
 		// those whose branch touches a sensitive path, and say which need a restack:
 		// a rebase, for a stacked task, or a retarget, for any task with a PR.
 		// All of these read origin's branches, so the project's clone is fetched
-		// first, once, when there's a sensitive path or a stacked task to check.
+		// first, once, when there's a sensitive path, a stacked task or a PR on
+		// another branch to check.
 		idx, fetched := c.branches(name), false
 		fetch := func() {
 			if !fetched {
@@ -154,7 +155,11 @@ func cmdSync(c *Crew, args []string) error {
 					say("%s: needs a restack, %s (run 'crew restack %s')", t.ID(), reason, t.ID())
 				}
 			}
-			if reason := retargetReason(t, p.Repo()); reason != "" {
+			// The branch it should target may be new, and not fetched yet.
+			if idx.prOffBase(t) {
+				fetch()
+			}
+			if reason := idx.retargetReason(t, p.Repo()); reason != "" {
 				say("%s: %s (run 'crew restack %s')", t.ID(), reason, t.ID())
 			}
 		}
