@@ -179,6 +179,16 @@ func cmdSet(c *Crew, args []string) error {
 	if key == "risk" && !Risk(value).Valid() {
 		return fail("risk must be low, medium or high, not '%s'", value)
 	}
+	if key == "kind" && !Kind(value).Valid() {
+		return fail("kind must be %s, not '%s'", kindNames(), value)
+	}
+	// done means a spike's report is in, which crew hand-over checks.
+	if key == "status" && Status(value) == Done {
+		return fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
+	}
+	if err := c.checkStacks(t, key, value); err != nil {
+		return err
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}
@@ -192,6 +202,32 @@ func cmdSet(c *Crew, args []string) error {
 	}
 	t.Touch()
 	c.commit("set " + t.ID() + " " + key)
+	return nil
+}
+
+// checkStacks refuses a base or kind that would put a task in a stack its kind
+// can't take part in (stackRefusal), as crew new --on does.
+func (c *Crew) checkStacks(t Task, key, value string) error {
+	if key != "base" && key != "kind" {
+		return nil
+	}
+	idx := c.branches(taskProjectDir(t))
+	if key == "base" {
+		if parent, ok := idx.parentWith(t, value); ok {
+			return stackRefusal(t.Kind(), parent, parent.Kind())
+		}
+		return nil
+	}
+	if parent, ok := idx.parentOf(t); ok {
+		if err := stackRefusal(Kind(value), parent, parent.Kind()); err != nil {
+			return err
+		}
+	}
+	for _, child := range idx.childrenOf(t) {
+		if err := stackRefusal(child.Kind(), t, Kind(value)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

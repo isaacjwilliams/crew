@@ -95,7 +95,7 @@ for f in lead:lead implementer:worker goal-lead:lead; do
   check "$a disallows EnterWorktree and ExitWorktree" "grep '^disallowedTools:' $A/$a.md | grep -q 'EnterWorktree, ExitWorktree'"
   check "$a's frontmatter runs crew-guard as $r" "grep -q 'bin/crew-guard\" $r.\$' $A/$a.md"
   sf=$C/worker-settings.json; [[ $r == lead ]] && sf=$LS
-  for g in lead implementer gardener goal-lead; do
+  for g in lead implementer gardener misses goal-lead; do
     check "${sf#"$REPO_DIR"/} denies Agent($g)" "jq -e >/dev/null '.permissions.deny | index(\"Agent($g)\")' $sf"
   done
 done
@@ -124,6 +124,26 @@ check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '
 check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
 check "the gardener's allow list is the read-only one, plus crew remember" \
   "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
+# --- the misses agent: the gardener's powers, its own job
+MS=$A/misses.md
+check "misses.md runs crew-guard as the gardener" "grep -q 'bin/crew-guard\" gardener.\$' $MS"
+check "misses.md names the four places a miss is fixed" \
+  "grep -q \"The repo's AGENTS.md\" $MS && grep -q 'A lint rule' $MS && grep -q '~/.claude/CLAUDE.md' $MS && grep -q \"Crew's review rubric\" $MS"
+check "misses.md sorts each comment, and what review already raised isn't a miss" \
+  "grep -q 'Sort each comment: a miss, or not' $MS && grep -q 'a question, or praise' $MS && grep -q 'a change of mind' $MS && grep -q \"the brief or the user's decisions settled\" $MS && grep -q 'something review already raised: a finding left for the user, a finding written up as a proposal, or a split or disputed finding' $MS"
+check "misses.md keeps the rubric generic: a project's miss goes to its AGENTS.md" \
+  "grep -q 'it never names a framework, a language or a project' $MS && grep -q \"goes to the repo's AGENTS.md, never to the rubric\" $MS"
+check "misses.md writes at most three proposals, source misses, citing every comment" \
+  "grep -q 'at most three proposals' $MS && grep -q '\`source\` is \`misses\`' $MS && grep -q 'cites every comment the proposal covers' $MS"
+check "misses.md marks a taste-file or rubric proposal as the user's to make, as lead.md and LEDGER.md expect" \
+  "grep -qF 'Target: <file>. A change for you to make, not a task in this project.' $MS && grep -qF 'Target: <file>. A change for you to make, not a task in this project.' $REPO_DIR/LEDGER.md && grep -qF 'Proposal section starts \`Target: <file>.\`' $A/lead.md"
+GD=$REPO_DIR/cmd/crew/cmd_gardener.go
+check "crew gardener launches its agents from one call site, which takes the agent's name" \
+  "[[ \$(grep -c '\"--agent\"' $GD) == 1 ]] && grep -q '\"--agent\", agent,' $GD"
+check "crew gardener reads rounds and merges through ledger.go, with no parser of its own" "! grep -n 'PR merged\\|### Round' $GD"
+check "the gardener's unit, its plist and crew help name the misses agent too" \
+  "grep -q '^Description=.*misses agent' $REPO_DIR/systemd/crew-gardener.service && grep -q 'misses agent' $REPO_DIR/launchd/crew-gardener.plist && grep -A2 'crew gardener \[' $REPO_DIR/cmd/crew/help.go | grep -q 'misses agent'"
+check "lead.md names the misses agent among the proposals' writers" "grep -q 'the misses agent (\`misses\`' $A/lead.md"
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
 check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'lead.del(\"agent\")' <<<\"\$SRC\""
@@ -172,7 +192,7 @@ check "the implementer records evidence for each acceptance criterion before it 
 check "the implementer fills in the PR body from its template, which has Risk, How to revert and Evidence, and no Changes" \
   "grep -q 'The PR body is .templates/pr-body.md.' $A/implementer.md && ! grep -q 'Changes.*: short bullets' $A/implementer.md && grep -qx '## Risk' $C/../templates/pr-body.md && grep -qx '## How to revert' $C/../templates/pr-body.md && grep -qx '## Evidence' $C/../templates/pr-body.md && ! grep -q '^## Changes' $C/../templates/pr-body.md"
 check "only first-run step 10 hands the PR over with crew hand-over" \
-  "[[ \$(grep -c 'crew hand-over' $A/implementer.md) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\*\\*: .crew hand-over <task>.' $A/implementer.md"
+  "[[ \$(awk '/^## Workflow: spike/ {sp=1; next} /^## / {sp=0} !sp && /crew hand-over/' $A/implementer.md | wc -l) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\*\\*: .crew hand-over <task>.' $A/implementer.md"
 check "every pass of automated review refreshes the evidence its fixes changed, before it pushes" \
   "awk '/^## Workflow: automated review/ {w=1} w && /If your fixes changed what an .## Evidence. entry shows, rerun it/ && !e {e=NR} w && /Then run the checks and push/ && !p {p=NR} END {exit !(e && p && e <= p)}' $A/implementer.md"
 # --- risk tiers: the lead sets one at intake; a high-risk worker runs a security review
@@ -184,6 +204,20 @@ check "a tier raised after the hand-over sends the worker back for a security re
   "grep -q 'A .pr-open. row that says .high: no security review yet.*crew followup <task> --note' $A/lead.md && awk '/^## Workflow: review rounds/ {w=1} w && /^9\\. / {print; exit}' $A/implementer.md | grep -q 'If the task.s .risk. is now .high.*run the security review as first-run step 5 says.*Then .crew set <task> status pr-open.'"
 check "the PR body's Risk section opens with the tier and its look" \
   "grep -q 'Its Risk section opens with the task.s tier and the look it asks for' $A/implementer.md && [[ \$(awk '/^## Risk\$/ {r=1; next} r && NF {print; exit}' $C/../templates/pr-body.md) == '<Low | Medium | High> risk: <the look>.' ]]"
+# --- spikes: a throwaway try that ends in a report, not a PR
+spike_workflow() { awk '/^## Workflow: spike/ {on=1; next} on && /^## / {exit} on' "$A/implementer.md"; }
+check "a spike leaves first run after step 3 for Workflow: spike" \
+  "awk '/^## Workflow: first run/ {w=1} w && /^3\\. / && !t {t=NR} w && /If your task is a spike .*follow .Workflow: spike. from here instead of the steps below/ && !s {s=NR} w && /^4\\. / && !f {f=NR} END {exit !(t && s && f && t < s && s < f)}' $A/implementer.md"
+check "Workflow: spike commits locally and never pushes, writes a report that starts with its answer, and hands over" \
+  "spike_workflow | grep -q 'only locally: never push' && spike_workflow | grep -q 'a .## Report. section in your task file.*Its first line is .Answer: <the answer, in a line>.' && spike_workflow | grep -q '^3\\. \\*\\*Hand over\\*\\*, last: .crew hand-over <task>.' && ! spike_workflow | grep -q '^4\\. '"
+check "Workflow: spike opens no PR and runs no observer, automated review or evidence" \
+  "! spike_workflow | grep -qE 'gh pr create|git push -u|casual-observer|/pr-review|crew review-summary' && spike_workflow | grep -q 'Tests, the observer, a PR, automated review and .## Evidence. are for builds, so skip them'"
+check "the lead lists what's still to learn and opens a spike for each approach, then puts the answers side by side" \
+  "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Propose a plan\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'write their answers side by side under the item, tick it, and finish the plan from them' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no plan review' $A/lead.md"
+check "the goal lead opens and readies spikes without parking, and hears when one reports" \
+  "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the plan review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a plan review' $A/lead.md"
+check "crew tells the goal lead a spike reported in the words its workflow names" \
+  "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
@@ -375,8 +409,8 @@ check "only lead.md's Splitting a task says how to re-point what waits on a spli
   "n=\$(cat $A/*.md | grep -ci 're-point\|crew set <child> base') && [[ \$n -gt 0 && \$n == \$(section '## Splitting a task' $A/lead.md | grep -ci 're-point\|crew set <child> base') ]]"
 check "a brief's Structure ends with a Size line, which the brief standard and the task template ask for" \
   "section '### The brief standard' $A/lead.md | grep -qF 'End the Structure section with \`Size: about <n> lines, <areas>\`' && awk '/^## Structure/ {s=1} s && /^## Plan/ {s=0} s && /Size: about <n> lines, <areas>/ {ok=1} END {exit !ok}' $REPO_DIR/templates/task.md"
-check "intake step 6 splits a plan past MAX_PR_LINES or holding two concerns, as Splitting a task says, and no agent keeps another measure of too big" \
-  "awk '/^6\\. \\*\\*Right-size it/ && /crew config MAX_PR_LINES --project <p>/ && /two concerns that would be reviewed for different things/ && /Splitting a task. says how/ {ok=1} END {exit !ok}' $A/lead.md && ! grep -q 'few hundred lines' $A/*.md && grep -q '^3\\. .*An item too big for one PR becomes a few tasks, as .Splitting a task. in .lead.md. says' $A/goal-lead.md"
+check "intake step 7 splits a plan past MAX_PR_LINES or holding two concerns, as Splitting a task says, and no agent keeps another measure of too big" \
+  "awk '/^7\\. \\*\\*Right-size it/ && /crew config MAX_PR_LINES --project <p>/ && /two concerns that would be reviewed for different things/ && /Splitting a task. says how/ {ok=1} END {exit !ok}' $A/lead.md && ! grep -q 'few hundred lines' $A/*.md && grep -q '^3\\. .*An item too big for one PR becomes a few tasks, as .Splitting a task. in .lead.md. says' $A/goal-lead.md"
 check "the plan reviewer asks the Size question after Preparatory work, and raises a plan past MAX_PR_LINES or holding two concerns with a proposed split" \
   "awk '/^   - \\*\\*Preparatory work\\.\\*\\*/ {p=NR} /^   - \\*\\*Size\\.\\*\\*/ && /crew config MAX_PR_LINES --project <project>/ && /Does it hold one concern, or two that would be reviewed for different things/ && /holding two concerns, is a Raise/ {z=NR} /^   - \\*\\*The criteria\\.\\*\\*/ {c=NR} END {exit !(p && z == p + 1 && c == z + 1)}' $A/plan-reviewer.md && grep -q 'For a Size finding, the direction is a proposed split: the pieces in order, what each covers, and which piece it builds on' $A/plan-reviewer.md"
 check "the goal lead settles a Size finding by splitting, or by a re-estimate it logs with evidence, and parks when unsure" \

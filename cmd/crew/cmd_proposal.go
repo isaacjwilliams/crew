@@ -65,15 +65,16 @@ func cmdPropose(c *Crew, args []string) error {
 }
 
 // ledgerSource checks the --source of what an agent suggests to the ledger: user,
-// lead, gardener, or worker:<task>, which it returns with the task's full ID.
+// lead, gardener, misses, or worker:<task>, which it returns with the task's
+// full ID.
 func (c *Crew) ledgerSource(s, proj string) (string, error) {
 	switch s {
-	case "gardener", "user", "lead":
+	case "gardener", "misses", "user", "lead":
 		return s, nil
 	}
 	task, ok := strings.CutPrefix(s, "worker:")
 	if !ok {
-		return "", fail("--source '%s': use user, lead, gardener or worker:<task>", s)
+		return "", fail("--source '%s': use user, lead, gardener, misses or worker:<task>", s)
 	}
 	f, matches := resolveIn(task, c.files("tasks", proj))
 	if f == "" {

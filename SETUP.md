@@ -1,6 +1,6 @@
 # Agent crew: setup and usage
 
-Seven Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
+Eight Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
 
 Everything lives in one private git repo of yours, your **crew home**, cloned to `~/crew`: the crew's code, your settings, and the ledger. It's a copy of the public crew repo, [isaacjwilliams/crew](https://github.com/isaacjwilliams/crew), and pulls new versions from it. Any machine with a clone can run the crew, one at a time.
 
@@ -21,6 +21,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            └── review/merge ── GitHub PRs
                                    ▲
        gardener (weekly timer) ────┘ reads merged commits → proposals in the ledger
+       misses (with the gardener)    your comments on merged PRs → proposals in the ledger
        crew tick (every 3 minutes)   your PR comments → the worker; collaborators' → you;
                                      restacks, cleanups; a goal's ready tasks → workers
        goal lead (one per goal)      plans every item of a goal you started, without you
@@ -68,10 +69,10 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 | Installed to | What |
 |---|---|
-| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
+| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
 | `~/.local/bin/crew`, `~/.local/bin/lead` | Links to the home's `bin/crew` and `bin/lead`, so the two commands are on your `PATH` |
 | `~/.config/fish/completions/{crew,lead}.fish` | Tab completion in fish, including task IDs |
-| Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener |
+| Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener and misses agent |
 | Linux: `~/.config/systemd/user/crew-tick.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-tick.plist` | `crew tick` every 3 minutes |
 | Linux: `~/.config/systemd/user/crew-lead.service`<br>Mac: `~/Library/LaunchAgents/crew-lead.plist` | The lead for your phone (see below) |
 
@@ -286,9 +287,9 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
 - restacks stacked tasks whose parent moved or merged, bottom-up, never sending the same restack twice;
-- cleans up merged tasks;
+- cleans up merged tasks and done spikes;
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
-- for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes and its workers' questions, and closes the goal once every task is merged or abandoned.
+- for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes, its workers' questions and its spikes' reports, and closes the goal once every task is finished (merged, done or abandoned).
 
 It starts a model session only when it resumes a worker or a goal lead. `crew host up` turns its timer on, on the machine that runs the crew. On Linux, to keep the timers and the lead's service running while you're logged out, and to read what a tick did:
 
@@ -354,7 +355,7 @@ crew status        # the project whose repo you're in, or all of them elsewhere 
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
 
-Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you.
+Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask or learn are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you, and so is one with something still to learn, with its spikes (see [Spikes](#spikes-try-a-path-before-planning-on-it)). `--done` adds merged and abandoned tasks, and done spikes.
 
 ### How much of your time it took
 
@@ -508,6 +509,22 @@ crew status              # a stack is listed bottom first, each task under its p
 - **A goal's `max_in_flight`** counts every task of a stack, as `MAX_WORKERS` counts every running worker.
 - To stack a task that already exists, set its base to the parent's branch: `crew set 046 base $(crew get 045 branch)`. Leave `depends_on` as it is.
 
+### Spikes: try a path before planning on it
+
+Some plans rest on something nobody has checked: whether an API pages, whether a query is fast enough, which of two designs fits the code. Rather than guess, the lead lists each question under the draft's `## Still to learn`, and `crew ready` refuses the draft until every item is ticked. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, and writes a report in its task file that starts with `Answer:`. It opens no PR, so there's nothing for you to review.
+
+```sh
+crew new "Try cursor paging" --kind spike --informs 040   # 040 is the draft whose question it answers
+crew ready 041 && crew dispatch 041     # a spike's brief needs Goal, Plan (what to try, a time box)
+                                        #   and Acceptance criteria (what would answer it); no Structure or risk
+crew status                             # 040's row: "2 to learn; 041 working, 042 draft"
+```
+
+- **The lead asks you first**, as for any task, but runs no plan review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
+- **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the plan from them.
+- **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
+- **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
+
 ## 6. The casual observer on its own
 
 Workers run it automatically before opening a PR. You can also use it anywhere:
@@ -529,6 +546,8 @@ crew promote 2026-09-29-extract-retry   # turns a proposal into a draft task; th
 ```
 
 Proposals live in `~/crew/projects/<project>/proposals/`. The gardener writes at most three per run and skips anything already proposed, accepted, or rejected.
+
+The same command then runs the misses agent. It reads the tasks merged since its last run where you commented on the PR after automated review had been through it (first run: from the last commit before those 14 days, as for the gardener), sorts each comment as a miss or not, and proposes a fix at the source for the misses: the repo's AGENTS.md, a lint rule, your `~/.claude/CLAUDE.md` or crew's review rubric, at most three per run. A proposal for your `CLAUDE.md` or the rubric starts `Target: <file>`: it's a change for you to make by hand, not a task, and once you've made it the lead marks the proposal accepted. When no merged task has such a comment, it starts no session.
 
 `crew host up` schedules it (weekly, Monday 06:00). To pause it, `systemctl --user disable --now crew-gardener.timer`, or on a Mac `launchctl bootout gui/$(id -u)/crew-gardener && launchctl disable gui/$(id -u)/crew-gardener`; the next `crew host up` turns it on again.
 
@@ -554,7 +573,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Rule | Enforced by |
 |---|---|
 | Workers only change files in their own worktree (plus the ledger, temp dirs and tool caches) | `crew-guard` blocks Edit/Write anywhere else, for the worker and any subagent it spawns (the hook is in both `implementer.md` and `worker-settings.json`). Shell commands aren't confined: the implementer's instructions set the same limit, and auto mode's classifier stops risky commands |
-| The gardener and `crew observe` don't change your code | They run only the read-only commands in `gardener-settings.json` and `readonly-settings.json` (the gardener may also suggest project memory with `crew remember`); anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
+| The gardener, the misses agent and `crew observe` don't change your code | They run only the read-only commands in `gardener-settings.json` and `readonly-settings.json` (the gardener may also suggest project memory with `crew remember`); anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
@@ -682,7 +701,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 ```sh
 crew host down                       # releases the lease and turns the services off; if it refuses
                                      # over unpushed work, push it, or use --force to drop it
-rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md
+rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md
 rm ~/.local/bin/{crew,lead} ~/.config/fish/completions/{crew,lead}.fish
 rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer} ~/.config/systemd/user/crew-lead.service
 rm ~/Library/LaunchAgents/crew-{tick,gardener,lead}.plist      # on a Mac, instead

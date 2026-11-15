@@ -52,13 +52,17 @@ Setup
                                    overrides
 
 Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
-  crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
-                                   Create a draft task; prints its path. NAME is the
-                                   branch without BRANCH_PREFIX (default: from title).
-                                   --on stacks it on TASK's unmerged branch; --goal
-                                   makes it one of GOAL's tasks
-  crew ready TASK                  Check the brief is complete and has a risk tier,
-                                   and mark it ready
+  crew new "<title>" [--kind KIND] [--informs TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
+                                   Create a draft task; prints its path. KIND is build
+                                   (the default) or spike, which tries a path and
+                                   reports instead of making a PR; --informs ties a
+                                   spike to the draft TASK whose question it answers.
+                                   NAME is the branch without BRANCH_PREFIX (default:
+                                   from title). --on stacks it on TASK's unmerged
+                                   branch; --goal makes it one of GOAL's tasks
+  crew ready TASK                  Check the brief is complete for its kind (a build
+                                   needs a risk tier) with nothing left under Still to
+                                   learn, and mark it ready
   crew dispatch TASK [--force]     Create worktree + branch and start an implementer
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
@@ -73,11 +77,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
-  crew hand-over TASK              Hand the task's PR over to you (status pr-open),
+  crew hand-over TASK              Hand a build's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
                                    under ## Evidence, and a high-risk task a security
                                    review; a branch that touches SENSITIVE_PATHS makes
-                                   it high risk (used by workers)
+                                   it high risk. Mark a spike done once its ## Report
+                                   starts with "Answer:" (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...
@@ -124,7 +129,7 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    sync, record new PR comments, red CI and
                                    conflicts, send review rounds and restacks to
                                    idle workers, mark tasks waiting on you, clean up
-                                   merged ones (run by a timer)
+                                   merged tasks and done spikes (run by a timer)
   crew pause [--project P|--all] [--force]
                                    Stop the project's work without losing any:
                                    nothing new starts, sessions mid-turn are told to
@@ -144,7 +149,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew set TASK KEY VALUE...       Write a front-matter field
   crew log TASK MESSAGE...         Append to the task's Log
   crew cleanup TASK|--merged [--project P] [--force]
-                                   Remove worktree/local branch of merged tasks
+                                   Remove worktree/local branch of merged tasks and
+                                   done spikes
   crew commit [MESSAGE]            Commit pending ledger edits
   crew commit --hook               The same for one file, from an agent's PostToolUse
                                    hook JSON on stdin (always exits 0)
@@ -158,9 +164,10 @@ Goals  (GOAL = id, number, unique substring, or file path)
   crew goal note GOAL TEXT         Record your words under the goal's Decisions and
                                    pass them to its goal lead
   crew goal cap GOAL N             Let N of the goal's tasks be in flight at once
-  crew goal followup GOAL          Resume the goal lead with your unsent notes and its
-                                   workers' new questions (run by crew tick)
-  crew goal done GOAL              Close a goal whose tasks are all merged or abandoned
+  crew goal followup GOAL          Resume the goal lead with your unsent notes, its
+                                   workers' new questions and its spikes' reports
+                                   (run by crew tick)
+  crew goal done GOAL              Close a goal whose tasks are all finished
                                    (run by crew tick)
   crew goal abandon GOAL           Stop the goal lead; its tasks stay as they are
   crew goal path GOAL              Print the goal file's path
@@ -169,12 +176,14 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew observe [TASK|PATH] [--base REF]
                                    Run the casual observer headless on a branch
   crew gardener [--all|--project P]
-                                   Run the gardener over newly merged commits
+                                   Run the gardener over newly merged commits, and
+                                   the misses agent over your comments on newly
+                                   merged PRs
   crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
                [--project P]
                                    Write down an idea worth keeping as a proposal;
                                    prints its path. S is lead (the default), user,
-                                   gardener or worker:TASK
+                                   gardener, misses or worker:TASK
   crew proposals [--any-status] [--all|--project P]
                                    List open proposals (--any-status: every one),
                                    with who wrote each and when to revisit it
@@ -185,7 +194,7 @@ Project memory  (facts about a project you approved, which its agents load)
   crew remember "<fact>" --why TEXT [--source S] [--project P]
                                    Suggest a fact for the project's memory; it waits
                                    on you in memory-suggestions.md. S is lead (the
-                                   default), user, gardener or worker:TASK
+                                   default), user, gardener, misses or worker:TASK
   crew memory [--project P]        Print the project's memory, after the rule for
                                    weighing it
   crew memory --hook               The same for CREW_PROJECT, from a SessionStart

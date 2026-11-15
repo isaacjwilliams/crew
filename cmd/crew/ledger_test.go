@@ -322,6 +322,70 @@ func TestRiskLook(t *testing.T) {
 	}
 }
 
+func TestTaskKind(t *testing.T) {
+	for kind, want := range map[string]Kind{"": KindBuild, "build": KindBuild, "spike": KindSpike, "drill": "drill"} {
+		task := Task{docWith(t, "---\nkind: "+kind+"\n---\n## Log\n")}
+		if got := task.Kind(); got != want {
+			t.Errorf("kind %q: Kind() = %q, want %q", kind, got, want)
+		}
+		if _, err := task.rules(); (err == nil) != (kind != "drill") {
+			t.Errorf("kind %q: rules() error = %v", kind, err)
+		}
+	}
+	if got := kindNames(); got != "build or spike" {
+		t.Errorf("kindNames() = %q", got)
+	}
+}
+
+// A spike asks less of its brief than a build, informs a draft, and ends done
+// rather than with a PR for the user.
+func TestKindRules(t *testing.T) {
+	build, _ := KindBuild.rules()
+	spike, _ := KindSpike.rules()
+	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.informs != "" || build.handedOver != PROpen {
+		t.Errorf("build's rules: %+v", build)
+	}
+	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.informs != Draft || spike.handedOver != Done {
+		t.Errorf("spike's rules: %+v", spike)
+	}
+}
+
+func TestDoneIsFinishedAndDelivered(t *testing.T) {
+	for _, s := range taskStatuses {
+		delivered := s == Merged || s == Done
+		if s.Delivered() != delivered {
+			t.Errorf("%s.Delivered() = %v", s, !delivered)
+		}
+		if s.Finished() != (delivered || s == Abandoned) {
+			t.Errorf("%s.Finished() = %v", s, s.Finished())
+		}
+		if s.Finished() && s.InFlight() {
+			t.Errorf("%s is both finished and in flight", s)
+		}
+	}
+}
+
+func TestStillToLearn(t *testing.T) {
+	task := Task{docWith(t, "## Context\n- [ ] not this one\n\n## Still to learn\n<!-- - [ ] a comment -->\n- [ ] does the API page?\n- [x] which store fits\n- [ ] is it fast enough?\n\n## Log\n")}
+	if n := task.StillToLearn(); n != 2 {
+		t.Errorf("StillToLearn = %d, want 2", n)
+	}
+}
+
+func TestAnswer(t *testing.T) {
+	for report, want := range map[string]string{
+		"## Report\nAnswer: yes, it pages by cursor\n\nTried: …\n":  "yes, it pages by cursor",
+		"## Report\n<!-- comment -->\n\nAnswer:   no  \nmore\n":     "no",
+		"## Report\nTried: …\nAnswer: later, so it doesn't count\n": "",
+		"## Report\nAnswer:\n":            "",
+		"## Goal\nAnswer: not a report\n": "",
+	} {
+		if got := (Task{docWith(t, report+"\n## Log\n")}).Answer(); got != want {
+			t.Errorf("Answer with %q = %q, want %q", report, got, want)
+		}
+	}
+}
+
 // Two CI rounds, one of them ticked, a round of comments with a CI line, a
 // question about a head that stayed red, and two rounds that report a conflict
 // with main, one of them ticked. A line quoted in a comment, or in the brief,
@@ -389,6 +453,59 @@ func TestReviewComments(t *testing.T) {
 		"- [ ] Automated review requested (comment 11)\n\n## Log\n"
 	if n := (Task{docWith(t, round)}).ReviewComments(); n != 3 {
 		t.Errorf("ReviewComments = %d, want 3", n)
+	}
+}
+
+// Round 1 comes before any automated review; review 1 follows it. Round 2
+// only reports red CI, round 3 has a review summary and an inline comment,
+// and round 4 a conversation comment, after review 2.
+const commentedTask = "## Automated reviews\n" +
+	"### Automated review 1 — 2026-11-10 12:00\n\n- Reviewers: Claude reviewer\n\n" +
+	"#### 1. [should fix] a — `a.go:1`\n- Agreed severity: should fix\n- Outcome: fixed in abc1234\n\nSummary posted\n\n" +
+	"### Automated review 2 — 2026-11-11 09:00\n\n- Reviewers: Claude reviewer\n\nNo findings.\n\nSummary posted\n\n" +
+	"## Review rounds\n" +
+	"### Round 1 — 2026-11-10 10:00 (PR #12)\n\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > too early\n\n" +
+	"### Round 2 — 2026-11-10 13:00 (PR #12)\n\n- [x] CI failed on aaa1111: test\n\n" +
+	"### Round 3 — 2026-11-10 14:00 (PR #12)\n\n**Review summaries**\n- [x] review 7 (changes_requested)\n  > Two things.\n  > - [ ] not an item\n\n" +
+	"**Inline comments**\n- [x] `a.go:3` — comment 9 — [link](u9)\n  > why?\n\n- [x] Automated review requested (comment 11)\n\n" +
+	"### Round 4 — 2026-11-11 10:00 (PR #12)\n\n**Conversation comments**\n- [ ] comment 12 — [link](u12)\n  > ok\n\n" +
+	"## Log\n"
+
+func TestReviewRounds(t *testing.T) {
+	rounds := Task{docWith(t, commentedTask)}.ReviewRounds()
+	var got []string
+	for _, r := range rounds {
+		line := fmt.Sprintf("%d %s:", r.Number, r.At.Format(logTime))
+		for _, cm := range r.Comments {
+			line += " [" + cm + "]"
+		}
+		got = append(got, line)
+	}
+	want := []string{
+		"1 2026-11-10 10:00: [comment 5 — [link](u5)]",
+		"2 2026-11-10 13:00:",
+		"3 2026-11-10 14:00: [review 7 (changes_requested)] [`a.go:3` — comment 9 — [link](u9)]",
+		"4 2026-11-11 10:00: [comment 12 — [link](u12)]",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestCommentsAfterReview(t *testing.T) {
+	var got []string
+	for _, c := range (Task{docWith(t, commentedTask)}).CommentsAfterReview() {
+		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment, c.Review.Number))
+	}
+	// Round 1 came before any review, and round 2 holds no comment.
+	want := []string{"round 3, review 7 (changes_requested), after review 1", "round 3, `a.go:3` — comment 9 — [link](u9), after review 1", "round 4, comment 12 — [link](u12), after review 2"}
+	if !slices.Equal(got, want) {
+		t.Errorf("CommentsAfterReview = %q\nwant %q", got, want)
+	}
+	// Without a time, a review can't be placed before a round.
+	undated := strings.Replace(strings.Replace(commentedTask, "1 — 2026-11-10 12:00", "1", 1), "2 — 2026-11-11 09:00", "2", 1)
+	if got := (Task{docWith(t, undated)}).CommentsAfterReview(); got != nil {
+		t.Errorf("after undated reviews: %v", got)
 	}
 }
 
@@ -490,6 +607,26 @@ func TestRisksMatchLedgerDoc(t *testing.T) {
 	}
 	if !slices.Equal(documented, known) {
 		t.Errorf("risk tiers in LEDGER.md %q, in crew %q", documented, known)
+	}
+}
+
+// LEDGER.md lists exactly crew's kinds of task, in order.
+func TestKindsMatchLedgerDoc(t *testing.T) {
+	b, err := os.ReadFile("../../LEDGER.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(b), "## Kinds of task\n")
+	rest, _, _ = strings.Cut(rest, "\n## ")
+	var documented, known []string
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z]+)` \\|").FindAllStringSubmatch(rest, -1) {
+		documented = append(documented, m[1])
+	}
+	for _, r := range kinds {
+		known = append(known, string(r.kind))
+	}
+	if !slices.Equal(documented, known) {
+		t.Errorf("kinds in LEDGER.md %q, in crew %q", documented, known)
 	}
 }
 
@@ -667,7 +804,7 @@ func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
 
 func TestProposalAuthor(t *testing.T) {
 	for source, want := range map[string]string{
-		"gardener": "the gardener", "user": "the user", "lead": "a lead",
+		"gardener": "the gardener", "misses": "the misses agent", "user": "the user", "lead": "a lead",
 		"worker:007-saved-filters": "the worker on 007-saved-filters", "": "", "bob": "",
 	} {
 		pr := Proposal{docWith(t, "---\nsource: "+source+"\n---\n## Log\n")}

@@ -3,6 +3,8 @@ id: {{ID}}
 title: "{{TITLE}}"
 project: {{PROJECT}}
 status: draft
+kind: {{KIND}}
+informs:
 base: {{BASE}}
 base_sha:
 restack_sent:
@@ -27,6 +29,7 @@ last_round_sent: 0
 interrupted:
 feedback_since:
 questions_routed:
+report_sent:
 created: {{NOW}}
 updated: {{NOW}}
 ---
@@ -38,6 +41,11 @@ updated: {{NOW}}
 
 ## Context
 <!-- What the worker needs that isn't obvious from the code: background, prior decisions, links. -->
+
+## Still to learn
+<!-- What the plan rests on that nobody has checked yet, one unchecked item each ("- [ ] …").
+     A spike can answer one: crew new --kind spike --informs <this task>. When its answers are
+     in, write them side by side under the item and tick it. crew ready refuses while any is open. -->
 
 ## Structure
 <!-- Where the new code lives (modules, classes, routes, components), whether it extends what exists

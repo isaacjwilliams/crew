@@ -2,9 +2,10 @@ package main
 
 import "fmt"
 
-// crew cleanup TASK|--merged [--force]: stops a merged or abandoned task's
-// worker and removes it from agent view, ends what it left running in the
-// worktree, removes the worktree, and deletes a merged task's local branch.
+// crew cleanup TASK|--merged [--force]: stops a finished task's worker and
+// removes it from agent view, ends what it left running in the worktree,
+// removes the worktree, and deletes the local branch of a task that delivered
+// (merged, or a spike done). --merged cleans up every task that delivered.
 func cmdCleanup(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -30,7 +31,7 @@ func cmdCleanup(c *Crew, args []string) error {
 			return err
 		}
 		for _, t := range c.tasks(p) {
-			if t.Status() == Merged && t.Worktree() != "" {
+			if t.Status().Delivered() && t.Worktree() != "" {
 				tasks = append(tasks, t)
 			}
 		}
@@ -84,7 +85,7 @@ func cmdCleanup(c *Crew, args []string) error {
 				continue
 			}
 		}
-		if st == Merged && t.Branch() != "" {
+		if st.Delivered() && t.Branch() != "" {
 			gitOK(p.Repo(), "branch", "-D", t.Branch())
 		}
 		t.Set("worktree", "")

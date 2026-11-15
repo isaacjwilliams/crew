@@ -289,9 +289,27 @@ func unroutedQuestions(t Task) (string, bool) {
 	return sum, sum != t.Get("questions_routed")
 }
 
+// unsentReport: a task of the goal is done, so its report is in, and the goal
+// lead hasn't been sent it. Only a spike's hand-over sets done, after checking
+// the report starts with its answer. report_sent records that it was sent.
+func unsentReport(t Task) bool {
+	return t.Status() == Done && t.Get("report_sent") != "yes"
+}
+
+// reportLine is what the goal lead is told of a done spike: its answer, and the
+// draft it informs.
+func reportLine(t Task) string {
+	line := fmt.Sprintf("%s reported: %s", t.ID(), t.Answer())
+	if d := t.Get("informs"); d != "" {
+		line += "; it informs " + d
+	}
+	return line + " (task file: " + t.Path + ")"
+}
+
 // crew goal followup GOAL: resumes the goal lead with what's waiting for it: the
-// user's unsent notes, questions its tasks' workers have asked, and word that a
-// pause cut its last turn short (interrupted). Exits 3 if there's nothing.
+// user's unsent notes, questions its tasks' workers have asked, its spikes'
+// reports, and word that a pause cut its last turn short (interrupted). Exits 3
+// if there's nothing.
 func (c *Crew) goalFollowup(g Goal) error {
 	for _, tool := range []string{"git", "claude"} {
 		if err := need(tool); err != nil {
@@ -320,10 +338,15 @@ func (c *Crew) goalFollowup(g Goal) error {
 		sum  string // of the questions, for questions_routed
 	}
 	var routed []asked
+	var reported []Task
 	for _, t := range c.goalTasks(g) {
 		if sum, ok := unroutedQuestions(t); ok {
 			input += fmt.Sprintf("\n- %s: its worker has asked something (task file: %s)", t.ID(), t.Path)
 			routed = append(routed, asked{t, sum})
+		}
+		if unsentReport(t) {
+			input += "\n- " + reportLine(t)
+			reported = append(reported, t)
 		}
 	}
 	if input == "" {
@@ -366,12 +389,17 @@ func (c *Crew) goalFollowup(g Goal) error {
 		r.task.Set("questions_routed", r.sum)
 		r.task.Log("open questions sent to the goal lead")
 	}
+	for _, t := range reported {
+		t.Set("report_sent", "yes")
+		t.Log("report sent to the goal lead")
+	}
 	c.commit("followup goal " + p.Name + "/" + g.ID())
 	fmt.Printf("goal %s: input sent to its goal lead (%s)\n", g.ID(), l.mode)
 	return nil
 }
 
-// goalFinished: the goal has tasks, and every one of them is merged or abandoned.
+// goalFinished: the goal has tasks, and every one of them is finished: merged,
+// done or abandoned.
 func (c *Crew) goalFinished(g Goal) bool {
 	ts := c.goalTasks(g)
 	for _, t := range ts {
@@ -382,7 +410,7 @@ func (c *Crew) goalFinished(g Goal) bool {
 	return len(ts) > 0
 }
 
-// crew goal done GOAL: closes a goal whose tasks are all merged or abandoned.
+// crew goal done GOAL: closes a goal whose tasks are all finished.
 func (c *Crew) goalDone(g Goal) error {
 	p, err := c.loadProject(g.Project())
 	if err != nil {
@@ -392,7 +420,7 @@ func (c *Crew) goalDone(g Goal) error {
 		return fail("goal %s is '%s', not running", g.ID(), st)
 	}
 	if !c.goalFinished(g) {
-		return fail("goal %s has tasks that aren't merged or abandoned yet", g.ID())
+		return fail("goal %s has tasks that aren't finished yet", g.ID())
 	}
 	return c.retireGoal(p, g, GoalDone)
 }
