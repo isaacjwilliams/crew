@@ -1094,6 +1094,9 @@ check "new --kind spike --informs makes a spike tied to the draft, and logs it" 
   '[[ $(crew get "$KS" kind) == spike && $(crew get "$KS" informs) == "$KDI" && $(crew get "$KD" kind) == build && $(section "$KS" "## Log") == *" — created as a spike, informs $KDI, for goal $G8" ]]'
 check "set checks a spike's informs as new does, and records the draft's ID" \
   '! crew set "$KS" informs "$OR" 2>/dev/null && crew set "$KS" informs "$(num "$KD")" && [[ $(crew get "$KS" informs) == "$KDI" ]]'
+KU=$(crew new "Try nothing" --kind spike --informs "$KD")
+check "set clears a spike's informs with an empty value" 'crew set "$KU" informs "" && [[ -z $(crew get "$KU" informs) ]]'
+crew set "$KU" status abandoned
 check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build, spike, fix or refine, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
 sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Plan$/a 1. Page through the API.' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
 check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Structure or risk" \
@@ -1172,6 +1175,8 @@ check "set refuses a fixes that isn't a merged task, and records the ID of one t
 crew set "$FU" fixes unknown
 check "ready accepts a fix whose cause is unknown" 'crew ready "$FU" >/dev/null && [[ $(crew get "$FU" status) == ready && $(crew get "$FU" fixes) == unknown ]]'
 check "set takes fix and refine as kinds" 'crew set "$FU" kind refine && crew set "$FX" kind fix && [[ $(crew get "$FU" kind) == refine ]]'
+check "set clears a fix's fixes and missed_by with an empty value, and ready then refuses it" \
+  'crew set "$FX" status draft && crew set "$FX" fixes "" && crew set "$FX" missed_by "" && [[ -z $(crew get "$FX" fixes) && -z $(crew get "$FX" missed_by) && $(crew ready "$FX" 2>&1) == *"fixes must be a merged task in"* ]]'
 for f in "$FX" "$FU"; do crew set "$f" status abandoned; done
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.

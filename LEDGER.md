@@ -79,7 +79,7 @@ A **fix** is only for a defect that is live in production: released or deployed,
 
 A fix's brief names where the defect came from, in two keys, and `crew ready` refuses it until both are set:
 
-- `fixes`: the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (say why under `## Context`). `crew new --kind fix --fixes <task>` sets it, resolving the task as `--on` does; `crew set` checks it the same way and records the task's ID.
+- `fixes`: the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (say why under `## Context`). `crew new --kind fix --fixes <task>` sets it, resolving the task as `--on` does; `crew set` checks it the same way and records the task's ID; `crew set <task> fixes ""` clears it, as an empty value clears any key.
 - `missed_by`: the check that should have caught it, one of:
 
 | missed_by | the check |
