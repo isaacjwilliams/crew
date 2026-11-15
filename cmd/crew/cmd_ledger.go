@@ -179,6 +179,9 @@ func cmdSet(c *Crew, args []string) error {
 	if key == "risk" && !Risk(value).Valid() {
 		return fail("risk must be low, medium or high, not '%s'", value)
 	}
+	if _, ok := Kind(value).rules(); key == "kind" && !ok {
+		return fail("kind must be %s, not '%s'", kindNames(), value)
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}

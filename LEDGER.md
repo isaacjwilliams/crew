@@ -52,9 +52,21 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `pr-open` | PR is up and waiting for your review | worker, with `crew hand-over` the first time, which refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
+| `done` | a spike's report is in (see Kinds of task) | `crew hand-over` |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
-"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
+"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. "Finished" means `merged`, `done` or `abandoned`; `crew cleanup --merged` and `crew tick` remove the worktree and local branch of a `merged` or `done` task. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
+
+## Kinds of task
+
+A task's `kind` says what it makes, and so what `crew ready` asks of its brief and what `crew hand-over` checks. A task without one is a build. `crew new --kind <kind>` sets it.
+
+| kind | makes | its brief needs | `crew hand-over` checks, then sets |
+|---|---|---|---|
+| `build` | a PR | Goal, Structure, Plan, Acceptance criteria, and a `risk` | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
+| `spike` | a report, from a path tried on a branch nobody merges | Goal, Plan (what to try) and Acceptance criteria (what would answer the question); no `risk` | `## Report` starts with `Answer: <one line>`; `done` |
+
+A **spike** answers a question a draft's plan rests on. The draft lists those questions under `## Still to learn`, one `- [ ]` item each, and `crew ready` refuses it while any is unchecked. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the plan, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft writes the spikes' answers side by side under the item, ticks it, and finishes the plan.
 
 ## Risk tiers
 
@@ -70,7 +82,7 @@ A project lists its sensitive paths in `SENSITIVE_PATHS`, in its `project.env`: 
 
 ## Front-matter keys (task files)
 
-`id`, `title`, `project`, `status`, `goal` (the goal the task belongs to, if any; set by `crew new --goal`), `base` (the branch the task starts from and its PR targets), `base_sha` (written by `crew` only; see Stacked tasks), `restack_sent` (the commit the last `crew restack` asked the worker to rebase onto; written by `crew` only), `branch`, `depends_on` (task ids, space or comma separated), `priority` (a whole number, higher first, empty means 0; orders `crew tick`'s dispatch of running goals' ready tasks; set with `crew set`), `risk` (`low`, `medium` or `high`, the look the PR needs; set by the lead, raised to `high` by `crew`; see Risk tiers), `pre_pr_review` (yes/no), `pr_mode` (draft/ready/none), `worktree`, `pr`, `pr_state`, `pr_updated` (when GitHub last saw a change to the PR, from `crew sync`; written by `crew` only), `ci_state` (the checks on the PR's head commit: `running` while any hasn't finished, then `failing` or `passing`, and empty when it has none; from `crew sync`, and only `crew tick`'s filter for running `crew ci-fix`; written by `crew` only), `worker_name`, `worker_job`, `worker_session`, `worker_fingerprint` (what the worker loaded when it started; written by `crew` only, see below), `review_rounds`, `last_round_sent` (the newest round a worker was sent), `interrupted` (when a pause caught the worker mid-turn; written by `crew pause`, and cleared by the followup that tells the worker to carry on), `feedback_since` (UTC), `questions_routed` (a checksum of the worker's open questions last sent to the goal lead; written by `crew` only), `created`, `updated`.
+`id`, `title`, `project`, `status`, `kind` (`build` or `spike`; empty means build; set by `crew new --kind`; see Kinds of task), `informs` (a spike's draft: the task whose question it answers; set by `crew new --informs`), `report_sent` (`yes` once a goal's done spike's report has gone to the goal lead; written by `crew` only), `goal` (the goal the task belongs to, if any; set by `crew new --goal`), `base` (the branch the task starts from and its PR targets), `base_sha` (written by `crew` only; see Stacked tasks), `restack_sent` (the commit the last `crew restack` asked the worker to rebase onto; written by `crew` only), `branch`, `depends_on` (task ids, space or comma separated), `priority` (a whole number, higher first, empty means 0; orders `crew tick`'s dispatch of running goals' ready tasks; set with `crew set`), `risk` (`low`, `medium` or `high`, the look the PR needs; set by the lead, raised to `high` by `crew`; a spike has none; see Risk tiers), `pre_pr_review` (yes/no), `pr_mode` (draft/ready/none), `worktree`, `pr`, `pr_state`, `pr_updated` (when GitHub last saw a change to the PR, from `crew sync`; written by `crew` only), `ci_state` (the checks on the PR's head commit: `running` while any hasn't finished, then `failing` or `passing`, and empty when it has none; from `crew sync`, and only `crew tick`'s filter for running `crew ci-fix`; written by `crew` only), `worker_name`, `worker_job`, `worker_session`, `worker_fingerprint` (what the worker loaded when it started; written by `crew` only, see below), `review_rounds`, `last_round_sent` (the newest round a worker was sent), `interrupted` (when a pause caught the worker mid-turn; written by `crew pause`, and cleared by the followup that tells the worker to carry on), `feedback_since` (UTC), `questions_routed` (a checksum of the worker's open questions last sent to the goal lead; written by `crew` only), `created`, `updated`.
 
 Front matter is flat `key: value`. Edit it with `crew set` rather than by hand when a session might be writing at the same time.
 
@@ -82,12 +94,12 @@ A goal is a batch of items, listed in its file or on a tracker, that the user ha
 |---|---|---|
 | `draft` | Goal section being written with the lead | `crew goal new` |
 | `running` | the goal lead is working through it | `crew goal start` (or a `crew goal note` to a done goal) |
-| `done` | every task merged or abandoned; goal lead and checkout removed | `crew goal done` (and so `crew tick`) |
+| `done` | every task finished (merged, done or abandoned); goal lead and checkout removed | `crew goal done` (and so `crew tick`) |
 | `abandoned` | stopped; goal lead and checkout removed, tasks left as they are | `crew goal abandon` |
 
 Front-matter keys: `id`, `title`, `project`, `status`, `checkout` (the goal lead's working directory), `lead_name`, `lead_job`, `lead_session` (its session, like a worker's three identifiers), `lead_fingerprint` (what it loaded when it started, like a worker's; written by `crew` only), `unsent_notes` (your notes the goal lead hasn't been sent yet; written by `crew` only), `interrupted` (as a task's, for the goal lead; cleared by `crew goal followup`), `max_in_flight` (how many of its tasks may be in flight at once; empty means `GOAL_MAX_IN_FLIGHT`; set by `crew goal new --max-in-flight` and `crew goal cap`), `created`, `updated`. Sections: Goal (your words, including where the items come from), Items (written by the goal lead), Decisions (your notes from `crew goal note`, and the goal lead's own calls), Log.
 
-The goal lead hears about two things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, and new questions from its tasks' workers. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
+The goal lead hears about three things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, new questions from its tasks' workers, and its spikes' reports, each once. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
 
 ## Proposals
 

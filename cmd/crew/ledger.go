@@ -141,7 +141,7 @@ func (d Doc) Section(heading string) string {
 func (d Doc) OpenQuestions() int { return unchecked(d.Section("## Open questions")) }
 
 // unchecked counts the lines of text that are unchecked items, "- [ ] …". In
-// the ledger, each is something waiting on the user.
+// the ledger, each is something still open.
 func unchecked(text string) int {
 	n := 0
 	for _, l := range strings.Split(text, "\n") {
@@ -288,17 +288,93 @@ const (
 	PROpen             Status = "pr-open"
 	AddressingFeedback Status = "addressing-feedback"
 	Merged             Status = "merged"
+	Done               Status = "done"
 	Abandoned          Status = "abandoned"
 )
 
-var taskStatuses = []Status{Draft, Ready, Working, NeedsInput, PROpen, AddressingFeedback, Merged, Abandoned}
+var taskStatuses = []Status{Draft, Ready, Working, NeedsInput, PROpen, AddressingFeedback, Merged, Done, Abandoned}
 
 func (s Status) InFlight() bool {
 	return s == Working || s == NeedsInput || s == AddressingFeedback || s == PROpen
 }
 
-// Finished is merged or abandoned: nothing more happens to the task.
-func (s Status) Finished() bool { return s == Merged || s == Abandoned }
+// Finished is merged, done or abandoned: nothing more happens to the task.
+func (s Status) Finished() bool { return s.Delivered() || s == Abandoned }
+
+// Delivered is merged or done: what the task was for is in, on the default
+// branch or in its report, so nothing is left to merge and its worktree and
+// local branch can go.
+func (s Status) Delivered() bool { return s == Merged || s == Done }
+
+// A task's kind: what it makes, which decides what its brief needs and what its
+// hand-over checks. A build makes a PR; a spike tries a path on a branch nobody
+// merges, and makes a report.
+type Kind string
+
+const (
+	KindBuild Kind = "build"
+	KindSpike Kind = "spike"
+)
+
+// kindRules is what a kind asks of its task. Commands ask the task's rules and
+// never the kind's name.
+type kindRules struct {
+	kind Kind
+	// brief is the sections crew ready needs filled in, and risk whether it needs
+	// a risk tier.
+	brief []string
+	risk  bool
+	// link is the front-matter key that ties the task to another, set by crew new
+	// --<link>, or nothing when the kind takes none; linkTo is the status that
+	// other task must have.
+	link   string
+	linkTo Status
+	// handOver is what crew hand-over checks, and handedOver the status it moves
+	// the task to.
+	handOver   func(*Crew, Task) error
+	handedOver Status
+}
+
+// kinds are the kinds of task, build first.
+var kinds = []kindRules{
+	{
+		kind:       KindBuild,
+		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		risk:       true,
+		handOver:   handOverPR,
+		handedOver: PROpen,
+	},
+	{
+		kind:       KindSpike,
+		brief:      []string{"## Goal", "## Plan", "## Acceptance criteria"},
+		link:       "informs",
+		linkTo:     Draft,
+		handOver:   handOverReport,
+		handedOver: Done,
+	},
+}
+
+// rules are what the kind asks, and whether crew knows it.
+func (k Kind) rules() (kindRules, bool) {
+	for _, r := range kinds {
+		if r.kind == k {
+			return r, true
+		}
+	}
+	return kindRules{}, false
+}
+
+// kindNames lists the kinds as a sentence does: "build or spike".
+func kindNames() string {
+	names := make([]string, len(kinds))
+	for i, r := range kinds {
+		names[i] = string(r.kind)
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
 
 // A task's risk tier: what kind of look its PR needs from the user. The lead
 // sets it at intake, and crew raises it to high when the branch touches one of
@@ -371,6 +447,38 @@ func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
+
+// Kind is the task's kind. A task without one, made before kinds, is a build.
+func (t Task) Kind() Kind {
+	if k := Kind(t.Get("kind")); k != "" {
+		return k
+	}
+	return KindBuild
+}
+
+// rules are what the task's kind asks, or an error for a kind crew doesn't know.
+func (t Task) rules() (kindRules, error) {
+	r, ok := t.Kind().rules()
+	if !ok {
+		return r, fmt.Errorf("%s: kind '%s' isn't %s; fix it with crew set %s kind <kind>", t.ID(), t.Kind(), kindNames(), t.ID())
+	}
+	return r, nil
+}
+
+// StillToLearn counts the unchecked items under Still to learn: what the plan
+// rests on that nobody has checked yet. crew ready refuses until there are none.
+func (t Task) StillToLearn() int { return unchecked(t.Section("## Still to learn")) }
+
+// Answer is a spike's answer: the first line of its ## Report, after "Answer:",
+// or nothing when the report doesn't start with one.
+func (t Task) Answer() string {
+	first, _, _ := strings.Cut(t.Section("## Report"), "\n")
+	answer, ok := strings.CutPrefix(first, "Answer:")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(answer)
+}
 
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
 // goes first. A task without one has priority 0.
