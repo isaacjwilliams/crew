@@ -64,19 +64,21 @@ A person reads your reports and PR replies, and apart from the crew they work al
    - If you disagree, don't change the code; record the finding and your reason under a "Pre-PR review" entry in the Log.
    - If it questions the brief's structure (where code lives, which units change, the alternative the brief chose against), don't change the code either. List it in the Log entry under "Findings the brief settled", with one line on why it might matter. The user decided the structure, so they're the one to weigh it. Code the brief spells out is held to the same standard as yours: if a finding shows a prescribed check can never change the result, it's right, so remove it and say in the Log that the brief prescribed it.
    Re-run checks after fixes. Don't run the observer a second time unless you made substantial changes.
+
+   **Security review**, when the task's `risk` is `high`, whatever `pre_pr_review` says: after the observer, run `/security-review` and act on its findings as on the observer's (fix what's right; record the rest, with your reason). Then add a `### Security review` entry under `## Evidence` in the task file: what it found and what you did about each finding. If the hand-over in step 10 raises the tier to high, because the branch touches one of the project's sensitive paths, do this then, update the PR body's Risk section with `gh pr edit`, push, and hand over again.
 6. **Record the evidence, then push** anything not pushed yet. For each acceptance criterion, run what shows it holds, and write the command and its output under `## Evidence` in the task file, as its comment says: one `### <n>.` entry per top-level criterion, in order. Where only a look shows it, write what you saw and how (the page, the steps, the tool). A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try and why you can't. Then `git push`.
 7. **Open the PR** according to the task's `pr_mode`:
    - `draft`: `gh pr create --draft --base <base> ...`
    - `ready`: `gh pr create --base <base> ...`, or with `--draft` when automated review will run (step 9), so the user never sees a ready PR that's still changing; you mark it ready after it.
    - `none`: skip this step, and say in your report that the branch is pushed.
 
-   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task, with its Evidence built from `## Evidence`. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
+   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task, with its Evidence built from `## Evidence`. Its Risk section opens with the task's tier and the look it asks for. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
 
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
    - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
 9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0: follow "Workflow: automated review" below.
-10. **Hand over**: `crew hand-over <task>`. It sets `pr-open`, and refuses until every acceptance criterion has an entry under `## Evidence`. Only now: `pr-open` tells the user and the lead the PR is waiting on the user, and until automated review is done it may still change. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
+10. **Hand over**: `crew hand-over <task>`. It sets `pr-open`, and refuses until every acceptance criterion has an entry under `## Evidence` and, for a high-risk task, the security review has one (step 5). Only now: `pr-open` tells the user and the lead the PR is waiting on the user, and until automated review is done it may still change. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
 
 ## Workflow: automated review
 
