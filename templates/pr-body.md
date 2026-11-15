@@ -9,7 +9,7 @@
      - Risk: what could break, for whom, and how far it reaches. When it's small, say so in a line.
      - How to revert: whether reverting the merge is enough, and anything a revert alone doesn't
        undo, such as data written, settings changed or a deploy step.
-     - Evidence: one item per acceptance criterion, in order, from the task's Evidence section.
+     - Evidence: one item per acceptance criterion, numbered as in the task's Evidence section.
        The criterion in a line and the command that shows it, then its output in a <details>
        block. Where only a look shows it, say what you saw and how; where only a person can
        check it, what to try.

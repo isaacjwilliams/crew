@@ -215,7 +215,7 @@ sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F
 check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
 check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
   '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
-check "hand-over refuses a task that isn't working" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"', not working"* ]]'
+check "hand-over refuses a task that isn't working" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"', not working or addressing feedback"* ]]'
 crew set 1 status working
 sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
 check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \

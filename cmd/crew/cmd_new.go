@@ -196,8 +196,9 @@ func cmdReady(c *Crew, args []string) error {
 }
 
 // crew hand-over TASK: the worker's PR is ready for the user, with evidence for
-// every acceptance criterion. Only the first move to pr-open is checked: a PR
-// that comes back after a review round or a restack was handed over already.
+// every acceptance criterion. Workers run it once, at the end of their first
+// run; a review round may have started by then. Their later moves back to
+// pr-open are plain crew set, since the PR was handed over already.
 func cmdHandOver(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew hand-over TASK")
@@ -207,9 +208,9 @@ func cmdHandOver(c *Crew, args []string) error {
 		return err
 	}
 	if st := t.Status(); st != Working && st != AddressingFeedback {
-		return fail("task is '%s', not working", st)
+		return fail("task is '%s', not working or addressing feedback", st)
 	}
-	if t.PR() == "" && t.Get("pr_mode") != "none" {
+	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
 		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
 	}
 	gaps, criteria := t.EvidenceGaps()
