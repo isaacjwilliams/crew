@@ -188,4 +188,4 @@ When CI goes red on a PR its worker has handed to you (`pr-open`), `crew tick` r
 
 A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you.
 
-`crew stats` reads those lines, the `Reviewers:`, `Agreed severity:` and `Outcome:` lines under Automated reviews, and the comment items of Review rounds. So their forms are a contract with it: a change to one needs a change to `crew stats`.
+`crew stats` reads those lines, the `Reviewers:`, `Agreed severity:` and `Outcome:` lines under Automated reviews, and the comment items of Review rounds. The misses run of `crew gardener` reads when a task merged, the comment items, and the times in the headings of review rounds and automated reviews. So their forms are a contract with both: a change to one needs a change to them.
