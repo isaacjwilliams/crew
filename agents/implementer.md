@@ -82,7 +82,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 
 After you open your PR, you review it before the user does: that's the first pass of automated review. The user can ask for another pass later, with a line in a review round, and you run this workflow again for it (see "Workflow: review rounds").
 
-A pass is the reviews recorded after the last `Summary posted` line, or every review when there's no such line yet. A pass that ended before its summary was posted (a blocked one, say) runs on into the next, and the next summary covers both. Review numbers carry on from one pass to the next. The PR's first review reads all of it; each later one reads only the commits since the review before it, unless the skill finds it has to read the whole PR again (after a rebase, say).
+A pass is the reviews recorded after the last `Summary posted` line, or every review when there's no such line yet. A pass that ended before its summary was posted (a blocked one, say) runs on into the next, and the next summary covers both. Review numbers carry on from one pass to the next. The PR's first review reads all of it; each later one reads only the commits since the last finished review, unless the skill finds it has to read the whole PR again (after a rebase, say).
 
 `AUTO_REVIEWS` (`crew config AUTO_REVIEWS --project <project>`) is how many reviews you may run in a pass. A pass the user asked for runs at least one, even when `AUTO_REVIEWS` is 0.
 

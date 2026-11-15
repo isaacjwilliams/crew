@@ -12,7 +12,7 @@ The briefing's scope names two ranges:
 
 - **the change**: everything the pull request does, from the fork point to its head;
 - **the new commits**: what you review. In a pull request's first review they're the change. In a later one they're
-  usually only the commits since the review before, so you read those, and the code around them.
+  usually only the commits since the last finished review, so you read those, and the code around them.
 
 "The range" below means the new commits.
 

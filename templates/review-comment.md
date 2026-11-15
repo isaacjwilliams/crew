@@ -3,7 +3,8 @@
      with `crew review-summary <task> <file>`. Leave out this comment, the <…> placeholders and any
      section that would be empty. One line per finding: a reader should take it in at a glance.
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
-     agents. Withdrawn findings aren't listed. A finding left for the user because it already failed at
+     agents. Withdrawn findings aren't listed, and a finding that repeats one from earlier in this
+     pass is one line, for its latest review. A finding left for the user because it already failed at
      the fork point goes under "Already on <base branch>", not "Left for you".
 
      <N> counts every review in this pass, including one whose reviewers failed. When the record
@@ -19,14 +20,15 @@
        Claude reviewer did that one alone." or "The Claude reviewer didn't report in review 2, so Codex
        did that one alone." (name each review; "in any of them" when it never reported)
      The next says what they read. The PR's first review reads all of it. Each later one reads only
-     the commits since the review before, or the whole PR again when it can't (after a rebase, say).
+     the commits since the last finished review (one the Claude reviewer reported in), or the whole
+     PR again when it can't (after a rebase, say).
      A Range line that says "since review <N>" read the new commits; one that says "since <base
      branch>" read the whole PR:
      - all the whole PR: "Each read the whole PR." ("It read the whole PR." after a single review)
-     - all the new commits: "Each read only the commits since the review before it." ("It read only
-       the commits since review 2." after a single review)
+     - all the new commits: "Each read only the commits since the last finished review." ("It read
+       only the commits since review 2." after a single review, naming the review on its Range line)
      - some of each: "Reviews 1 and 3 read the whole PR, and the others only the commits since the
-       review before." (name the reviews that read the whole PR)
+       last finished review." (name the reviews that read the whole PR)
      The line after that says how the last review ended:
      - clean: "The last came back clean." ("It came back clean." after a single review)
      - the limit ran out after fixes: "The limit ran out: the fixes for the last review haven't been reviewed again."
