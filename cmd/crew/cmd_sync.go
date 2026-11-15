@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// crew sync [--quiet] [--all]: finds missing PR URLs, records each PR's state and
-// when it last changed, marks merged tasks, raises the risk of tasks that touch a
-// sensitive path, and reports stacked tasks that need a restack, in the current
+// crew sync [--quiet] [--all]: finds missing PR URLs, records each PR's state, its
+// base and when it last changed, marks merged tasks, raises the risk of tasks that
+// touch a sensitive path, and reports tasks that need a restack, in the current
 // project or all of them.
 func cmdSync(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
@@ -68,12 +68,13 @@ func cmdSync(c *Crew, args []string) error {
 			if pr == "" {
 				continue
 			}
-			out, err := ghQuiet(p.Repo(), "pr", "view", pr, "--json", "state,isDraft,reviewDecision,updatedAt,statusCheckRollup,mergeable")
+			out, err := ghQuiet(p.Repo(), "pr", "view", pr, "--json", "state,isDraft,reviewDecision,updatedAt,baseRefName,statusCheckRollup,mergeable")
 			var info struct {
 				State             string    `json:"state"`
 				IsDraft           bool      `json:"isDraft"`
 				ReviewDecision    string    `json:"reviewDecision"`
 				UpdatedAt         string    `json:"updatedAt"`
+				BaseRefName       string    `json:"baseRefName"`
 				StatusCheckRollup []ciCheck `json:"statusCheckRollup"`
 				Mergeable         string    `json:"mergeable"`
 			}
@@ -84,6 +85,11 @@ func cmdSync(c *Crew, args []string) error {
 			// For prMayHaveNewComments in crew tick.
 			if t.Get("pr_updated") != info.UpdatedAt {
 				t.Set("pr_updated", info.UpdatedAt)
+				changed = true
+			}
+			// The branch the PR targets, which retargetReason compares with the task's.
+			if t.Get("pr_base") != info.BaseRefName {
+				t.Set("pr_base", info.BaseRefName)
 				changed = true
 			}
 			// For crew tick, which runs crew ci-fix only while CI is failing.
@@ -127,9 +133,11 @@ func cmdSync(c *Crew, args []string) error {
 			}
 		}
 		// Tasks in flight, now that the merges above are known: raise the risk of
-		// those whose branch touches a sensitive path, and say which stacked tasks
-		// need a restack.
-		// Both read origin's branches, so the project's clone is fetched first, once.
+		// those whose branch touches a sensitive path, and say which need a restack:
+		// a rebase, for a stacked task, or a retarget, for any task with a PR.
+		// All of these read origin's branches, so the project's clone is fetched
+		// first, once, when there's a sensitive path, a stacked task or a PR on
+		// another branch to check.
 		idx, fetched := c.branches(name), false
 		fetch := func() {
 			if !fetched {
@@ -156,16 +164,21 @@ func cmdSync(c *Crew, args []string) error {
 					fmt.Printf("%s: %s\n", t.ID(), raised)
 				}
 			}
-			parent, ok := idx.parentOf(t)
-			if !ok {
-				continue
+			if parent, ok := idx.parentOf(t); ok {
+				fetch()
+				if noteBaseSHA(t, parent, p.Repo()) {
+					changed = true
+				}
+				if reason := idx.restackReason(t, p.Repo()); reason != "" {
+					say("%s: needs a restack, %s (run 'crew restack %s')", t.ID(), reason, t.ID())
+				}
 			}
-			fetch()
-			if noteBaseSHA(t, parent, p.Repo()) {
-				changed = true
+			// The branch it should target may be new, and not fetched yet.
+			if idx.prOffBase(t) {
+				fetch()
 			}
-			if reason := idx.restackReason(t, p.Repo()); reason != "" {
-				say("%s: needs a restack, %s (run 'crew restack %s')", t.ID(), reason, t.ID())
+			if reason := idx.retargetReason(t, p.Repo()); reason != "" {
+				say("%s: %s (run 'crew restack %s')", t.ID(), reason, t.ID())
 			}
 		}
 	}

@@ -2,7 +2,7 @@ package main
 
 // Commands that act on a task's worker session: crew followup resumes it,
 // crew attach opens it in this terminal, and crew restack resumes it with a
-// rebase to run.
+// rebase or a retarget to run.
 
 import (
 	"fmt"
@@ -174,12 +174,13 @@ func cmdAttach(c *Crew, args []string) error {
 	return execClaude(c.claude("attach", t.WorkerJob()))
 }
 
-// crew restack TASK [--again]: has a stacked task's worker rebase it after its
-// parent moved or merged. crew only works out where to cut and what to rebase
-// onto; the worker does the rebase, the push and the PR retarget, and records the
-// new base when it has succeeded, so a failed restack still shows as one that's
-// needed. restack_sent records the commit the last restack asked for, so the same
-// restack isn't sent twice unless --again.
+// crew restack TASK [--again]: has a task's worker rebase its branch after its
+// parent moved or merged, or point its PR at the task's base when GitHub has it
+// targeting another branch, or both. crew only works out what to run; the worker
+// does the rebase, the push and the retarget, and records a new base when it has
+// succeeded, so a failed restack still shows as one that's needed. restack_sent
+// records the commit the last rebase was asked onto, and retarget_sent the base
+// the last retarget asked for, so neither is sent twice unless --again.
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -204,14 +205,16 @@ func cmdRestack(c *Crew, args []string) error {
 		return err
 	}
 	repo, idx := p.Repo(), c.branches(p.Name)
-	base, branch := t.Base(), t.Branch()
-	parent, ok := idx.parentOf(t)
-	if !ok {
-		return fail("%s isn't stacked: its base '%s' isn't another task's branch", t.ID(), base)
-	}
-	pid := parent.ID()
 	if !t.Dispatched() {
 		return fail("%s has no branch yet; dispatch it first", t.ID())
+	}
+	// Refuse a task there's nothing to send for before making its worktree.
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
+	parent, stacked := idx.parentOf(t)
+	if !stacked && !idx.prOffBase(t) {
+		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
 	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
@@ -223,13 +226,55 @@ func cmdRestack(c *Crew, args []string) error {
 	if !gitOK(repo, "fetch", "--quiet", "origin") {
 		warn("git fetch failed; using local refs")
 	}
+	if stacked {
+		if err := c.lock(); err != nil {
+			return err
+		}
+		if noteBaseSHA(t, parent, repo) {
+			c.commit("base_sha " + p.Name + "/" + t.ID())
+		}
+		c.unlock()
+	}
+	// With nothing to rebase, a retarget goes on its own, whatever the parent's
+	// state. Otherwise it goes in the rebase note, and waits with it.
+	retarget := idx.retargetReason(t, repo)
+	if retarget != "" && idx.onBase(t, repo) {
+		return c.sendRetarget(p, t, retarget, again)
+	}
+	if stacked {
+		return c.sendRebase(p, idx, t, parent, retarget, again)
+	}
+	if retarget == "" {
+		return fail("origin has no branch %s yet, so %s's PR can't target it", t.Base(), t.ID())
+	}
+	return fail("%s's branch doesn't start on %s (base_sha %s isn't on it), so its PR would bring other commits there. crew restack rebases only stacked tasks; tell its worker what to do with 'crew followup %s --note'", t.ID(), t.Base(), cut(t.Get("base_sha"), 12), t.ID())
+}
+
+// sendRetarget resumes a task's worker to point its PR at the task's base, with
+// nothing to rebase. retarget_sent is that base, not the PR's: moving the task
+// to yet another branch is a new retarget, to be sent.
+func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error {
+	base := t.Base()
+	if !again && t.Get("retarget_sent") == base {
+		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
+	}
+	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
+	if err := c.followup(t, false, note); err != nil {
+		return err
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if noteBaseSHA(t, parent, repo) {
-		c.commit("base_sha " + p.Name + "/" + t.ID())
-	}
-	c.unlock()
+	t.Set("retarget_sent", base)
+	c.commit("retarget " + p.Name + "/" + t.ID())
+	return nil
+}
+
+// sendRebase resumes a stacked task's worker to rebase its branch onto its
+// parent's latest commit, or onto what the parent merged into, and to retarget
+// its PR when that's needed too. retarget is retargetReason's answer for t.
+func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarget string, again bool) error {
+	repo, base, branch, pid := p.Repo(), t.Base(), t.Branch(), parent.ID()
 	if idx.parentNeedsRestack(t, repo) {
 		return fail("%s needs a restack itself (%s); restack it first, a stack goes bottom-up", pid, idx.restackReason(parent, repo))
 	}
@@ -262,8 +307,14 @@ func cmdRestack(c *Crew, args []string) error {
 	lease, _ := git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
 	note := fmt.Sprintf("Restack (%s): rebase your branch with `git fetch origin && git rebase --onto %s %s`, then follow your restack workflow. %s is origin/%s now; %s is the last of %s's commits in your branch. Push the result with `git push --force-with-lease=%s:%s origin %s`, exactly as written and as a command on its own.",
 		reason, target, old, target, newBase, old, pid, branch, lease, branch)
-	if newBase != base {
+	retargetTo := ""
+	switch {
+	case newBase != base: // The parent merged: the task moves to what it merged into, PR and all.
+		retargetTo = newBase
 		note += fmt.Sprintf(" Your base is now %s: after pushing, run `gh pr edit --base %s` and `crew set %s base %s`.", newBase, newBase, t.ID(), newBase)
+	case retarget != "": // The task moved already, and its PR hasn't followed.
+		retargetTo = base
+		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
 	if err := c.followup(t, false, note); err != nil {
 		return err
@@ -272,6 +323,9 @@ func cmdRestack(c *Crew, args []string) error {
 		return err
 	}
 	t.Set("restack_sent", target)
+	if retargetTo != "" {
+		t.Set("retarget_sent", retargetTo)
+	}
 	c.commit("restack " + p.Name + "/" + t.ID())
 	return nil
 }

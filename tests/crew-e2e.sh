@@ -599,6 +599,13 @@ check "sync reports the child of a merged parent" '[[ $out == *"010-season-admin
 check "cleanup of a merged parent leaves its stack workable" 'crew cleanup 9 >/dev/null && ! git show-ref --verify --quiet refs/heads/agent/season-model'
 crew observe 10 >/dev/null
 check "observe falls back to base_sha when the parent's branch is gone" 'grep -q "Review the change $T9b...HEAD" "$HOME/claude-calls.log"'
+# GitHub moved 10's PR to main itself when it deleted 9's branch, and this clone, fetching without
+# pruning, still has that branch.
+git update-ref refs/remotes/origin/agent/season-model "$T9b"; echo main >"$HOME/gh-pr-base-22"
+out=$(crew sync)
+check "after a merge, a PR GitHub already moved to what the parent merged into isn't sent back" \
+  '[[ $out == *"010-season-admin: needs a restack, 009-season-model merged"* && $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+git update-ref -d refs/remotes/origin/agent/season-model; rm -f "$HOME/gh-pr-base-22"
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
@@ -772,7 +779,7 @@ base_moves() {  # another PR merges into main on origin; prints main's new short
 }
 sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
 crew set 13 status working; n=$(resumes); r=$(crew get 13 review_rounds)
-echo CONFLICTING >"$HOME/gh-pr-mergeable"; B1=$(base_moves)
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; B1=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a conflict before the worker hands its PR over is recorded by sync, and left to the worker, by tick and by hand" '[[ $(crew get 13 mergeable) == conflicting && $out != *onflict* && $byhand == *"is working, and its conflicts are its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == "$r" && $(resumes) == "$n" ]]'
 crew set 13 status pr-open
@@ -788,19 +795,19 @@ check "a second tick on the same base commit records nothing, and crew catch-up 
 echo UNKNOWN >"$HOME/gh-pr-mergeable"; B2=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "while GitHub is still working out whether the PR conflicts, crew leaves it alone" '[[ -z $(crew get 13 mergeable) && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
-echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo agent/elsewhere >"$HOME/gh-pr-base"
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo agent/elsewhere >"$HOME/gh-pr-base-12"; setstate working 4242   # busy, so no retarget goes out
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "a PR whose GitHub base isn't the task's base gets no conflict round" '[[ $(crew get 13 mergeable) == conflicting && -z $out && $byhand == "nothing to do: PR #12 targets agent/elsewhere, not the task'"'"'s base main" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'
-crew set 13 base agent/season-model; echo agent/season-model >"$HOME/gh-pr-base"; setstate working 4242
+crew set 13 base agent/season-model; echo agent/season-model >"$HOME/gh-pr-base-12"
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "a stacked task's conflict is left to a restack, by tick and by hand" '[[ $out != *onflict* && $byhand == "nothing to do: 013-tick-routing is stacked on 009-season-model, so its conflicts are a restack'"'"'s (crew restack)" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'
-crew set 13 base main; rm "$HOME/gh-pr-base"; echo CLOSED >"$HOME/gh-pr-state"
+crew set 13 base main; echo main >"$HOME/gh-pr-base-12"; echo CLOSED >"$HOME/gh-pr-state"
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "a conflict on a PR closed without merging is left alone" '[[ $out != *onflict* && $byhand == "nothing to do: PR #12 is closed" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo OPEN >"$HOME/gh-pr-state"; setstate "done" null; n=$(resumes)
 out=$(crew tick 2>/dev/null)
 check "a new commit on the base that still conflicts gets a round of its own" '[[ $out == *"013-tick-routing: catch-up round $((r + 2)) recorded: conflicts with main"* && $(round "$F13" $((r + 2))) == "- [ ] Conflicts with main at $B2" && $(resumes) == $((n + 1)) ]]'
-rm "$HOME/gh-pr-mergeable"; crew sync >/dev/null 2>&1
+rm "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew sync >/dev/null 2>&1
 check "sync clears mergeable once the PR merges cleanly again" '[[ -z $(crew get 13 mergeable) ]]'
 setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
@@ -825,10 +832,52 @@ crew set 15 status pr-open; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 1)) ]]'
 
+# Retargets: 15 moves onto 16, a new task stacked on 14 that holds all of 14's work, as a split's last
+# piece can. 15 restacks onto 14 first, so its branch already holds 16's.
+(cd "$WT15" && git rebase -q --onto "$(tip tick-parent)" "$(crew get 15 base_sha)") && restack_push "$WT15"
+FR=$(crew new "Tick replacement" --branch tick-replacement --on 14); fill "$FR"; crew ready "$FR" >/dev/null
+crew set 15 base agent/tick-replacement; crew set 15 status pr-open; rs15=$(crew get 15 restack_sent)
+echo agent/tick-parent >"$HOME/gh-pr-base-32"
+out=$(crew sync)
+check "sync records the branch each PR targets on GitHub" '[[ $(crew get 15 pr_base) == agent/tick-parent ]]'
+check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+setstate "done" null; crew dispatch "$FR" >/dev/null; (cd "$(crew get "$FR" worktree)" && git push -q -u origin HEAD 2>/dev/null)
+crew set "$FR" pr https://github.com/isaac/webapp/pull/33; crew set "$FR" status pr-open
+echo agent/tick-old >"$HOME/gh-pr-base-31"
+out=$(crew sync)
+check "sync reports each PR that targets a branch other than its task's base, stacked or not" \
+  '[[ $out == *"015-tick-child: PR targets agent/tick-parent, not agent/tick-replacement (run '"'"'crew restack 015-tick-child'"'"')"* && $out == *"014-tick-parent: PR targets agent/tick-old, not main"* && $out != *"needs a restack"* ]]'
+check "status shows it" '[[ $(crew status) == *"PR targets agent/tick-parent, not agent/tick-replacement"* ]]'
+prompt_of() { grep -- "--resume" "$HOME/claude-calls.log" | grep -F "New input for task $1 (" | tail -1; }
+setstate "done" null; n=$(resumes)
+out=$(crew tick)
+check "with nothing to rebase, tick sends a retarget alone, to a stacked task and an unstacked one" \
+  '[[ $out == *"015-tick-child: restack sent to its worker (PR targets agent/tick-parent, not agent/tick-replacement)"* && $out == *"014-tick-parent: restack sent to its worker (PR targets agent/tick-old, not main)"* && $(resumes) == $((n + 2)) ]]'
+p15=$(prompt_of 015-tick-child)
+check "a retarget note asks for gh pr edit --base and no rebase or push, and is recorded apart from restacks" \
+  '[[ $p15 == *"Retarget (PR targets agent/tick-parent, not agent/tick-replacement)"*"\`gh pr edit --base agent/tick-replacement\`"* && $p15 != *"git rebase"* && $p15 != *"git push"* && $(crew get 15 retarget_sent) == agent/tick-replacement && $(crew get 15 restack_sent) == "$rs15" ]]'
+crew set 14 status pr-open; crew set 15 status pr-open; setstate "done" null
+out=$(crew tick 2>&1)
+check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 2)) ]]'
+check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(resumes) == $((n + 2)) ]]'
+# 14's worker retargeted its PR. 16 moves, and its own PR targets the wrong branch.
+echo main >"$HOME/gh-pr-base-31"; echo main >"$HOME/gh-pr-base-33"; work "$(crew get "$FR" worktree)" r1.txt
+setstate "done" null; out=$(crew tick)
+check "a parent whose PR targets the wrong branch doesn't hold back its child's rebase" \
+  '[[ $out == *"016-tick-replacement: restack sent to its worker (PR targets main, not agent/tick-parent)"* && $out == *"015-tick-child: restack sent to its worker (016-tick-replacement moved)"* && $out != *014-tick-parent* ]]'
+p15=$(prompt_of 015-tick-child)
+check "a rebase note asks for the retarget still due, after the push" \
+  '[[ $p15 == *"git rebase --onto $(tip tick-replacement) "*"Your PR targets agent/tick-parent, not your base: after pushing, run \`gh pr edit --base agent/tick-replacement\`."* ]]'
+echo agent/tick-replacement >"$HOME/gh-pr-base-32"; echo agent/tick-parent >"$HOME/gh-pr-base-33"
+check "once a PR targets its task's base, nothing says otherwise" 'crew sync >/dev/null && [[ $(crew status) != *"PR targets"* ]]'
+rm -f "$HOME"/gh-pr-base-*
+
 echo MERGED >"$HOME/gh-pr-state"; setstate "done" null; touch "$HOME/rm-fail"
 out=$(crew tick 2>&1)
 check "tick cleans up merged tasks" '[[ $out == *"014-tick-parent: merged; worktree cleaned up"* && ! -d $WT14 && $(crew get 14 status) == merged ]]'
 check "a worker that won't leave agent view is reported, not a reason to keep the worktree" '[[ $out == *"couldn'"'"'t remove job $(crew get 14 worker_job) from agent view"* ]]'
+head=$(git -C "$L" rev-parse @); out=$(crew restack 14 2>&1); st=$?
+check "crew restack refuses a merged task before bringing back its worktree" '((st == 1)) && [[ $out == *"014-tick-parent is merged"* && ! -d $WT14 && -z $(crew get 14 worktree) && $(git -C "$L" rev-parse @) == "$head" ]]'
 rm -f "$HOME/rm-fail"
 rm -f "$HOME/gh-pr-state"
 
@@ -853,6 +902,24 @@ crew set "$F16" status abandoned >/dev/null; crew set "$F16" worktree "/elsewher
 out=$(crew cleanup "$F16" 2>&1)
 check "cleanup of a task whose worktree isn't here just clears it" '[[ $out == *"cleaned up"* && -z $(crew get "$F16" worktree) ]]'
 crew set "$F17" status abandoned >/dev/null
+# A PR's new base that only another clone has pushed, with no stack in flight for sync to fetch
+# for (12 steps aside): sync fetches for the PR itself.
+crew set 12 status abandoned >/dev/null
+FB=$(crew new "Moved base" --branch moved-base); fill "$FB"; crew ready "$FB" >/dev/null; setstate "done" null; crew dispatch "$FB" >/dev/null
+work "$(crew get "$FB" worktree)" b.txt; crew set "$FB" pr https://github.com/isaac/webapp/pull/34; crew set "$FB" status pr-open
+(cd "$SB/other-clone" && git fetch -q origin && git push -q origin origin/main:refs/heads/release/next)
+crew set "$FB" base release/next; echo main >"$HOME/gh-pr-base-34"
+out=$(crew sync)
+check "sync fetches a new base that a PR doesn't target yet, for a task that isn't stacked" '[[ $out == *"$(basename "$FB" .md): PR targets main, not release/next"* ]]'
+# Moved onto a branch cut before it started, as when a task leaves an abandoned parent for main,
+# its branch still holds commits that aren't on the new base: no retarget alone.
+(cd "$SB/other-clone" && git push -q origin origin/main~1:refs/heads/release/old)
+crew set "$FB" base release/old; crew sync >/dev/null; setstate "done" null; n=$(resumes)
+out=$(crew tick 2>&1)
+check "tick sends no retarget alone to an unstacked task whose branch doesn't start on its new base" '[[ $out != *"$(basename "$FB" .md): restack sent"* && $(resumes) == "$n" ]]'
+out=$(crew restack "$FB" 2>&1); st=$?
+check "and crew restack refuses it, saying why" '((st == 1)) && [[ $out == *"branch doesn'"'"'t start on release/old"*"crew followup $(basename "$FB" .md) --note"* && $(resumes) == "$n" ]]'
+rm -f "$HOME/gh-pr-base-34"; crew set "$FB" status abandoned >/dev/null
 # crew tick re-homes a task in progress whose worker and worktree stayed on another machine.
 moved_away() {  # file: its job unknown here, its worktree gone, as on the machine it moved to
   local j; j=$(crew get "$1" worker_job)

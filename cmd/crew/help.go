@@ -72,7 +72,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew attach TASK                 Attach this terminal to the task's worker; a
                                    followup or tick that resumes the worker ends it
   crew restack TASK [--again]      Have a stacked task's worker rebase it after its
-                                   parent moved or merged (bottom of the stack first);
+                                   parent moved or merged (bottom of the stack first),
+                                   and any task's worker retarget a PR that targets
+                                   another branch than its base;
                                    --again resends a restack the worker already has
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
@@ -123,8 +125,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    raise to high the risk of tasks whose branch
-                                   touches SENSITIVE_PATHS; report stacked tasks that
-                                   need a restack
+                                   touches SENSITIVE_PATHS; report tasks that need a
+                                   restack or a retarget
   crew tick                        Do what needs no decision, across all projects:
                                    sync, record new PR comments, red CI and
                                    conflicts, send review rounds and restacks to

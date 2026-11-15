@@ -504,6 +504,9 @@ func (s *statusView) notes(t Task) []string {
 		if reason := s.branches.restackReason(t, s.repo); reason != "" {
 			notes = append(notes, "needs restack: "+reason)
 		}
+		if reason := s.branches.retargetReason(t, s.repo); reason != "" {
+			notes = append(notes, reason)
+		}
 	}
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
