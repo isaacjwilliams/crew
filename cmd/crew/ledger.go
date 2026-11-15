@@ -89,9 +89,42 @@ func (d Doc) Set(key, value string) error {
 // Touch sets updated: to now.
 func (d Doc) Touch() error { return d.Set("updated", now()) }
 
+// logTime is how a Log line gives the time it was written, to the minute.
+const logTime = "2006-01-02 15:04"
+
 // Log appends a dated line to the end of the file, which is the Log section's.
 func (d Doc) Log(msg string) error {
-	return d.appendRaw("- " + time.Now().Format("2006-01-02 15:04") + " — " + msg + "\n")
+	return d.appendRaw("- " + time.Now().Format(logTime) + " — " + msg + "\n")
+}
+
+// A line of a file's Log: when it was written, and its message.
+type logEntry struct {
+	at  time.Time
+	msg string
+}
+
+// LogEntries is the file's Log, oldest first: the lines Log wrote, read back.
+// A line that isn't one, such as one that continues a message, is skipped.
+func (d Doc) LogEntries() []logEntry {
+	var entries []logEntry
+	for _, l := range strings.Split(d.Section("## Log"), "\n") {
+		item, ok := strings.CutPrefix(l, "- ")
+		if !ok {
+			continue
+		}
+		stamp, msg, ok := strings.Cut(item, " — ")
+		if at, err := time.ParseInLocation(logTime, stamp, time.Local); ok && err == nil {
+			entries = append(entries, logEntry{at, msg})
+		}
+	}
+	return entries
+}
+
+// status is the status the entry changed the task to, when SetStatus wrote it.
+// A message that only starts like one, with no status after it, isn't one.
+func (e logEntry) status() (Status, bool) {
+	s, ok := strings.CutPrefix(e.msg, statusLogged)
+	return Status(s), ok && slices.Contains(taskStatuses, Status(s))
 }
 
 // Section is a section's text, without HTML comments and blank lines.
@@ -372,6 +405,24 @@ func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 
+// statusLogged begins the Log line of every change to a task's status:
+// "status → pr-open", say. crew stats reads the waits on the user from them.
+const statusLogged = "status → "
+
+// recordedForTheUser ends the Log line crew feedback and crew ci-fix write when
+// they put a question to the user under Open questions: a collaborator's PR
+// comment, or red CI past MAX_CI_FIXES. crew stats reads it.
+const recordedForTheUser = "recorded under Open questions for the user"
+
+// SetStatus writes the task's status and logs the change. Every change of a
+// task's status goes through here, so the Log has a line for each.
+func (t Task) SetStatus(s Status) error {
+	if err := t.Set("status", string(s)); err != nil {
+		return err
+	}
+	return t.Log(statusLogged + string(s))
+}
+
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
 // goes first. A task without one has priority 0.
 func (t Task) Priority() (int, error) {
@@ -413,6 +464,112 @@ func (t Task) NewestReview() int {
 		}
 	}
 	return n
+}
+
+// An automated review in the task's record: whether the Claude reviewer
+// reported, and each finding.
+type AutomatedReview struct {
+	ClaudeReported bool
+	Findings       []Finding
+}
+
+// A finding of an automated review: the rest of its "- Agreed severity:" and
+// "- Outcome:" lines in the record.
+type Finding struct{ severity, outcome string }
+
+// AutomatedReviews is the reviews under ## Automated reviews, oldest first, in
+// the record's format (pr-review's SKILL.md step 8, and LEDGER.md). A review's
+// "- Reviewers:" line says "Claude reviewer (failed: …)" when that reviewer
+// didn't report; one that failed only in a round reported first.
+func (t Task) AutomatedReviews() []AutomatedReview {
+	var reviews []AutomatedReview
+	var r *AutomatedReview // the review the line is in
+	var f *Finding         // the finding the line is in
+	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
+		reviewers, isReviewers := strings.CutPrefix(l, "- Reviewers: ")
+		severity, isSeverity := strings.CutPrefix(l, "- Agreed severity:")
+		outcome, isOutcome := strings.CutPrefix(l, "- Outcome:")
+		switch {
+		case strings.HasPrefix(l, "### Automated review "):
+			reviews = append(reviews, AutomatedReview{ClaudeReported: true})
+			r, f = &reviews[len(reviews)-1], nil
+		case r == nil:
+		case isReviewers:
+			r.ClaudeReported = !strings.Contains(reviewers, "Claude reviewer (failed:")
+		case strings.HasPrefix(l, "#### "):
+			r.Findings = append(r.Findings, Finding{})
+			f = &r.Findings[len(r.Findings)-1]
+		case f == nil:
+		case isSeverity:
+			f.severity = strings.TrimSpace(severity)
+		case isOutcome:
+			f.outcome = strings.TrimSpace(outcome)
+		}
+	}
+	return reviews
+}
+
+// Clean is the rule for a review that ends a pass, as implementer.md's
+// "Workflow: automated review" step 3 states it: the worker fixed nothing at
+// must fix or should fix for it, and the Claude reviewer reported.
+func (r AutomatedReview) Clean() bool {
+	for _, f := range r.Findings {
+		if f.Outcome() == OutcomeFixed && f.mustOrShouldFix() {
+			return false
+		}
+	}
+	return r.ClaudeReported
+}
+
+// mustOrShouldFix: the finding is held at must fix or should fix, whatever
+// labels come before that ("split: held at pre-existing: must fix, …") and
+// notes after it ("should fix (lowered from must fix: …)").
+func (f Finding) mustOrShouldFix() bool {
+	s := f.severity
+	for _, label := range []string{"flipped: ", "split: held at ", "pre-existing: "} {
+		s = strings.TrimPrefix(s, label)
+	}
+	return strings.HasPrefix(s, "must fix") || strings.HasPrefix(s, "should fix")
+}
+
+// What the worker did about a finding, from the first words of its outcome:
+// "left for the user: pre-existing, …" is OutcomeLeftForUser, say.
+type Outcome string
+
+const (
+	OutcomeFixed       Outcome = "fixed"             // fixed in <sha>
+	OutcomeProposal    Outcome = "proposal"          // proposal <file>
+	OutcomeRecorded    Outcome = "recorded"          // a nitpick outside the PR's lines
+	OutcomeWithdrawn   Outcome = "withdrawn"         // withdrawn in round <n>
+	OutcomeNotADefect  Outcome = "not a defect"      // not a defect: <evidence>
+	OutcomeLeftForUser Outcome = "left for the user" // left for the user[: <reason>]
+	OutcomeOpen        Outcome = "open"              // nothing yet (not a prefix)
+	OutcomeOther       Outcome = "other"             // a form crew doesn't know (not a prefix)
+)
+
+func (f Finding) Outcome() Outcome {
+	if f.outcome == "" {
+		return OutcomeOpen
+	}
+	for _, o := range []Outcome{OutcomeFixed, OutcomeProposal, OutcomeRecorded, OutcomeWithdrawn, OutcomeNotADefect, OutcomeLeftForUser} {
+		if strings.HasPrefix(f.outcome, string(o)) {
+			return o
+		}
+	}
+	return OutcomeOther
+}
+
+// StillOpen: the finding repeats one an earlier review left for the user,
+// which the user hasn't decided yet ("left for the user: still open from
+// review <N>").
+func (f Finding) StillOpen() bool {
+	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
+}
+
+// SetAside: the worker judged the finding not a defect, either settling a
+// split that way or disputing a finding no reviewer refuted.
+func (f Finding) SetAside() bool {
+	return f.Outcome() == OutcomeNotADefect || strings.HasPrefix(f.severity, "disputed")
 }
 
 // AcceptanceCriteria is the first line of each of the task's criteria: the
@@ -518,15 +675,25 @@ const (
 // ciLineHead is the head commit an item reports red CI on, when it's a line of
 // that kind (ciFailedOn or ciStillRedOn), checked or not.
 func ciLineHead(l, kind string) (string, bool) {
-	rest, ok := strings.CutPrefix(l, "- [")
-	if !ok || len(rest) < 3 || rest[1:3] != "] " {
+	item, ok := checklistItem(l)
+	if !ok {
 		return "", false
 	}
-	if rest, ok = strings.CutPrefix(rest[3:], kind); !ok {
+	rest, ok := strings.CutPrefix(item, kind)
+	if !ok {
 		return "", false
 	}
 	head, _, _ := strings.Cut(rest, " ")
 	return strings.TrimSuffix(head, ":"), true
+}
+
+// checklistItem is the text of a checklist item, "- [ ] …" or "- [x] …".
+func checklistItem(l string) (string, bool) {
+	rest, ok := strings.CutPrefix(l, "- [")
+	if !ok || len(rest) < 3 || rest[1:3] != "] " {
+		return "", false
+	}
+	return rest[3:], true
 }
 
 // CIFailures is the head commits the task's review rounds reported red CI on,
@@ -568,6 +735,21 @@ func (t Task) FeedbackRounds() int {
 		case !ci && !hasFeedback:
 			n++
 			hasFeedback = true
+		}
+	}
+	return n
+}
+
+// ReviewComments counts the user's comments in the task's review rounds:
+// review summaries, inline comments and conversation comments (reviewRound.add
+// writes their items). Red CI and requests for another automated review
+// aren't comments.
+func (t Task) ReviewComments() int {
+	n := 0
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		item, ok := checklistItem(l)
+		if ok && (strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")) {
+			n++
 		}
 	}
 	return n

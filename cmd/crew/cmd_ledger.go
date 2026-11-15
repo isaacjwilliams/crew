@@ -182,13 +182,15 @@ func cmdSet(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if err := t.Set(key, value); err != nil {
+	if key == "status" {
+		err = t.SetStatus(Status(value))
+	} else {
+		err = t.Set(key, value)
+	}
+	if err != nil {
 		return err
 	}
 	t.Touch()
-	if key == "status" {
-		t.Log("status → " + value)
-	}
 	c.commit("set " + t.ID() + " " + key)
 	return nil
 }

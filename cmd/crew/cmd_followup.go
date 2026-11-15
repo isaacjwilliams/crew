@@ -124,9 +124,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	// can land after it set pr-open.
 	switch {
 	case newRound:
-		t.Set("status", string(AddressingFeedback))
+		t.SetStatus(AddressingFeedback)
 	case note != "":
-		t.Set("status", string(Working))
+		t.SetStatus(Working)
 	}
 	t.Touch()
 	msg := fmt.Sprintf("followup (%s): worker %s", l.mode, l.job)
