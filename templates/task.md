@@ -41,7 +41,7 @@ updated: {{NOW}}
 <!-- Where the new code lives (modules, classes, routes, components), whether it extends what exists
      or starts something new, the main alternative, and why it lost. If a preparatory refactor would
      make this simpler, name it here even if you decided against it. A change that adds no new code
-     paths says so in one line. -->
+     paths says so in one line. End with "Size: about <n> lines, <areas>" (added plus removed). -->
 
 ## Plan
 <!-- The agreed approach, as numbered steps. Name the files and functions to touch. -->
