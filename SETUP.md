@@ -388,7 +388,7 @@ Later fixes and reverts since 2026-11-05:
 
 A fix traces to its task through `fixes`, or to an unknown task when that's `unknown`. A revert is a commit on the default branch whose message says `This reverts commit <sha>`, as `git revert` and GitHub's revert button write, where that commit is a PR's merge commit (`Merge pull request #35 from …`) or squash commit (`… (#35)`). It traces to the task whose `pr` is that PR, or to an unknown task when none is. Undoing a revert, by reverting it or the PR that made it, isn't counted, and each commit counts as reverted once.
 
-It reads the ledger, and for reverts the default branch in the project's clone, which it fetches first. It changes nothing else, so it works on any machine; without the project's clone it reports the rest and says `reverts: not checked`.
+It reads the ledger, and for reverts the default branch in the project's clone, which it fetches first. It changes nothing else, so it works on any machine; without the project's clone, or with a shallow one, it reports the rest and says `reverts: not checked`.
 
 ### What a worker's PR looks like
 

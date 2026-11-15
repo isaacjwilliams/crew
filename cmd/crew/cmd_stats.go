@@ -289,10 +289,14 @@ func riskWords(r Risk) string {
 }
 
 // reverts reads the reverts on the project's default branch from its clone,
-// after a quiet fetch, as crew sync does.
+// after a quiet fetch, as crew sync does. A shallow clone lacks the older
+// commits a revert may name, so it isn't read.
 func (p *Project) reverts() ([]correction, error) {
 	if p.Repo() == "" || !isDir(p.Repo()) {
 		return nil, errors.New("no clone of the project on this machine")
+	}
+	if shallow, _ := git(p.Repo(), "rev-parse", "--is-shallow-repository"); shallow == "true" {
+		return nil, fmt.Errorf("%s is a shallow clone; git fetch --unshallow there gets its whole history", p.Repo())
 	}
 	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
 		warn("%s: git fetch failed; reading reverts as last fetched", p.Name)

@@ -1628,6 +1628,11 @@ check "stats traces a fix and a revert since the date to their tasks and tiers, 
   '[[ $out == *"$later" ]]'
 check "stats changes nothing in the home" '[[ $(git -C "$L" rev-parse @) == "$head" && $(git -C "$L" status --porcelain) == "$dirty" ]]'
 check "stats refuses a date it can't read" '[[ $(crew stats --project stats --since 11/05 2>&1) == *"--since takes a date, YYYY-MM-DD, not '"'"'11/05'"'"'"* ]]'
+git clone -q --depth 1 "file://$SB/stats.git" "$SB/stats-shallow" 2>/dev/null
+echo "REPO=\"$SB/stats-shallow\"" >"$SP/local.env"
+out=$(crew stats --project stats --since 2026-11-05 2>&1); st=$?
+check "with a shallow clone, stats says it didn't check for reverts, and why" \
+  '((st == 0)) && [[ $out == *"  reverts: not checked ($SB/stats-shallow is a shallow clone; git fetch --unshallow there gets its whole history)" && $out != *"revert of"* ]]'
 rm "$SP/local.env"
 out=$(crew stats --project stats --since 2026-11-05 2>&1); st=$?
 check "without the project's clone, stats says it didn't check for reverts, and still reports" \
