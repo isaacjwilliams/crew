@@ -772,6 +772,44 @@ out=$(crew feedback 13 --since 1970-01-01T00:00:00Z)
 check "crew feedback doesn't read the CI summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]]'
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set 13 last_round_sent "$(crew get 13 review_rounds)"
 setstate "done" null; crew set 13 status pr-open
+# A PR that conflicts with its base: crew tick sends the worker a round once it has handed the
+# PR over (pr-open), once for each commit of the base on origin, and never for a stacked task.
+base_moves() {  # another PR merges into main on origin; prints main's new short SHA
+  git -C "$SB/webapp" commit -q --allow-empty -m "Another PR" && git -C "$SB/webapp" push -q && git -C "$SB/webapp" rev-parse --short=7 HEAD
+}
+sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
+crew set 13 status working; n=$(resumes); r=$(crew get 13 review_rounds)
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; B1=$(base_moves)
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
+check "a conflict before the worker hands its PR over is recorded by sync, and left to the worker, by tick and by hand" '[[ $(crew get 13 mergeable) == conflicting && $out != *onflict* && $byhand == *"is working, and its conflicts are its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == "$r" && $(resumes) == "$n" ]]'
+crew set 13 status pr-open
+printf '#!/bin/sh\ncrew set 13 status abandoned\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
+out=$(crew catch-up 13)
+check "a task abandoned while crew catch-up reads GitHub is sent nothing" '[[ $out == "nothing to do: 013-tick-routing is abandoned" && $(crew get 13 review_rounds) == "$r" ]]'
+rm "$HOME/gh-pr-view-hook"; crew set 13 status pr-open
+out=$(crew tick 2>/dev/null)
+check "once the PR is handed over, a tick records the conflict with main's tip on origin as a round of its own, and sends it to the idle worker" '[[ $out == *"013-tick-routing: catch-up round $((r + 1)) recorded: conflicts with main"* && $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(round "$F13" $((r + 1))) == "- [ ] Conflicts with main at $B1" && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+setstate "done" null; crew set 13 status pr-open
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
+check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
+echo UNKNOWN >"$HOME/gh-pr-mergeable"; B2=$(base_moves)
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
+check "while GitHub is still working out whether the PR conflicts, crew leaves it alone" '[[ -z $(crew get 13 mergeable) && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo agent/elsewhere >"$HOME/gh-pr-base-12"; setstate working 4242   # busy, so no retarget goes out
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
+check "a PR whose GitHub base isn't the task's base gets no conflict round" '[[ $(crew get 13 mergeable) == conflicting && -z $out && $byhand == "nothing to do: PR #12 targets agent/elsewhere, not the task'"'"'s base main" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'
+crew set 13 base agent/season-model; echo agent/season-model >"$HOME/gh-pr-base-12"
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
+check "a stacked task's conflict is left to a restack, by tick and by hand" '[[ $out != *onflict* && $byhand == "nothing to do: 013-tick-routing is stacked on 009-season-model, so its conflicts are a restack'"'"'s (crew restack)" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'
+crew set 13 base main; echo main >"$HOME/gh-pr-base-12"; echo CLOSED >"$HOME/gh-pr-state"
+out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
+check "a conflict on a PR closed without merging is left alone" '[[ $out != *onflict* && $byhand == "nothing to do: PR #12 is closed" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
+echo OPEN >"$HOME/gh-pr-state"; setstate "done" null; n=$(resumes)
+out=$(crew tick 2>/dev/null)
+check "a new commit on the base that still conflicts gets a round of its own" '[[ $out == *"013-tick-routing: catch-up round $((r + 2)) recorded: conflicts with main"* && $(round "$F13" $((r + 2))) == "- [ ] Conflicts with main at $B2" && $(resumes) == $((n + 1)) ]]'
+rm "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew sync >/dev/null 2>&1
+check "sync clears mergeable once the PR merges cleanly again" '[[ -z $(crew get 13 mergeable) ]]'
+setstate "done" null; crew set 13 status pr-open
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
 check "launched sessions never inherit crew's lock fds" '! grep -q "LEAK LOCK FD" "$HOME/claude-calls.log"'

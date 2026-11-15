@@ -103,8 +103,8 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		return err
 	}
 	// Again under the lock: a task merged or abandoned since crew tick looked at
-	// it, or while crew feedback or crew ci-fix read GitHub, keeps its worker
-	// stopped, and so does a pause.
+	// it, or while an earlier tick step read GitHub, keeps its worker stopped,
+	// and so does a pause.
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
