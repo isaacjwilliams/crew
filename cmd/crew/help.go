@@ -124,9 +124,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew stats [--since YYYY-MM-DD] [--all|--project P]
                                    For each task merged since the date (default 30
                                    days ago): your review rounds and comments, how
-                                   long its PR and questions waited on you, and how
-                                   its automated reviews went. Reads the ledger
-                                   only, so it changes nothing and runs anywhere
+                                   long its PR and questions waited on you, how its
+                                   automated reviews went, and its later fixes and
+                                   reverts. Then the tasks by risk tier, and each
+                                   fix and revert since the date, traced to the
+                                   task that caused it. Reads the ledger, and
+                                   fetches the project's clone to read its reverts
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    raise to high the risk of tasks whose branch
