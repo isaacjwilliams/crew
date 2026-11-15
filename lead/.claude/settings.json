@@ -30,6 +30,7 @@
       "Agent(lead)",
       "Agent(implementer)",
       "Agent(gardener)",
+      "Agent(misses)",
       "Agent(goal-lead)"
     ]
   },

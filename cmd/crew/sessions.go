@@ -291,7 +291,7 @@ func (c *Crew) newLauncher(p *Project, prefix, agent string, flags ...string) la
 // sessionRoles are the agents that run as sessions of their own. Every other
 // agent is a subagent, which a session may run. The lead's settings deny each of
 // them as a subagent, and a test checks the two lists agree.
-var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener"}
+var sessionRoles = []string{"lead", "goal-lead", "implementer", "gardener", "misses"}
 
 // agentFiles are the files a session of agent loads its instructions from: the
 // installed copies (installedAgents) of its own agent file and of every

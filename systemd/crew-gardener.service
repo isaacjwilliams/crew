@@ -1,5 +1,5 @@
 [Unit]
-Description=crew gardener: review newly merged commits and write refactor proposals
+Description=crew gardener: the gardener on newly merged commits, the misses agent on your comments on merged PRs; both write proposals
 After=network-online.target
 Wants=network-online.target
 

@@ -95,7 +95,7 @@ for f in lead:lead implementer:worker goal-lead:lead; do
   check "$a disallows EnterWorktree and ExitWorktree" "grep '^disallowedTools:' $A/$a.md | grep -q 'EnterWorktree, ExitWorktree'"
   check "$a's frontmatter runs crew-guard as $r" "grep -q 'bin/crew-guard\" $r.\$' $A/$a.md"
   sf=$C/worker-settings.json; [[ $r == lead ]] && sf=$LS
-  for g in lead implementer gardener goal-lead; do
+  for g in lead implementer gardener misses goal-lead; do
     check "${sf#"$REPO_DIR"/} denies Agent($g)" "jq -e >/dev/null '.permissions.deny | index(\"Agent($g)\")' $sf"
   done
 done
@@ -124,6 +124,26 @@ check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '
 check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
 check "the gardener's allow list is the read-only one, plus crew remember" \
   "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
+# --- the misses agent: the gardener's powers, its own job
+MS=$A/misses.md
+check "misses.md runs crew-guard as the gardener" "grep -q 'bin/crew-guard\" gardener.\$' $MS"
+check "misses.md names the four places a miss is fixed" \
+  "grep -q \"The repo's AGENTS.md\" $MS && grep -q 'A lint rule' $MS && grep -q '~/.claude/CLAUDE.md' $MS && grep -q \"Crew's review rubric\" $MS"
+check "misses.md sorts each comment, and what review already raised isn't a miss" \
+  "grep -q 'Sort each comment: a miss, or not' $MS && grep -q 'a question, or praise' $MS && grep -q 'a change of mind' $MS && grep -q \"the brief or the user's decisions settled\" $MS && grep -q 'something review already raised: a finding left for the user, a finding written up as a proposal, or a split or disputed finding' $MS"
+check "misses.md keeps the rubric generic: a project's miss goes to its AGENTS.md" \
+  "grep -q 'it never names a framework, a language or a project' $MS && grep -q \"goes to the repo's AGENTS.md, never to the rubric\" $MS"
+check "misses.md writes at most three proposals, source misses, citing every comment" \
+  "grep -q 'at most three proposals' $MS && grep -q '\`source\` is \`misses\`' $MS && grep -q 'cites every comment the proposal covers' $MS"
+check "misses.md marks a taste-file or rubric proposal as the user's to make, as lead.md and LEDGER.md expect" \
+  "grep -qF 'Target: <file>. A change for you to make, not a task in this project.' $MS && grep -qF 'Target: <file>. A change for you to make, not a task in this project.' $REPO_DIR/LEDGER.md && grep -qF 'Proposal section starts \`Target: <file>.\`' $A/lead.md"
+GD=$REPO_DIR/cmd/crew/cmd_gardener.go
+check "crew gardener launches its agents from one call site, which takes the agent's name" \
+  "[[ \$(grep -c '\"--agent\"' $GD) == 1 ]] && grep -q '\"--agent\", agent,' $GD"
+check "crew gardener reads rounds and merges through ledger.go, with no parser of its own" "! grep -n 'PR merged\\|### Round' $GD"
+check "the gardener's unit, its plist and crew help name the misses agent too" \
+  "grep -q '^Description=.*misses agent' $REPO_DIR/systemd/crew-gardener.service && grep -q 'misses agent' $REPO_DIR/launchd/crew-gardener.plist && grep -A2 'crew gardener \[' $REPO_DIR/cmd/crew/help.go | grep -q 'misses agent'"
+check "lead.md names the misses agent among the proposals' writers" "grep -q 'the misses agent (\`misses\`' $A/lead.md"
 check "a session in the home's lead/ runs as the lead" "jq -e >/dev/null '.agent == \"lead\"' $LS"
 check "the lead's settings leave the permission mode to LEAD_PERMISSION_MODE" "jq -e >/dev/null '.permissions.defaultMode == null' $LS"
 check "a goal lead gets the lead's settings without their agent" "grep -qF 'lead/.claude/settings.json' <<<\"\$SRC\" && grep -qF 'lead.del(\"agent\")' <<<\"\$SRC\""

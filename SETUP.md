@@ -1,6 +1,6 @@
 # Agent crew: setup and usage
 
-Seven Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
+Eight Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
 
 Everything lives in one private git repo of yours, your **crew home**, cloned to `~/crew`: the crew's code, your settings, and the ledger. It's a copy of the public crew repo, [isaacjwilliams/crew](https://github.com/isaacjwilliams/crew), and pulls new versions from it. Any machine with a clone can run the crew, one at a time.
 
@@ -21,6 +21,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            └── review/merge ── GitHub PRs
                                    ▲
        gardener (weekly timer) ────┘ reads merged commits → proposals in the ledger
+       misses (with the gardener)    your comments on merged PRs → proposals in the ledger
        crew tick (every 3 minutes)   your PR comments → the worker; collaborators' → you;
                                      restacks, cleanups; a goal's ready tasks → workers
        goal lead (one per goal)      plans every item of a goal you started, without you
@@ -68,10 +69,10 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 | Installed to | What |
 |---|---|
-| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
+| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
 | `~/.local/bin/crew`, `~/.local/bin/lead` | Links to the home's `bin/crew` and `bin/lead`, so the two commands are on your `PATH` |
 | `~/.config/fish/completions/{crew,lead}.fish` | Tab completion in fish, including task IDs |
-| Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener |
+| Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener and misses agent |
 | Linux: `~/.config/systemd/user/crew-tick.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-tick.plist` | `crew tick` every 3 minutes |
 | Linux: `~/.config/systemd/user/crew-lead.service`<br>Mac: `~/Library/LaunchAgents/crew-lead.plist` | The lead for your phone (see below) |
 
@@ -540,6 +541,8 @@ crew promote 2026-09-29-extract-retry   # turns a proposal into a draft task; th
 
 Proposals live in `~/crew/projects/<project>/proposals/`. The gardener writes at most three per run and skips anything already proposed, accepted, or rejected.
 
+The same command then runs the misses agent. It reads the tasks merged since its last run where you commented on the PR after automated review had been through it (first run: from the last commit before those 14 days, as for the gardener), sorts each comment as a miss or not, and proposes a fix at the source for the misses: the repo's AGENTS.md, a lint rule, your `~/.claude/CLAUDE.md` or crew's review rubric, at most three per run. A proposal for your `CLAUDE.md` or the rubric starts `Target: <file>`: it's a change for you to make by hand, not a task, and once you've made it the lead marks the proposal accepted. When no merged task has such a comment, it starts no session.
+
 `crew host up` schedules it (weekly, Monday 06:00). To pause it, `systemctl --user disable --now crew-gardener.timer`, or on a Mac `launchctl bootout gui/$(id -u)/crew-gardener && launchctl disable gui/$(id -u)/crew-gardener`; the next `crew host up` turns it on again.
 
 ```sh
@@ -564,7 +567,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Rule | Enforced by |
 |---|---|
 | Workers only change files in their own worktree (plus the ledger, temp dirs and tool caches) | `crew-guard` blocks Edit/Write anywhere else, for the worker and any subagent it spawns (the hook is in both `implementer.md` and `worker-settings.json`). Shell commands aren't confined: the implementer's instructions set the same limit, and auto mode's classifier stops risky commands |
-| The gardener and `crew observe` don't change your code | They run only the read-only commands in `gardener-settings.json` and `readonly-settings.json` (the gardener may also suggest project memory with `crew remember`); anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
+| The gardener, the misses agent and `crew observe` don't change your code | They run only the read-only commands in `gardener-settings.json` and `readonly-settings.json` (the gardener may also suggest project memory with `crew remember`); anything else is denied without a prompt. `crew-guard` keeps the gardener's edits to the ledger |
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
@@ -692,7 +695,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 ```sh
 crew host down                       # releases the lease and turns the services off; if it refuses
                                      # over unpushed work, push it, or use --force to drop it
-rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,goal-lead}.md
+rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md
 rm ~/.local/bin/{crew,lead} ~/.config/fish/completions/{crew,lead}.fish
 rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer} ~/.config/systemd/user/crew-lead.service
 rm ~/Library/LaunchAgents/crew-{tick,gardener,lead}.plist      # on a Mac, instead
