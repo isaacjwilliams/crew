@@ -373,7 +373,7 @@ func (r reviewRound) empty() bool {
 func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
-	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format("2006-01-02 15:04"), prNumber)
+	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
 		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
 	}

@@ -1,6 +1,6 @@
 # Agent ledger
 
-The coordination state for the crew: the `lead`, `implementer` workers, `casual-observer`, and `gardener`. It lives in the crew home (`~/crew`, a clone of the crew repo), under `projects/`, outside every repository you work on, so none of it shows up for collaborators. The home is a git repo: `crew` commits the ledger after every mutating command, so `git log -- projects` there is the history of who decided what. Those commits take only the ledger, never the home's code or config. Each one is pushed to the home's `origin`, your private repo, in the background a moment later, and `crew tick` pushes anything that didn't make it.
+The coordination state for the crew: the `lead`, `implementer` workers, `casual-observer`, `gardener` and `misses`. It lives in the crew home (`~/crew`, a clone of the crew repo), under `projects/`, outside every repository you work on, so none of it shows up for collaborators. The home is a git repo: `crew` commits the ledger after every mutating command, so `git log -- projects` there is the history of who decided what. Those commits take only the ledger, never the home's code or config. Each one is pushed to the home's `origin`, your private repo, in the background a moment later, and `crew tick` pushes anything that didn't make it.
 
 ## Layout
 
@@ -27,10 +27,11 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     memory.md            facts about the project the user approved (see Project memory)
     memory-suggestions.md  facts suggested for memory.md, waiting on the user
     gardener.last        last commit the gardener reviewed
+    misses.last          newest merge time of the tasks the misses agent read
     paused               there while the project is paused (see Pausing)
   reports/               free-form notes the lead keeps
   host                   the machine that runs the crew; `crew host up` claims it
-  logs/                  gardener runs, Worktrunk hook output and background pushes (not committed)
+  logs/                  gardener and misses runs, Worktrunk hook output and background pushes (not committed)
 ```
 
 `<project>` is `<owner>-<repo>` from the `origin` remote.
@@ -52,11 +53,23 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `pr-open` | PR is up and waiting for your review | worker, with `crew hand-over` the first time, which refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
+| `done` | a spike's report is in (see Kinds of task) | `crew hand-over` |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
 Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log).
 
-"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
+"In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. "Finished" means `merged`, `done` or `abandoned`; `crew cleanup --merged` and `crew tick` remove the worktree and local branch of a `merged` or `done` task. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
+
+## Kinds of task
+
+A task's `kind` says what it makes, and so what `crew ready` asks of its brief and what `crew hand-over` checks. A task without one is a build. `crew new --kind <kind>` sets it.
+
+| kind | makes | its brief needs | `crew hand-over` checks, then sets |
+|---|---|---|---|
+| `build` | a PR | Goal, Structure, Plan, Acceptance criteria, and a `risk` | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
+| `spike` | a report, from a path tried on a branch nobody merges | Goal, Plan (what to try) and Acceptance criteria (what would answer the question); no `risk` | `## Report` starts with `Answer: <one line>`, and the worktree has nothing uncommitted; `done` |
+
+A **spike** answers a question a draft's plan rests on. The draft lists those questions under `## Still to learn`, one `- [ ]` item each, and `crew ready` refuses it while any is unchecked. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. So a spike takes no part in stacks: it can't be stacked, and nothing can stack on it; `crew new --on` and `crew set` of a `base` or `kind` refuse either. A task that `depends_on` a spike can be dispatched once the spike is done. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the plan, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft writes the spikes' answers side by side under the item, ticks it, and finishes the plan.
 
 ## Risk tiers
 
@@ -72,7 +85,7 @@ A project lists its sensitive paths in `SENSITIVE_PATHS`, in its `project.env`: 
 
 ## Front-matter keys (task files)
 
-`id`, `title`, `project`, `status`, `goal` (the goal the task belongs to, if any; set by `crew new --goal`), `base` (the branch the task starts from and its PR targets), `base_sha` (written by `crew` only; see Stacked tasks), `restack_sent` (the commit the last `crew restack` asked the worker to rebase onto; written by `crew` only), `retarget_sent` (the base the last `crew restack` asked the worker to point its PR at; written by `crew` only), `branch`, `depends_on` (task ids, space or comma separated), `priority` (a whole number, higher first, empty means 0; orders `crew tick`'s dispatch of running goals' ready tasks; set with `crew set`), `risk` (`low`, `medium` or `high`, the look the PR needs; set by the lead, raised to `high` by `crew`; see Risk tiers), `pre_pr_review` (yes/no), `pr_mode` (draft/ready/none), `worktree`, `pr`, `pr_state`, `pr_base` (the branch the PR targets on GitHub, from `crew sync`; written by `crew` only), `pr_updated` (when GitHub last saw a change to the PR, from `crew sync`; written by `crew` only), `ci_state` (the checks on the PR's head commit: `running` while any hasn't finished, then `failing` or `passing`, and empty when it has none; from `crew sync`, and only `crew tick`'s filter for running `crew ci-fix`; written by `crew` only), `worker_name`, `worker_job`, `worker_session`, `worker_fingerprint` (what the worker loaded when it started; written by `crew` only, see below), `review_rounds`, `last_round_sent` (the newest round a worker was sent), `interrupted` (when a pause caught the worker mid-turn; written by `crew pause`, and cleared by the followup that tells the worker to carry on), `feedback_since` (UTC), `questions_routed` (a checksum of the worker's open questions last sent to the goal lead; written by `crew` only), `created`, `updated`.
+`id`, `title`, `project`, `status`, `kind` (`build` or `spike`; empty means build; set by `crew new --kind`; see Kinds of task), `informs` (a spike's draft: the task whose question it answers; set by `crew new --informs`), `report_sent` (`yes` once a goal's done spike's report has gone to the goal lead; written by `crew` only), `goal` (the goal the task belongs to, if any; set by `crew new --goal`), `base` (the branch the task starts from and its PR targets), `base_sha` (written by `crew` only; see Stacked tasks), `restack_sent` (the commit the last `crew restack` asked the worker to rebase onto; written by `crew` only), `retarget_sent` (the base the last `crew restack` asked the worker to point its PR at; written by `crew` only), `branch`, `depends_on` (task ids, space or comma separated), `priority` (a whole number, higher first, empty means 0; orders `crew tick`'s dispatch of running goals' ready tasks; set with `crew set`), `risk` (`low`, `medium` or `high`, the look the PR needs; set by the lead, raised to `high` by `crew`; a spike has none; see Risk tiers), `pre_pr_review` (yes/no), `pr_mode` (draft/ready/none), `worktree`, `pr`, `pr_state`, `pr_base` (the branch the PR targets on GitHub, from `crew sync`; written by `crew` only), `pr_updated` (when GitHub last saw a change to the PR, from `crew sync`; written by `crew` only), `ci_state` (the checks on the PR's head commit: `running` while any hasn't finished, then `failing` or `passing`, and empty when it has none; from `crew sync`, and only `crew tick`'s filter for running `crew ci-fix`; written by `crew` only), `worker_name`, `worker_job`, `worker_session`, `worker_fingerprint` (what the worker loaded when it started; written by `crew` only, see below), `review_rounds`, `last_round_sent` (the newest round a worker was sent), `interrupted` (when a pause caught the worker mid-turn; written by `crew pause`, and cleared by the followup that tells the worker to carry on), `feedback_since` (UTC), `questions_routed` (a checksum of the worker's open questions last sent to the goal lead; written by `crew` only), `created`, `updated`.
 
 Front matter is flat `key: value`. Edit it with `crew set` rather than by hand when a session might be writing at the same time.
 
@@ -84,25 +97,27 @@ A goal is a batch of items, listed in its file or on a tracker, that the user ha
 |---|---|---|
 | `draft` | Goal section being written with the lead | `crew goal new` |
 | `running` | the goal lead is working through it | `crew goal start` (or a `crew goal note` to a done goal) |
-| `done` | every task merged or abandoned; goal lead and checkout removed | `crew goal done` (and so `crew tick`) |
+| `done` | every task finished (merged, done or abandoned); goal lead and checkout removed | `crew goal done` (and so `crew tick`) |
 | `abandoned` | stopped; goal lead and checkout removed, tasks left as they are | `crew goal abandon` |
 
 Front-matter keys: `id`, `title`, `project`, `status`, `checkout` (the goal lead's working directory), `lead_name`, `lead_job`, `lead_session` (its session, like a worker's three identifiers), `lead_fingerprint` (what it loaded when it started, like a worker's; written by `crew` only), `unsent_notes` (your notes the goal lead hasn't been sent yet; written by `crew` only), `interrupted` (as a task's, for the goal lead; cleared by `crew goal followup`), `max_in_flight` (how many of its tasks may be in flight at once; empty means `GOAL_MAX_IN_FLIGHT`; set by `crew goal new --max-in-flight` and `crew goal cap`), `created`, `updated`. Sections: Goal (your words, including where the items come from), Items (written by the goal lead), Decisions (your notes from `crew goal note`, and the goal lead's own calls), Log.
 
-The goal lead hears about two things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, and new questions from its tasks' workers. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
+The goal lead hears about three things, through `crew goal followup`, which `crew tick` runs once it's free: your notes, new questions from its tasks' workers, and its spikes' reports, each once. A question it can't answer stays unchecked, with a "For the user" line in the task's Log, and reaches you through the lead like any worker question.
 
 ## Proposals
 
-A proposal is an idea worth keeping that isn't ready to be a task, in `proposals/<YYYY-MM-DD>-<slug>.md`. The gardener writes refactor proposals on its schedule; the user, a lead or a worker writes one with `crew propose "<title>" --why "<a paragraph>"`. A proposal stays out of the task list, so it doesn't look like work in progress. The lead raises an open one at intake when it touches the task's area, and `crew promote` turns one into a draft task.
+A proposal is an idea worth keeping that isn't ready to be a task, in `proposals/<YYYY-MM-DD>-<slug>.md`. The gardener writes refactor proposals on its schedule, and the misses agent proposals that fix the cause of your review comments that automated review missed; the user, a lead or a worker writes one with `crew propose "<title>" --why "<a paragraph>"`. A proposal stays out of the task list, so it doesn't look like work in progress. The lead raises an open one at intake when it touches the task's area, and `crew promote` turns one into a draft task.
 
 | status | meaning | set by |
 |---|---|---|
-| `open` | kept, not acted on yet | `crew propose`, or the gardener |
+| `open` | kept, not acted on yet | `crew propose`, the gardener or the misses agent |
 | `deferred` | set aside for now; can still be promoted | you or the lead via `crew set` |
-| `accepted` | promoted; `task` names the draft task it became | `crew promote` |
+| `accepted` | promoted; `task` names the draft task it became. A `Target:` proposal (below) is never promoted: it's accepted once you've made its change, with a Log line saying so | `crew promote`, or the lead via `crew set` |
 | `rejected` | not wanted; the Log says why | you or the lead via `crew set` |
 
-Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener fills them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
+Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `misses`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener and the misses agent fill them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
+
+A proposal from the misses agent may target a file outside the project: your `~/.claude/CLAUDE.md`, or crew's review rubric (`.claude/skills/pr-review/rubric.md` in crew's repo). Its Proposal section then starts `Target: <file>. A change for you to make, not a task in this project.` You make the change by hand, and the lead sets the proposal `accepted`.
 
 ## Project memory
 
@@ -127,7 +142,7 @@ A session that's mid-turn when the pause starts gets `interrupted` set on its ta
 
 A task whose `base` is another task's `branch` is stacked on that task, its parent. `crew new --on TASK` sets that up (and adds the parent to `depends_on`); `crew set TASK base <branch>` does the same for an existing task. There is no other marker.
 
-- A stacked task can be dispatched once its parent's branch is on GitHub. Its other `depends_on` entries must still be merged.
+- A stacked task can be dispatched once its parent's branch is on GitHub. Its other `depends_on` entries must still be merged (or, for a spike, done).
 - `base_sha` is the last commit of the parent's in the task's branch. `crew dispatch` records it and `crew sync` keeps it current; a restack cuts there.
 - `crew sync` and `crew status` report a stacked task that needs a restack: its parent's branch has new commits, or its parent merged. `crew restack TASK` resumes the task's worker with the rebase to run. After a merge the worker also retargets the PR and sets `base` to the branch the parent merged into, which is what ends the stacking.
 - `crew sync` and `crew status` also report any task, stacked or not, whose open PR (`pr_base`) targets a branch other than the one the task belongs on now: its `base`, or, once its parent has merged, what the parent merged into. They wait until origin has that branch: `PR targets <pr_base>, not <base>`. `crew restack TASK` then has its worker run `gh pr edit --base`, with the rebase when one is needed, or alone. Moving a task onto another task's branch is `crew set TASK base <branch>`; `crew tick` does the rest. A task that isn't stacked gets a retarget alone only when its branch starts on its new base (`base_sha` is on it). Otherwise `crew restack` refuses, since crew rebases only stacked tasks, and its worker needs a note from you.
@@ -186,4 +201,4 @@ When CI goes red on a PR its worker has handed to you (`pr-open`), `crew tick` r
 
 A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you.
 
-`crew stats` reads those lines, the `Reviewers:`, `Agreed severity:` and `Outcome:` lines under Automated reviews, and the comment items of Review rounds. So their forms are a contract with it: a change to one needs a change to `crew stats`.
+`crew stats` reads those lines, the `Reviewers:`, `Agreed severity:` and `Outcome:` lines under Automated reviews, and the comment items of Review rounds. The misses run of `crew gardener` reads when a task merged, the comment items, and the times in the headings of review rounds and automated reviews. So their forms are a contract with both: a change to one needs a change to them.

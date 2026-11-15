@@ -7,7 +7,7 @@
 isolate_home "$(new_sandbox host)/home"
 H=$HOME/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
-check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
+check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/misses.md && -f $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
 check "crew and lead linked into ~/.local/bin" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" && $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" ]]'
 check "and the fish completions installed, and nothing else for fish" '[[ -f $HOME/.config/fish/completions/crew.fish && -f $HOME/.config/fish/completions/lead.fish && $(find "$HOME/.config/fish" -type f | wc -l) == 2 ]]'

@@ -28,8 +28,10 @@ func (c *Crew) branches(project string) Branches {
 func taskProjectDir(t Task) string { return filepath.Base(filepath.Dir(filepath.Dir(t.Path))) }
 
 // parentOf is the task t is stacked on, if any.
-func (idx Branches) parentOf(t Task) (Task, bool) {
-	base := t.Base()
+func (idx Branches) parentOf(t Task) (Task, bool) { return idx.parentWith(t, t.Base()) }
+
+// parentWith is the task t would be stacked on with this base, if any.
+func (idx Branches) parentWith(t Task, base string) (Task, bool) {
 	if base == "" {
 		return Task{}, false
 	}
@@ -38,6 +40,31 @@ func (idx Branches) parentOf(t Task) (Task, bool) {
 		return Task{}, false
 	}
 	return p, true
+}
+
+// childrenOf are the tasks stacked on t.
+func (idx Branches) childrenOf(t Task) []Task {
+	var children []Task
+	for _, c := range idx {
+		if p, ok := idx.parentOf(c); ok && p.Path == t.Path {
+			children = append(children, c)
+		}
+	}
+	return children
+}
+
+// stackRefusal says why a task of kind child can't be stacked on parent, of kind
+// parentKind, or nothing. Only kinds that make a PR take part in stacks: a
+// restack has its worker push, and a task waits for its parent's branch on
+// origin. A kind crew doesn't know is left to the commands that report it.
+func stackRefusal(child Kind, parent Task, parentKind Kind) error {
+	if rules, ok := child.rules(); ok && !rules.pr {
+		return fail("a %s's branch stays local, so it can't be stacked", child)
+	}
+	if rules, ok := parentKind.rules(); ok && !rules.pr {
+		return fail("a %s's branch is never pushed, so nothing can stack on %s", parentKind, parent.ID())
+	}
+	return nil
 }
 
 // liveParent is the task t is stacked on once crew dispatch has moved it past

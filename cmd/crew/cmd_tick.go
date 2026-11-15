@@ -3,8 +3,9 @@ package main
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments and red CI on PRs handed to the user, send
 // review rounds and restacks to idle workers, mark tasks that wait on the user,
-// clean up merged ones, pass goal leads their input and close finished goals.
-// Last, it dispatches the ready tasks of running goals, highest priority first.
+// clean up those that delivered (merged, or a spike done), pass goal leads their
+// input and close finished goals. Last, it dispatches the ready tasks of running
+// goals, highest priority first.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
 // prints one line per thing it did.
 //
@@ -109,14 +110,15 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 }
 
 // tickTask is one task's share of a tick, for a task already under way: its
-// cleanup once merged, or what its worker is sent while it's in flight, which is
-// nothing while its project is paused. Dispatching ready tasks is dispatchReady's.
+// cleanup once it has delivered (Status.Delivered), or what its worker is sent
+// while it's in flight, which is nothing while its project is paused.
+// Dispatching ready tasks is dispatchReady's.
 func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool) {
 	id, st := t.ID(), t.Status()
-	if st == Merged {
+	if st.Delivered() {
 		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
 		if t.Worktree() != "" && c.step(nil, "cleanup", t.Path) == 0 {
-			fmt.Printf("%s: merged; worktree cleaned up\n", id)
+			fmt.Printf("%s: %s; worktree cleaned up\n", id, st)
 		}
 		return
 	}
@@ -257,7 +259,7 @@ func (c *Crew) dispatchReady() {
 			continue
 		}
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
-		if deps, err := c.unmergedDeps(idx, t); err == nil && len(deps) > 0 {
+		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
 			continue
 		}
 		var errs strings.Builder
@@ -312,7 +314,7 @@ func movedHere(t Task, as Agents) bool {
 
 // tickGoal is one running goal's share of a tick: pass the goal lead its input
 // once it's free and its project isn't paused, or close the goal once its tasks
-// are all merged or abandoned.
+// are all finished.
 func (c *Crew) tickGoal(g Goal, as Agents, paused bool) {
 	if g.Status() != GoalRunning {
 		return
@@ -326,19 +328,19 @@ func (c *Crew) tickGoal(g Goal, as Agents, paused bool) {
 		}
 	} else if c.goalFinished(g) && !as.jobBusy(job) {
 		if c.step(nil, "goal", "done", g.Path) == 0 {
-			fmt.Printf("goal %s: done, every task merged or abandoned\n", id)
+			fmt.Printf("goal %s: done, every task finished\n", id)
 		}
 	}
 }
 
-// goalHasInput: the user's notes, a worker's questions, or word that a pause cut
-// its last turn short wait for the goal lead.
+// goalHasInput: the user's notes, a worker's questions, a spike's report, or word
+// that a pause cut its last turn short wait for the goal lead.
 func (c *Crew) goalHasInput(g Goal) bool {
 	if atoiOr0(g.Get("unsent_notes")) != 0 || g.Get("interrupted") != "" {
 		return true
 	}
 	for _, t := range c.goalTasks(g) {
-		if _, ok := unroutedQuestions(t); ok {
+		if _, ok := unroutedQuestions(t); ok || unsentReport(t) {
 			return true
 		}
 	}
