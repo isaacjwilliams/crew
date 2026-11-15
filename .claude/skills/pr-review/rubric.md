@@ -38,6 +38,13 @@ For each finding:
 - Explain the causal chain rather than only describing suspicious code.
 - Distinguish a proven defect from a question or preference.
 - Recommend the smallest coherent correction without implementing it.
+- Name the class of defect in a phrase (for example "job arguments read with the wrong id type"). List every instance
+  of that class in the range, not only the first one you met.
+- If the failure already happens at the fork point (the start of the range), for the same caller and input, tag the
+  finding `pre-existing` and cite the code at the fork point that fails the same way. Unchanged lines aren't enough: an
+  old defect that the range newly makes reachable (a new caller of a buggy function, say) is the range's own, so don't
+  tag it. The tag sits beside the severity; it doesn't change it. When some instances of a class already fail at the
+  fork point and others don't, report them as two findings, and tag only the old one.
 
 Do not inflate the review with findings that lack a demonstrated caller, behavioral consequence, or maintenance cost.
 
@@ -82,7 +89,8 @@ Your report goes to a reconciliation step, not to a human, so return findings ra
 
 ### Findings
 
-1. [must fix | should fix | fix later | nitpick] <title> — `path:line`
+1. [must fix | should fix | fix later | nitpick] [pre-existing] <title> — `path:line`
+   Class: <the class of defect>. Instances: `path:line`, `path:line`, …
    <the finding: the failure or cost, the code path, the causal chain, the smallest correction>
 
 ### Review conclusion
@@ -91,3 +99,5 @@ Your report goes to a reconciliation step, not to a human, so return findings ra
 ### Verification limits
 <what you could not check, or "none">
 ```
+
+Leave out `[pre-existing]` unless you tagged the finding.

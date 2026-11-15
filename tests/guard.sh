@@ -281,6 +281,22 @@ check "reviewer.md answers a rebuttal round in the shape the skill asks for" \
   "grep -qx '## Rebuttal rounds' $A/reviewer.md && grep -q 'A prompt that starts .Rebuttal round. is a different job' $A/reviewer.md && grep -q '^  > Rebuttal round <n> on' $SK/SKILL.md && grep -q 'confirm | refute | withdraw | reseverity' $A/reviewer.md"
 check "the implementer acts on withdrawn and split findings, and a review where only Codex failed can be clean" \
   "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: held at <severity>, <reviewer> refutes' $SK/SKILL.md"
+check "the rubric asks for each finding's class and every instance of it, and its report shows both" \
+  "grep -q 'Name the class of defect in a phrase' $SK/rubric.md && grep -q 'of that class in the range, not only the first one you met' $SK/rubric.md && grep -q '^   Class: <the class of defect>. Instances: ' $SK/rubric.md"
+check "the rubric tags a finding pre-existing by its failure at the fork point, not by unchanged lines, and the tag is never a fifth severity" \
+  "grep -q 'If the failure already happens at the fork point' $SK/rubric.md && grep -q 'Unchanged lines aren.t enough' $SK/rubric.md && grep -qF '[must fix | should fix | fix later | nitpick] [pre-existing] <title>' $SK/rubric.md && [[ \$(grep -cE '^- .(must fix|should fix|fix later|nitpick).: ' $SK/rubric.md) == 4 ]] && ! grep -qE '^- .pre-existing.: ' $SK/rubric.md"
+check "only reviewers tag a finding pre-existing, all that raised it: pr-review checks the tag at the fork point and settles it on the Agreed severity line" \
+  "grep -qF 'git show <fork sha>:<path>' $SK/SKILL.md && grep -q 'Never add the tag to a finding no reviewer tagged' $SK/SKILL.md && grep -q 'and every reviewer that raised the finding tagged it' $SK/SKILL.md && grep -q 'but only one of the two reviewers that raised it tagged it: it.s .uncertain.' $SK/SKILL.md && grep -q '^- Agreed severity: .*| pre-existing: <severity> |' $SK/SKILL.md"
+check "the implementer fixes every instance of a finding's class that the change brings in, and names old ones for the user rather than skipping them" \
+  "grep -q 'fix every instance of the finding.s class' $A/implementer.md && grep -q 'fixed in <short sha> (<n> instances)' $A/implementer.md && ! grep -q 'Leave alone an instance' $A/implementer.md && grep -q 'fix every instance of the finding.s class that fails because of this change' $A/implementer.md && grep -q 'left for the user: also at the fork point, <path:line>' $A/implementer.md && grep -q 'report them as two findings, and tag only the old one' $SK/rubric.md"
+check "the implementer changes no code for a pre-existing finding, and leaves it for the user with a proposal" \
+  "grep -q '^   - \*\*pre-existing\*\* (.pre-existing: <severity>.):.*don.t change the code' $A/implementer.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <its file name>' $A/implementer.md"
+check "only a code change closes a must fix: one that only a deploy step or the docs could close is left for the user with its cost" \
+  "grep -q 'Only a code change that removes the failure fixes a must fix' $A/implementer.md && grep -q 'left for the user: <the cost: what fails, for whom, and for how long>' $A/implementer.md"
+check "the summary lists pre-existing findings in a section of their own after Left for later, and gives a deploy window's cost" \
+  "awk '/^\*\*Left for later\*\*/ {l=NR} /^\*\*Already on <base branch>\*\*/ {a=NR} /^\*\*Left for you\*\*/ {y=NR} END {exit !(l && a && y && l < a && a < y)}' $C/../templates/review-comment.md && grep -q 'deploy window' $C/../templates/review-comment.md"
+check "LEDGER.md has the pre-existing agreed severity and both reasons a finding is left for the user" \
+  "grep -q 'pre-existing: <severity>' $REPO_DIR/LEDGER.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <file name>' $REPO_DIR/LEDGER.md && grep -q 'left for the user: <the cost>.: a must fix that only a deploy step' $REPO_DIR/LEDGER.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
