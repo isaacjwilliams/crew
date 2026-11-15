@@ -5,6 +5,8 @@ project: {{PROJECT}}
 status: draft
 kind: {{KIND}}
 informs:
+fixes:
+missed_by:
 base: {{BASE}}
 base_sha:
 restack_sent:
@@ -21,6 +23,7 @@ pr_state:
 pr_base:
 pr_updated:
 ci_state:
+mergeable:
 worker_name:
 worker_job:
 worker_session:

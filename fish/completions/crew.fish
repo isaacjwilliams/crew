@@ -1,10 +1,10 @@
-set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix ci-summary codex status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix catch-up ci-summary codex status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
-complete -c crew -n "__fish_seen_subcommand_from ready hand-over dispatch feedback followup attach restack review ci-fix show path find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
+complete -c crew -n "__fish_seen_subcommand_from ready hand-over dispatch feedback followup attach restack review ci-fix catch-up show path find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
@@ -15,9 +15,11 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
 complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
-complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike' -d 'What the task makes'
+complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike fix refine' -d 'What the task makes'
 complete -c crew -n "__fish_seen_subcommand_from new" -l informs -x -d 'The draft whose question this spike answers' \
     -a "(crew list --status draft 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
+complete -c crew -n "__fish_seen_subcommand_from new" -l fixes -x -d 'The merged task that introduced the defect this fixes' \
+    -a "unknown (crew list --status merged 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'

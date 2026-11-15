@@ -175,6 +175,10 @@ check "implementer names no CI service but GitHub Actions: for any other, the pr
   "! grep -qiE 'semaphore|circleci|buildkite|jenkins|travis|gitlab|teamcity|drone' $A/implementer.md $C/worker-settings.json && grep -q 'For any other CI, read its logs the way the project.s AGENTS.md or memory says' $A/implementer.md"
 check "a red build comes to the implementer as a round's CI line, which it handles before the comments, with the shipped template" \
   "awk '/^## Workflow: review rounds/ {w=1} w && /^4\\. If a round has a .CI failed on <sha>: <checks>. line/ && !c {c=NR} w && /^5\\. Address every comment/ && !a {a=NR} END {exit !(c && a && c < a)}' $A/implementer.md && grep -q 'fill in .templates/ci-comment.md.' $A/implementer.md && [[ -f $C/../templates/ci-comment.md ]] && grep -qF '\"- [ ] %s%s: %s\\n\\n\", ciFailedOn' <<<\"\$SRC\" && grep -qF 'ciFailedOn   = \"CI failed on \"' <<<\"\$SRC\""
+check "a conflict with the base comes to the implementer as a round's line, which it handles first by merging the base in and pushing without force, then ticks" \
+  "awk '/^## Workflow: review rounds/ {w=1} w && /^3\\. Fetch and fast-forward/ && /If a round has a .Conflicts with <base> at <sha>. line/ && !m {m=NR} w && /^4\\. If a round has a .CI failed on/ && !c {c=NR} END {exit !(m && c && m < c)}' $A/implementer.md && grep -q '^   - .git fetch origin., then .git merge origin/<base>.' $A/implementer.md && grep -q '^   - Run the checks, commit the merge, and push it with plain .git push., never a force-push.' $A/implementer.md && grep -q '^   - Tick the line. It needs no PR comment' $A/implementer.md && grep -qF '\"- [ ] %s%s at %s\\n\\n\", conflictsWith' <<<\"\$SRC\" && grep -qF 'conflictsWith = \"Conflicts with \"' <<<\"\$SRC\""
+check "implementer's ground rule turns on the hand-over: rebase a conflict before it; after it, rebase only for a restack, and merge only when the task isn't stacked" \
+  "grep -q '^- Stay on your branch. Until you first hand your PR over (first-run step 10), rebase it onto its base when it conflicts, then force-push it with a lease.*Once you.ve handed it over, never rewrite it: rebase only for a restack (below). If your task isn.t stacked, resolve a conflict by merging the base in.*A stacked task.s conflicts wait for its restack.' $A/implementer.md"
 check "implementer reacts to review comments only with crew react, never with gh" \
   "grep -q 'react to them with .crew react. as .Workflow: review rounds. says. Never reply or react with .gh. directly' $A/implementer.md && grep -q 'adding any reaction but a .crew react.;' $A/implementer.md"
 check "on a review round, the implementer reacts 👀 to every item before reading them, and 🚀 before changing code for one" \
@@ -218,6 +222,17 @@ check "the goal lead opens and readies spikes without parking, and hears when on
   "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the plan review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a plan review' $A/lead.md"
 check "crew tells the goal lead a spike reported in the words its workflow names" \
   "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
+# --- fixes: a defect live in production, proved by a failing test and traced to its cause
+check "a fix's worker commits a failing test that reproduces the defect before the fix, in step 4, and its evidence shows both runs" \
+  "awk '/^## Workflow: first run/ {w=1} w && /^4\\. / && !f {f=NR} w && /^   If your task is a fix .*prove the defect before you fix it/ && !x {x=NR} w && /^5\\. / && !p {p=NR} END {exit !(f && x && p && f < x && x < p)}' $A/implementer.md && grep -q 'Commit a test that reproduces the defect and fails on the code as it is, before the fix commit' $A/implementer.md && grep -q 'shows both runs: the test failing before the fix, and passing after' $A/implementer.md"
+check "a fix's failing test takes the place of pinning the defective behaviour, and pins of what must stay may come first" \
+  "grep -q 'If you also pin behaviour that must stay the same, those passing tests may come first: the failing test takes the place of pinning the defective behaviour, and it still comes before the fix commit' $A/implementer.md"
+# The checks a fix's missed_by can name, as lead.md lists them: "`plan-review`, `tests`, … or `user-review`".
+missed_by() { sed -n 's/^var missedBy = \[\]string{\(.*\)}$/\1/p' <<<"$SRC" | sed -e 's/"\([a-z-]*\)"/`\1`/g' -e 's/, \([^,]*\)$/ or \1/'; }
+check "the lead makes a fix only of a defect live in production, and anything else a refine or a build" \
+  "grep -q 'A \\*\\*fix\\*\\* (.--kind fix.) is only for a defect live in production: released or deployed, and affecting users now' $A/lead.md && grep -q 'A defect in unreleased work, a bug found in review, or polish is a \\*\\*refine\\*\\*' $A/lead.md"
+check "the lead traces a fix to the task that introduced it and names the check that missed it, from crew's list" \
+  "grep -q 'Set .fixes. to the merged task whose change introduced it: find the commit with .git log -S' $A/lead.md && grep -q 'set .unknown. and say why under Context' $A/lead.md && [[ -n \$(missed_by) ]] && grep -qF \"Set \\\`missed_by\\\` to the check that should have caught it, from why it didn't: \$(missed_by).\" $A/lead.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"

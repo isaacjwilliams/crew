@@ -356,15 +356,17 @@ func isReviewRequest(cm ghComment) bool {
 // A review round: the user's new comments on the PR, for the worker that wrote
 // it, and their requests for another automated review pass, if they made any.
 // The worker runs one pass for them all, and reacts to each request comment. A
-// round from crew ci-fix holds only the red CI it reports.
+// round from crew ci-fix holds only the red CI it reports, and one from crew
+// catch-up only the conflict with the base.
 type reviewRound struct {
 	reviews, inline, convo []ghComment
 	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
 	redCI                  *redCI
+	conflict               *baseConflict
 }
 
 func (r reviewRound) empty() bool {
-	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil
+	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil && r.conflict == nil
 }
 
 // add writes the round into the task as its next, before ## Log, and counts it
@@ -376,6 +378,9 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
 		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
+	}
+	if r.conflict != nil {
+		fmt.Fprintf(&b, "- [ ] %s%s at %s\n\n", conflictsWith, r.conflict.base, r.conflict.at)
 	}
 	if len(r.reviews) > 0 {
 		b.WriteString("**Review summaries**\n")
@@ -414,7 +419,7 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 }
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of
-// the user's feedback. Rounds that only report red CI don't count.
+// the user's feedback. Rounds that only report red CI or a conflict don't count.
 func warnManyRounds(p *Project, t Task) {
 	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil {
 		if n := t.FeedbackRounds(); n > max {

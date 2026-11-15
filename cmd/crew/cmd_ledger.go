@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -174,14 +175,12 @@ func cmdSet(c *Crew, args []string) error {
 	}
 	// Trimmed once, so the checks below see what Lookup will read back.
 	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
-	if _, ok := parsePriority(value); key == "priority" && !ok {
-		return fail("priority must be a whole number, not '%s'", value)
-	}
-	if key == "risk" && !Risk(value).Valid() {
-		return fail("risk must be low, medium or high, not '%s'", value)
-	}
-	if key == "kind" && !Kind(value).Valid() {
-		return fail("kind must be %s, not '%s'", kindNames(), value)
+	// An empty value clears the key. crew ready refuses a task whose kind needs
+	// one it cleared.
+	if value != "" {
+		if value, err = c.checkValue(t.Project(), key, value); err != nil {
+			return err
+		}
 	}
 	// done means a spike's report is in, which crew hand-over checks.
 	if key == "status" && Status(value) == Done {
@@ -233,6 +232,47 @@ func (c *Crew) checkStacks(t Task, key, value string) error {
 		}
 	}
 	return nil
+}
+
+// checkValue is the value crew set records for key, or a refusal that says what
+// the key takes. A key that links to another task (informs, fixes) names it, so
+// it's resolved as crew new resolves it, and recorded as that task's ID. Keys
+// crew doesn't check take any value. crew ready checks the keys a task's kind
+// needs with it too.
+func (c *Crew) checkValue(proj, key, value string) (string, error) {
+	var ok bool
+	var takes string
+	switch key {
+	case "priority":
+		_, ok = parsePriority(value)
+		takes = "a whole number"
+	case "risk":
+		ok = Risk(value).Valid()
+		takes = orList(risks)
+	case "kind":
+		ok = Kind(value).Valid()
+		takes = kindNames()
+	case "missed_by":
+		ok = slices.Contains(missedBy, value)
+		takes = orList(missedBy)
+	default:
+		if r, ok := linkRules(key); ok {
+			return c.resolveLink(proj, r, value)
+		}
+		return value, nil
+	}
+	if !ok {
+		return "", mustBe(key, takes, value)
+	}
+	return value, nil
+}
+
+// mustBe refuses a value for key, saying what it takes.
+func mustBe(key, takes, value string) error {
+	if value == "" {
+		return fail("%s must be %s", key, takes)
+	}
+	return fail("%s must be %s, not '%s'", key, takes, value)
 }
 
 // crew log TASK MESSAGE...

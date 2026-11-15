@@ -16,7 +16,7 @@ import (
 // (with Worktrunk) the per-worktree databases, so it's short and filesystem-safe.
 var branchName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// crew new "<title>" [--kind KIND] [--informs TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
+// crew new "<title>" [--kind KIND] [--informs TASK] [--fixes TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
 func cmdNew(c *Crew, args []string) error {
 	_, err := c.newTask(args, true)
 	return err
@@ -24,10 +24,10 @@ func cmdNew(c *Crew, args []string) error {
 
 // newTask makes a draft task, prints its path when show is set, and returns it.
 func (c *Crew) newTask(args []string, show bool) (Task, error) {
-	const use = `crew new "<title>" [--kind KIND] [--informs TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]`
-	var proj, name, on, goal, kindArg, informs string
+	const use = `crew new "<title>" [--kind KIND] [--informs TASK] [--fixes TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]`
+	var proj, name, on, goal, kindArg, informs, fixes string
 	title, err := parseText(args, map[string]*string{"--project": &proj, "--branch": &name, "--on": &on, "--goal": &goal,
-		"--kind": &kindArg, "--informs": &informs}, use)
+		"--kind": &kindArg, "--informs": &informs, "--fixes": &fixes}, use)
 	if err != nil {
 		return Task{}, err
 	}
@@ -42,8 +42,11 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	if !ok {
 		return Task{}, fail("--kind must be %s, not '%s'", kindNames(), kindArg)
 	}
-	if informs != "" && rules.informs == "" {
-		return Task{}, fail("a %s task doesn't take --informs", kind)
+	links := map[string]string{"informs": informs, "fixes": fixes}
+	for key, value := range links {
+		if value != "" && key != rules.link {
+			return Task{}, fail("a %s task doesn't take --%s", kind, key)
+		}
 	}
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
 		return Task{}, fail("--branch '%s': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)", name)
@@ -87,15 +90,10 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		}
 		base = parent.Branch()
 	}
-	var linked Task
-	if informs != "" {
-		f, matches := resolveIn(informs, c.files("tasks", proj))
-		if f == "" {
-			return Task{}, ambiguousFail(informs, matches, "--informs '%s' doesn't match exactly one task in %s", informs, proj)
-		}
-		linked = Task{Doc{f}}
-		if st := linked.Status(); st != rules.informs {
-			return Task{}, fail("%s is '%s'; --informs takes a %s task", linked.ID(), st, rules.informs)
+	link := links[rules.link]
+	if link != "" {
+		if link, err = c.resolveLink(proj, rules, link); err != nil {
+			return Task{}, err
 		}
 	}
 
@@ -123,9 +121,9 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		return Task{}, err
 	}
 	msg := "created as a " + string(kind)
-	if linked.Path != "" {
-		t.Set("informs", linked.ID())
-		msg += ", informs " + linked.ID()
+	if link != "" {
+		t.Set(rules.link, link)
+		msg += ", " + rules.link + " " + link
 	}
 	if parent.Path != "" {
 		t.Set("depends_on", parent.ID())
@@ -141,6 +139,31 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		fmt.Println(t.Path)
 	}
 	return t, nil
+}
+
+// resolveLink is what a task of a kind with rules r records as its link: the ID
+// of the one task in proj that value names, which must have the status r.linkTo,
+// or "unknown" where r takes that. A fix's "12" is recorded as "012-<slug>".
+func (c *Crew) resolveLink(proj string, r kindRules, value string) (string, error) {
+	takes := fmt.Sprintf("a %s task in %s", r.linkTo, proj)
+	if r.linkUnknown {
+		takes += ", or unknown"
+	}
+	if value == "" {
+		return "", mustBe(r.link, takes, value)
+	}
+	if r.linkUnknown && value == "unknown" {
+		return value, nil
+	}
+	f, matches := resolveIn(value, c.files("tasks", proj))
+	if f == "" {
+		return "", ambiguousFail(value, matches, "%s must be %s; '%s' doesn't match exactly one task", r.link, takes, value)
+	}
+	linked := Task{Doc{f}}
+	if st := linked.Status(); st != r.linkTo {
+		return "", fail("%s must be %s; %s is '%s'", r.link, takes, linked.ID(), st)
+	}
+	return linked.ID(), nil
 }
 
 // ambiguousFail lists the matches of an ambiguous argument, if there are any,
@@ -228,6 +251,11 @@ func cmdReady(c *Crew, args []string) error {
 	}
 	if rules.pr && !t.Risk().Valid() {
 		return fail("set its risk: crew set %s risk low|medium|high", t.ID())
+	}
+	for _, key := range rules.keys {
+		if _, err := c.checkValue(t.Project(), key, t.Get(key)); err != nil {
+			return fail("%v: crew set %s %s <value>", err, t.ID(), key)
+		}
 	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)

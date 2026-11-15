@@ -342,40 +342,55 @@ func (s Status) Delivered() bool { return s == Merged || s == Done }
 
 // A task's kind: what it makes, which decides what its brief needs and what its
 // hand-over checks. A build makes a PR; a spike tries a path on a branch nobody
-// merges, and makes a report.
+// merges, and makes a report. A fix is a build that mends a defect live in
+// production, and names the task that caused it and the check that missed it. A
+// refine is any other change to existing work, with a build's rules, so that a
+// fix means only a defect in production.
 type Kind string
 
 const (
-	KindBuild Kind = "build"
-	KindSpike Kind = "spike"
+	KindBuild  Kind = "build"
+	KindSpike  Kind = "spike"
+	KindFix    Kind = "fix"
+	KindRefine Kind = "refine"
 )
 
 // kindRules is what a kind asks of its task. Commands ask the task's rules and
 // never the kind's name.
 type kindRules struct {
 	kind Kind
-	// brief is the sections crew ready needs filled in.
+	// brief is the sections crew ready needs filled in, and keys the front-matter
+	// keys it needs set besides a risk tier, each to a value crew set takes.
 	brief []string
+	keys  []string
 	// pr: the kind makes a PR, so its branch is pushed for the user to review,
 	// and it needs a risk tier (the look its PR needs). Only such a kind takes
 	// part in stacks: a restack has its worker push, and a task stacked on
 	// another needs that branch on origin. A kind that makes no PR keeps its
 	// branch local and throws it away.
 	pr bool
-	// informs is the status of the task this kind may inform (crew new
-	// --informs), or nothing when it informs none.
-	informs Status
+	// link is the front-matter key that ties the task to another, or nothing when
+	// the kind takes none; crew new sets it from the flag of the same name
+	// (--informs, --fixes). linkTo is the status that other task must have, and
+	// linkUnknown lets the link be "unknown" instead, for a task that can't be
+	// traced.
+	link        string
+	linkTo      Status
+	linkUnknown bool
 	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
 	// cmd_new.go), and handedOver the status it moves the task to.
 	handOver   func(*Crew, Task) error
 	handedOver Status
 }
 
+// buildBrief is the sections a build's brief needs, and a fix's and a refine's.
+var buildBrief = []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"}
+
 // kinds are the kinds of task, build first.
 var kinds = []kindRules{
 	{
 		kind:       KindBuild,
-		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		brief:      buildBrief,
 		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
@@ -383,9 +398,30 @@ var kinds = []kindRules{
 	{
 		kind:       KindSpike,
 		brief:      []string{"## Goal", "## Plan", "## Acceptance criteria"},
-		informs:    Draft,
+		link:       "informs",
+		linkTo:     Draft,
 		handOver:   handOverReport,
 		handedOver: Done,
+	},
+	{
+		// A spike needn't inform a draft, but a fix is ready only once it names
+		// the task it fixes, so fixes is one of its keys as well as its link.
+		kind:        KindFix,
+		brief:       buildBrief,
+		pr:          true,
+		keys:        []string{"fixes", "missed_by"},
+		link:        "fixes",
+		linkTo:      Merged,
+		linkUnknown: true,
+		handOver:    handOverPR,
+		handedOver:  PROpen,
+	},
+	{
+		kind:       KindRefine,
+		brief:      buildBrief,
+		pr:         true,
+		handOver:   handOverPR,
+		handedOver: PROpen,
 	},
 }
 
@@ -405,13 +441,39 @@ func (k Kind) rules() (kindRules, bool) {
 	return kindRules{}, false
 }
 
-// kindNames lists the kinds as a sentence does: "build or spike".
+// linkRules is the kind whose link key is key, and whether there is one.
+func linkRules(key string) (kindRules, bool) {
+	for _, r := range kinds {
+		if r.link != "" && r.link == key {
+			return r, true
+		}
+	}
+	return kindRules{}, false
+}
+
+// kindNames lists the kinds as a sentence does: "build, spike, fix or refine".
 func kindNames() string {
 	names := make([]string, len(kinds))
 	for i, r := range kinds {
 		names[i] = string(r.kind)
 	}
-	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+	return orList(names)
+}
+
+// missedBy are the checks a fix's missed_by can name, the one that should have
+// caught the defect, in the order work passes them.
+var missedBy = []string{"plan-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
+
+// orList lists items as a sentence does: "low, medium or high".
+func orList[T ~string](items []T) string {
+	s := make([]string, len(items))
+	for i, item := range items {
+		s[i] = string(item)
+	}
+	if len(s) < 2 {
+		return strings.Join(s, "")
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
 }
 
 // A task's risk tier: what kind of look its PR needs from the user. The lead
@@ -803,6 +865,16 @@ const (
 	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
 )
 
+// The line that reports a PR's conflict with its base branch, at a commit of
+// the base (its short SHA), in a review round that sends it to the worker. Like
+// the CI lines, it's the only record: crew catch-up writes it, ConflictReported
+// reads it back, and the worker ticks it once it has merged the base in.
+const conflictsWith = "Conflicts with " // - [ ] Conflicts with <base> at <sha>
+
+// crewReports are the kinds of line crew writes into a review round of its own,
+// to report what it found on the PR rather than pass on the user's feedback.
+var crewReports = []string{ciFailedOn, conflictsWith}
+
 // ciLineHead is the head commit an item reports red CI on, when it's a line of
 // that kind (ciFailedOn or ciStillRedOn), checked or not.
 func ciLineHead(l, kind string) (string, bool) {
@@ -839,6 +911,19 @@ func (t Task) CIFailures() []string {
 	return heads
 }
 
+// ConflictReported: a review round sent the worker the PR's conflict with
+// its base at the base commit sha.
+func (t Task) ConflictReported(sha string) bool {
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		item, _ := checklistItem(l)
+		rest, ok := strings.CutPrefix(item, conflictsWith)
+		if _, at, _ := strings.Cut(rest, " at "); ok && at == sha {
+			return true
+		}
+	}
+	return false
+}
+
 // CIReported: red CI on head was sent to the worker in a review round, or put
 // to the user under Open questions.
 func (t Task) CIReported(head string) bool {
@@ -854,16 +939,18 @@ func (t Task) CIReported(head string) bool {
 }
 
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
-// round but those that only report red CI. MAX_REVIEW_ROUNDS limits these.
+// round but those that only hold crew's own reports (crewReports), of red CI
+// or a conflict with the base. MAX_REVIEW_ROUNDS limits these.
 func (t Task) FeedbackRounds() int {
 	n := 0
 	hasFeedback := true // nothing before the first round counts
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		_, ci := ciLineHead(l, ciFailedOn)
+		item, _ := checklistItem(l)
+		report := slices.ContainsFunc(crewReports, func(kind string) bool { return strings.HasPrefix(item, kind) })
 		switch {
 		case strings.HasPrefix(l, "### Round "):
 			hasFeedback = false
-		case !ci && !hasFeedback:
+		case !report && !hasFeedback:
 			n++
 			hasFeedback = true
 		}

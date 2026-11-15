@@ -365,7 +365,7 @@ crew stats         # tasks merged in the last 30 days (--since YYYY-MM-DD; --pro
 
 One row for each merged task:
 
-- **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI isn't counted.
+- **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI or a conflict with the base isn't counted.
 - **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
 - **questions waited on you**: from each time it went to `needs-input` until it left it. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
 - **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
@@ -455,6 +455,12 @@ A task gets `MAX_CI_FIXES` of these rounds (2 by default). After that, red CI on
 
 **CI other than GitHub Actions.** Workers read GitHub Actions logs and rerun its failed jobs with `gh run`, which their settings allow. For any other CI, say in the project's `AGENTS.md` or its crew memory how to read the logs and rerun failed jobs, and allow those commands in `projects/<project>/worker-settings.json`. Without that, a worker reproduces the failure locally from the CI config in the repo, and asks you rather than rerun it.
 
+### Conflicts with the base
+
+As you merge PRs, another open PR that touches the same files can stop merging cleanly: GitHub shows it as conflicting. Once a worker has handed its PR to you (`pr-open`), `crew tick` notices and sends the worker a review round of its own saying so, once for each commit of the base branch. You don't have to ask. The worker merges the base branch into its own, resolves the conflicts, runs the checks and pushes. It doesn't rebase or force-push, so the commits you may have reviewed stay as they were, and the merge commit shows how it was resolved. It posts no comment. If a conflict means the plan no longer fits, the worker asks you.
+
+Before the hand-over, a conflict is the worker's own business: it rebases onto the base when it conflicts. A stacked task's conflicts are handled by a restack instead (see "Stacked tasks"). Rounds that only report a conflict don't count toward `MAX_REVIEW_ROUNDS`.
+
 ### Pausing
 
 To stop work on a project without losing any (when your usage is running low, say), tell the lead, or run:
@@ -464,7 +470,7 @@ crew pause --project <p>      # --all for every project; without either, the lea
 crew resume --project <p>     # let it go on
 ```
 
-While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments and red CI), the gardener skips it, and `crew dispatch`, `crew followup` and `crew goal start` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
+While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup` and `crew goal start` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
 
 Nothing is lost: worktrees, branches and conversations stay. When crew stops a session, it also ends what that session left running in the background in its worktree, such as a dev server or a Codex review, as cleanup does; `--force` does that for sessions that had already closed, too. A background subagent the session started may still run on: Claude Code carries those over to the session's next process. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
 
@@ -519,6 +525,20 @@ crew status                             # 040's row: "2 to learn; 041 working, 0
 - **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the plan from them.
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 - **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
+
+### Fixes: trace a defect to where it came from
+
+A **fix** is only for a defect live in production: released or deployed, and affecting users now. A bug in unreleased work, one found in review, or polish is a **refine**, which works just like a build. Keeping them apart means each fix marks a defect that got past every check, and its brief says which:
+
+```sh
+crew new "Round invoice totals to the cent" --kind fix --fixes 012   # 012 is the merged task that introduced it
+crew set 050 missed_by tests            # the check that should have caught it
+crew ready 050                          # refuses a fix without fixes and missed_by
+```
+
+- **`fixes`** is the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (the brief says why). The lead finds it from the code's history.
+- **`missed_by`** is one of `plan-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
+- **The worker proves the defect first**: it commits a test that reproduces it and fails, before the fix commit, which makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
 
 ## 6. The casual observer on its own
 
@@ -598,7 +618,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `PRE_PR_REVIEW` | `yes` | Default for new tasks: casual-observer pass before the PR |
 | `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready` (a draft until its first hand-over, then marked ready), or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
-| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI don't count |
+| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI or a conflict don't count |
 | `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
 | `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a plan at intake, and a worker asks whether to split its branch before it opens a PR; `0` sets no limit for either |
