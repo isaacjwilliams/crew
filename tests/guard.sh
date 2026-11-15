@@ -95,7 +95,7 @@ for f in lead:lead implementer:worker goal-lead:lead; do
   check "$a disallows EnterWorktree and ExitWorktree" "grep '^disallowedTools:' $A/$a.md | grep -q 'EnterWorktree, ExitWorktree'"
   check "$a's frontmatter runs crew-guard as $r" "grep -q 'bin/crew-guard\" $r.\$' $A/$a.md"
   sf=$C/worker-settings.json; [[ $r == lead ]] && sf=$LS
-  for g in lead implementer gardener goal-lead; do
+  for g in lead implementer gardener misses goal-lead; do
     check "${sf#"$REPO_DIR"/} denies Agent($g)" "jq -e >/dev/null '.permissions.deny | index(\"Agent($g)\")' $sf"
   done
 done

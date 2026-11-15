@@ -165,7 +165,9 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew observe [TASK|PATH] [--base REF]
                                    Run the casual observer headless on a branch
   crew gardener [--all|--project P]
-                                   Run the gardener over newly merged commits
+                                   Run the gardener over newly merged commits, and
+                                   the misses agent over your comments on newly
+                                   merged PRs
   crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
                [--project P]
                                    Write down an idea worth keeping as a proposal;
