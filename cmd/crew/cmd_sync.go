@@ -63,13 +63,14 @@ func cmdSync(c *Crew, args []string) error {
 			if pr == "" {
 				continue
 			}
-			out, err := ghQuiet(p.Repo(), "pr", "view", pr, "--json", "state,isDraft,reviewDecision,updatedAt,statusCheckRollup")
+			out, err := ghQuiet(p.Repo(), "pr", "view", pr, "--json", "state,isDraft,reviewDecision,updatedAt,statusCheckRollup,mergeable")
 			var info struct {
 				State             string    `json:"state"`
 				IsDraft           bool      `json:"isDraft"`
 				ReviewDecision    string    `json:"reviewDecision"`
 				UpdatedAt         string    `json:"updatedAt"`
 				StatusCheckRollup []ciCheck `json:"statusCheckRollup"`
+				Mergeable         string    `json:"mergeable"`
 			}
 			if err != nil || json.Unmarshal(out, &info) != nil {
 				warn("%s: couldn't read %s", t.ID(), pr)
@@ -83,6 +84,15 @@ func cmdSync(c *Crew, args []string) error {
 			// For crew tick, which runs crew ci-fix only while CI is failing.
 			if ci, _ := rollup(info.StatusCheckRollup); t.Get("ci_state") != string(ci) {
 				t.Set("ci_state", string(ci))
+				changed = true
+			}
+			// For crew tick, which runs crew catch-up only while the PR conflicts with its base.
+			mergeable := ""
+			if info.Mergeable == "CONFLICTING" {
+				mergeable = conflicting
+			}
+			if t.Get("mergeable") != mergeable {
+				t.Set("mergeable", mergeable)
 				changed = true
 			}
 			label := "open"

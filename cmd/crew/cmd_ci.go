@@ -171,7 +171,7 @@ func cmdCIFix(c *Crew, args []string) error {
 	return nil
 }
 
-// nothingToDo ends crew ci-fix with exit 3, saying why.
+// nothingToDo ends crew ci-fix or crew catch-up with exit 3, saying why.
 func nothingToDo(format string, a ...any) error {
 	fmt.Printf("nothing to do: "+format+"\n", a...)
 	return exitQuietly(3)

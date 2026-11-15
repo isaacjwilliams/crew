@@ -68,7 +68,7 @@ func cmdTick(c *Crew, args []string) error {
 			continue
 		}
 		// A paused project still gets the steps that only record (cleanup,
-		// feedback, ci-fix, needs-input, goal done); those that would start a
+		// feedback, ci-fix, catch-up, needs-input, goal done); those that would start a
 		// session wait, quietly, for crew resume.
 		paused, idx := p.Paused(), c.branches(name)
 		for _, t := range c.tasks(name) {
@@ -147,6 +147,13 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 			} else {
 				fmt.Printf("%s: CI still red after %d CI rounds, for you\n", id, len(failures))
 			}
+		}
+	}
+	// Likewise mergeable: crew catch-up reads the PR again, and decides. It exits
+	// 0 when it recorded a round. A stacked task's conflicts are a restack's.
+	if _, stacked := idx.parentOf(t); st == PROpen && t.Get("mergeable") == conflicting && !stacked {
+		if c.step(nil, "catch-up", t.Path) == 0 {
+			fmt.Printf("%s: catch-up round %s recorded: conflicts with %s\n", id, t.Get("review_rounds"), t.Base())
 		}
 	}
 	job := t.WorkerJob()
