@@ -282,7 +282,7 @@ check "reviewer.md answers a rebuttal round in the shape the skill asks for" \
 check "the implementer acts on withdrawn and split findings, and a review where only Codex failed can be clean" \
   "grep -q '^   - \*\*withdrawn\*\*:.*.withdrawn in round <n>.' $A/implementer.md && grep -q '^   - \*\*split\*\*:.*.not a defect: <the evidence>.' $A/implementer.md && grep -q 'One where only Codex failed can be' $A/implementer.md && grep -q 'split: held at <severity>, <reviewer> refutes' $SK/SKILL.md"
 check "the rubric asks for each finding's class and every instance of it, and its report shows both" \
-  "grep -q 'Name the class of defect in a phrase' $SK/rubric.md && grep -q 'of that class in the range, not only the first one you met' $SK/rubric.md && grep -q '^   Class: <the class of defect>. Instances: ' $SK/rubric.md"
+  "grep -q 'Name the class of defect in a phrase' $SK/rubric.md && grep -q 'of that class in the change, not only the first one you met' $SK/rubric.md && grep -q '^   Class: <the class of defect>. Instances: ' $SK/rubric.md"
 check "the rubric tags a finding pre-existing by its failure at the fork point, not by unchanged lines, and the tag is never a fifth severity" \
   "grep -q 'If the failure already happens at the fork point' $SK/rubric.md && grep -q 'Unchanged lines aren.t enough' $SK/rubric.md && grep -qF '[must fix | should fix | fix later | nitpick] [pre-existing] <title>' $SK/rubric.md && [[ \$(grep -cE '^- .(must fix|should fix|fix later|nitpick).: ' $SK/rubric.md) == 4 ]] && ! grep -qE '^- .pre-existing.: ' $SK/rubric.md"
 check "only reviewers tag a finding pre-existing, all that raised it: pr-review checks the tag at the fork point and settles it on the Agreed severity line" \

@@ -47,7 +47,8 @@ For each finding:
 - Distinguish a proven defect from a question or preference.
 - Recommend the smallest coherent correction without implementing it.
 - Name the class of defect in a phrase (for example "job arguments read with the wrong id type"). List every instance
-  of that class in the range, not only the first one you met.
+  of that class in the change, not only the first one you met: an instance in a commit you didn't review needs the
+  same fix.
 - If the failure already happens at the fork point (the start of the change), for the same caller and input, tag the
   finding `pre-existing` and cite the code at the fork point that fails the same way. Unchanged lines aren't enough: an
   old defect that the change newly makes reachable (a new caller of a buggy function, say) is the change's own, so
