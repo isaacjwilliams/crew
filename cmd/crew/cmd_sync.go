@@ -129,14 +129,17 @@ func cmdSync(c *Crew, args []string) error {
 			if !t.Status().InFlight() {
 				continue
 			}
-			if sensitive {
-				fetch()
-			}
-			if raised, err := raiseRisk(t, p); err != nil {
-				warn("%s: %v", t.ID(), err)
-			} else if raised != "" {
-				changed = true
-				fmt.Printf("%s: %s\n", t.ID(), raised)
+			// A kind without a risk tier, a spike say, has nothing to raise.
+			if rules, err := t.rules(); err == nil && rules.risk {
+				if sensitive {
+					fetch()
+				}
+				if raised, err := raiseRisk(t, p); err != nil {
+					warn("%s: %v", t.ID(), err)
+				} else if raised != "" {
+					changed = true
+					fmt.Printf("%s: %s\n", t.ID(), raised)
+				}
 			}
 			parent, ok := idx.parentOf(t)
 			if !ok {

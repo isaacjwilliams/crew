@@ -1100,6 +1100,9 @@ check "status shows a draft's open items and its spikes, and a spike the draft i
   '[[ $(row "$KDI") == *"draft"*"2 to learn; $(num "$KS") working, $(num "$KT") draft" && $(row "$KSI") == *"working"*"informs $(num "$KD")" ]]'
 check "a running spike holds a slot of its goal's max_in_flight" '[[ $(row "goal $G8") == *"0 of 3 task(s) merged, 1/1 in flight: full" ]]'
 commit_in "$KWT" spike/paging.ts
+echo 'SENSITIVE_PATHS="spike"' >>"$PE"; out=$(crew sync 2>&1); sed -i '/^SENSITIVE_PATHS=/d' "$PE"
+check "sync leaves a spike that touches a sensitive path without a risk tier: it has none to raise" '[[ $out != *"risk →"* && -z $(crew get "$KS" risk) ]]'
+crew set "$KS" pr ""   # the gh stub finds a PR for any branch; a spike's branch is never pushed
 check "hand-over refuses a spike without a report" '[[ $(crew hand-over "$KS" 2>&1) == *"## Report must start with a line '"'"'Answer: <the answer, in a line>'"'"'"* && $(crew get "$KS" status) == working ]]'
 sed -i '/^## Automated reviews$/i ## Report\nTried: paging by cursor.\nAnswer: yes\n' "$KS"
 check "hand-over refuses a spike whose report doesn't start with its answer" '! crew hand-over "$KS" 2>/dev/null && [[ $(crew get "$KS" status) == working ]]'
