@@ -141,14 +141,25 @@ func taskFile(t *testing.T, id, content string) Task {
 
 func TestRevertedPRs(t *testing.T) {
 	sha := func(id string) string { return strings.Repeat(id, 40/len(id)) }
-	commit := func(id string, at int, subject, body string) string {
-		return fmt.Sprintf("%s\x00%d\x00%s\x00%s\x1e\n", sha(id), at, subject, body)
+	commit := func(id string, at int, subject, body string, parents ...string) string {
+		for i, p := range parents {
+			parents[i] = sha(p)
+		}
+		return fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x1e\n", sha(id), strings.Join(parents, " "), at, subject, body)
 	}
 	// GitHub's revert button on revert PRs: #41 reverted #39 and was merged with a
 	// merge commit, #42 reverted #37 and was squashed; then each was reverted.
 	// #43 reverted #38 with a merge commit whose body repeats the revert's line.
-	log := commit("a", 1900, "Revert the revert of #39", "This reverts commit "+sha("b")+".\n") +
-		commit("b", 1800, "Merge pull request #41 from me/revert-39", `Revert "Fees (#39)"`) +
+	// #47 reverted #46, was renamed, merged and reverted. #48's squash body
+	// carries a revert of one of its own commits, and #48 was reverted.
+	log := commit("cd", 2300, "Bring the export back", "This reverts commit "+sha("ce")+".\n") +
+		commit("ce", 2200, "Merge pull request #47 from me/disable", "Disable export until follow-up", "cf", "da") +
+		commit("da", 2100, "Disable the export", "This reverts commit "+sha("db")+".\n") +
+		commit("db", 2050, "Merge pull request #46 from me/export", "") +
+		commit("dc", 2000, `Revert "Fees, again (#48)"`, "This reverts commit "+sha("df")+".\n") +
+		commit("df", 1950, "Fees, again (#48)", "* wip\n\n* Revert \"wip\"\n\nThis reverts commit "+sha("de")+".\n") +
+		commit("a", 1900, "Revert the revert of #39", "This reverts commit "+sha("b")+".\n") +
+		commit("b", 1800, "Merge pull request #41 from me/revert-39", `Revert "Fees (#39)"`, "ab", "c") +
 		commit("c", 1700, `Revert "Fees (#39)"`, "This reverts commit "+sha("ab")+".\n") +
 		commit("ab", 1650, "Fees (#39)", "") +
 		commit("d", 1600, `Revert "Revert "Export (#37)"" (#44)`, "This reverts commit "+sha("e")+".\n") +
@@ -169,10 +180,10 @@ func TestRevertedPRs(t *testing.T) {
 	for _, c := range revertedPRs(log) {
 		got = append(got, fmt.Sprintf("#%s at %d", c.pr, c.at.Unix()))
 	}
-	// A revert of a revert, merged or squashed or not a PR's, of an unrelated
-	// commit, or of a short SHA isn't a PR's revert; nor is a second commit that
-	// says it reverts a commit already reverted.
-	if want := []string{"#39 at 1700", "#37 at 1500", "#38 at 1300", "#36 at 700", "#35 at 600"}; !slices.Equal(got, want) {
+	// A revert of a revert, merged (renamed or not) or squashed or not a PR's,
+	// of an unrelated commit, or of a short SHA isn't a PR's revert; nor is a
+	// second commit that says it reverts a commit already reverted.
+	if want := []string{"#46 at 2100", "#48 at 2000", "#39 at 1700", "#37 at 1500", "#38 at 1300", "#36 at 700", "#35 at 600"}; !slices.Equal(got, want) {
 		t.Errorf("revertedPRs = %v,\nwant %v: a merge commit's and a squash commit's reverts, whatever their subject, each once", got, want)
 	}
 }

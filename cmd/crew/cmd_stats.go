@@ -306,10 +306,10 @@ func (p *Project) reverts() ([]correction, error) {
 }
 
 // revertLogFormat is the git log format revertedPRs reads: each commit's SHA,
-// time, subject and body, apart by NUL bytes, and ended by a record separator.
-// A revert names the commit it reverts by SHA, so every commit is read, to find
-// that commit's subject.
-const revertLogFormat = "%H%x00%ct%x00%s%x00%b%x1e"
+// parents, time, subject and body, apart by NUL bytes, and ended by a record
+// separator. A revert names the commit it reverts by SHA, so every commit is
+// read, to find that commit's subject.
+const revertLogFormat = "%H%x00%P%x00%ct%x00%s%x00%b%x1e"
 
 var (
 	// The line git revert, and GitHub's revert button, write in the body.
@@ -322,46 +322,62 @@ var (
 // revertedPRs reads git log's output, in revertLogFormat, for the reverts of
 // PRs: commits whose body says "This reverts commit <sha>" of a PR's merge or
 // squash commit. Each comes back with the PR's number and when the revert was
-// committed. A revert of anything else is left out: of a commit that isn't a
-// PR's, of a revert (a revert PR's merge or squash commit included), or one
-// named by a short SHA, which git never writes. A commit counts as reverted
-// once, though a revert PR's merge commit may repeat its revert's message.
+// committed. Each reverted commit counts once, though a revert PR's merge
+// commit may repeat its revert's message. Left out are reverts of commits
+// that aren't a PR's, or that undo a PR themselves, as a revert PR's merge or
+// squash commit does: reverting those only puts a PR back.
 func revertedPRs(log string) []correction {
 	// First every commit, with each by its SHA, then each revert's reverted
-	// commits looked up by their SHA.
+	// commits looked up by their SHA. A SHA that isn't there, a short one or a
+	// branch commit a squash merge left behind, names no commit of the branch.
 	type commit struct {
+		parents       []string
 		at            time.Time
 		subject, body string
 	}
 	var commits []commit
 	bySHA := map[string]commit{}
 	for _, record := range strings.Split(log, "\x1e") {
-		f := strings.SplitN(strings.TrimLeft(record, "\n"), "\x00", 4)
-		if len(f) < 4 {
+		f := strings.SplitN(strings.TrimLeft(record, "\n"), "\x00", 5)
+		if len(f) < 5 {
 			continue
 		}
-		secs, _ := strconv.ParseInt(f[1], 10, 64)
-		c := commit{time.Unix(secs, 0), f[2], f[3]}
+		secs, _ := strconv.ParseInt(f[2], 10, 64)
+		c := commit{strings.Fields(f[1]), time.Unix(secs, 0), f[3], f[4]}
 		commits = append(commits, c)
 		bySHA[f[0]] = c
 	}
-	// isRevert: a revert's own commit, or a revert PR's merge commit, whose
-	// body is the PR's title, "Revert "…"".
-	isRevert := func(c commit) bool {
-		return revertsCommit.MatchString(c.body) || strings.HasPrefix(c.subject, `Revert "`) || strings.HasPrefix(c.body, `Revert "`)
+	// pr is the number of the PR a commit merged or squashed, or nothing.
+	pr := func(c commit) string {
+		if m := mergesPR.FindStringSubmatch(c.subject); m != nil {
+			return cmp.Or(m[1], m[2]) // a merge's or a squash's
+		}
+		return ""
+	}
+	// undoesPR: c reverts a PR's commit, or merges a branch whose tip does.
+	var undoesPR func(c commit) bool
+	undoesPR = func(c commit) bool {
+		for _, m := range revertsCommit.FindAllStringSubmatch(c.body, -1) {
+			if reverted, ok := bySHA[m[1]]; ok && pr(reverted) != "" {
+				return true
+			}
+		}
+		if len(c.parents) < 2 {
+			return false
+		}
+		tip, ok := bySHA[c.parents[1]]
+		return ok && undoesPR(tip)
 	}
 	var reverts []correction
 	counted := map[string]bool{}
 	for _, c := range commits {
 		for _, m := range revertsCommit.FindAllStringSubmatch(c.body, -1) {
 			reverted, ok := bySHA[m[1]]
-			if !ok || counted[m[1]] || isRevert(reverted) {
+			if !ok || counted[m[1]] || pr(reverted) == "" || undoesPR(reverted) {
 				continue
 			}
-			if pr := mergesPR.FindStringSubmatch(reverted.subject); pr != nil {
-				reverts = append(reverts, correction{at: c.at, pr: cmp.Or(pr[1], pr[2])}) // a merge's or a squash's
-				counted[m[1]] = true
-			}
+			reverts = append(reverts, correction{at: c.at, pr: pr(reverted)})
+			counted[m[1]] = true
 		}
 	}
 	return reverts
