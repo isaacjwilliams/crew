@@ -261,8 +261,9 @@ that code on the Verdict line:
 - The same failure happens there, and every reviewer that raised the finding tagged it: put `pre-existing: ` before
   the severity, wherever the agreed severity names one. For example `pre-existing: should fix`, or
   `split: held at pre-existing: must fix, Codex refutes`.
-- Otherwise the agreed severity stays as it is. When both raised the finding and only one tagged it, the rounds never
-  weighed the tag, so it doesn't stand.
+- The same failure happens there, but only one of the two reviewers that raised it tagged it: it's `uncertain`. The
+  rounds never weighed the tag, so whether to fix it is the user's call.
+- It doesn't: the agreed severity stays as it is.
 
 ## 8. Record the review
 
