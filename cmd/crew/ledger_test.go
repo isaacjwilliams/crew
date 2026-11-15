@@ -183,6 +183,7 @@ func TestEvidenceGaps(t *testing.T) {
 		{"entries in a comment don't count", "## Evidence\n<!-- ### 1. like this -->\n### 2. two\nok\n\n", []int{1, 3}},
 		{"an entry with nothing under its heading doesn't count", "## Evidence\n### 1. one\n\n### 2. two\nok\n### 3. three\n\n", []int{1, 3}},
 		{"an entry with only a comment under it doesn't count", "## Evidence\n### 1. one\n<!-- to do -->\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
+		{"a heading in fenced output belongs to the entry it's in", "## Evidence\n### 1. one\n```\n### 2. two\nok\n```\n### 3. three\nok\n\n", []int{2}},
 		{"lines under another heading belong to no entry", "## Evidence\n### 1. one\n### Notes\nok\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
 	} {
 		task := Task{docWith(t, criteria+c.evidence+"## Log\n")}

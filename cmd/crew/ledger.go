@@ -381,12 +381,17 @@ func (t Task) AcceptanceCriteria() []string {
 
 // EvidenceGaps is the numbers of the acceptance criteria that have no evidence
 // yet. The evidence for criterion n is a "### n." entry under ## Evidence with
-// something under its heading. It counts the entries and doesn't judge them.
+// something under its heading. A heading inside a fenced block is output, not
+// an entry. It counts the entries and doesn't judge them.
 func (t Task) EvidenceGaps() []int {
 	recorded := map[int]bool{}
 	entry := 0 // the entry the line is in, or 0 outside one
+	fenced := false
 	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		if rest, ok := strings.CutPrefix(l, "### "); ok {
+		if strings.HasPrefix(l, "```") {
+			fenced = !fenced
+		}
+		if rest, ok := strings.CutPrefix(l, "### "); ok && !fenced {
 			num, _, _ := strings.Cut(rest, ".")
 			entry, _ = strconv.Atoi(num)
 		} else if entry > 0 {
