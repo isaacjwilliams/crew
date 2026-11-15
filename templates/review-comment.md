@@ -3,9 +3,10 @@
      with `crew review-summary <task> <file>`. Leave out this comment, the <…> placeholders and any
      section that would be empty. One line per finding: a reader should take it in at a glance.
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
-     agents. Withdrawn findings aren't listed, and a finding that repeats one from earlier in this
-     pass is one line, for its latest review. A finding left for the user because it already failed at
-     the fork point goes under "Already on <base branch>", not "Left for you".
+     agents. Each finding is listed by its outcome. One whose outcome is "withdrawn in round <n>"
+     isn't listed. A finding that repeats one from earlier in this pass is one line, from its latest
+     review's outcome. A finding left for the user because it already failed at the fork point goes
+     under "Already on <base branch>", not "Left for you".
 
      <N> counts every review in this pass, including one whose reviewers failed. When the record
      has a "Summary posted" line before this pass's reviews, open instead of the line below with
