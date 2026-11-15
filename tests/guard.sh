@@ -316,7 +316,7 @@ check "a reviewer marks each finding new or a repeat, and drops a repeat of a se
 check "each finding in the record has an Earlier line after Raised by, and only a reviewer marks a repeat" \
   "awk '/^- Raised by: / {r=NR} /^- Earlier: <new [|] repeat of review <N> #<k>>/ {e=NR} END {exit !(r && e == r + 1)}' $SK/SKILL.md && grep -q 'a repeat only ever comes from a reviewer' $SK/SKILL.md && grep -q 'only a reviewer marks a repeat; the worker may reject the mark, never add one' $REPO_DIR/LEDGER.md"
 check "a finding whose verdict flips between reviews is recorded as flipped, ahead of split and pre-existing" \
-  "grep -q '^- Agreed severity: .*| flipped: <severity>, was <earlier> in review <N> |' $SK/SKILL.md && grep -q 'agreed severity .withdrawn. or .disputed., or outcome' $SK/SKILL.md && grep -q '.flipped:. comes first on' $SK/SKILL.md && grep -q 'flipped: <severity>, was <earlier> in review N' $REPO_DIR/LEDGER.md"
+  "grep -q '^- Agreed severity: .*| flipped: <severity>, was <earlier> in review <N> |' $SK/SKILL.md && grep -q 'agreed severity .withdrawn., or outcome' $SK/SKILL.md && ! grep -q 'agreed severity .withdrawn. or .disputed.' $SK/SKILL.md && grep -q '.flipped:. comes first on' $SK/SKILL.md && grep -q 'flipped: <severity>, was <earlier> in review N' $REPO_DIR/LEDGER.md"
 check "the implementer leaves a flipped finding, and a repeat of one already left for the user, with the user" \
   "grep -q '^   - \*\*flipped\*\*:.*don.t change the code: .left for the user: verdict changed since review <N>.' $A/implementer.md && grep -q 'left for the user: still open from review <N>' $A/implementer.md"
 check "the summary says what each review read, and never that every review reads the whole PR" \

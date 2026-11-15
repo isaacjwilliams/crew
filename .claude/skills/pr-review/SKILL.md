@@ -332,13 +332,13 @@ that code on the Verdict line:
 A repeat may also have changed its verdict. Look up the earlier finding's `Agreed severity:` and `Outcome:` lines in
 the record:
 
-- **Flipped**: the earlier review settled it as not a defect (agreed severity `withdrawn` or `disputed`, or outcome
+- **Flipped**: the earlier review settled it as not a defect (agreed severity `withdrawn`, or outcome
   `not a defect: …`), and a reviewer holds it at must fix or should fix now. The reviews disagree, so it goes to the
   user rather than being fought again. Its agreed severity is `flipped: <severity>, was <the earlier agreed severity
   or outcome> in review <N>`, for example `flipped: must fix, was withdrawn in review 2`. `flipped:` comes first on
   the line: a `split` or `pre-existing` label that also applies goes on the Verdict line instead.
-- **Still with the user**: the earlier outcome was `left for the user` (with or without a reason). It stays with the
-  user, and isn't a flip: settle its agreed severity as usual.
+- **Still with the user**: the earlier outcome was `left for the user` (with or without a reason), as it is for every
+  `disputed` or `uncertain` finding. It stays with the user, and isn't a flip: settle its agreed severity as usual.
 - Any other repeat (an earlier `proposal …` or `recorded` now held higher, or an earlier fix that didn't hold) is
   settled as usual. The reviewer brought evidence the earlier settlement missed.
 
