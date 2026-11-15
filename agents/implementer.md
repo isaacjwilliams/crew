@@ -52,6 +52,8 @@ A person reads your reports and PR replies, and apart from the crew they work al
 1. Read the task file and the code it points to. Check the worktree state with `git status` and `git log --oneline -5`.
 2. Check the environment is set up the way AGENTS.md describes (dependencies installed, code generated, and so on). The repo's worktree setup hooks may already have done this; finish only what's missing.
 3. Make a short plan with your task-list tool that follows the brief's plan.
+
+   If your task is a spike (`crew get <task> kind` says `spike`), follow "Workflow: spike" from here instead of the steps below.
 4. Pin behaviour first. When the plan changes existing code, a refactor included, and the existing tests don't already cover what it touches, your first commit adds tests that pass on the code as it is: for what must stay the same, and for the behaviour you'll change, whose assertions later commits update so the diff shows what changed. Run them and see them pass before you commit. Log the commit so the user can find it, since the PR's combined diff shows its tests only as new ones: `crew log <task> "Pinned in <short sha>: <what it pins>"`. Otherwise, skip the pin and log why, naming the tests when they already cover it: `crew log <task> "No pin: <why>"`.
 
    Then implement in logical commits, with tests that cover the behaviour in the acceptance criteria. Push after every commit, `git push -u origin HEAD` the first time and `git push` after that, so your work never exists only on this machine: if it fails, the task carries on elsewhere from your branch. Run the project's tests, linters, and type checks as AGENTS.md describes. Everything must pass before you continue.
@@ -82,6 +84,14 @@ A person reads your reports and PR replies, and apart from the crew they work al
     - Once it succeeds, if `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark it ready: `gh pr ready <url>`. Only this first hand-over marks the PR ready: later ones, after a review round or a restack, leave it as it is, since the user may have made it a draft again.
 
     Only now: `pr-open` tells the user and the lead the PR is waiting on the user. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
+
+## Workflow: spike
+
+A spike answers a question that another task's plan rests on, by trying a path. Its code is thrown away: what lasts is your report in the task file, which whoever owns that draft (the task's `informs`) reads beside any other spikes' answers. The brief's Plan says what to try and its time box; its Acceptance criteria say what would answer the question.
+
+1. **Try the path** in your worktree, within the time box. Commit as you go, but only locally: never push. A spike leaves nothing in the shared repo. Write the quickest code that answers the question. Tests, the observer, a PR, automated review and `## Evidence` are for builds, so skip them. If the time box runs out, stop and report what you have.
+2. **Write the report**: a `## Report` section in your task file, before `## Automated reviews` (or before `## Log` if that's missing). Its first line is `Answer: <the answer, in a line>`, such as `Answer: yes, the API pages by cursor, 100 rows a page` or `Answer: not answered in the time box: …`. Then what you tried, the evidence (the commands you ran and their output, trimmed to what shows the result), what it means for the plan of the task it informs, and anything that surprised you.
+3. **Hand over**, last: `crew hand-over <task>`. It checks that the report starts with its answer and that your worktree has nothing uncommitted, and sets `done`. A goal's spike goes to the goal lead; outside a goal, the lead finds it in `crew status`. Then end your turn: `crew tick` removes your session with the worktree, so the report is what's read.
 
 ## Workflow: automated review
 

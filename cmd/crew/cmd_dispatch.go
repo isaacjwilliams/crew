@@ -118,7 +118,7 @@ func cmdDispatch(c *Crew, args []string) error {
 		return err
 	}
 	l.record(t.Doc)
-	t.Set("status", string(Working))
+	t.SetStatus(Working)
 	t.Touch()
 	t.Log(fmt.Sprintf("dispatched: worker %s (session %s) in %s on %s", l.job, orUnknown(l.session), wt, branch))
 	c.commit("dispatch " + p.Name + "/" + t.ID())
@@ -152,12 +152,12 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if parent, ok := idx.abandonedParent(t); ok {
 		return fail("%s is stacked on %s, which is abandoned; give it another base with 'crew set %s base <branch>'", t.ID(), parent.ID(), t.ID())
 	}
-	deps, err := c.unmergedDeps(idx, t)
+	deps, err := c.pendingDeps(idx, t)
 	if err != nil {
 		return err
 	}
 	if len(deps) > 0 {
-		return notYet("%s depends on %s, which is '%s' (must be merged)", t.ID(), deps[0].ID(), deps[0].Status())
+		return notYet("%s depends on %s, which is '%s' (must be merged or done)", t.ID(), deps[0].ID(), deps[0].Status())
 	}
 	workers, err := workerSlots(p.Settings, c.runningWorkers(c.agents()))
 	if err != nil {
@@ -178,14 +178,14 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	return nil
 }
 
-// unmergedDeps are the tasks this one waits on: its dependencies that haven't
-// merged. A stacked task's parent (liveParent, the one dispatch stacks it on)
+// pendingDeps are the tasks this one waits on: its dependencies that aren't
+// delivered yet (merged, or for a spike, done). A stacked task's parent (liveParent, the one dispatch stacks it on)
 // needn't merge, since dispatch needs only its branch on origin, so it's listed
 // only when it's abandoned, whether or not it's in depends_on. A dependency
 // that doesn't name exactly one task is an error.
 // idx indexes the task's project, or every project: building it reads every
 // task file, so a caller checking many tasks builds it once.
-func (c *Crew) unmergedDeps(idx Branches, t Task) ([]Task, error) {
+func (c *Crew) pendingDeps(idx Branches, t Task) ([]Task, error) {
 	var deps []Task
 	project := taskProjectDir(t)
 	if parent, ok := idx.abandonedParent(t); ok {
@@ -202,7 +202,7 @@ func (c *Crew) unmergedDeps(idx Branches, t Task) ([]Task, error) {
 		if stacked && f == parent.Path {
 			continue
 		}
-		if d := (Task{Doc{f}}); d.Status() != Merged {
+		if d := (Task{Doc{f}}); !d.Status().Delivered() {
 			deps = append(deps, d)
 		}
 	}

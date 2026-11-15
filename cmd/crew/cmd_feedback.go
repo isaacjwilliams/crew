@@ -286,7 +286,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	}
 	if questions.Len() > 0 {
 		t.AppendToSection("## Open questions", questions.String())
-		t.Log(fmt.Sprintf("%d collaborator comment(s) recorded under Open questions for the user", no))
+		t.Log(fmt.Sprintf("%d collaborator comment(s) %s", no, recordedForTheUser))
 	}
 	t.Set("pr", pr)
 	t.Set("feedback_since", stamp)
@@ -374,7 +374,7 @@ func (r reviewRound) empty() bool {
 func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
-	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format("2006-01-02 15:04"), prNumber)
+	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
 		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
 	}

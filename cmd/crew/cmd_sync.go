@@ -52,6 +52,11 @@ func cmdSync(c *Crew, args []string) error {
 			if st == Draft || st == Ready || st.Finished() {
 				continue
 			}
+			// A kind that makes no PR has none to find: one under its branch's
+			// name is an old one, from a branch since deleted.
+			if rules, err := t.rules(); err == nil && !rules.pr {
+				continue
+			}
 			pr := t.PR()
 			if pr == "" && t.Branch() != "" {
 				if pr = prOfBranch(p.Repo(), t.Branch()); pr != "" {
@@ -102,7 +107,7 @@ func cmdSync(c *Crew, args []string) error {
 				changed = true
 			}
 			if info.State == "MERGED" && st != Merged {
-				t.Set("status", string(Merged))
+				t.SetStatus(Merged)
 				t.Touch()
 				t.Log("PR merged")
 				changed = true
@@ -129,14 +134,17 @@ func cmdSync(c *Crew, args []string) error {
 			if !t.Status().InFlight() {
 				continue
 			}
-			if sensitive {
-				fetch()
-			}
-			if raised, err := raiseRisk(t, p); err != nil {
-				warn("%s: %v", t.ID(), err)
-			} else if raised != "" {
-				changed = true
-				fmt.Printf("%s: %s\n", t.ID(), raised)
+			// A kind that makes no PR, a spike say, has no risk tier to raise.
+			if rules, err := t.rules(); err == nil && rules.pr {
+				if sensitive {
+					fetch()
+				}
+				if raised, err := raiseRisk(t, p); err != nil {
+					warn("%s: %v", t.ID(), err)
+				} else if raised != "" {
+					changed = true
+					fmt.Printf("%s: %s\n", t.ID(), raised)
+				}
 			}
 			parent, ok := idx.parentOf(t)
 			if !ok {

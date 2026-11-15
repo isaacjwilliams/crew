@@ -4,6 +4,7 @@
 #   $HOME/agents.json        what `claude agents --json` returns; --bg adds or updates a job
 #   $HOME/fail-resume        if present, `--resume … --bg` fails
 #   $HOME/fail-resume-late   if present, `--resume … --bg` starts a job that ends `failed`
+#   $HOME/fail-agent         if present, `-p --agent <the agent it names>` fails
 #   $HOME/placeholder-session  if present, the next `claude agents` after a resume shows
 #                            the resumed job under a new session ID, as a process does
 #                            before it has loaded the session
@@ -102,6 +103,8 @@ case ${1:-} in
         --arg id "$id" --arg s "$session" --arg st "$state" --argjson pid "$pid" --arg cwd "$PWD" --arg name "${name:-untitled session}"
       if [[ -f $HOME/placeholder-session && $session == "$resume" ]]; then echo "$id" >"$HOME/placeholder-pending"; fi
       printf 'backgrounded · \e[36m%s\e[39m · stub\n' "$id"
+    elif [[ -f $HOME/fail-agent && " $* " == *" --agent $(cat "$HOME/fail-agent") "* ]]; then
+      echo "stub claude -p failed"; exit 1
     else
       echo "stub claude -p ok"
     fi ;;
