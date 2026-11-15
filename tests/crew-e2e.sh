@@ -1458,14 +1458,25 @@ out=$(crew gardener --project "$PJ" 2>&1); st=$?
 call=$(tail -n +$((n + 1)) "$HOME/claude-calls.log")
 check "with no new commits, crew gardener still runs the misses agent, with the gardener's settings" \
   '((st == 0)) && [[ $out == *"$PJ: no new commits since the last run"*"$PJ: sorting your comments on 1 merged task(s)"* && $call == *"--agent misses "* && $call != *"--agent gardener "* && $(given_settings) == "$(jq -c . "$L/config/gardener-settings.json")" ]]'
-check "it passes the task merged after misses.last with a comment after a review, and no other" \
-  '[[ $call == *"- $MT/090-misses-one.md"* && $call != *091-misses-ci* && $call != *092-misses-old* ]]'
+check "it passes the task merged after misses.last with a comment after a review, with that comment, and no other task" \
+  '[[ $call == *"- $MT/090-misses-one.md"$'"'"'\n'"'"'"  - round 1, after automated review 1: comment 5 — [link](u5)"* && $call != *091-misses-ci* && $call != *092-misses-old* ]]'
 check "it records the newest merge time it read in misses.last, and commits" \
   '[[ $(cat "$PD/misses.last") == "$(date -d "2026-11-06 16:00" --iso-8601=seconds)" && $(git -C "$L" log -1 --format=%s) == "misses $PJ (1 tasks)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
 n=$(wc -l <"$HOME/claude-calls.log")
 out=$(crew gardener --project "$PJ" 2>&1)
 check "a second run with nothing new starts no session" \
   '[[ $out == *"$PJ: no newly merged tasks with your comments after automated review"* && $(wc -l <"$HOME/claude-calls.log") == "$n" ]]'
+# The gardener fails on a new commit; the misses agent still runs and records its own progress.
+sed 's/^status: .*/status: merged/' "$L/templates/task.md" >"$MT/093-misses-two.md"
+review_then_round "$MT/093-misses-two.md" 2026-11-08 '**Conversation comments**\n- [x] comment 7 — [link](u7)\n  > split this'
+printf -- '- 2026-11-08 16:00 — status → merged\n' >>"$MT/093-misses-two.md"
+crew commit "misses fixture" >/dev/null
+(cd "$SB/webapp" && git commit -q --allow-empty -m "more" && git push -q)
+glast=$(cat "$PD/gardener.last"); echo gardener >"$HOME/fail-agent"
+out=$(crew gardener --project "$PJ" 2>&1); st=$?
+rm "$HOME/fail-agent"
+check "when the gardener fails, the misses agent still runs and moves its own cursor, and crew gardener exits 1" \
+  '((st == 1)) && [[ $out == *"$PJ: gardener exited with 1"*"$PJ: sorting your comments on 1 merged task(s)"* && $(cat "$PD/gardener.last") == "$glast" && $(cat "$PD/misses.last") == "$(date -d "2026-11-08 16:00" --iso-8601=seconds)" ]]'
 MP=$(crew propose "Name things for the domain" --source misses --project "$PJ")
 check "crew propose takes --source misses, and names the misses agent as its author" \
   '[[ $(crew get "$MP" source) == misses && $(section "$MP" "## Log") == *"proposed by the misses agent"* ]]'

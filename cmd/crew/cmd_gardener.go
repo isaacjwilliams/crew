@@ -122,42 +122,68 @@ func (c *Crew) reviewCommits(p *Project, wt string) error {
 
 // sortMisses runs the misses agent over the project's tasks merged after
 // missesSince that have the user's comments after an automated review, in wt, a
-// checkout of the default branch. misses.last then holds the newest merge time
-// the run read. A merge time is when crew sync logged the merge, so a task
-// synced late still comes after the cursor.
+// checkout of the default branch. The prompt names each task's comments, so the
+// agent sorts exactly those. misses.last then holds the newest merge time the
+// run read.
 func (c *Crew) sortMisses(p *Project, wt string) error {
 	lastFile := filepath.Join(p.Dir, "misses.last")
 	since, err := missesSince(p, wt, lastFile)
 	if err != nil {
 		return err
 	}
-	// Log times are to the minute, so a task synced later in this minute would
-	// tie with a cursor set now, and be skipped. It waits for the next run.
-	thisMinute := time.Now().Truncate(time.Minute)
-	var files []string
+	tasks, newest := tasksWithMisses(c.tasks(p.Name), since, time.Now())
+	if len(tasks) == 0 {
+		fmt.Printf("%s: no newly merged tasks with your comments after automated review\n", p.Name)
+		return nil
+	}
+	var list strings.Builder
+	for _, t := range tasks {
+		fmt.Fprintf(&list, "- %s\n", t.task.Path)
+		for _, cm := range t.comments {
+			fmt.Fprintf(&list, "  - round %d, after automated review %d: %s\n", cm.Round, cm.Review.Number, cm.Comment)
+		}
+	}
+	prompt := fmt.Sprintf("Project: %s\nProposals directory: %s\nProposal template: %s\nCrew's review rubric: %s\nToday's date: %s\nTasks to read, and the comments to sort in each:\n%sFollow your process and write proposals only into the proposals directory.",
+		p.Name, filepath.Join(p.Dir, "proposals"), c.path("templates/proposal.md"), c.path(".claude/skills/pr-review/rubric.md"), time.Now().Format("2006-01-02"), list.String())
+	if err := c.runAgent(p, wt, "misses", fmt.Sprintf("sorting your comments on %d merged task(s)", len(tasks)), prompt); err != nil {
+		return err
+	}
+	return c.advance(lastFile, newest.Format(time.RFC3339), fmt.Sprintf("misses %s (%d tasks)", p.Name, len(tasks)))
+}
+
+// A merged task for the misses agent, and the user's comments in it after an
+// automated review.
+type taskWithMisses struct {
+	task     Task
+	comments []CommentAfterReview
+}
+
+// tasksWithMisses picks, from tasks, those merged after since that have the
+// user's comments after an automated review, and returns them with the newest
+// of their merge times. A merge time is when crew sync logged the merge, so a
+// task synced late still comes after since. Log times are to the minute, so a
+// task synced later in now's minute would tie with a cursor set now, and be
+// skipped: one merged in that minute waits for the next run.
+func tasksWithMisses(tasks []Task, since, now time.Time) ([]taskWithMisses, time.Time) {
+	thisMinute := now.Truncate(time.Minute)
+	var picked []taskWithMisses
 	newest := since
-	for _, t := range c.tasks(p.Name) {
+	for _, t := range tasks {
 		if t.Status() != Merged {
 			continue
 		}
 		merged := mergedAt(t.LogEntries())
-		if merged.After(since) && merged.Before(thisMinute) && len(t.CommentsAfterReview()) > 0 {
-			files = append(files, t.Path)
+		if !merged.After(since) || !merged.Before(thisMinute) {
+			continue
+		}
+		if comments := t.CommentsAfterReview(); len(comments) > 0 {
+			picked = append(picked, taskWithMisses{t, comments})
 			if merged.After(newest) {
 				newest = merged
 			}
 		}
 	}
-	if len(files) == 0 {
-		fmt.Printf("%s: no newly merged tasks with your comments after automated review\n", p.Name)
-		return nil
-	}
-	prompt := fmt.Sprintf("Project: %s\nProposals directory: %s\nProposal template: %s\nCrew's review rubric: %s\nToday's date: %s\nTasks to read:\n- %s\nFollow your process and write proposals only into the proposals directory.",
-		p.Name, filepath.Join(p.Dir, "proposals"), c.path("templates/proposal.md"), c.path(".claude/skills/pr-review/rubric.md"), time.Now().Format("2006-01-02"), strings.Join(files, "\n- "))
-	if err := c.runAgent(p, wt, "misses", fmt.Sprintf("sorting your comments on %d merged task(s)", len(files)), prompt); err != nil {
-		return err
-	}
-	return c.advance(lastFile, newest.Format(time.RFC3339), fmt.Sprintf("misses %s (%d tasks)", p.Name, len(files)))
+	return picked, newest
 }
 
 // missesSince is where the misses agent's run starts: the time in lastFile,

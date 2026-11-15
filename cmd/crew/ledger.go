@@ -754,44 +754,27 @@ func (t Task) FeedbackRounds() int {
 }
 
 // A review round: its number, when crew recorded it, and the user's comments
-// in it.
+// in it, each by its checklist item: "review 7 (changes_requested)",
+// "comment 10 — [link](u10)" or "`a.go:3` — comment 9 — [link](u9)". The item
+// names the comment; the round quotes it on the lines below.
 type ReviewRound struct {
 	Number   int
 	At       time.Time
-	Comments []ReviewComment
+	Comments []string
 }
-
-// A comment of the user's in a review round: a review summary, an inline
-// comment or a conversation comment. Item is its checklist item, such as
-// "comment 10 — [link](u10)", and Text what the round quotes of it.
-type ReviewComment struct{ Item, Text string }
 
 // ReviewRounds is the task's review rounds, oldest first, as reviewRound.add
 // writes them. Red CI and requests for another automated review aren't
 // comments, so a round of only those has none.
 func (t Task) ReviewRounds() []ReviewRound {
 	var rounds []ReviewRound
-	var comment *ReviewComment // the comment whose quote the line may continue
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
 		if rest, ok := strings.CutPrefix(l, "### Round "); ok {
 			n, at := numberedHeading(rest)
-			rounds, comment = append(rounds, ReviewRound{Number: n, At: at}), nil
-			continue
-		}
-		if len(rounds) == 0 {
-			continue
-		}
-		r := &rounds[len(rounds)-1]
-		if quote, ok := strings.CutPrefix(l, "  >"); ok && comment != nil {
-			if comment.Text != "" {
-				comment.Text += "\n"
-			}
-			comment.Text += strings.TrimPrefix(quote, " ")
-		} else if item, ok := checklistItem(l); ok && isComment(item) {
-			r.Comments = append(r.Comments, ReviewComment{Item: item})
-			comment = &r.Comments[len(r.Comments)-1]
-		} else {
-			comment = nil
+			rounds = append(rounds, ReviewRound{Number: n, At: at})
+		} else if item, ok := checklistItem(l); ok && isComment(item) && len(rounds) > 0 {
+			r := &rounds[len(rounds)-1]
+			r.Comments = append(r.Comments, item)
 		}
 	}
 	return rounds
@@ -818,7 +801,7 @@ func (t Task) ReviewComments() int {
 // that round.
 type CommentAfterReview struct {
 	Round   int
-	Comment ReviewComment
+	Comment string // its checklist item in the round
 	Review  AutomatedReview
 }
 

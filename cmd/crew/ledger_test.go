@@ -400,15 +400,15 @@ func TestReviewRounds(t *testing.T) {
 	for _, r := range rounds {
 		line := fmt.Sprintf("%d %s:", r.Number, r.At.Format(logTime))
 		for _, cm := range r.Comments {
-			line += fmt.Sprintf(" [%s | %s]", cm.Item, cm.Text)
+			line += " [" + cm + "]"
 		}
 		got = append(got, line)
 	}
 	want := []string{
-		"1 2026-11-10 10:00: [comment 5 — [link](u5) | too early]",
+		"1 2026-11-10 10:00: [comment 5 — [link](u5)]",
 		"2 2026-11-10 13:00:",
-		"3 2026-11-10 14:00: [review 7 (changes_requested) | Two things.\n- [ ] not an item] [`a.go:3` — comment 9 — [link](u9) | why?]",
-		"4 2026-11-11 10:00: [comment 12 — [link](u12) | ok]",
+		"3 2026-11-10 14:00: [review 7 (changes_requested)] [`a.go:3` — comment 9 — [link](u9)]",
+		"4 2026-11-11 10:00: [comment 12 — [link](u12)]",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)
@@ -418,10 +418,10 @@ func TestReviewRounds(t *testing.T) {
 func TestCommentsAfterReview(t *testing.T) {
 	var got []string
 	for _, c := range (Task{docWith(t, commentedTask)}).CommentsAfterReview() {
-		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment.Text, c.Review.Number))
+		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment, c.Review.Number))
 	}
 	// Round 1 came before any review, and round 2 holds no comment.
-	want := []string{"round 3, Two things.\n- [ ] not an item, after review 1", "round 3, why?, after review 1", "round 4, ok, after review 2"}
+	want := []string{"round 3, review 7 (changes_requested), after review 1", "round 3, `a.go:3` — comment 9 — [link](u9), after review 1", "round 4, comment 12 — [link](u12), after review 2"}
 	if !slices.Equal(got, want) {
 		t.Errorf("CommentsAfterReview = %q\nwant %q", got, want)
 	}
