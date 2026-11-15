@@ -11,7 +11,8 @@
      <N> counts every review in this pass, including one whose reviewers failed. When the record
      has a "Summary posted" line before this pass's reviews, open instead of the line below with
      "<N> more automated reviews of this PR ran since the last summary." ("1 more automated review
-     …" for one).
+     …" for one). Otherwise, when the pass didn't converge, the PR isn't ready for the user, so
+     open with "<N> automated reviews ran on this PR."
      The sentences after it say who reviewed, from the Reviewers and Rounds lines:
      - the Claude reviewer only: "Each was by a Claude reviewer." ("It was by …" after a single review)
      - with Codex: "Each was by a Claude reviewer and Codex."
@@ -30,15 +31,19 @@
        only the commits since review 2." after a single review, naming the review on its Range line)
      - some of each: "Reviews 1 and 3 read the whole PR, and the others only the commits since the
        last finished review." (name the reviews that read the whole PR)
-     The line after that says how the last review ended:
+     The line after that says how the last review ended. When more than one fits, the first wins:
      - clean: "The last came back clean." ("It came back clean." after a single review)
-     - the limit ran out after fixes: "The limit ran out: the fixes for the last review haven't been reviewed again."
+     - it didn't converge (the limit ran out with fixes made for the last review): "Review didn't settle
+       after <N> reviews, so this PR isn't ready yet. Proposed instead:", then the proposed pieces,
+       one line each: what each smaller PR would cover. Call them "smaller PRs", never "tasks".
+     - no reviewer reported in any review: "None could finish, so this PR hasn't had an automated review."
      - only Codex reported in it: "The Claude reviewer couldn't finish the last, so only Codex has seen the latest fixes."
-     - no reviewer reported in it: "The last couldn't finish, so the latest fixes haven't been reviewed again."
-     - no reviewer reported in any review: "None could finish, so this PR hasn't had an automated review." -->
+     - no reviewer reported in it: "The last couldn't finish, so the latest fixes haven't been reviewed again." -->
 ## Automated review
 
 <N> automated reviews ran before this PR was ready for you. <Who reviewed, from the list above.> <What they read, from the list above.> <How the last one ended, from the list above.>
+
+- <only after "Proposed instead:", one line per smaller PR: what it would cover>
 
 **Fixed**
 - [<severity>] <what was wrong, in a line> (<short sha>)
