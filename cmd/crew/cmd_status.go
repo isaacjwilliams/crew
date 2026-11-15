@@ -136,6 +136,7 @@ type statusView struct {
 	repo     string            // the project's clone here, for restack reasons; empty when there's none
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
+	spikes   map[string][]Task // a task's ID → the spikes that inform it
 	deps     map[string]depsOf // a task's file → the tasks it waits on
 	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
 }
@@ -178,6 +179,12 @@ func (s *statusView) project(name string) {
 	}
 	fmt.Println(line)
 	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
+	s.spikes = map[string][]Task{}
+	for _, t := range s.tasks(name) {
+		if d := t.Get("informs"); d != "" {
+			s.spikes[d] = append(s.spikes[d], t)
+		}
+	}
 	var goals []Goal
 	shownGoals := map[string]bool{}
 	for _, g := range s.goals(name) {
@@ -293,10 +300,10 @@ func leavesStack(t, parent Task) bool {
 }
 
 // foldedDrafts counts a draft outside a goal, with the drafts stacked on it, when
-// none of them has an open question: they're counted in one line, not listed.
-// It's 0 for a task that's listed.
+// none of them has an open question or anything still to learn: they're counted
+// in one line, not listed. It's 0 for a task that's listed.
 func (s *statusView) foldedDrafts(t Task) int {
-	if t.Status() != Draft || t.OpenQuestions() > 0 {
+	if t.Status() != Draft || t.OpenQuestions() > 0 || s.learning(t) != "" {
 		return 0
 	}
 	n := 1
@@ -368,7 +375,7 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) {
 			parked = append(parked, t)
 		case st == Draft:
 			planning = append(planning, t)
-		default: // merged or abandoned, listed with --done
+		default: // merged, done or abandoned, listed with --done
 			finished = append(finished, t)
 		}
 	}
@@ -498,6 +505,13 @@ func (s *statusView) notes(t Task) []string {
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
 	}
+	if l := s.learning(t); l != "" {
+		notes = append(notes, l)
+	}
+	if d := t.Get("informs"); d != "" {
+		n, _, _ := strings.Cut(d, "-")
+		notes = append(notes, "informs "+n)
+	}
 	if t.Get("interrupted") != "" {
 		notes = append(notes, "interrupted by a pause")
 	}
@@ -534,6 +548,27 @@ func (s *statusView) notes(t Task) []string {
 		notes = append(notes, "dispatch by hand")
 	}
 	return notes
+}
+
+// learning is what a draft is still learning: how many items under Still to
+// learn are open, and the spikes that inform it, with their status: "2 to learn;
+// 041 done, 042 working". It's empty when there's neither.
+func (s *statusView) learning(t Task) string {
+	if t.Status() != Draft {
+		return ""
+	}
+	var parts []string
+	if n := t.StillToLearn(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d to learn", n))
+	}
+	var spikes []string
+	for _, sp := range s.spikes[t.ID()] {
+		spikes = append(spikes, taskNumber(sp)+" "+string(sp.Status()))
+	}
+	if len(spikes) > 0 {
+		parts = append(parts, strings.Join(spikes, ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // after names the tasks a task waits on by number, or counts them when there are

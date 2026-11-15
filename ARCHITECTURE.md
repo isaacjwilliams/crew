@@ -339,7 +339,7 @@ crew tick
   ├─ for each running goal:
   │    a note, a worker question it hasn't had,  → crew goal followup, once the goal lead is free (saying so if it isn't)
   │      or interrupted                             and its project isn't paused
-  │    every task merged or abandoned            → crew goal done
+  │    every task finished                        → crew goal done
   ├─ dispatchReady: the ready tasks of running goals, every unpaused project's together,
   │    highest priority first, then by project and ID (sortForDispatch)
   │    waiting on other tasks (unmergedDeps)     → skipped, without a word
@@ -374,7 +374,7 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
         → plan-reviewer → findings settled → crew ready TASK, or parked (draft, with Open questions)
   crew tick: dispatches the goal's ready tasks, highest priority first, as MAX_WORKERS / the goal's max_in_flight allow;
              resumes the goal lead (crew goal followup) with the user's notes and its workers' questions;
-             closes the goal (crew goal done) once every task is merged or abandoned
+             closes the goal (crew goal done) once every task is finished
 ```
 
 - **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job`, `lead_session` and `lead_fingerprint`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's record, and the session can be replaced.
