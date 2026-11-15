@@ -599,6 +599,10 @@ check "sync reports the child of a merged parent" '[[ $out == *"010-season-admin
 check "cleanup of a merged parent leaves its stack workable" 'crew cleanup 9 >/dev/null && ! git show-ref --verify --quiet refs/heads/agent/season-model'
 crew observe 10 >/dev/null
 check "observe falls back to base_sha when the parent's branch is gone" 'grep -q "Review the change $T9b...HEAD" "$HOME/claude-calls.log"'
+echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
+check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
+  '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
+sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'
 crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
