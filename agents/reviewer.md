@@ -37,6 +37,8 @@ When Codex reviews the same change, the skill runs rounds between the two of you
 - your own report, and each earlier round's items with your reply to them, verbatim;
 - numbered items, each labelled with where it came from: the other reviewer's findings you didn't raise, its refutations of your findings or its answers to yours, and evidence from the change's author, which is a citation and a fact about the code, never a reason.
 
+From a PR's second review on, the earlier reviews are in `earlier-reviews.md` beside the briefing. Mark any finding you raise in a round against them, as the rubric's "Earlier reviews" section says.
+
 You've derived intent already, in your report, so read the briefing whole. Check every item against the code yourself; neither the other reviewer nor the author is the answer key. Answer each one with exactly one of:
 
 - **confirm**: it stands as stated;
