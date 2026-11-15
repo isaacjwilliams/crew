@@ -1705,10 +1705,23 @@ out=$(crew review-eval --project "$PJ" --limit 1 2>&1); st=$?
 call=$(since "$n")
 check "--limit 1 runs only the first case, and its report says so" \
   '((st == 0)) && [[ $(grep -c -- "--agent reviewer " <<<"$call") == 1 && $(judged "$call") == 1 && $out == *"Found 0 of 1 misses."* ]] && grep -qx -- "- Cases: --limit 1" "$(ls "$PD"/review-eval/*.md | tail -1)"'
+# A pause, or a new rubric or reviewer from crew upgrade, during a review stops
+# the run: it starts no more sessions, and its report is never a baseline.
+sleep 1; echo "$PD/paused" >"$HOME/reviewer-writes"; n=$(calls)
+out=$(crew review-eval --project "$PJ" 2>&1); st=$?
+rm "$PD/paused"; call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1)
+check "a pause while the reviewer runs stops the run: no judge starts, and the report says it was cut short" \
+  '((st == 0)) && [[ $(grep -c -- "--agent reviewer " <<<"$call") == 1 && $(judged "$call") == 0 ]] && grep -qx -- "- Cases: all, cut short: the project was paused" "$EV" &&
+   grep -qx "Found 0 of 0 misses. Not run: 3." "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **not run** — \`${EF:0:7}..${EH:0:7}\` — Fix the b race — the project was paused" "$EV"'
+sleep 1; echo "$SB/rubric.md" >"$HOME/reviewer-writes"; n=$(calls)
+out=$(crew review-eval --project "$PJ" --rubric "$SB/rubric.md" 2>&1); st=$?
+call=$(since "$n")
+check "a rubric that changes while the reviewer runs stops the run the same way" \
+  '((st == 0)) && [[ $(judged "$call") == 0 ]] && grep -qx -- "- Cases: all, cut short: the rubric changed" "$(ls "$PD"/review-eval/*.md | tail -1)"'
 sleep 1; echo reviewer >"$HOME/fail-agent"; n=$(calls)
 out=$(crew review-eval --task 095-eval-one 2>&1); st=$?
 rm "$HOME/fail-agent"; call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1)
-check "when the reviewer fails, its cases aren't run or judged, and the report says so" \
+check "when the reviewer fails, its cases aren't run or judged, and the report says so and compares with the last full run, not a cut-short one" \
   '((st == 0)) && [[ $(judged "$call") == 0 ]] && grep -q "^Compared with the last full run, \`$EV2\`" "$EV" && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **not run** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — the reviewer exited with 1; see 095-eval-one-review-1.report.log" "$EV" && grep -qx "Found 0 of 0 misses. Not run: 3." "$EV"'
 n=$(calls)
 out=$(crew review-eval --project "$P2" --task 095-eval-one 2>&1); st=$?
@@ -1722,6 +1735,6 @@ out=$(flock "$L/.crew-eval-$PJ.lock" crew review-eval --project "$PJ" 2>&1); st=
 check "a second review eval of a project refuses while one runs" '((st == 1)) && [[ $out == *"a review eval of $PJ is running already"* && $(calls) == "$n" ]]'
 out=$(crew review-eval --project "$PJ" --task 090-misses-one 2>&1); st=$?
 check "with no cases, crew review-eval says so, starts no session and writes no report" \
-  '((st == 0)) && [[ $out == "$PJ: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 4 ]]'
+  '((st == 0)) && [[ $out == "$PJ: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 6 ]]'
 
 summary crew-e2e

@@ -17,6 +17,8 @@
 #   $HOME/claude-fingerprint.log  every invocation again, after its CREW_LEAD_FINGERPRINT ("unset" for none)
 #   $HOME/judge-finds        what a judge (`-p --tools ""`, as crew review-eval runs it) finds:
 #                            it answers found when its prompt has this text, else missed
+#   $HOME/reviewer-writes    if present, the next `-p --agent reviewer` adds a line to the file
+#                            it names, then removes it: a change made while a review runs
 #   $HOME/claude-interrupt   if present, a bare `claude` sends the signal it names (INT or HUP)
 #                            to its process group, as Ctrl+C or a closed terminal does, and
 #                            exits as that signal would
@@ -108,6 +110,9 @@ case ${1:-} in
     elif [[ -f $HOME/fail-agent && " $* " == *" --agent $(cat "$HOME/fail-agent") "* ]]; then
       echo "stub claude -p failed"; exit 1
     elif [[ " $* " == *" --agent reviewer "* ]]; then
+      if [[ -f $HOME/reviewer-writes ]]; then
+        echo "changed while a review ran" >>"$(cat "$HOME/reviewer-writes")"; rm "$HOME/reviewer-writes"
+      fi
       printf '#### 1. [should fix] A stub finding — `a.go:1`\n'
     elif [[ " $* " == *" --tools "* ]]; then
       if [[ -f $HOME/judge-finds && ${args[-1]} == *"$(cat "$HOME/judge-finds")"* ]]; then

@@ -192,15 +192,25 @@ func TestEvalReportAndComparison(t *testing.T) {
 
 // A run narrowed by --task or --limit is a trial: the next run compares with
 // the last run over every case instead.
-func TestLastFullEvalSkipsTrials(t *testing.T) {
+func TestLastFullEvalSkipsPartialRuns(t *testing.T) {
 	dir := t.TempDir()
 	at, _ := time.ParseInLocation(logTime, "2026-11-15 14:30", time.Local)
-	results := []evalResult{{evalCase{id: "1/fix-2"}, verdictFound, "x"}}
+	judged := []evalResult{{evalCase{id: "1/fix-2"}, verdictFound, "x"}}
+	failed := []evalResult{{evalCase{id: "1/fix-2"}, verdictNotRun, "the reviewer exited with 1"}}
 	full := evalSetup{rubricHash: "aaaa1111", reviewerHash: "bbbb2222", claude: "2.1.290"}
-	trial := full
+	trial, cut := full, full
 	trial.selection = "--limit 1"
-	for name, setup := range map[string]evalSetup{"2026-11-14-090000.md": full, "2026-11-15-100000.md": trial} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(evalReport("webapp", at, setup, "/l", results, "")), 0o644); err != nil {
+	cut.selection = "all, cut short: the project was paused"
+	for name, run := range map[string]struct {
+		setup   evalSetup
+		results []evalResult
+	}{
+		"2026-11-14-090000.md": {full, judged},
+		"2026-11-15-100000.md": {trial, judged},
+		"2026-11-15-110000.md": {cut, judged},
+		"2026-11-15-120000.md": {full, failed},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(evalReport("webapp", at, run.setup, "/l", run.results, "")), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

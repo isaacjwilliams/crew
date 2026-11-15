@@ -315,8 +315,9 @@ type evalSetup struct {
 	rubric, rubricHash     string
 	reviewer, reviewerHash string
 	claude                 string
-	// selection is the flags that narrowed the run to some cases, "--task 042
-	// --limit 2" say, or "" for a full run.
+	// selection is how the run came to judge only some cases: the flags that
+	// narrowed it ("--task 042 --limit 2", say) and why it was cut short, if it
+	// was. It's "" for a full run.
 	selection string
 }
 
@@ -331,8 +332,8 @@ func shortHash(path string) string {
 }
 
 // One run of crew review-eval over a project: when it started, what it tests
-// with, its checkout, and the directory for what each session was given and
-// said.
+// with, its checkout, the directory for what each session was given and said,
+// and why it stopped starting sessions, if it has.
 type evalRun struct {
 	c        *Crew
 	p        *Project
@@ -340,6 +341,7 @@ type evalRun struct {
 	tested   evalSetup
 	checkout string
 	logs     string
+	stopped  string
 }
 
 // startEvalRun gets a run over p ready: it notes what the run tests with, and
@@ -372,12 +374,16 @@ func (e *evalRun) record(results []evalResult) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	tested := e.tested
+	if e.stopped != "" {
+		tested.selection = cmp.Or(tested.selection, "all") + ", cut short: " + e.stopped
+	}
 	comparison := ""
 	if prev, setup, verdicts, ok := lastFullEval(dir); ok {
-		comparison = compareEvals(filepath.Base(prev), setup, verdicts, e.tested, results)
+		comparison = compareEvals(filepath.Base(prev), setup, verdicts, tested, results)
 	}
 	file := filepath.Join(dir, e.started.Format("2006-01-02-150405")+".md")
-	text := evalReport(e.p.Name, e.started, e.tested, e.logs, results, comparison)
+	text := evalReport(e.p.Name, e.started, tested, e.logs, results, comparison)
 	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 		return err
 	}
@@ -422,9 +428,9 @@ func (e *evalRun) all(cases []evalCase) []evalResult {
 	var results []evalResult
 	for i, ec := range cases {
 		fmt.Printf("%s: case %d of %d, %s: ", e.p.Name, i+1, len(cases), ec.id)
-		if e.p.Paused() { // since the run started: crew upgrade may be replacing the reviewer
+		if !e.goOn() {
 			fmt.Println(verdictNotRun)
-			results = append(results, evalResult{ec, verdictNotRun, "the project was paused"})
+			results = append(results, evalResult{ec, verdictNotRun, e.stopped})
 			continue
 		}
 		key := fmt.Sprintf("%s-review-%d", ec.task.ID(), ec.review.Number)
@@ -445,6 +451,34 @@ func (e *evalRun) all(cases []evalCase) []evalResult {
 		results = append(results, res)
 	}
 	return results
+}
+
+// goOn says whether the run may start another session. Once the project is
+// paused, or the rubric or the reviewer's prompt has changed since the run
+// started, it stops for good: its report would name what it no longer tests.
+// crew upgrade replaces both, and its pause can start and end inside one
+// review, so a check for the pause alone could miss it.
+func (e *evalRun) goOn() bool {
+	if e.stopped == "" {
+		switch {
+		case e.p.Paused():
+			e.stopped = "the project was paused"
+		case shortHash(e.tested.rubric) != e.tested.rubricHash:
+			e.stopped = "the rubric changed"
+		case shortHash(e.tested.reviewer) != e.tested.reviewerHash:
+			e.stopped = "the reviewer's prompt changed"
+		}
+	}
+	return e.stopped == ""
+}
+
+// session runs cmd, one of the run's claude -p sessions, as printSession does,
+// unless the run has stopped.
+func (e *evalRun) session(cmd *exec.Cmd, out, who string) (string, error) {
+	if !e.goOn() {
+		return "", errors.New(e.stopped)
+	}
+	return printSession(cmd, out, who)
 }
 
 // rerun reviews r's range again, from a checkout of its head, and returns the
@@ -471,7 +505,7 @@ func (e *evalRun) rerun(t Task, r AutomatedReview, base string) (string, error) 
 	cmd := e.c.claude("-p", "--agent", "reviewer", "--add-dir", e.logs, "--add-dir", filepath.Dir(e.tested.rubric),
 		"--permission-mode", "auto", "--permission-prompts", "none", "--settings", e.c.path("config/readonly-settings.json"), prompt)
 	cmd.Dir = e.checkout
-	return printSession(cmd, base+".report.md", "the reviewer")
+	return e.session(cmd, base+".report.md", "the reviewer")
 }
 
 // checkOut puts the eval's checkout at head. When the clone doesn't have it,
@@ -530,7 +564,7 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	// isn't taken for a tool.
 	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, userWordsBefore(ec.task, ec.review), report))
 	cmd.Dir = os.TempDir() // away from any repo's CLAUDE.md
-	answer, err := printSession(cmd, out, "the judge")
+	answer, err := e.session(cmd, out, "the judge")
 	if err != nil {
 		return "", "", err
 	}
@@ -668,10 +702,10 @@ func firstLine(text string, n int) string {
 	return ""
 }
 
-// lastFullEval is the newest report in dir of a run over every case, with what
-// it tested and its verdicts. A run narrowed by --task or --limit, a trial,
-// would compare a full run with a few of its cases. Reports are named for
-// their times, so the newest sorts last.
+// lastFullEval is the newest report in dir of a run over every case that
+// judged at least one, with what it tested and its verdicts. A run narrowed by
+// --task or --limit, a trial, or one cut short would compare a full run with a
+// few of its cases. Reports are named for their times, so the newest sorts last.
 func lastFullEval(dir string) (string, evalSetup, map[string]verdict, bool) {
 	reports, _ := filepath.Glob(filepath.Join(dir, "*.md"))
 	slices.Sort(reports)
@@ -680,7 +714,12 @@ func lastFullEval(dir string) (string, evalSetup, map[string]verdict, bool) {
 		if err != nil {
 			continue
 		}
-		if setup, verdicts := parseEvalReport(string(b)); setup.selection == "" {
+		setup, verdicts := parseEvalReport(string(b))
+		judged := false
+		for _, v := range verdicts {
+			judged = judged || v != verdictNotRun
+		}
+		if setup.selection == "" && judged {
 			return reports[i], setup, verdicts, true
 		}
 	}
