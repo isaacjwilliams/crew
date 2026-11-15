@@ -1736,7 +1736,7 @@ check "with no new commits, crew gardener still runs the misses agent, with the 
 check "it passes the task merged after misses.last with a comment after a review, with that comment, and no other task" \
   '[[ $call == *"- $MT/090-misses-one.md"$'"'"'\n'"'"'"  - round 1, after automated review 1: comment 5 — [link](u5)"* && $call != *091-misses-ci* && $call != *092-misses-old* ]]'
 check "it records the newest merge time it read in misses.last, and commits" \
-  '[[ $(cat "$PD/misses.last") == "$(date -d "2026-11-06 16:00" --iso-8601=seconds)" && $(git -C "$L" log -1 --format=%s) == "misses $PJ (1 tasks)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
+  '[[ $(date -d "$(cat "$PD/misses.last")" +%s) == $(date -d "2026-11-06 16:00" +%s) && $(git -C "$L" log -1 --format=%s) == "misses $PJ (1 tasks)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
 n=$(wc -l <"$HOME/claude-calls.log")
 out=$(crew gardener --project "$PJ" 2>&1)
 check "a second run with nothing new starts no session" \
@@ -1751,7 +1751,7 @@ glast=$(cat "$PD/gardener.last"); echo gardener >"$HOME/fail-agent"
 out=$(crew gardener --project "$PJ" 2>&1); st=$?
 rm "$HOME/fail-agent"
 check "when the gardener fails, the misses agent still runs and moves its own cursor, and crew gardener exits 1" \
-  '((st == 1)) && [[ $out == *"$PJ: gardener exited with 1"*"$PJ: sorting your comments on 1 merged task(s)"* && $(cat "$PD/gardener.last") == "$glast" && $(cat "$PD/misses.last") == "$(date -d "2026-11-08 16:00" --iso-8601=seconds)" ]]'
+  '((st == 1)) && [[ $out == *"$PJ: gardener exited with 1"*"$PJ: sorting your comments on 1 merged task(s)"* && $(cat "$PD/gardener.last") == "$glast" && $(date -d "$(cat "$PD/misses.last")" +%s) == $(date -d "2026-11-08 16:00" +%s) ]]'
 MP=$(crew propose "Name things for the domain" --source misses --project "$PJ")
 check "crew propose takes --source misses, and names the misses agent as its author" \
   '[[ $(crew get "$MP" source) == misses && $(section "$MP" "## Log") == *"proposed by the misses agent"* ]]'
