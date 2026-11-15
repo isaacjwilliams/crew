@@ -161,6 +161,12 @@ check "after automated review, the implementer carries on at the review-round st
   "n=\$(sed -n 's/.*or step \\([0-9]*\\) of \"Workflow: review rounds\".*/\\1/p' $A/implementer.md) && [[ -n \$n ]] && awk -v n=\"\$n\" '/^## Workflow: review rounds/ {w=1} w && index(\$0, n \". \") == 1 {print; exit}' $A/implementer.md | grep -q 'run a new pass of .Workflow: automated review.'"
 check "implementer marks its PR ready only after automated review, as its settings allow" \
   "grep -q 'with .--draft. when automated review will run' $A/implementer.md && awk '/crew review-summary <task> <file>.. Add a last line/ && !s {s=NR} /mark the PR ready: .gh pr ready <url>./ && !r {r=NR} END {exit !(s && r && s < r)}' $A/implementer.md"
+check "the implementer records evidence for each acceptance criterion before it opens the PR, including one only the user can check" \
+  "awk '/^## Workflow: first run/ {w=1} w && /^6\\. \\*\\*Record the evidence, then push\\*\\*/ && !e {e=NR} w && /^7\\. \\*\\*Open the PR\\*\\*/ && !o {o=NR} END {exit !(e && o && e < o)}' $A/implementer.md && grep -q 'A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try' $A/implementer.md && grep -qx '## Evidence' $C/../templates/task.md"
+check "the implementer fills in the PR body from its template, which has Risk, How to revert and Evidence, and no Changes" \
+  "grep -q 'The PR body is .templates/pr-body.md.' $A/implementer.md && ! grep -q 'Changes.*: short bullets' $A/implementer.md && grep -qx '## Risk' $C/../templates/pr-body.md && grep -qx '## How to revert' $C/../templates/pr-body.md && grep -qx '## Evidence' $C/../templates/pr-body.md && ! grep -q '^## Changes' $C/../templates/pr-body.md"
+check "only first-run step 10 hands the PR over with crew hand-over, after refreshing the evidence" \
+  "[[ \$(grep -c 'crew hand-over' $A/implementer.md) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\.\\*\\* If automated review changed code, rerun what each affected .## Evidence. entry shows.*Then .crew hand-over <task>.' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
