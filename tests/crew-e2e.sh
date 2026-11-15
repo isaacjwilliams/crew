@@ -245,26 +245,33 @@ check "a hand-over waiting on the lock refuses a task abandoned meanwhile" \
 crew set 1 status needs-input
 # Risk tiers: a branch that changes a file matching one of SENSITIVE_PATHS makes its
 # task high risk, at the hand-over and at every sync; high risk needs a security review.
-echo 'SENSITIVE_PATHS="db/migrate :(glob)**/auth*"' >>"$PE"
 commit_in() { (cd "$1" && shift && for f in "$@"; do mkdir -p "$(dirname "$f")" && echo x >"$f"; done && git add -A && git commit -qm "change $*"); }
 commit_in "$WT" src/search.ts src/oauth.ts
+echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
+out=$(crew hand-over 1 2>&1); st=$?
+check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS (:(nosuchmagic)db): git diff failed"* && $(crew get 1 status) == needs-input ]]'
+sed -i 's/^SENSITIVE_PATHS=.*/SENSITIVE_PATHS="db\/migrate :(glob)**\/auth*"/' "$PE"
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "status shows a pr-open task's look" '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  low: approve from the evidence"* ]]'
-commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
+# Someone else pushes to the PR's branch: a suggestion applied on GitHub, say.
+git -C "$WT" push -q -u origin HEAD 2>/dev/null
+(cd "$SB/other-clone" && git fetch -q origin && git checkout -q -b from-github origin/agent/saved-search-filters && commit_in . config/auth.yml >/dev/null && git push -q origin HEAD:agent/saved-search-filters)
 echo OPEN >"$HOME/gh-pr-state"; out=$(crew sync 2>&1); rm "$HOME/gh-pr-state"
-check "sync raises the risk of a task whose branch touched a sensitive path after its hand-over, and logs the first path" \
-  '[[ $out == *"001-saved-search-filters: risk → high: touches app/auth.rb (+1 more)"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches app/auth.rb (+1 more)" ]]'
+check "sync fetches and raises the risk of a task whose branch on origin gained a sensitive path after its hand-over, and logs it" \
+  '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
 check "status shows a pr-open task raised after its hand-over as waiting on its security review" \
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* ]]'
 crew set 1 status working; crew set 1 risk medium
+commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
 out=$(crew hand-over 1 2>&1); st=$?
-check "hand-over raises the risk of a branch that touches a sensitive path, then refuses it without a security review" \
-  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+1 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
+check "hand-over raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
+  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
 sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
 check "hand-over hands a high-risk task over once its security review is under Evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
-sed -i '/^SENSITIVE_PATHS=/d' "$PE"
+sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'

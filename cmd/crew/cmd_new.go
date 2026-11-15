@@ -222,6 +222,11 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The branch on origin may have commits from elsewhere, a suggestion applied
+	// on GitHub say, that raiseRisk has to see.
+	if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+		warn("git fetch failed; checking SENSITIVE_PATHS against the refs as last fetched")
+	}
 	// Check under the lock: crew sync may be marking the task merged, or the
 	// lead abandoning it, at the same moment.
 	if err := c.lock(); err != nil {
@@ -247,7 +252,11 @@ func cmdHandOver(c *Crew, args []string) error {
 	}
 	// A raise stands even when the hand-over is refused below: the branch touches
 	// a sensitive path whatever happens next.
-	if raised := raiseRisk(t, p); raised != "" {
+	raised, err := raiseRisk(t, p)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if raised != "" {
 		fmt.Println(raised)
 		c.commit("raise risk " + t.ID())
 	}

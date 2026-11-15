@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -101,34 +102,44 @@ func (idx Branches) restackReason(t Task, repo string) string {
 
 // raiseRisk makes a task high risk when its branch changes a file that matches
 // one of the project's SENSITIVE_PATHS (git pathspecs), and logs the first such
-// file. It never lowers a tier. The branch is the local one, or origin's when the
-// local one is missing or behind it, as last fetched; its changes are those since
-// it left its base. It returns the line it logged, or nothing. Call it with the
-// lock held.
-func raiseRisk(t Task, p *Project) string {
+// file. It never lowers a tier. It looks at the branch here and on origin, as last
+// fetched, since either may have commits the other lacks: each one's changes since
+// it left origin/<base>. It returns the line it logged, or nothing, and an error
+// when it couldn't look. Call it with the lock held.
+func raiseRisk(t Task, p *Project) (string, error) {
 	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
-	if len(pathspecs) == 0 || t.Risk() == RiskHigh || t.Branch() == "" {
-		return ""
+	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
+		return "", nil
 	}
-	repo := p.Repo()
-	branch, origin := "refs/heads/"+t.Branch(), "refs/remotes/origin/"+t.Branch()
-	localMissing := !gitOK(repo, "show-ref", "--verify", "--quiet", branch)
-	if localMissing || gitOK(repo, "merge-base", "--is-ancestor", branch, origin) {
-		branch = origin // also when the two are the same commit
+	repo, base := p.Repo(), "refs/remotes/origin/"+t.Base()
+	var touched []string
+	looked := false
+	for _, tip := range []string{"refs/heads/" + t.Branch(), "refs/remotes/origin/" + t.Branch()} {
+		if !gitOK(repo, "show-ref", "--verify", "--quiet", tip) {
+			continue
+		}
+		since, err := git(repo, "merge-base", base, tip)
+		if err != nil {
+			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: %s has no merge base with origin/%s", t.Branch(), t.Base())
+		}
+		out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, tip, "--"}, pathspecs...)...)
+		if err != nil {
+			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS (%s): git diff failed; is each one a pathspec?", strings.Join(pathspecs, " "))
+		}
+		for _, f := range strings.Split(out, "\x00") {
+			if f != "" && !slices.Contains(touched, f) {
+				touched = append(touched, f)
+			}
+		}
+		looked = true
 	}
-	since, err := git(repo, "merge-base", "refs/remotes/origin/"+t.Base(), branch)
-	if err != nil {
-		return ""
+	if !looked {
+		return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: branch %s isn't here or on origin", t.Branch())
 	}
-	out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, branch, "--"}, pathspecs...)...)
-	if err != nil {
-		warn("%s: couldn't check SENSITIVE_PATHS (%s): %v", t.ID(), strings.Join(pathspecs, " "), err)
-		return ""
-	}
-	touched := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
 	if len(touched) == 0 {
-		return ""
+		return "", nil
 	}
+	slices.Sort(touched)
 	line := "risk → high: touches " + touched[0]
 	if len(touched) > 1 {
 		line += fmt.Sprintf(" (+%d more)", len(touched)-1)
@@ -136,7 +147,7 @@ func raiseRisk(t Task, p *Project) string {
 	t.Set("risk", string(RiskHigh))
 	t.Touch()
 	t.Log(line)
-	return line
+	return line, nil
 }
 
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of

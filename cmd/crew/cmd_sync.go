@@ -114,12 +114,27 @@ func cmdSync(c *Crew, args []string) error {
 		// Tasks in flight, now that the merges above are known: raise the risk of
 		// those whose branch touches a sensitive path, and say which stacked tasks
 		// need a restack.
+		// Both read origin's branches, so the project's clone is fetched first, once.
 		idx, fetched := c.branches(name), false
+		fetch := func() {
+			if !fetched {
+				if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+					warn("%s: git fetch failed; using the refs as last fetched", name)
+				}
+				fetched = true
+			}
+		}
+		sensitive := strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != ""
 		for _, t := range c.tasks(name) {
 			if !t.Status().InFlight() {
 				continue
 			}
-			if raised := raiseRisk(t, p); raised != "" {
+			if sensitive {
+				fetch()
+			}
+			if raised, err := raiseRisk(t, p); err != nil {
+				warn("%s: %v", t.ID(), err)
+			} else if raised != "" {
 				changed = true
 				fmt.Printf("%s: %s\n", t.ID(), raised)
 			}
@@ -127,12 +142,7 @@ func cmdSync(c *Crew, args []string) error {
 			if !ok {
 				continue
 			}
-			if !fetched {
-				if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-					warn("%s: git fetch failed; checking stacks against local refs", name)
-				}
-				fetched = true
-			}
+			fetch()
 			if noteBaseSHA(t, parent, p.Repo()) {
 				changed = true
 			}
