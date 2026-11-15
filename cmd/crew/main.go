@@ -60,6 +60,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"cleanup":        cmdCleanup,
 	"goal":           cmdGoal,
 	"gardener":       cmdGardener,
+	"review-eval":    cmdReviewEval,
 	"install":        cmdInstall,
 	"doctor":         cmdDoctor,
 	"host":           cmdHost,
