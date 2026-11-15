@@ -48,7 +48,8 @@ last_launch() {  # the latest --bg call, with every line of its prompt
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does to put its task in pr-open: evidence for each acceptance criterion,
-# the first time, then crew hand-over.
+# the first time, then crew hand-over. A refusal fails the suite, since the checks after
+# it would run against a task that isn't pr-open.
 hand_over() {  # task
   local f n i; f=$(crew path "$1")
   if ! section "$f" "## Evidence" | grep -q '^### '; then
@@ -57,7 +58,7 @@ hand_over() {  # task
       sed -i "/^## Evidence\$/a ### $i.\\nok" "$f"
     done
   fi
-  crew hand-over "$1" >/dev/null || echo "  hand_over $1 refused at line ${BASH_LINENO[0]}" >&2
+  crew hand-over "$1" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: hand_over %s refused at line %s\n' "$1" "${BASH_LINENO[0]}"; }
 }
 # The latest --settings sets CREW_PROJECT to project $1, CREW_HOME to the home, and
 # CREW_LEAD_FINGERPRINT to nothing: a background session takes its environment from
