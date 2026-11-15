@@ -1,12 +1,14 @@
 package main
 
-// Making tasks: crew new, crew ready.
+// Making tasks, and the checked moves of a task's status: crew new, crew ready
+// and crew hand-over.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -190,5 +192,45 @@ func cmdReady(c *Crew, args []string) error {
 	t.Log("marked ready")
 	c.commit("ready " + t.ID())
 	fmt.Println("ready: " + t.ID())
+	return nil
+}
+
+// crew hand-over TASK: the worker's PR is ready for the user, with evidence for
+// every acceptance criterion. Only the first move to pr-open is checked: a PR
+// that comes back after a review round or a restack was handed over already.
+func cmdHandOver(c *Crew, args []string) error {
+	if len(args) == 0 {
+		return usage("crew hand-over TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	if st := t.Status(); st != Working && st != AddressingFeedback {
+		return fail("task is '%s', not working", st)
+	}
+	if t.PR() == "" && t.Get("pr_mode") != "none" {
+		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
+	}
+	gaps, criteria := t.EvidenceGaps()
+	if criteria == 0 {
+		return fail("## Acceptance criteria has no '- ' items, so there's nothing to show evidence for")
+	}
+	if len(gaps) > 0 {
+		nums := make([]string, len(gaps))
+		for i, n := range gaps {
+			nums[i] = strconv.Itoa(n)
+		}
+		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry under ## Evidence for each, with the command and its output",
+			strings.Join(nums, ", "), criteria)
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	t.Set("status", string(PROpen))
+	t.Touch()
+	t.Log("handed over")
+	c.commit("hand over " + t.ID())
+	fmt.Println("handed over: " + t.ID())
 	return nil
 }

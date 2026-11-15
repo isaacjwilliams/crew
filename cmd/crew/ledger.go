@@ -366,6 +366,31 @@ func (t Task) NewestReview() int {
 	return n
 }
 
+// EvidenceGaps is the numbers of the acceptance criteria that have no evidence
+// yet, and how many criteria there are. Criterion n is the nth top-level "- "
+// bullet under ## Acceptance criteria; its evidence is a "### n." entry under
+// ## Evidence. It counts the entries and doesn't judge them.
+func (t Task) EvidenceGaps() (gaps []int, criteria int) {
+	recorded := map[int]bool{}
+	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
+		if rest, ok := strings.CutPrefix(l, "### "); ok {
+			num, _, _ := strings.Cut(rest, ".")
+			if n, err := strconv.Atoi(num); err == nil {
+				recorded[n] = true
+			}
+		}
+	}
+	for _, l := range strings.Split(t.Section("## Acceptance criteria"), "\n") {
+		if strings.HasPrefix(l, "- ") {
+			criteria++
+			if !recorded[criteria] {
+				gaps = append(gaps, criteria)
+			}
+		}
+	}
+	return gaps, criteria
+}
+
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
 // user once the worker has had MAX_CI_FIXES rounds of them. They are the only

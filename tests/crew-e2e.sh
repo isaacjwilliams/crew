@@ -209,7 +209,20 @@ check "workers start with the configured auto-compact window" 'grep -- "--agent 
 check "workers get the shipped settings, with their project, the home and the pause hook, when the project adds none" \
   '[[ $(given_settings) == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P" && has_pause_hook'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
-check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
+# The hand-over to the user: crew hand-over is the checked move to pr-open, and
+# crew set stays a plain write. Three criteria; the nested bullet isn't one.
+sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F1"
+check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
+check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
+  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
+check "hand-over refuses a task that isn't working" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"', not working"* ]]'
+crew set 1 status working
+sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
+check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
+  'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
+sed -i -e '/^### 3. z$/i ### 2. z3\nseen' "$F1"
+check "hand-over sets pr-open and logs it once every acceptance criterion has evidence" \
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'

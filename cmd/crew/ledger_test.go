@@ -156,6 +156,29 @@ func TestNewestReview(t *testing.T) {
 	}
 }
 
+// Three acceptance criteria, the second with nested bullets and a bullet in a
+// comment, neither of which is a criterion.
+const criteria = "## Acceptance criteria\n<!-- Checkable statements:\n- not a criterion -->\n" +
+	"- one\n- two, with details:\n  - nested\n  - nested\n  continued\n- three <!-- - inline -->\n\n"
+
+func TestEvidenceGaps(t *testing.T) {
+	for _, c := range []struct {
+		name, evidence string
+		gaps           []int
+	}{
+		{"every criterion has an entry", "## Evidence\n### 1. one\n```\nok\n```\n### 2. two\nseen\n### 3. three\nok\n\n", nil},
+		{"one entry missing", "## Evidence\n### 1. one\nok\n### 3. three\nok\n\n", []int{2}},
+		{"no Evidence section", "", []int{1, 2, 3}},
+		{"entries in a comment don't count", "## Evidence\n<!-- ### 1. like this -->\n### 2. two\nok\n\n", []int{1, 3}},
+	} {
+		task := Task{docWith(t, criteria+c.evidence+"## Log\n")}
+		gaps, n := task.EvidenceGaps()
+		if !slices.Equal(gaps, c.gaps) || n != 3 {
+			t.Errorf("%s: EvidenceGaps = %v, %d; want %v, 3", c.name, gaps, n, c.gaps)
+		}
+	}
+}
+
 // Two CI rounds, one of them ticked, a round of comments with a CI line, and a
 // question about a head that stayed red. A line quoted in a comment, or in the
 // brief, reports nothing.

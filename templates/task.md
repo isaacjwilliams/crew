@@ -65,6 +65,15 @@ updated: {{NOW}}
 <!-- Dated decisions made after dispatch, each ending with whose call it was: "(user)" for the
      user's own words or answer, otherwise "(lead)" or "(worker)". -->
 
+## Evidence
+<!-- Written by the worker before the hand-over: one "### <n>. <the criterion, in a line>" entry
+     for each top-level item of Acceptance criteria, numbered in order. Each holds the command
+     that shows the criterion holds and its output, in a fenced block trimmed to what shows the
+     result; or, where only a look would show it, what you saw and how (the page, the steps, the
+     tool); or, for a check only the user can make, what to try and why you couldn't. Indent any
+     output line that starts with "## ", or it ends this section. `crew hand-over` refuses until
+     every criterion has an entry. -->
+
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker
      adds each finding's outcome. -->
