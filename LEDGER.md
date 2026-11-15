@@ -143,8 +143,8 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
 
 - the range reviewed: `<from sha>..<HEAD sha>`, what it starts from (`since <base branch>` for a review that read the whole PR, or `since review N` for one that read only the commits since review N's head) and the fork point (`fork point <sha>`). The first review reads the whole PR; a later one reads only the new commits, unless the branch was rebased or its base moved. The reviewers (the Claude reviewer, and Codex when `CODEX_REVIEW` is on; each marked `failed` when it didn't report), how many rounds they had between them, and each one's derived intent and reading of the stated intent;
 - every finding a reviewer raised, as a `####` heading with its severity, and lines for who raised it (`both`, `Codex` or `Claude reviewer`), whether it's `new` or a `repeat of review N #k` (only a reviewer marks a repeat; the worker may reject the mark, never add one), the finding (quoted), each round's replies to it (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. Besides the rubric's four, an agreed severity can be `pre-existing: <severity>` (every reviewer that holds it tagged it `pre-existing`, in its report or a round, and the worker found the same failure at the fork point), `withdrawn` (its raiser took it back in a round, and no reviewer holds it), `split` (one reviewer holds it and the other refutes it; the worker settles it), `flipped: <severity>, was <earlier> in review N` (a repeat that an earlier review settled as not a defect, and a reviewer now holds at must fix or should fix), `disputed` (the worker disagrees, with evidence, and no reviewer does) or `uncertain`. The worker fills in the outcome once it has acted:
-  - `fixed in <sha>`, with `(<n> instances)` when it fixed more than one instance of the finding's class, and `; left for the user: also at the fork point, <path:line>, …` when it found old instances no finding covers;
-  - `proposal <file name>`;
+  - `fixed in <sha>`: a must fix or should fix, or a fix-later or nitpick finding in the PR's lines; with `(<n> instances)` when it fixed more than one instance of the finding's class, and `; left for the user: also at the fork point, <path:line>, …` when it found old instances no finding covers;
+  - `proposal <file name>`: a fix-later finding outside the PR's lines;
   - `recorded`: a nitpick outside the PR's lines, or a pre-existing nitpick;
   - `withdrawn in round <n>`;
   - `not a defect: <evidence>`: a split it set aside;
@@ -153,6 +153,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
   - `left for the user: verdict changed since review N`: a flipped finding;
   - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user, which the user hasn't decided since;
   - `left for the user: <the cost>`: a must fix that only a deploy step or the docs could close. The cost says what fails, for whom, and for how long;
+  - `left for the user: <the fix's cost>`: a fix-later finding in the PR's lines whose fix is too big for the PR. The cost says the fix's size and what it touches;
 - each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the pass's summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary: review N -->`, N the newest review, so a second `crew review-summary` for the same review edits it instead of posting another.
 
