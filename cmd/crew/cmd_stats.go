@@ -245,8 +245,9 @@ func dispatchedBeforeSetStatus(log []logEntry) bool {
 	return false
 }
 
-// The report's columns after the task's, each headed by two lines.
+// The report's columns, each headed by two lines.
 var statsHeadings = [][2]string{
+	{"", "task"},
 	{"review", "rounds"}, {"", "comments"},
 	{"PR", "waited on you"}, {"questions", "waited on you"},
 	{"automated", "reviews"}, {"clean", "after"},
@@ -262,36 +263,55 @@ func printStats(project string, since time.Time, stats []taskStats) {
 		return
 	}
 	fmt.Printf("%s: %d task(s) merged since %s\n\n", project, len(stats), day)
-	idWidth := len("median")
-	for _, s := range stats {
-		idWidth = max(idWidth, len(s.task.ID()))
-	}
-	row := func(id string, cells ...string) {
-		line := fmt.Sprintf("  %-*s", idWidth, id)
-		for i, h := range statsHeadings {
-			line += fmt.Sprintf("  %*s", max(len(h[0]), len(h[1])), cells[i])
-		}
-		fmt.Println(strings.TrimRight(line, " "))
-	}
-	var top, bottom []string
-	for _, h := range statsHeadings {
-		top = append(top, h[0])
-		bottom = append(bottom, h[1])
-	}
-	row("", top...)
-	row("task", bottom...)
-
+	var rows [][]string
 	var sum taskStats
 	var prWaits, questionWaits []time.Duration
 	for _, s := range stats {
-		row(s.task.ID(), s.cells(s.cleanAfterText())...)
+		rows = append(rows, append([]string{s.task.ID()}, s.cells(s.cleanAfterText())...))
 		sum.add(s)
 		prWaits = append(prWaits, s.prWait)
 		questionWaits = append(questionWaits, s.questionWait)
 	}
-	fmt.Println()
-	row("total", sum.cells("")...)
-	row("median", "", "", roughly(median(prWaits)), roughly(median(questionWaits)), "", "", "", "", "")
+	rows = append(rows, nil,
+		append([]string{"total"}, sum.cells("")...),
+		[]string{"median", "", "", roughly(median(prWaits)), roughly(median(questionWaits))})
+	printTable(statsHeadings, rows)
+}
+
+// printTable prints rows under two-line headings, each column as wide as its
+// widest cell: the first column aligned left, the others right. A row may stop
+// short of the last columns, and an empty row is a blank line.
+func printTable(headings [][2]string, rows [][]string) {
+	widths := make([]int, len(headings))
+	for i, h := range headings {
+		widths[i] = max(len(h[0]), len(h[1]))
+	}
+	for _, r := range rows {
+		for i, cell := range r {
+			widths[i] = max(widths[i], len(cell))
+		}
+	}
+	printRow := func(cells []string) {
+		line := ""
+		for i, cell := range cells {
+			if i == 0 {
+				line += fmt.Sprintf("  %-*s", widths[i], cell)
+			} else {
+				line += fmt.Sprintf("  %*s", widths[i], cell)
+			}
+		}
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+	var top, bottom []string
+	for _, h := range headings {
+		top = append(top, h[0])
+		bottom = append(bottom, h[1])
+	}
+	printRow(top)
+	printRow(bottom)
+	for _, r := range rows {
+		printRow(r)
+	}
 }
 
 // median is the middle of the durations, or the mean of the two in the middle.
