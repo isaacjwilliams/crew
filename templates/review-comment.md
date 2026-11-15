@@ -36,9 +36,9 @@
      - it didn't converge (the limit ran out with fixes made for the last review): "Review didn't settle
        after <N> reviews, so this PR isn't ready yet. Proposed instead:", then the proposed pieces,
        one line each: what each smaller PR would cover. Call them "smaller PRs", never "tasks".
+     - no reviewer reported in any review: "None could finish, so this PR hasn't had an automated review."
      - only Codex reported in it: "The Claude reviewer couldn't finish the last, so only Codex has seen the latest fixes."
-     - no reviewer reported in it: "The last couldn't finish, so the latest fixes haven't been reviewed again."
-     - no reviewer reported in any review: "None could finish, so this PR hasn't had an automated review." -->
+     - no reviewer reported in it: "The last couldn't finish, so the latest fixes haven't been reviewed again." -->
 ## Automated review
 
 <N> automated reviews ran before this PR was ready for you. <Who reviewed, from the list above.> <What they read, from the list above.> <How the last one ended, from the list above.>
