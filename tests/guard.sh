@@ -290,13 +290,13 @@ check "only a reviewer tags a finding pre-existing: pr-review checks the tag at 
 check "the implementer fixes every instance of a finding's class" \
   "grep -q 'fix every instance of the finding.s class' $A/implementer.md && grep -q 'fixed in <short sha> (<n> instances)' $A/implementer.md"
 check "the implementer changes no code for a pre-existing finding, and leaves it for the user with a proposal" \
-  "grep -q '^   - \*\*pre-existing\*\*:.*don.t change the code' $A/implementer.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <its file name>' $A/implementer.md"
+  "grep -q '^   - \*\*pre-existing\*\* (.pre-existing: <severity>.):.*don.t change the code' $A/implementer.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <its file name>' $A/implementer.md"
 check "only a code change closes a must fix: one that only a deploy step or the docs could close is left for the user with its cost" \
   "grep -q 'Only a code change that removes the failure fixes a must fix' $A/implementer.md && grep -q 'left for the user: <the cost: what fails, for whom, and for how long>' $A/implementer.md"
 check "the summary lists pre-existing findings in a section of their own after Left for later, and gives a deploy window's cost" \
   "awk '/^\*\*Left for later\*\*/ {l=NR} /^\*\*Already on <base branch>\*\*/ {a=NR} /^\*\*Left for you\*\*/ {y=NR} END {exit !(l && a && y && l < a && a < y)}' $C/../templates/review-comment.md && grep -q 'deploy window' $C/../templates/review-comment.md"
-check "LEDGER.md has the pre-existing agreed severity and the reasons a finding is left for the user" \
-  "grep -q 'pre-existing: <severity>' $REPO_DIR/LEDGER.md && grep -q 'left for the user: <reason>' $REPO_DIR/LEDGER.md"
+check "LEDGER.md has the pre-existing agreed severity and both reasons a finding is left for the user" \
+  "grep -q 'pre-existing: <severity>' $REPO_DIR/LEDGER.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <file name>' $REPO_DIR/LEDGER.md && grep -q 'left for the user: <the cost>.: a must fix that only a deploy step' $REPO_DIR/LEDGER.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md

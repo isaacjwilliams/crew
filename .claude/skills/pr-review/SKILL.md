@@ -255,9 +255,12 @@ raised and then withdrew.
 - When you disagree and no reviewer refutes the finding, it's `disputed`.
 - When you're uncertain, it's `uncertain`.
 
-A `pre-existing` tag that the fork point confirms goes before the severity, wherever the agreed severity names one:
-`pre-existing: should fix`, or `split: held at pre-existing: must fix, Codex refutes`. A tag it doesn't confirm leaves
-the agreed severity as it is. Either way, the Verdict line cites the code at the fork point.
+When a reviewer tagged the finding `pre-existing`, settle the tag from what step 5 found at the fork point, and cite
+that code on the Verdict line:
+
+- The same failure happens there: put `pre-existing: ` before the severity, wherever the agreed severity names one.
+  For example `pre-existing: should fix`, or `split: held at pre-existing: must fix, Codex refutes`.
+- It doesn't: the agreed severity stays as it is.
 
 ## 8. Record the review
 
