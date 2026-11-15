@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestTasksWithMisses(t *testing.T) {
+func TestTasksToSort(t *testing.T) {
 	at := func(s string) time.Time {
 		tm, err := time.ParseInLocation(logTime, s, time.Local)
 		if err != nil {
@@ -30,7 +30,7 @@ func TestTasksWithMisses(t *testing.T) {
 		task(PROpen, comment, "2026-11-06 12:00"),                            // not merged any more
 		task(Merged, "- [x] CI failed on aaa1111: test", "2026-11-06 13:00"), // no comment after the review
 	}
-	picked, newest := tasksWithMisses(tasks, at("2026-11-05 00:00"), at("2026-11-06 16:00").Add(30*time.Second))
+	picked, newest := tasksToSort(tasks, at("2026-11-05 00:00"), at("2026-11-06 16:00").Add(30*time.Second))
 	var got []string
 	for _, p := range picked {
 		got = append(got, p.task.Path)
@@ -45,7 +45,7 @@ func TestTasksWithMisses(t *testing.T) {
 		t.Errorf("newest = %v, want the picked task's merge time", newest)
 	}
 	// A minute later, the task merged at 16:00 is picked.
-	if picked, _ := tasksWithMisses(tasks, at("2026-11-06 12:00"), at("2026-11-06 16:01")); len(picked) != 1 || picked[0].task.Path != tasks[1].Path {
+	if picked, _ := tasksToSort(tasks, at("2026-11-06 12:00"), at("2026-11-06 16:01")); len(picked) != 1 || picked[0].task.Path != tasks[1].Path {
 		t.Errorf("a minute later, picked %v", picked)
 	}
 }

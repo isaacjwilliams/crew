@@ -131,7 +131,7 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	if err != nil {
 		return err
 	}
-	tasks, newest := tasksWithMisses(c.tasks(p.Name), since, time.Now())
+	tasks, newest := tasksToSort(c.tasks(p.Name), since, time.Now())
 	if len(tasks) == 0 {
 		fmt.Printf("%s: no newly merged tasks with your comments after automated review\n", p.Name)
 		return nil
@@ -151,22 +151,22 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	return c.advance(lastFile, newest.Format(time.RFC3339), fmt.Sprintf("misses %s (%d tasks)", p.Name, len(tasks)))
 }
 
-// A merged task for the misses agent, and the user's comments in it after an
-// automated review.
-type taskWithMisses struct {
+// A merged task for the misses agent, and the comments in it to sort: the
+// user's comments after an automated review.
+type taskToSort struct {
 	task     Task
 	comments []CommentAfterReview
 }
 
-// tasksWithMisses picks, from tasks, those merged after since that have the
+// tasksToSort picks, from tasks, those merged after since that have the
 // user's comments after an automated review, and returns them with the newest
 // of their merge times. A merge time is when crew sync logged the merge, so a
 // task synced late still comes after since. Log times are to the minute, so a
 // task synced later in now's minute would tie with a cursor set now, and be
 // skipped: one merged in that minute waits for the next run.
-func tasksWithMisses(tasks []Task, since, now time.Time) ([]taskWithMisses, time.Time) {
+func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
 	thisMinute := now.Truncate(time.Minute)
-	var picked []taskWithMisses
+	var picked []taskToSort
 	newest := since
 	for _, t := range tasks {
 		if t.Status() != Merged {
@@ -177,7 +177,7 @@ func tasksWithMisses(tasks []Task, since, now time.Time) ([]taskWithMisses, time
 			continue
 		}
 		if comments := t.CommentsAfterReview(); len(comments) > 0 {
-			picked = append(picked, taskWithMisses{t, comments})
+			picked = append(picked, taskToSort{t, comments})
 			if merged.After(newest) {
 				newest = merged
 			}
