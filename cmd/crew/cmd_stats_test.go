@@ -140,25 +140,40 @@ func taskFile(t *testing.T, id, content string) Task {
 }
 
 func TestRevertedPRs(t *testing.T) {
-	sha := func(c byte) string { return strings.Repeat(string(c), 40) }
-	commit := func(id byte, at int, subject, body string) string {
+	sha := func(id string) string { return strings.Repeat(id, 40/len(id)) }
+	commit := func(id string, at int, subject, body string) string {
 		return fmt.Sprintf("%s\x00%d\x00%s\x00%s\x1e\n", sha(id), at, subject, body)
 	}
-	log := commit('1', 900, `Revert "Revert "Merge pull request #35 from me/two""`, "This reverts commit "+sha('5')+".\n") +
-		commit('2', 800, "Revert the tidy", "This reverts commit "+sha('8')+".\n") +
-		commit('3', 700, "Back out totals", "This reverts commit "+sha('7')+".\n") +
-		commit('4', 650, "Mention a revert", "This reverts commit 777777, but only in passing.\n") +
-		commit('5', 600, `Revert "Merge pull request #35 from me/two"`, "This reverts commit "+sha('6')+", reversing\nchanges made to "+sha('9')+".\n") +
-		commit('6', 500, "Merge pull request #35 from me/two", "Two") +
-		commit('7', 400, "Round totals to the cent (#36)", "") +
-		commit('8', 300, "Tidy the README", "")
+	// GitHub's revert button on revert PRs: #41 reverted #39 and was merged with a
+	// merge commit, #42 reverted #37 and was squashed; then each was reverted.
+	// #43 reverted #38 with a merge commit whose body repeats the revert's line.
+	log := commit("a", 1900, "Revert the revert of #39", "This reverts commit "+sha("b")+".\n") +
+		commit("b", 1800, "Merge pull request #41 from me/revert-39", `Revert "Fees (#39)"`) +
+		commit("c", 1700, `Revert "Fees (#39)"`, "This reverts commit "+sha("ab")+".\n") +
+		commit("ab", 1650, "Fees (#39)", "") +
+		commit("d", 1600, `Revert "Revert "Export (#37)"" (#44)`, "This reverts commit "+sha("e")+".\n") +
+		commit("e", 1500, `Revert "Export (#37)" (#42)`, "This reverts commit "+sha("f")+".\n") +
+		commit("f", 1400, "Export (#37)", "") +
+		commit("0", 1300, "Merge pull request #43 from me/revert-38", "Revert totals\n\nThis reverts commit "+sha("9")+".\n") +
+		commit("9", 1200, "Merge pull request #38 from me/totals", "") +
+		commit("1", 900, `Revert "Revert "Merge pull request #35 from me/two""`, "This reverts commit "+sha("5")+".\n") +
+		commit("2", 800, "Revert the tidy", "This reverts commit "+sha("8")+".\n") +
+		commit("3", 700, "Back out totals", "This reverts commit "+sha("7")+".\n") +
+		commit("4", 650, "Mention a revert", "This reverts commit 777777, but only in passing.\n") +
+		commit("5", 600, `Revert "Merge pull request #35 from me/two"`, "This reverts commit "+sha("6")+", reversing\nchanges made to "+sha("9")+".\n") +
+		commit("6", 500, "Merge pull request #35 from me/two", "Two") +
+		commit("7", 400, "Round totals to the cent (#36)", "") +
+		commit("8", 300, "Tidy the README", "") +
+		commit("2", 290, "Back out the totals", "This reverts commit "+sha("9")+".\n")
 	var got []string
 	for _, c := range revertedPRs(log) {
 		got = append(got, fmt.Sprintf("#%s at %d", c.pr, c.at.Unix()))
 	}
-	// The revert of a revert, of an unrelated commit, and of a short SHA aren't a PR's.
-	if want := []string{"#36 at 700", "#35 at 600"}; !slices.Equal(got, want) {
-		t.Errorf("revertedPRs = %v, want %v: a merge commit's and a squash commit's reverts, whatever their subject", got, want)
+	// A revert of a revert, merged or squashed or not a PR's, of an unrelated
+	// commit, or of a short SHA isn't a PR's revert; nor is a second commit that
+	// says it reverts a commit already reverted.
+	if want := []string{"#39 at 1700", "#37 at 1500", "#38 at 1300", "#36 at 700", "#35 at 600"}; !slices.Equal(got, want) {
+		t.Errorf("revertedPRs = %v,\nwant %v: a merge commit's and a squash commit's reverts, whatever their subject, each once", got, want)
 	}
 }
 

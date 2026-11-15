@@ -323,30 +323,44 @@ var (
 // PRs: commits whose body says "This reverts commit <sha>" of a PR's merge or
 // squash commit. Each comes back with the PR's number and when the revert was
 // committed. A revert of anything else is left out: of a commit that isn't a
-// PR's, of a revert, or one named by a short SHA, which git never writes.
+// PR's, of a revert (a revert PR's merge or squash commit included), or one
+// named by a short SHA, which git never writes. A commit counts as reverted
+// once, though a revert PR's merge commit may repeat its revert's message.
 func revertedPRs(log string) []correction {
-	// First every commit, with its subject by SHA, then each revert's reverted
+	// First every commit, with each by its SHA, then each revert's reverted
 	// commits looked up by their SHA.
 	type commit struct {
 		at            time.Time
 		subject, body string
 	}
 	var commits []commit
-	subjects := map[string]string{}
+	bySHA := map[string]commit{}
 	for _, record := range strings.Split(log, "\x1e") {
 		f := strings.SplitN(strings.TrimLeft(record, "\n"), "\x00", 4)
 		if len(f) < 4 {
 			continue
 		}
 		secs, _ := strconv.ParseInt(f[1], 10, 64)
-		commits = append(commits, commit{time.Unix(secs, 0), f[2], f[3]})
-		subjects[f[0]] = f[2]
+		c := commit{time.Unix(secs, 0), f[2], f[3]}
+		commits = append(commits, c)
+		bySHA[f[0]] = c
+	}
+	// isRevert: a revert's own commit, or a revert PR's merge commit, whose
+	// body is the PR's title, "Revert "…"".
+	isRevert := func(c commit) bool {
+		return revertsCommit.MatchString(c.body) || strings.HasPrefix(c.subject, `Revert "`) || strings.HasPrefix(c.body, `Revert "`)
 	}
 	var reverts []correction
+	counted := map[string]bool{}
 	for _, c := range commits {
 		for _, m := range revertsCommit.FindAllStringSubmatch(c.body, -1) {
-			if pr := mergesPR.FindStringSubmatch(subjects[m[1]]); pr != nil {
+			reverted, ok := bySHA[m[1]]
+			if !ok || counted[m[1]] || isRevert(reverted) {
+				continue
+			}
+			if pr := mergesPR.FindStringSubmatch(reverted.subject); pr != nil {
 				reverts = append(reverts, correction{at: c.at, pr: cmp.Or(pr[1], pr[2])}) // a merge's or a squash's
+				counted[m[1]] = true
 			}
 		}
 	}
