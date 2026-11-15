@@ -100,7 +100,8 @@ one's range and findings, with how each finding was settled, quoted from the rec
 written your findings. Then, for each finding:
 
 - Mark it `Earlier: repeat of review <N> #<k>` when it's the same defect as finding k of review N, and `Earlier: new`
-  otherwise. With no earlier-reviews file, every finding is `new`.
+  otherwise. When more than one earlier review raised it, name the latest: its settlement is the one that stands.
+  With no earlier-reviews file, every finding is `new`.
 - Drop a repeat of a finding that an earlier review settled any way but `fixed in …` (withdrawn, disputed, not a
   defect, a proposal, recorded, left for the user), unless you have evidence that the settlement missed. Then keep
   it, and state that evidence in the finding.

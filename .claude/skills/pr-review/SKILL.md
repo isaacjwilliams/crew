@@ -236,6 +236,10 @@ cited evidence, and the finding is then `new`; or you may put the question to th
 `new` mark into a repeat: like the `pre-existing` tag, a repeat only ever comes from a reviewer. A finding is a repeat
 when a reviewer marked it so and you didn't reject the mark.
 
+A repeat names the latest earlier finding of the same defect, because that one's settlement stands. If the record has
+a later finding whose `Earlier:` line names the one this mark names, point the mark at that later finding, and so on
+down the chain.
+
 ## 6. Rounds between the reviewers
 
 Skip this step unless both reviewers reported. The rounds are where the reviewers test each other's findings. You
