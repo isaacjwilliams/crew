@@ -185,7 +185,7 @@ spike_workflow() { awk '/^## Workflow: spike/ {on=1; next} on && /^## / {exit} o
 check "a spike leaves first run after step 3 for Workflow: spike" \
   "awk '/^## Workflow: first run/ {w=1} w && /^3\\. / && !t {t=NR} w && /If your task is a spike .*follow .Workflow: spike. from here instead of the steps below/ && !s {s=NR} w && /^4\\. / && !f {f=NR} END {exit !(t && s && f && t < s && s < f)}' $A/implementer.md"
 check "Workflow: spike commits locally and never pushes, writes a report that starts with its answer, and hands over" \
-  "spike_workflow | grep -q 'only locally: never push' && spike_workflow | grep -q 'a .## Report. section in your task file.*Its first line is .Answer: <the answer, in a line>.' && spike_workflow | grep -q '^3\\. \\*\\*Hand over\\*\\*: .crew hand-over <task>.'"
+  "spike_workflow | grep -q 'only locally: never push' && spike_workflow | grep -q 'a .## Report. section in your task file.*Its first line is .Answer: <the answer, in a line>.' && spike_workflow | grep -q '^3\\. \\*\\*Hand over\\*\\*, last: .crew hand-over <task>.' && ! spike_workflow | grep -q '^4\\. '"
 check "Workflow: spike opens no PR and runs no observer, automated review or evidence" \
   "! spike_workflow | grep -qE 'gh pr create|git push -u|casual-observer|/pr-review|crew review-summary' && spike_workflow | grep -q 'Tests, the observer, a PR, automated review and .## Evidence. are for builds, so skip them'"
 check "the lead lists what's still to learn and opens a spike for each approach, then puts the answers side by side" \

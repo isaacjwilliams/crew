@@ -1122,6 +1122,10 @@ check "hand-over refuses a spike without a report" '[[ $(crew hand-over "$KS" 2>
 sed -i '/^## Automated reviews$/i ## Report\nTried: paging by cursor.\nAnswer: yes\n' "$KS"
 check "hand-over refuses a spike whose report doesn't start with its answer" '! crew hand-over "$KS" 2>/dev/null && [[ $(crew get "$KS" status) == working ]]'
 sed -i -e '/^Tried: paging by cursor.$/d' -e 's/^Answer: yes$/Answer: yes, 100 rows a page by cursor\nTried: paging by cursor./' "$KS"
+touch "$KWT/scratch.log"
+check "hand-over refuses a spike whose worktree has changes it didn't commit, which cleanup would leave behind" \
+  '[[ $(crew hand-over "$KS" 2>&1) == *"$KWT has changes that aren'"'"'t committed: commit or delete them"* && $(crew get "$KS" status) == working ]]'
+rm "$KWT/scratch.log"
 check "hand-over moves a spike whose report starts with its answer to done, without a PR or evidence, and logs it" \
   '[[ $(crew hand-over "$KS") == "handed over: $KSI (done)" && $(crew get "$KS" status) == done && $(section "$KS" "## Log" | tail -1) == *" — handed over" ]]'
 st=$(crew status)

@@ -260,6 +260,18 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	// A PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that raiseRisk has to see. Fetch before taking the
+	// lock, so a slow network doesn't hold up other crew commands.
+	if rules.pr {
+		p, err := c.loadProject(t.Project())
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+			return fail("couldn't check SENSITIVE_PATHS: git fetch origin failed in %s", p.Repo())
+		}
+	}
 	// Check under the lock: crew sync may be marking the task merged, or the
 	// lead abandoning it, at the same moment.
 	if err := c.lock(); err != nil {
@@ -302,12 +314,6 @@ func handOverPR(c *Crew, t Task) error {
 	if err != nil {
 		return err
 	}
-	// The branch on origin may have commits from elsewhere, a suggestion applied
-	// on GitHub say, that raiseRisk has to see. crew sync fetches under the lock
-	// too.
-	if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		return fail("couldn't check SENSITIVE_PATHS: git fetch origin failed in %s", p.Repo())
-	}
 	// A raise stands even when the hand-over is refused below: the branch touches
 	// a sensitive path whatever happens next.
 	raised, err := raiseRisk(t, p)
@@ -325,10 +331,15 @@ func handOverPR(c *Crew, t Task) error {
 }
 
 // handOverReport checks a spike's report is in, so whoever reads it next finds
-// an answer.
+// an answer, and that its worktree is clean, so crew cleanup can remove it.
 func handOverReport(_ *Crew, t Task) error {
 	if t.Answer() == "" {
 		return fail("## Report must start with a line 'Answer: <the answer, in a line>'; write the report, then hand over again")
+	}
+	if wt := t.Worktree(); wt != "" && isDir(wt) {
+		if out, _ := git(wt, "status", "--porcelain"); out != "" {
+			return fail("%s has changes that aren't committed: commit or delete them, so it can be cleaned up, then hand over again", wt)
+		}
 	}
 	return nil
 }

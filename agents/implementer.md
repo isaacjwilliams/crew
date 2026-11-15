@@ -88,8 +88,7 @@ A spike answers a question that another task's plan rests on, by trying a path. 
 
 1. **Try the path** in your worktree, within the time box. Commit as you go, but only locally: never push. A spike leaves nothing in the shared repo. Write the quickest code that answers the question. Tests, the observer, a PR, automated review and `## Evidence` are for builds, so skip them. If the time box runs out, stop and report what you have.
 2. **Write the report**: a `## Report` section in your task file, before `## Automated reviews` (or before `## Log` if that's missing). Its first line is `Answer: <the answer, in a line>`, such as `Answer: yes, the API pages by cursor, 100 rows a page` or `Answer: not answered in the time box: …`. Then what you tried, the evidence (the commands you ran and their output, trimmed to what shows the result), what it means for the plan of the task it informs, and anything that surprised you.
-3. **Hand over**: `crew hand-over <task>`. It checks that the report starts with its answer and sets `done`. A goal's spike goes to the goal lead; outside a goal, the lead finds it in `crew status`.
-4. Finish with a short report: the answer, and what it means for the plan.
+3. **Hand over**, last: `crew hand-over <task>`. It checks that the report starts with its answer and that your worktree has nothing uncommitted, and sets `done`. A goal's spike goes to the goal lead; outside a goal, the lead finds it in `crew status`. Then end your turn: `crew tick` removes your session with the worktree, so the report is what's read.
 
 ## Workflow: automated review
 
