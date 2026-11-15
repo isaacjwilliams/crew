@@ -23,6 +23,7 @@ pr_state:
 pr_base:
 pr_updated:
 ci_state:
+mergeable:
 worker_name:
 worker_job:
 worker_session:

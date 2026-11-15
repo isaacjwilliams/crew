@@ -873,6 +873,16 @@ const (
 	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
 )
 
+// The line that reports a PR's conflict with its base branch, at a commit of
+// the base (its short SHA), in a review round that sends it to the worker. Like
+// the CI lines, it's the only record: crew catch-up writes it, ConflictReported
+// reads it back, and the worker ticks it once it has merged the base in.
+const conflictsWith = "Conflicts with " // - [ ] Conflicts with <base> at <sha>
+
+// crewReports are the kinds of line crew writes into a review round of its own,
+// to report what it found on the PR rather than pass on the user's feedback.
+var crewReports = []string{ciFailedOn, conflictsWith}
+
 // ciLineHead is the head commit an item reports red CI on, when it's a line of
 // that kind (ciFailedOn or ciStillRedOn), checked or not.
 func ciLineHead(l, kind string) (string, bool) {
@@ -909,6 +919,19 @@ func (t Task) CIFailures() []string {
 	return heads
 }
 
+// ConflictReported: a review round sent the worker the PR's conflict with
+// its base at the base commit sha.
+func (t Task) ConflictReported(sha string) bool {
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		item, _ := checklistItem(l)
+		rest, ok := strings.CutPrefix(item, conflictsWith)
+		if _, at, _ := strings.Cut(rest, " at "); ok && at == sha {
+			return true
+		}
+	}
+	return false
+}
+
 // CIReported: red CI on head was sent to the worker in a review round, or put
 // to the user under Open questions.
 func (t Task) CIReported(head string) bool {
@@ -924,16 +947,18 @@ func (t Task) CIReported(head string) bool {
 }
 
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
-// round but those that only report red CI. MAX_REVIEW_ROUNDS limits these.
+// round but those that only hold crew's own reports (crewReports), of red CI
+// or a conflict with the base. MAX_REVIEW_ROUNDS limits these.
 func (t Task) FeedbackRounds() int {
 	n := 0
 	hasFeedback := true // nothing before the first round counts
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		_, ci := ciLineHead(l, ciFailedOn)
+		item, _ := checklistItem(l)
+		report := slices.ContainsFunc(crewReports, func(kind string) bool { return strings.HasPrefix(item, kind) })
 		switch {
 		case strings.HasPrefix(l, "### Round "):
 			hasFeedback = false
-		case !ci && !hasFeedback:
+		case !report && !hasFeedback:
 			n++
 			hasFeedback = true
 		}

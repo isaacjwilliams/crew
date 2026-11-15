@@ -101,6 +101,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    the worker handed it over, send it the failure as a
                                    review round, once a commit; past MAX_CI_FIXES,
                                    ask you instead (run by crew tick)
+  crew catch-up TASK               If the task's open PR conflicts with its base, the
+                                   task isn't stacked, and the worker handed it over,
+                                   send it the conflict as a review round, once a
+                                   commit of the base, to merge it in (run by crew tick)
   crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on
                                    commit SHA, which the task reports, or edit the
                                    one there (used by workers)
@@ -132,10 +136,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    touches SENSITIVE_PATHS; report tasks that need a
                                    restack or a retarget
   crew tick                        Do what needs no decision, across all projects:
-                                   sync, record new PR comments and red CI, send
-                                   review rounds and restacks to idle workers, mark
-                                   tasks waiting on you, clean up merged tasks and
-                                   done spikes (run by a timer)
+                                   sync, record new PR comments, red CI and
+                                   conflicts, send review rounds and restacks to
+                                   idle workers, mark tasks waiting on you, clean up
+                                   merged tasks and done spikes (run by a timer)
   crew pause [--project P|--all] [--force]
                                    Stop the project's work without losing any:
                                    nothing new starts, sessions mid-turn are told to
@@ -152,7 +156,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew show TASK | crew path TASK  Print a task file / its path
   crew find TASK                   Print the resolved task id
   crew get TASK KEY                Read a front-matter field
-  crew set TASK KEY VALUE...       Write a front-matter field
+  crew set TASK KEY VALUE...       Write a front-matter field (not status pr-open:
+                                   crew hand-over sets that)
   crew log TASK MESSAGE...         Append to the task's Log
   crew cleanup TASK|--merged [--project P] [--force]
                                    Remove worktree/local branch of merged tasks and
