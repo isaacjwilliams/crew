@@ -210,6 +210,11 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Check under the lock: crew sync may be marking the task merged, or the
+	// lead abandoning it, at the same moment.
+	if err := c.lock(); err != nil {
+		return err
+	}
 	if st := t.Status(); !st.InFlight() || st == PROpen {
 		return fail("task is '%s': only a task in flight that isn't pr-open yet can be handed over", st)
 	}
@@ -227,9 +232,6 @@ func cmdHandOver(c *Crew, args []string) error {
 		}
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			strings.Join(nums, ", "), len(criteria))
-	}
-	if err := c.lock(); err != nil {
-		return err
 	}
 	t.Set("status", string(PROpen))
 	t.Touch()

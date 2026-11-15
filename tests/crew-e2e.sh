@@ -228,6 +228,11 @@ check "hand-over refuses a task without evidence for every acceptance criterion,
 sed -i -e '/^### 3. z$/i ### 2. z3\nseen' -e 's/^\(- z[23]\?\)$/1. \1/' "$F1"
 check "hand-over refuses acceptance criteria that aren't '- ' items, and says to ask" '[[ $(crew hand-over 1 2>&1) == *"no '"'"'- '"'"' items to show evidence for: ask"* ]]'
 sed -i 's/^1\. \(- z[23]\?\)$/\1/' "$F1"
+# A hand-over waiting for the ledger lock checks the task as it is once it has it
+# (-o: the hand-over mustn't inherit the lock flock holds).
+flock -o "$L/.crew.lock" bash -c 'crew hand-over 1 >"$HOME/hand-over.out" 2>&1 & sleep 0.5; sed -i "s/^status: .*/status: abandoned/" "$1"' _ "$F1"
+check "a hand-over waiting on the lock refuses a task abandoned meanwhile" \
+  'wait_for "grep -q abandoned \"\$HOME/hand-over.out\"" && [[ $(crew get 1 status) == abandoned ]]'
 # A task in flight may be waiting on a collaborator's question when its worker finishes.
 crew set 1 status needs-input
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence" \
