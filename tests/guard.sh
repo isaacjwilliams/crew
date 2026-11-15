@@ -165,8 +165,10 @@ check "the implementer records evidence for each acceptance criterion before it 
   "awk '/^## Workflow: first run/ {w=1} w && /^6\\. \\*\\*Record the evidence, then push\\*\\*/ && !e {e=NR} w && /^7\\. \\*\\*Open the PR\\*\\*/ && !o {o=NR} END {exit !(e && o && e < o)}' $A/implementer.md && grep -q 'A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try' $A/implementer.md && grep -qx '## Evidence' $C/../templates/task.md"
 check "the implementer fills in the PR body from its template, which has Risk, How to revert and Evidence, and no Changes" \
   "grep -q 'The PR body is .templates/pr-body.md.' $A/implementer.md && ! grep -q 'Changes.*: short bullets' $A/implementer.md && grep -qx '## Risk' $C/../templates/pr-body.md && grep -qx '## How to revert' $C/../templates/pr-body.md && grep -qx '## Evidence' $C/../templates/pr-body.md && ! grep -q '^## Changes' $C/../templates/pr-body.md"
-check "only first-run step 10 hands the PR over with crew hand-over, after refreshing the evidence" \
-  "[[ \$(grep -c 'crew hand-over' $A/implementer.md) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\.\\*\\* If automated review changed code, rerun what each affected .## Evidence. entry shows.*Then .crew hand-over <task>.' $A/implementer.md"
+check "only first-run step 10 hands the PR over with crew hand-over" \
+  "[[ \$(grep -c 'crew hand-over' $A/implementer.md) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\*\\*: .crew hand-over <task>.' $A/implementer.md"
+check "every pass of automated review refreshes the evidence its fixes changed, before it pushes" \
+  "awk '/^## Workflow: automated review/ {w=1} w && /If your fixes changed what an .## Evidence. entry shows, rerun it/ && !e {e=NR} w && /Then run the checks and push/ && !p {p=NR} END {exit !(e && p && e <= p)}' $A/implementer.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"

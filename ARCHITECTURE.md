@@ -208,10 +208,10 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
           │    (each reviewer started fresh, with a round file: its report, earlier rounds, this round's items)
           └─ checks each finding, settles its severity, appends "### Automated review N" under "## Automated reviews"
         → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user → its Outcome line
+        → evidence the fixes changed, rerun and updated in the task and the PR body
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
         → gh pr ready (pr_mode ready, PR still a draft)
-        → evidence the fixes changed, rerun and updated in the task and the PR body
         → crew hand-over TASK    # refuses until every acceptance criterion has an entry (Task.EvidenceGaps);
                                  # then status pr-open, "handed over" in the Log
 ```
