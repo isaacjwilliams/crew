@@ -181,7 +181,7 @@ check "a high-risk worker runs /security-review in step 5, after the observer, a
 check "a tier raised after the hand-over sends the worker back for a security review: the lead relays it, and a review round's hand-over needs it" \
   "grep -q 'A .pr-open. row that says .high: no security review yet.*crew followup <task> --note.*and hand over again with crew hand-over' $A/lead.md && awk '/^## Workflow: review rounds/ {w=1} w && /^9\\. / {print; exit}' $A/implementer.md | grep -q 'Hand over again: .crew hand-over <task>. checks the round.s commits as it did the first run.s. When it refuses, do what first-run step 10 says'"
 check "the lead hands a task back with crew hand-over, and fixes only the refusals that are its own" \
-  "grep -q '^.crew hand-over. is the only way into .pr-open.*Evidence and a security review are the worker.s to add.*Acceptance criteria that aren.t .- . items are yours to fix' $A/lead.md"
+  "grep -q '^.crew hand-over. is the only way into .pr-open.*Evidence and a security review are the worker.s to add.*Acceptance criteria that aren.t .- . items are yours to fix.*When a worker asks you about them in its first run, rewrite them and answer it: it hands over itself' $A/lead.md"
 check "the PR body's Risk section opens with the tier and its look" \
   "grep -q 'Its Risk section opens with the task.s tier and the look it asks for' $A/implementer.md && [[ \$(awk '/^## Risk\$/ {r=1; next} r && NF {print; exit}' $C/../templates/pr-body.md) == '<Low | Medium | High> risk: <the look>.' ]]"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
