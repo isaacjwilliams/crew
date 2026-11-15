@@ -186,6 +186,19 @@ func (idx Branches) prOffBase(t Task) bool {
 	return t.HasOpenPR() && prBase != "" && prBase != idx.effectiveBase(t)
 }
 
+// onBase: the task's branch needs no rebase for its PR to target its base. A
+// stacked task's holds its parent's latest commit (restackReason has nothing to
+// say), and an unstacked task's starts on its base: base_sha is on origin/<base>.
+// An unstacked task moved off an abandoned parent isn't, since it still holds
+// that parent's commits.
+func (idx Branches) onBase(t Task, repo string) bool {
+	if _, stacked := idx.parentOf(t); stacked {
+		return idx.restackReason(t, repo) == ""
+	}
+	bs := t.Get("base_sha")
+	return bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, "refs/remotes/origin/"+t.Base())
+}
+
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of
 // its effective base on origin, as last fetched. Empty if that branch isn't on
 // origin.

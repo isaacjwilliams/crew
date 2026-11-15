@@ -208,6 +208,14 @@ func cmdRestack(c *Crew, args []string) error {
 	if !t.Dispatched() {
 		return fail("%s has no branch yet; dispatch it first", t.ID())
 	}
+	// Refuse a task there's nothing to send for before making its worktree.
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
+	parent, stacked := idx.parentOf(t)
+	if !stacked && !idx.prOffBase(t) {
+		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
+	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
@@ -218,7 +226,6 @@ func cmdRestack(c *Crew, args []string) error {
 	if !gitOK(repo, "fetch", "--quiet", "origin") {
 		warn("git fetch failed; using local refs")
 	}
-	parent, stacked := idx.parentOf(t)
 	if stacked {
 		if err := c.lock(); err != nil {
 			return err
@@ -231,13 +238,16 @@ func cmdRestack(c *Crew, args []string) error {
 	// With nothing to rebase, a retarget goes on its own, whatever the parent's
 	// state. Otherwise it goes in the rebase note, and waits with it.
 	retarget := idx.retargetReason(t, repo)
-	if retarget != "" && idx.restackReason(t, repo) == "" {
+	if retarget != "" && idx.onBase(t, repo) {
 		return c.sendRetarget(p, t, retarget, again)
 	}
-	if !stacked {
-		return fail("%s isn't stacked: its base '%s' isn't another task's branch", t.ID(), t.Base())
+	if stacked {
+		return c.sendRebase(p, idx, t, parent, retarget, again)
 	}
-	return c.sendRebase(p, idx, t, parent, retarget, again)
+	if retarget == "" {
+		return fail("origin has no branch %s yet, so %s's PR can't target it", t.Base(), t.ID())
+	}
+	return fail("%s's branch doesn't start on %s (base_sha %s isn't on it), so its PR would bring other commits there. crew restack rebases only stacked tasks; tell its worker what to do with 'crew followup %s --note'", t.ID(), t.Base(), cut(t.Get("base_sha"), 12), t.ID())
 }
 
 // sendRetarget resumes a task's worker to point its PR at the task's base, with

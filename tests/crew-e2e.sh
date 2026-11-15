@@ -838,6 +838,8 @@ echo MERGED >"$HOME/gh-pr-state"; setstate "done" null; touch "$HOME/rm-fail"
 out=$(crew tick 2>&1)
 check "tick cleans up merged tasks" '[[ $out == *"014-tick-parent: merged; worktree cleaned up"* && ! -d $WT14 && $(crew get 14 status) == merged ]]'
 check "a worker that won't leave agent view is reported, not a reason to keep the worktree" '[[ $out == *"couldn'"'"'t remove job $(crew get 14 worker_job) from agent view"* ]]'
+head=$(git -C "$L" rev-parse @); out=$(crew restack 14 2>&1); st=$?
+check "crew restack refuses a merged task before bringing back its worktree" '((st == 1)) && [[ $out == *"014-tick-parent is merged"* && ! -d $WT14 && -z $(crew get 14 worktree) && $(git -C "$L" rev-parse @) == "$head" ]]'
 rm -f "$HOME/rm-fail"
 rm -f "$HOME/gh-pr-state"
 
@@ -871,6 +873,14 @@ work "$(crew get "$FB" worktree)" b.txt; crew set "$FB" pr https://github.com/is
 crew set "$FB" base release/next; echo main >"$HOME/gh-pr-base-34"
 out=$(crew sync)
 check "sync fetches a new base that a PR doesn't target yet, for a task that isn't stacked" '[[ $out == *"$(basename "$FB" .md): PR targets main, not release/next"* ]]'
+# Moved onto a branch cut before it started, as when a task leaves an abandoned parent for main,
+# its branch still holds commits that aren't on the new base: no retarget alone.
+(cd "$SB/other-clone" && git push -q origin origin/main~1:refs/heads/release/old)
+crew set "$FB" base release/old; crew sync >/dev/null; setstate "done" null; n=$(resumes)
+out=$(crew tick 2>&1)
+check "tick sends no retarget alone to an unstacked task whose branch doesn't start on its new base" '[[ $out != *"$(basename "$FB" .md): restack sent"* && $(resumes) == "$n" ]]'
+out=$(crew restack "$FB" 2>&1); st=$?
+check "and crew restack refuses it, saying why" '((st == 1)) && [[ $out == *"branch doesn'"'"'t start on release/old"*"crew followup $(basename "$FB" .md) --note"* && $(resumes) == "$n" ]]'
 rm -f "$HOME/gh-pr-base-34"; crew set "$FB" status abandoned >/dev/null
 # crew tick re-homes a task in progress whose worker and worktree stayed on another machine.
 moved_away() {  # file: its job unknown here, its worktree gone, as on the machine it moved to

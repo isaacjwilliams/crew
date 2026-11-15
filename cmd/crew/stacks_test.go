@@ -113,3 +113,38 @@ func TestRetargetAfterAParentMerged(t *testing.T) {
 		t.Errorf("a PR still on the merged parent's branch: retargetReason = %q", got)
 	}
 }
+
+// A retarget alone suits a branch that needs no rebase: for an unstacked task,
+// one that starts on its base. One moved off an abandoned parent still holds
+// that parent's commits.
+func TestOnBase(t *testing.T) {
+	repo := stackRepo(t, "agent/gone")
+	runIn(t, repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "the parent's work")
+	runIn(t, repo, "git", "update-ref", "refs/remotes/origin/agent/gone", "HEAD")
+	gone := gitOut(t, repo, "rev-parse", "HEAD")
+	start := gitOut(t, repo, "rev-parse", "refs/remotes/origin/main")
+	dir := t.TempDir()
+	idx := (&Crew{Home: dir}).branches("p")
+	for _, c := range []struct {
+		name, baseSHA string
+		want          bool
+	}{
+		{"a branch that starts on its base", start, true},
+		{"a branch that still holds an abandoned parent's commits", gone, false},
+		{"a task with no base_sha", "", false},
+	} {
+		task := stackTask(t, dir, "001-a", "status: pr-open", "base: main", "base_sha: "+c.baseSHA)
+		if got := idx.onBase(task, repo); got != c.want {
+			t.Errorf("%s: onBase = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := git(dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
+}
