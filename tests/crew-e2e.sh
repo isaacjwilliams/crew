@@ -261,8 +261,8 @@ git -C "$WT" push -q -u origin HEAD 2>/dev/null
 echo OPEN >"$HOME/gh-pr-state"; out=$(crew sync 2>&1); rm "$HOME/gh-pr-state"
 check "sync fetches and raises the risk of a task whose branch on origin gained a sensitive path after its hand-over, and logs it" \
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
-check "status shows a pr-open task raised after its hand-over as waiting on its security review" \
-  '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* ]]'
+check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
+  '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 crew set 1 status working; crew set 1 risk medium
 commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
 out=$(crew hand-over 1 2>&1); st=$?
@@ -561,10 +561,10 @@ check "status lists a stacked task under its parent, columns aligned" '[[ $(grep
 crew set 2 pr https://github.com/isaac/webapp/pull/41; crew set 2 status pr-open
 crew set 5 pr https://github.com/isaac/webapp/pull/38; crew set 5 risk medium; crew set 5 status pr-open; crew set 10 risk high
 check "status ends a project's block with its PRs to review, cheapest look first, then by PR number" \
-  '[[ $(crew status | tail -1) == "  to review: #21 low, #41 low, #38 medium, #22 high" ]]'
+  '[[ $(crew status | tail -1) == "  to review: #21 low, #41 low, #38 medium, #22 high (no security review yet)" ]]'
 crew set 5 risk high; sed -i 's/^risk: high$/risk:/' "$F10"; out=$(crew status)
 check "a pr-open task without a risk tier needs the diff read, and comes last in to review" \
-  '[[ $(grep "└ 010-season-admin" <<<"$out") == *"  no risk tier: read the diff" && $(tail -1 <<<"$out") == "  to review: #21 low, #41 low, #38 high, #22 no risk tier" ]]'
+  '[[ $(grep "└ 010-season-admin" <<<"$out") == *"  no risk tier: read the diff" && $(tail -1 <<<"$out") == "  to review: #21 low, #41 low, #38 high (no security review yet), #22 no risk tier" ]]'
 crew set 10 risk low; crew set 2 status working; crew set 2 pr ""; crew set 5 status working; crew set 5 pr ""; crew set 5 risk low
 out=$(crew sync)
 check "sync leaves a stack alone while the parent hasn't moved" '[[ $out != *restack* && $(crew get 9 status) == pr-open ]]'

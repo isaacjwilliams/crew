@@ -260,7 +260,7 @@ func cmdHandOver(c *Crew, args []string) error {
 		fmt.Println(raised)
 		c.commit("raise risk " + t.ID())
 	}
-	if t.Risk() == RiskHigh && !t.SecurityReviewed() {
+	if t.AwaitsSecurityReview() {
 		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
 	}
 	t.Set("status", string(PROpen))

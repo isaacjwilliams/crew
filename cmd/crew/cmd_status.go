@@ -237,12 +237,10 @@ func (s *statusView) project(name string) {
 // lookNote says what look a PR waiting on the user needs: its tier and the
 // tier's look, or, for a high-risk task, that its security review is still to come.
 func lookNote(t Task) string {
-	r := t.Risk()
-	switch {
-	case r == RiskHigh && !t.SecurityReviewed():
+	if t.AwaitsSecurityReview() {
 		return "high: no security review yet"
 	}
-	return r.Label() + ": " + r.Look()
+	return t.Risk().Label() + ": " + t.Risk().Look()
 }
 
 // toReview lists the PRs waiting on the user, cheapest look first, so the ones
@@ -268,6 +266,9 @@ func toReview(tasks []Task) string {
 			ref = taskNumber(t)
 		}
 		items[i] = ref + " " + t.Risk().Label()
+		if t.AwaitsSecurityReview() {
+			items[i] += " (no security review yet)"
+		}
 	}
 	return "to review: " + strings.Join(items, ", ")
 }

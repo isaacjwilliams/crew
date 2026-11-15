@@ -488,6 +488,10 @@ func (t Task) SecurityReviewed() bool {
 	return false
 }
 
+// AwaitsSecurityReview: the task is high risk and its security review isn't
+// recorded yet.
+func (t Task) AwaitsSecurityReview() bool { return t.Risk() == RiskHigh && !t.SecurityReviewed() }
+
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
 // user once the worker has had MAX_CI_FIXES rounds of them. They are the only
