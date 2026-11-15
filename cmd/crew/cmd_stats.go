@@ -520,7 +520,7 @@ func printStats(project string, since time.Time, stats []taskStats, h history) {
 // The columns of the table by risk tier.
 var tierHeadings = [][2]string{
 	{"", "risk tier"}, {"tasks", "merged"}, {"median", "rounds"}, {"comments", "per task"},
-	{"later", "fixes"}, {"", "reverts"},
+	{"later fixes", "since"}, {"reverts", "since"},
 }
 
 // byTier groups items by risk tier, those without a valid tier under "".
