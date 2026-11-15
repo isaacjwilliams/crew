@@ -15,6 +15,9 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
 complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
+complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike' -d 'What the task makes'
+complete -c crew -n "__fish_seen_subcommand_from new" -l informs -x -d 'The draft whose question this spike answers' \
+    -a "(crew list --status draft 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'
@@ -22,11 +25,11 @@ complete -c crew -n "__fish_seen_subcommand_from feedback" -l since -r
 complete -c crew -n "__fish_seen_subcommand_from followup" -l fresh -d 'Start a new worker instead of resuming'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l note -r
 complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a restack the worker already has'
-complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks with worktrees'
+complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks and done spikes with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
 complete -c crew -n "__fish_seen_subcommand_from status stats list sync proposals pause resume" -l all -d 'Every project, not just this one'
-complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/abandoned'
+complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/done/abandoned'
 complete -c crew -n "__fish_seen_subcommand_from stats" -l since -x -d 'Tasks merged since this date (YYYY-MM-DD)'
 complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r

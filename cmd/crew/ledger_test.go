@@ -322,6 +322,70 @@ func TestRiskLook(t *testing.T) {
 	}
 }
 
+func TestTaskKind(t *testing.T) {
+	for kind, want := range map[string]Kind{"": KindBuild, "build": KindBuild, "spike": KindSpike, "drill": "drill"} {
+		task := Task{docWith(t, "---\nkind: "+kind+"\n---\n## Log\n")}
+		if got := task.Kind(); got != want {
+			t.Errorf("kind %q: Kind() = %q, want %q", kind, got, want)
+		}
+		if _, err := task.rules(); (err == nil) != (kind != "drill") {
+			t.Errorf("kind %q: rules() error = %v", kind, err)
+		}
+	}
+	if got := kindNames(); got != "build or spike" {
+		t.Errorf("kindNames() = %q", got)
+	}
+}
+
+// A spike asks less of its brief than a build, informs a draft, and ends done
+// rather than with a PR for the user.
+func TestKindRules(t *testing.T) {
+	build, _ := KindBuild.rules()
+	spike, _ := KindSpike.rules()
+	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.informs != "" || build.handedOver != PROpen {
+		t.Errorf("build's rules: %+v", build)
+	}
+	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.informs != Draft || spike.handedOver != Done {
+		t.Errorf("spike's rules: %+v", spike)
+	}
+}
+
+func TestDoneIsFinishedAndDelivered(t *testing.T) {
+	for _, s := range taskStatuses {
+		delivered := s == Merged || s == Done
+		if s.Delivered() != delivered {
+			t.Errorf("%s.Delivered() = %v", s, !delivered)
+		}
+		if s.Finished() != (delivered || s == Abandoned) {
+			t.Errorf("%s.Finished() = %v", s, s.Finished())
+		}
+		if s.Finished() && s.InFlight() {
+			t.Errorf("%s is both finished and in flight", s)
+		}
+	}
+}
+
+func TestStillToLearn(t *testing.T) {
+	task := Task{docWith(t, "## Context\n- [ ] not this one\n\n## Still to learn\n<!-- - [ ] a comment -->\n- [ ] does the API page?\n- [x] which store fits\n- [ ] is it fast enough?\n\n## Log\n")}
+	if n := task.StillToLearn(); n != 2 {
+		t.Errorf("StillToLearn = %d, want 2", n)
+	}
+}
+
+func TestAnswer(t *testing.T) {
+	for report, want := range map[string]string{
+		"## Report\nAnswer: yes, it pages by cursor\n\nTried: …\n":  "yes, it pages by cursor",
+		"## Report\n<!-- comment -->\n\nAnswer:   no  \nmore\n":     "no",
+		"## Report\nTried: …\nAnswer: later, so it doesn't count\n": "",
+		"## Report\nAnswer:\n":            "",
+		"## Goal\nAnswer: not a report\n": "",
+	} {
+		if got := (Task{docWith(t, report+"\n## Log\n")}).Answer(); got != want {
+			t.Errorf("Answer with %q = %q, want %q", report, got, want)
+		}
+	}
+}
+
 // Two CI rounds, one of them ticked, a round of comments with a CI line, and a
 // question about a head that stayed red. A line quoted in a comment, or in the
 // brief, reports nothing.
@@ -530,6 +594,26 @@ func TestRisksMatchLedgerDoc(t *testing.T) {
 	}
 	if !slices.Equal(documented, known) {
 		t.Errorf("risk tiers in LEDGER.md %q, in crew %q", documented, known)
+	}
+}
+
+// LEDGER.md lists exactly crew's kinds of task, in order.
+func TestKindsMatchLedgerDoc(t *testing.T) {
+	b, err := os.ReadFile("../../LEDGER.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(b), "## Kinds of task\n")
+	rest, _, _ = strings.Cut(rest, "\n## ")
+	var documented, known []string
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z]+)` \\|").FindAllStringSubmatch(rest, -1) {
+		documented = append(documented, m[1])
+	}
+	for _, r := range kinds {
+		known = append(known, string(r.kind))
+	}
+	if !slices.Equal(documented, known) {
+		t.Errorf("kinds in LEDGER.md %q, in crew %q", documented, known)
 	}
 }
 

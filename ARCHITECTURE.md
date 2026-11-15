@@ -172,17 +172,19 @@ The home's own files (code, config, templates) are never part of a ledger commit
 ### Intake and dispatch
 ```
 you ⇄ lead (a session in <home>/lead, for one project or every one; reads code in crew checkout <p>)
-  lead: confirm goal → crew new "<title>" --branch <name> → investigate → plan, with its risk tier → acceptance criteria
+  lead: confirm goal → crew new "<title>" --branch <name> → investigate
+        → what's still to learn, if anything: spikes (see "Spikes") → plan, with its risk tier → acceptance criteria
         → size estimate (Structure's Size: line); past MAX_PR_LINES or two concerns → split ("Splitting a task")
         → plan-reviewer subagent in the background (task file path only) → summary right away
         → review arrives → findings settled → Raise findings to you
         (each point written into the draft task file as it's agreed)
   you: "go"                             # if the review is still running, the lead dispatches once it's settled
-  lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty,
-                                        # the criteria are '- ' items, and risk is set
+  lead: crew ready TASK                 # checks the sections its kind needs are non-empty (a build: Goal / Structure /
+                                        #   Plan / Acceptance criteria, and a risk tier), the criteria are '- ' items,
+                                        #   and nothing is open under Still to learn
         crew dispatch TASK
-          ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS, the goal's max_in_flight; unlock
-          │     a stacked task's parent is exempt from "must be merged";
+          ├─ lock; check status, depends_on (same project, must be merged or done), MAX_WORKERS, the goal's max_in_flight; unlock
+          │     a stacked task's parent is exempt from "must be merged or done";
           │     a parent that has already merged → base rewritten to its base
           ├─ git fetch origin <base> (must succeed for a stacked task: the parent's branch has to be pushed);
           │   create ~/agent-work/<p>/<id> on a new <branch> from origin/<base>, recorded as base_sha:
@@ -240,6 +242,27 @@ With `AUTO_REVIEWS` at 0 it goes straight from opening the PR to `crew hand-over
 
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
+### Spikes
+A draft whose plan rests on something nobody has checked lists each question under `## Still to learn`, and `crew ready` refuses it until every item is ticked. A **spike** answers one by trying a path:
+
+```
+lead: crew new "<what it tries>" --kind spike --informs DRAFT [--goal GOAL]   # refuses an informs that isn't a draft
+      brief: Goal (the question), Plan (what to try, a time box), Acceptance criteria (what would answer it)
+      crew ready SPIKE      # no Structure, no risk: the kind asks less
+      crew dispatch SPIKE   (or crew tick, for a goal's)                  # in flight while it runs, like any task
+worker: first-run steps 1-3 → "Workflow: spike": try the path, commits local only → "## Report", first line "Answer: …"
+        crew hand-over SPIKE → checks the answer (handOverReport) → status done
+crew tick: a done task's worktree and local branch → crew cleanup
+           a goal's done spike, report_sent not yes → crew goal followup: "<spike> reported: <answer>; it informs <draft>"
+lead or goal lead: the spikes' answers side by side under the item → tick it → finish the plan
+```
+
+- **What a kind asks is one table**, `kinds` in `ledger.go`: the sections `crew ready` needs, whether it makes a PR (`pr`: then it needs a risk tier and takes part in stacks), the status of the task it may inform (`crew new --informs`), and the check `crew hand-over` runs and the status it moves to. `crew new`, `crew ready` and `crew hand-over` ask the task's rules (`Task.rules`) and never a kind's name. A task without a `kind` is a build.
+- **A spike leaves nothing in the shared repo.** Its worker never pushes, and opens no PR: the code is thrown away, and the report in the ledger is the record. So nothing needs cleaning up on origin, and `crew cleanup` deletes the local branch as it does a merged task's (`Status.Delivered`: merged or done). `crew hand-over` refuses a spike whose worktree has changes it didn't commit, since cleanup skips a dirty worktree. `crew sync` looks for no PR for a spike: one under its branch's name would be an old one, and could mark it merged. A spike takes no part in stacks: a restack has its worker push, and a task stacked on it would wait for a branch that never reaches origin. So `stackRefusal` refuses both ways up, wherever a stack is made: `crew new --on`, and `crew set` of a `base` or a `kind`. A plain `depends_on` a spike clears once it's done (`pendingDeps`).
+- **`done` always means the report is there**: only `crew hand-over` sets it, after `Task.Answer` finds the answer line, and `crew set` refuses it. So the goal lead is never told of a report that doesn't exist, and `report_sent` keeps it from being told twice.
+- **Spikes count toward `max_in_flight`** while they run. Not counting them would change what the cap is for (principle 5); they're short, and `MAX_WORKERS` counts them either way.
+- **The answers are put side by side by whoever owns the draft**, not by the spikes' workers: workers never edit other tasks, and weighing several answers is a judgment. Outside a goal, `crew status` shows the draft's open items and its spikes on its row.
+
 ### Review feedback
 ```
 you review on GitHub → tell the lead (or run it yourself):
@@ -248,7 +271,7 @@ you review on GitHub → tell the lead (or run it yourself):
                          # skips: anyone else's comments, replies tagged <!-- crew -->,
                          #        comments in PENDING reviews; inline comments timed by review submitted_at
   crew followup TASK     # refuses if the worker is busy (mid-turn or on an open prompt), or if there's no new round and no --note
-                         # refuses a merged or abandoned task, checked under the ledger lock
+                         # refuses a finished task (merged, done or abandoned), checked under the ledger lock
                          # a worker that isn't busy but whose process is still open (pid set) → claude stop <job> first
                          # what a fresh worker would load (worker_fingerprint) changed since it started, or it has none
                          #   → fresh worker instead, "(fresh: <why>)" in the log line and the output
@@ -283,7 +306,7 @@ worker: crew react TASK eyes <every ID in the unsent rounds>
 A task is *stacked* when its `base` is another task's `branch`; that task is its *parent*. Nothing else records the relationship (`parentOf` looks the base up among the project's task branches), so it can't disagree with `base`, and `crew set TASK base <a task's branch>` stacks an existing task. `depends_on` stays as it was written.
 
 ```
-crew new "<title>" --on PARENT   # base = parent's branch, depends_on = parent; refuses a merged or abandoned parent
+crew new "<title>" --on PARENT   # base = parent's branch, depends_on = parent; refuses a finished parent or a spike
 crew dispatch TASK               # needs origin/<parent branch>, not a merged parent; records base_sha = the parent's tip
 worker                           # gh pr create --base <parent branch>; PR body starts "Stacked on #N."
 crew sync                        # after the PR pass: git fetch origin (only for projects with a live stacked task or SENSITIVE_PATHS),
@@ -311,7 +334,7 @@ worker: rebase → checks → the note's push, as a command on its own
 
 ### Sync and cleanup
 - `crew sync` finds missing PR URLs by branch (`gh pr list --head`), records `pr_state`, `pr_updated` and `ci_state` (from `statusCheckRollup`, by `rollup` in `cmd_ci.go`), and sets `status: merged` when GitHub says merged. Then, for each task in flight, it raises the risk of one whose branch touches a sensitive path (`raiseRisk`, see "Worker first run") and checks the stacks, as above.
-- `crew cleanup TASK|--merged` stops the worker and removes it from agent view (`removeSession`), then ends any background process still running in the worktree (`stopProcessesIn`: TERM, then KILL after 10 seconds), then removes the worktree (`git worktree remove`, or `wt remove --no-delete-branch --foreground` so the repo's remove hooks run) and deletes the local branch (merged tasks only). The worker goes first so that it doesn't carry on in a deleted directory. Its leftover processes go next: a dev server it started in a background shell outlives `claude stop`, and would otherwise keep running, holding its port, after the worktree is gone. They're found by working directory: in `/proc` on Linux, with `lsof` and `ps` on a Mac. Only processes without a terminal are ended: one with a terminal is the user's, such as their shell sitting in the worktree. crew's own process and those that started it are left alone too. A worker whose process won't close keeps its worktree until a later cleanup; one that `claude rm` won't delete only gets a warning. Cleaning up a merged parent is safe while tasks are still stacked on it: their branches contain its commits, a restack cuts at `base_sha`, and nothing reads the parent's local branch.
+- `crew cleanup TASK|--merged` stops the worker and removes it from agent view (`removeSession`), then ends any background process still running in the worktree (`stopProcessesIn`: TERM, then KILL after 10 seconds), then removes the worktree (`git worktree remove`, or `wt remove --no-delete-branch --foreground` so the repo's remove hooks run) and deletes the local branch (merged tasks and done spikes only: `Status.Delivered`). The worker goes first so that it doesn't carry on in a deleted directory. Its leftover processes go next: a dev server it started in a background shell outlives `claude stop`, and would otherwise keep running, holding its port, after the worktree is gone. They're found by working directory: in `/proc` on Linux, with `lsof` and `ps` on a Mac. Only processes without a terminal are ended: one with a terminal is the user's, such as their shell sitting in the worktree. crew's own process and those that started it are left alone too. A worker whose process won't close keeps its worktree until a later cleanup; one that `claude rm` won't delete only gets a warning. Cleaning up a merged parent is safe while tasks are still stacked on it: their branches contain its commits, a restack cuts at `base_sha`, and nothing reads the parent's local branch.
 
 ### `crew tick`
 One pass over every project, run by `crew-tick.timer` every 3 minutes (the `crew-tick` job on a Mac), by the lead (at session start and for status), or by hand. A second tick while one runs exits at once (it doesn't wait for `.crew-tick.lock`). Each step is a `crew` command run as a process of its own, so one that refuses doesn't stop the rest. It prints one line per thing it did, and one per review round or goal input it holds back for a busy session; nothing otherwise.
@@ -325,7 +348,7 @@ crew tick
   ├─ crew sync --all
   ├─ crew mcp sync: every project's mcp.local.json, then lead/.mcp.json
   ├─ for each task (a paused project's get only cleanup, feedback, ci-fix and needs-input):
-  │    merged, worktree still recorded           → crew cleanup
+  │    merged or done, worktree still recorded   → crew cleanup
   │    in flight, PR changed since last read     → crew feedback (the user's comments → a round;
   │                                                  collaborators' → unchecked Open questions)
   │    pr-open, ci_state failing                 → crew ci-fix: reads the head's checks again; once all have finished
@@ -341,11 +364,11 @@ crew tick
   │    not needs-input, unchecked Open questions → crew set TASK status needs-input
   ├─ for each running goal:
   │    a note, a worker question it hasn't had,  → crew goal followup, once the goal lead is free (saying so if it isn't)
-  │      or interrupted                             and its project isn't paused
-  │    every task merged or abandoned            → crew goal done
+  │      a spike's unsent report, or interrupted    and its project isn't paused
+  │    every task finished                        → crew goal done
   ├─ dispatchReady: the ready tasks of running goals, every unpaused project's together,
   │    highest priority first, then by project and ID (sortForDispatch)
-  │    waiting on other tasks (unmergedDeps)     → skipped, without a word
+  │    waiting on other tasks (pendingDeps)     → skipped, without a word
   │    the rest                                  → crew dispatch, each in turn (exit 4, a dispatch that has to
   │                                                  wait: nothing said, and the next task is tried)
   └─ push_ledger in the foreground (soft): whatever a background push missed
@@ -376,23 +399,24 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
   goal lead, for every item, in one turn: crew new … --goal GOAL → intake to the brief standard
         → plan-reviewer → findings settled → crew ready TASK, or parked (draft, with Open questions)
   crew tick: dispatches the goal's ready tasks, highest priority first, as MAX_WORKERS / the goal's max_in_flight allow;
-             resumes the goal lead (crew goal followup) with the user's notes and its workers' questions;
-             closes the goal (crew goal done) once every task is merged or abandoned
+             resumes the goal lead (crew goal followup) with the user's notes, its workers' questions and its spikes' reports;
+             closes the goal (crew goal done) once every task is finished
 ```
 
 - **A goal is a ledger file**, `projects/<p>/goals/NNN-<slug>.md`, with flat front matter (`status`: `draft`, `running`, `done` or `abandoned`; the goal lead's `checkout`, `lead_name`, `lead_job`, `lead_session` and `lead_fingerprint`; `unsent_notes`; `max_in_flight`) and the sections Goal (the user's words, quoted, including where the items come from), Items (each one with its task, written by the goal lead), Decisions and Log. Like a task file, it is the goal lead's record, and the session can be replaced.
 - **A task belongs to a goal through its `goal:` key**, set by `crew new --goal`. `crew status` lists each goal with its tasks under it, grouped by where they stand: in flight; next, numbered in the order `crew tick` dispatches them (`sortForDispatch`); waiting on other tasks, with `after <tasks>`; drafts with open questions, under `parked`; and the other drafts, under `planning`. A goal that isn't running lists its ready tasks under `ready`, unnumbered.
 - **Parked is a task state, not a goal one.** The goal lead parks an item by leaving its task in `draft` with unchecked Open questions, so the rest of the goal carries on. The user answers through the lead, which records the answer in the task and passes it on with `crew goal note`.
-- **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. `crew goal followup` sends both, once the goal lead is free, and resets them.
+- **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. A done spike's report is sent once too, with its answer and the draft it informs, and `report_sent` records it. `crew goal followup` sends all three, once the goal lead is free, and resets them.
 - **The goal lead works one turn per input** and never polls (its prompt, and `disallowedTools` without `ScheduleWakeup` or cron). Every turn starts in a freshly fetched checkout. It doesn't count toward `MAX_WORKERS`, which caps workers: what it produces is capped where it reaches the user, by the goal's `max_in_flight`.
-- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a paused project (checked first), an unmerged dependency (`unmergedDeps`), a cap, or a stacked parent that hasn't pushed. It counts the caps only once the dependencies have merged, since counting the workers running asks `claude agents`. `crew tick` leaves out paused projects' tasks, skips a task with unmerged dependencies without running `crew dispatch` for it, and prints nothing for exit 4; it tries both again next tick. Any other refusal is a warning.
-- **`crew status` shows what holds dispatch back**, from the same `unmergedDeps`, `workerSlots`, `goalSlots` and `sortForDispatch`, so the two agree on dependencies, caps and order. It counts the caps once for each project and goal, not for each task. A cap set to something that isn't a whole number shows as `?`, with the error on that project's or goal's line. Each note means one thing:
+- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a paused project (checked first), a dependency that isn't merged or done yet (`pendingDeps`), a cap, or a stacked parent that hasn't pushed. It counts the caps only once the dependencies are through, since counting the workers running asks `claude agents`. `crew tick` leaves out paused projects' tasks, skips a task with pending dependencies without running `crew dispatch` for it, and prints nothing for exit 4; it tries both again next tick. Any other refusal is a warning.
+- **`crew status` shows what holds dispatch back**, from the same `pendingDeps`, `workerSlots`, `goalSlots` and `sortForDispatch`, so the two agree on dependencies, caps and order. It counts the caps once for each project and goal, not for each task. A cap set to something that isn't a whole number shows as `?`, with the error on that project's or goal's line. Each note means one thing:
   - `after <tasks>`: the dependencies that haven't merged. An abandoned one is always named, `<task> (abandoned)`, since it never will. A stacked task's abandoned parent counts, whether it's in `depends_on` or only the `base`.
   - `on <parent>`: a ready task whose parent is in flight. It can go once the parent's branch is on origin, which status can't see. When the task's own parent has merged, the parent named is the first task down the stack that hasn't (`liveParent`), since that's where `crew dispatch` puts the task.
   - `full` on a goal's line: the goal is at its `max_in_flight`.
   - `full` on the `workers running` line: no project has a worker slot free. A project may set its own `MAX_WORKERS`, higher or lower, so each full project's line says `workers full` with its own limit.
   - `dispatch by hand`: a ready task no running or draft goal will dispatch. `goal <id> full` beside it means a done or abandoned goal's cap still holds it; a bad cap on that goal is said there too, since status doesn't list the goal.
-  - `N draft(s)`: drafts outside a goal with no open questions, counted rather than listed.
+  - `N to learn; <spike> <status>, …` on a draft: its open items under Still to learn, and the spikes that inform it. `informs <draft>` on a spike.
+  - `N draft(s)`: drafts outside a goal with no open questions and nothing to learn, counted rather than listed.
   - `paused (crew resume --project <p>)` on a project's line: nothing dispatches for it, whatever its groups say, until it's resumed. `interrupted by a pause` on a task: the pause cut its worker's turn short, and `crew tick` tells it to carry on once the project is resumed.
   - Status lists a project's next tasks even when it isn't cloned here, though `crew tick` dispatches only projects cloned on its machine.
 - **Ending a goal** (`crew goal done` or `abandon`) stops and removes the goal lead, any background process still running in its checkout, and the checkout, and leaves the tasks alone. A note to a done goal reopens it, for items added later. The ready tasks of an abandoned goal are the lead's to dispatch.
@@ -589,7 +613,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - `pushLedger` pushes until `@` equals `@{u}`, up to five tries. A push rejected because origin has commits this machine lacks fetches them and rebases the ledger onto them (`git pull --rebase --autostash`) under the ledger lock (`adoptOriginCommits`); a rebase that conflicts is aborted and left for the next try.
   - `crew push`, and `crew tick` at its end, push in the foreground (`pushNow`, which waits for the push lock), a catch-all for background pushes that failed.
 - **Ledger files (`ledger.go`):**
-  - A `Doc` is a task, goal or proposal file. It reads the file afresh for every value and writes it back at once, under the ledger lock: agents edit these files too, so nothing is kept in memory. `Task`, `Goal` and `Proposal` wrap one with the keys each has. `Status` and `GoalStatus` are the statuses; a Go test checks them against `LEDGER.md`.
+  - A `Doc` is a task, goal or proposal file. It reads the file afresh for every value and writes it back at once, under the ledger lock: agents edit these files too, so nothing is kept in memory. `Task`, `Goal` and `Proposal` wrap one with the keys each has. `Status` and `GoalStatus` are the statuses, and `kinds` the kinds of task with what each asks; a Go test checks each list against `LEDGER.md`.
   - `Get`/`Set` handle *flat* `key: value` between the first two `---` lines. `Set` quotes values containing `: `, ` #` or `"`, replaces newlines with spaces, and adds missing keys before the closing `---`. Keep front matter flat; there's no YAML parser.
   - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `crew hand-over` reads the criteria with it (`Task.AcceptanceCriteria`) and the entries without one (`Task.EvidenceGaps`), and `crew ready` checks each criterion is a `- ` item. `InsertBefore` puts review rounds before `## Log`.
   - `Log` appends to the end of the file, so **`## Log` must stay the last section**. `LogEntries` reads the lines back. `Task.SetStatus` is the only writer of a task's status, and logs each change as `status → <status>`.
@@ -716,17 +740,20 @@ Changing any of these means updating every side listed.
 | A question put to the user under Open questions by `crew feedback` (a collaborator's comment) or `crew ci-fix` (red CI past `MAX_CI_FIXES`) logs a line ending `recorded under Open questions for the user` (`recordedForTheUser`) | `crew feedback`, `crew ci-fix` → `crew stats` (a goal task's question wait starts there) |
 | A review round's comment items: `- [ ] review <id> (<state>)`, `- [ ] <where> — comment <id> …` and `- [ ] comment <id> — …`, checked or not, each followed by the comment quoted and indented | `reviewRound.add` → implementer "Workflow: review rounds" (the IDs for `crew react` and `crew reply`), `Task.ReviewRounds` → `Task.ReviewComments` (`crew stats`) and `Task.CommentsAfterReview` (`crew gardener`'s misses run, whose prompt lists each comment by its item for `misses.md`); `LEDGER.md` |
 | A split question's three answers, `split as proposed`, `review it anyway` and `take it as it is`, and what the worker does for each at the size check and at the end of a pass that didn't converge | implementer "Workflow: split proposal" → `goal-lead.md` "Workflow: new input" and `lead.md` "Status" (who answers), `lead.md` "Splitting a task" (the pieces, and moving what waits on the old task); the summary's unconverged ending in `templates/review-comment.md`; checked in `tests/guard.sh` |
-| A brief's Structure ends with `Size: about <n> lines, <areas>`, held to `MAX_PR_LINES`; a plan past it or holding two concerns is split as `lead.md` "Splitting a task" says | `lead.md` "The brief standard" and intake step 6 → `plan-reviewer.md` (the Size question, a Raise with a proposed split) → `goal-lead.md` (settling a Size finding); `templates/task.md`; checked in `tests/guard.sh` |
+| A brief's Structure ends with `Size: about <n> lines, <areas>`, held to `MAX_PR_LINES`; a plan past it or holding two concerns is split as `lead.md` "Splitting a task" says | `lead.md` "The brief standard" and intake step 7 → `plan-reviewer.md` (the Size question, a Raise with a proposed split) → `goal-lead.md` (settling a Size finding); `templates/task.md`; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
 | A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 7; checked in `tests/guard.sh` |
-| Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew hand-over`, `crew sync`, `crew status`, `crew stats`), `implementer.md`, `lead.md`, `LEDGER.md` |
-| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Evidence`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew hand-over`, `crew feedback`, `Doc.Log`, `crew promote` |
-| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 5, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `crew ready` (each criterion a `- ` item), `Task.AcceptanceCriteria` and `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
+| Status values `draft ready working needs-input pr-open addressing-feedback merged done abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew hand-over`, `crew sync`, `crew status`, `crew stats`), `implementer.md`, `lead.md`, `LEDGER.md` |
+| Section headings (`## Goal`, `## Still to learn`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Evidence`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready` (the sections each kind needs, from `kinds`; `Task.StillToLearn`), `crew hand-over`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 6, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `crew ready` (each criterion a `- ` item), `Task.AcceptanceCriteria` and `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | Risk values `low medium high`, and the look each asks of the user (`Risk.Look`) | `ledger.go` → `crew set`, `crew ready`, `raiseRisk`, `crew status`; `lead.md` (the tier rule), `templates/pr-body.md` (the Risk line), `LEDGER.md` (checked by a Go test), `SETUP.md` ("Risk tiers") |
 | A high-risk task's `### Security review` entry under `## Evidence`, unnumbered so it's no criterion's | implementer first-run step 5 → `Task.SecurityReviewed` (`crew hand-over`, `crew status`); `templates/task.md` |
+| Kind values `build spike`, and what each asks: brief sections, whether it makes a PR, the status of the task it informs, hand-over check and status (`kinds`) | `ledger.go` → `crew new --kind`, `crew set`, `crew ready`, `crew hand-over`; `implementer.md` ("Workflow: spike"), `lead.md` (intake step 4), `goal-lead.md`, `LEDGER.md` (checked by a Go test), `SETUP.md` ("Spikes") |
+| A spike's `## Report` starts with `Answer: <one line>`, before `## Automated reviews` (or `## Log`) | implementer "Workflow: spike" → `Task.Answer` (`crew hand-over`, `crew goal followup`); `LEDGER.md` |
+| `report_sent: yes` once a goal's done spike's report has gone to the goal lead; written by `crew` only | `crew goal followup` → `goalHasInput`, `unsentReport`; `templates/task.md`, `LEDGER.md` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies, the automated-review summary and the CI comment | `crew reply`, `crew review-summary`, `crew ci-summary` (`postOrEditComment`) → the `crew feedback` filter |
@@ -783,7 +810,7 @@ Changing any of these means updating every side listed.
 | Change the PR-body format | `templates/pr-body.md`; `implementer.md` (first run, step 7) says how it's filled in |
 | Tune the readability review | `casual-observer.md` (budget, checklist, severity, model) |
 | Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; the size past which a worker proposes a split, and the lead splits a plan at intake, is `MAX_PR_LINES`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
-| Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 7 of `lead.md` |
+| Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 8 of `lead.md` |
 | Tune the gardener or the misses agent | `gardener.md`, `misses.md`; the first run's lookback and the turn limit, which they share, are in `config/defaults.env` (set them in `config/crew.env`) |
 | Allow or deny a command | `config/*-settings.json` (`allow` for fewer prompts, `deny` as a tripwire); what an agent may do on GitHub goes in its prompt |
 | Add a `crew` subcommand | A new `cmd…` function in `cmd/crew/`, its entry in `commands` (`main.go`), the help text (`help.go`), `fish/completions/crew.fish` |

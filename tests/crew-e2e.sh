@@ -923,7 +923,7 @@ check "a goal followup after agents/lead.md changes starts the goal lead fresh: 
 git -C "$L" checkout -q -- agents; install_agents; GJ=$(gget "$GF" lead_job)
 crew set "$GT1" status merged; crew set "$GT2" status abandoned; setstate "done" null
 out=$(crew tick 2>&1)
-check "tick closes a goal once every task is merged or abandoned, removing its goal lead and checkout" '[[ $out == *"goal $G: done"* && $(gget "$GF" status) == done && ! -d $CO && -z $(gget "$GF" checkout) ]] && grep -qx "claude rm $GJ" "$HOME/claude-calls.log"'
+check "tick closes a goal once every task is finished, removing its goal lead and checkout" '[[ $out == *"goal $G: done"* && $(gget "$GF" status) == done && ! -d $CO && -z $(gget "$GF" checkout) ]] && grep -qx "claude rm $GJ" "$HOME/claude-calls.log"'
 out=$(crew goal note 1 "Pick up the new cards" 2>&1)
 check "a note reopens a done goal, in a fresh checkout" '[[ $out == *"input sent to its goal lead"* && $(gget "$GF" status) == running && -d $CO ]]'
 GT3=$(crew new "Season footer" --goal 1); fill "$GT3"; crew ready "$GT3" >/dev/null
@@ -1070,6 +1070,81 @@ check "status says when the workers running have reached MAX_WORKERS" 'echo "MAX
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
 crew goal abandon "$GF5" >/dev/null 2>&1; crew goal abandon "$GF6" >/dev/null 2>&1
 for f in "$PD"/tasks/*.md; do case $(crew get "$f" status) in merged|abandoned) ;; *) crew set "$f" status abandoned ;; esac; done
+rm -f "$HOME/gh-pr-state"
+
+# Spikes: a draft lists what it still has to learn; a spike tries a path on a
+# branch nobody merges, and its report goes to whoever owns the draft.
+echo OPEN >"$HOME/gh-pr-state"; setstate "done" null
+GF8=$(crew goal new "Season search" --max-in-flight 1); G8=$(basename "$GF8" .md)
+sed -i '/^## Goal$/a "Add search to the season page."' "$GF8"; crew goal start "$GF8" >/dev/null
+KD=$(crew new "Season search box" --goal "$GF8"); KDI=$(basename "$KD" .md); fill "$KD"
+sed -i '/^## Still to learn$/a - [ ] Does the API page by cursor?\n- [x] Which index? Settled: the existing one.\n- [ ] Is a full scan fast enough?' "$KD"
+check "ready refuses a task with open items under Still to learn, counting them and naming the spike that can answer them" \
+  '[[ $(crew ready "$KD" 2>&1) == *"2 item(s) under Still to learn are open"*"crew new --kind spike --informs $KDI"* && $(crew get "$KD" status) == draft ]]'
+n=$(ls "$PD/tasks" | wc -l)
+check "new refuses a kind crew doesn't know, and --informs on a kind that takes none" \
+  '[[ $(crew new "Drill" --kind drill 2>&1) == *"--kind must be build or spike, not '"'"'drill'"'"'"* && $(crew new "Built" --informs "$KD" 2>&1) == *"a build task doesn'"'"'t take --informs"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+check "new refuses to stack a spike: its branch stays local" \
+  '[[ $(crew new "Stacked spike" --kind spike --on "$KD" 2>&1) == *"a spike'"'"'s branch stays local, so it can'"'"'t be stacked"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+check "new --informs refuses a task that isn't a draft" \
+  '[[ $(crew new "Late spike" --kind spike --informs "$OR" 2>&1) == *"; --informs takes a draft task"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+KS=$(crew new "Try cursor paging" --kind spike --informs "$KD" --goal "$GF8"); KSI=$(basename "$KS" .md)
+KT=$(crew new "Try a full scan" --kind spike --informs "$KD" --goal "$GF8")
+check "new --kind spike --informs makes a spike tied to the draft, and logs it" \
+  '[[ $(crew get "$KS" kind) == spike && $(crew get "$KS" informs) == "$KDI" && $(crew get "$KD" kind) == build && $(section "$KS" "## Log") == *" — created as a spike, informs $KDI, for goal $G8" ]]'
+check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build or spike, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
+sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Plan$/a 1. Page through the API.' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
+check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Structure or risk" \
+  'crew ready "$KS" >/dev/null && [[ $(crew get "$KS" status) == ready && -z $(crew get "$KS" risk) ]]'
+crew dispatch "$KS" >/dev/null; KWT=$(crew get "$KS" worktree); KB=$(crew get "$KS" branch)
+n=$(ls "$PD/tasks" | wc -l)
+check "new refuses to stack a task on a spike, whose branch is never pushed" \
+  '[[ $(crew new "On a spike" --on "$KS" 2>&1) == *"a spike'"'"'s branch is never pushed, so nothing can stack on $KSI"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+KA=$(crew new "Search results page"); KAI=$(basename "$KA" .md); fill "$KA"; crew set "$KA" depends_on "$KSI"; crew ready "$KA" >/dev/null
+KC=$(crew new "On the draft" --on "$KD"); KDB=$(crew get "$KD" branch); KAB=$(crew get "$KA" base)
+check "set refuses a base or kind that would put a spike in a stack, either way up" \
+  '[[ $(crew set "$KA" base "$KB" 2>&1) == *"nothing can stack on $KSI"* && $(crew set "$KS" base "$KDB" 2>&1) == *"a spike'"'"'s branch stays local, so it can'"'"'t be stacked"* && $(crew set "$KC" kind spike 2>&1) == *"can'"'"'t be stacked"* && $(crew set "$KD" kind spike 2>&1) == *"nothing can stack on $KDI"* && $(crew get "$KA" base) != "$KB" && $(crew get "$KS" base) != "$KDB" && $(crew get "$KD" kind) == build && $(crew get "$KC" kind) == build ]]'
+check "set takes a base that stacks one build on another" 'crew set "$KA" base "$KDB" && [[ $(crew get "$KA" base) == "$KDB" ]] && crew set "$KA" base "$KAB"'
+check "a task that depends on a running spike waits for it" \
+  '[[ $(crew dispatch "$KA" 2>&1) == *"depends on $KSI, which is '"'"'working'"'"' (must be merged or done)"* && $(crew get "$KA" status) == ready ]]'
+st=$(crew status)
+check "status shows a draft's open items and its spikes, and a spike the draft it informs" \
+  '[[ $(row "$KDI") == *"draft"*"2 to learn; $(num "$KS") working, $(num "$KT") draft" && $(row "$KSI") == *"working"*"informs $(num "$KD")" ]]'
+check "status shows a task waiting on a running spike" '[[ $(row "$KAI") == *"after $(num "$KS")"* ]]'
+check "a running spike holds a slot of its goal's max_in_flight" '[[ $(row "goal $G8") == *"0 of 1 task(s) merged, 1/1 in flight: full" ]]'
+commit_in "$KWT" spike/paging.ts
+echo 'SENSITIVE_PATHS="spike"' >>"$PE"; out=$(crew sync 2>&1); sed -i '/^SENSITIVE_PATHS=/d' "$PE"
+check "sync leaves a spike that touches a sensitive path without a risk tier: it has none to raise" '[[ $out != *"risk →"* && -z $(crew get "$KS" risk) ]]'
+check "sync looks for no PR for a spike: one under its branch's name is someone else's" '[[ $out != *"$KSI: found PR"* && -z $(crew get "$KS" pr) ]]'   # the gh stub finds a PR for any branch
+check "set refuses done: only hand-over sets it, once the report is in" \
+  '[[ $(crew set "$KS" status done 2>&1) == *"only crew hand-over sets done, once the report is in: crew hand-over $KSI"* && $(crew get "$KS" status) == working ]]'
+check "hand-over refuses a spike without a report" '[[ $(crew hand-over "$KS" 2>&1) == *"## Report must start with a line '"'"'Answer: <the answer, in a line>'"'"'"* && $(crew get "$KS" status) == working ]]'
+sed -i '/^## Automated reviews$/i ## Report\nTried: paging by cursor.\nAnswer: yes\n' "$KS"
+check "hand-over refuses a spike whose report doesn't start with its answer" '! crew hand-over "$KS" 2>/dev/null && [[ $(crew get "$KS" status) == working ]]'
+sed -i -e '/^Tried: paging by cursor.$/d' -e 's/^Answer: yes$/Answer: yes, 100 rows a page by cursor\nTried: paging by cursor./' "$KS"
+touch "$KWT/scratch.log"
+check "hand-over refuses a spike whose worktree has changes it didn't commit, which cleanup would leave behind" \
+  '[[ $(crew hand-over "$KS" 2>&1) == *"$KWT has changes that aren'"'"'t committed: commit or delete them"* && $(crew get "$KS" status) == working ]]'
+rm "$KWT/scratch.log"
+check "hand-over moves a spike whose report starts with its answer to done, without a PR or evidence, and logs it" \
+  '[[ $(crew hand-over "$KS") == "handed over: $KSI (done)" && $(crew get "$KS" status) == done && $(section "$KS" "## Log" | tail -1) == *" — handed over" ]]'
+st=$(crew status)
+check "a done spike doesn't hold its goal's slot, and is listed only with --done" \
+  '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
+check "a task that depends on a done spike no longer waits for it" '[[ $(row "$KAI") != *after* ]]'
+setstate "done" null; n=$(resumes)
+out=$(crew tick 2>&1)
+check "tick cleans up a done spike's worktree and local branch" \
+  '[[ $out == *"$KSI: done; worktree cleaned up"* && ! -d $KWT && -z $(crew get "$KS" worktree) ]] && ! git -C "$SB/webapp" show-ref --verify --quiet "refs/heads/$KB"'
+check "tick sends a goal's done spike's report to its goal lead, with its answer and the draft it informs" \
+  '[[ $out == *"goal $G8: input sent to its goal lead"* && $(last_launch) == *"- $KSI reported: yes, 100 rows a page by cursor; it informs $KDI (task file: $KS)"* && $(crew get "$KS" report_sent) == yes && $(resumes) == $((n + 1)) ]]'
+setstate "done" null
+out=$(crew tick 2>&1)
+check "a report the goal lead has been sent isn't sent again" '[[ $out != *"goal $G8"* && $(resumes) == $((n + 1)) ]]'
+KO=$(crew new "Outside learning"); sed -i '/^## Still to learn$/a - [ ] Will it fit?' "$KO"
+check "status lists a draft outside a goal that has something to learn, rather than fold it into the count" '[[ $(crew status | grep "$(basename "$KO" .md)") == *"draft"*"1 to learn" ]]'
+crew goal abandon "$GF8" >/dev/null 2>&1
+for f in "$KC" "$KD" "$KT" "$KO" "$KA"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
