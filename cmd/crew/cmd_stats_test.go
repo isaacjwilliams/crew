@@ -41,6 +41,12 @@ func TestStatsOfWaits(t *testing.T) {
 				"- 2026-11-10 10:00 — status → pr-open\n- 2026-11-10 11:00 — 1 collaborator comment(s) " + recordedForTheUser + "\n" +
 				"- 2026-11-10 11:03 — status → needs-input\n- 2026-11-10 14:00 — status → pr-open\n- 2026-11-10 15:00 — status → merged\n",
 			at("2026-11-10 15:00"), 2*time.Hour + 3*time.Minute, 3 * time.Hour},
+		{"a goal task's collaborator comment still waits while the worker handles a round sent with it",
+			"---\ngoal: 001-g\n---\n## Log\n" +
+				"- 2026-11-10 10:00 — status → pr-open\n- 2026-11-10 11:00 — 1 collaborator comment(s) " + recordedForTheUser + "\n" +
+				"- 2026-11-10 11:00 — status → addressing-feedback\n- 2026-11-10 12:00 — status → pr-open\n" +
+				"- 2026-11-10 12:03 — status → needs-input\n- 2026-11-10 15:00 — status → pr-open\n- 2026-11-10 16:00 — status → merged\n",
+			at("2026-11-10 16:00"), 2*time.Hour + 3*time.Minute, 4 * time.Hour},
 		{"so does a goal task's red CI past MAX_CI_FIXES",
 			"---\ngoal: 001-g\n---\n## Log\n" +
 				"- 2026-11-10 10:00 — status → pr-open\n- 2026-11-10 11:00 — CI still red on abc1234 after 2 CI rounds; " + recordedForTheUser + "\n" +

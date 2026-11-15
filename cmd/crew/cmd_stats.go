@@ -117,7 +117,7 @@ func statsOf(t Task) taskStats {
 		merged:   mergedAt(log),
 		rounds:   t.FeedbackRounds(),
 		comments: t.ReviewComments(),
-		prWait:   waited(log, changedTo(PROpen), changesStatus),
+		prWait:   waited(log, changedTo(PROpen), anyChange),
 	}
 	asked := changedTo(NeedsInput)
 	if t.Goal() != "" {
@@ -129,9 +129,11 @@ func statsOf(t Task) taskStats {
 			return strings.HasPrefix(e.msg, "For the user:") || strings.HasSuffix(e.msg, recordedForTheUser)
 		}
 	}
-	// A question is answered once the task moves on: crew tick marking it
-	// needs-input, once its worker is idle, isn't an answer.
-	answered := func(e logEntry) bool { return changesStatus(e) && !changedTo(NeedsInput)(e) }
+	// A question is answered when the task leaves needs-input, or merges.
+	// crew tick marks it needs-input only once its worker is idle, so the
+	// worker's own changes before then (a review round sent, say) answer
+	// nothing.
+	answered := func(from, to Status) bool { return from == NeedsInput && to != NeedsInput || to == Merged }
 	s.questionWait = waited(log, asked, answered)
 
 	reviews := t.AutomatedReviews()
@@ -179,27 +181,30 @@ func changedTo(s Status) func(logEntry) bool {
 }
 
 // waited adds up the time from each Log entry that starts a wait on the user
-// to the next one that ends it.
-func waited(log []logEntry, starts, ends func(logEntry) bool) time.Duration {
+// to the next change of status that ends it: ends is given the status the task
+// had and the one it changed to.
+func waited(log []logEntry, starts func(logEntry) bool, ends func(from, to Status) bool) time.Duration {
 	var total time.Duration
 	var since time.Time // when the wait under way began, or zero
+	var status Status   // the task's status before the entry
 	for _, e := range log {
-		if !since.IsZero() && ends(e) {
+		to, changed := e.status()
+		if !since.IsZero() && changed && ends(status, to) {
 			total += e.at.Sub(since)
 			since = time.Time{}
 		}
 		if since.IsZero() && starts(e) {
 			since = e.at
 		}
+		if changed {
+			status = to
+		}
 	}
 	return total
 }
 
-// changesStatus: the entry is a status line.
-func changesStatus(e logEntry) bool {
-	_, ok := e.status()
-	return ok
-}
+// anyChange ends a wait at every change of status.
+func anyChange(from, to Status) bool { return true }
 
 // withStatusLines adds the status lines a task dispatched before
 // Task.SetStatus lacks. Back then crew dispatch, crew followup and crew sync
