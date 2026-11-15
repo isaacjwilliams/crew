@@ -188,6 +188,9 @@ func cmdReady(c *Crew, args []string) error {
 			return fail("write each acceptance criterion as a '- ' item, any detail indented under it; this line isn't one: %s", l)
 		}
 	}
+	if !t.Risk().Valid() {
+		return fail("set its risk: crew set %s risk low|medium|high", t.ID())
+	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)
 	}
@@ -203,9 +206,10 @@ func cmdReady(c *Crew, args []string) error {
 }
 
 // crew hand-over TASK: the worker's PR is ready for the user, with evidence for
-// every acceptance criterion. Workers run it once, at the end of their first
-// run; a review round may have started by then. Their later moves back to
-// pr-open are plain crew set, since the PR was handed over already.
+// every acceptance criterion, and a security review if it's high risk, which a
+// branch that touches a sensitive path makes it. Workers run it once, at the end
+// of their first run; a review round may have started by then. Their later moves
+// back to pr-open are plain crew set, since the PR was handed over already.
 func cmdHandOver(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew hand-over TASK")
@@ -213,6 +217,15 @@ func cmdHandOver(c *Crew, args []string) error {
 	t, err := c.resolveTask(args[0])
 	if err != nil {
 		return err
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	// The branch on origin may have commits from elsewhere, a suggestion applied
+	// on GitHub say, that raiseRisk has to see.
+	if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+		return fail("couldn't check SENSITIVE_PATHS: git fetch origin failed in %s", p.Repo())
 	}
 	// Check under the lock: crew sync may be marking the task merged, or the
 	// lead abandoning it, at the same moment.
@@ -236,6 +249,19 @@ func cmdHandOver(c *Crew, args []string) error {
 		}
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			strings.Join(nums, ", "), len(criteria))
+	}
+	// A raise stands even when the hand-over is refused below: the branch touches
+	// a sensitive path whatever happens next.
+	raised, err := raiseRisk(t, p)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if raised != "" {
+		fmt.Println(raised)
+		c.commit("raise risk " + t.ID())
+	}
+	if t.AwaitsSecurityReview() {
+		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
 	}
 	t.Set("status", string(PROpen))
 	t.Touch()

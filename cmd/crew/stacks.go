@@ -3,7 +3,12 @@ package main
 // A task is stacked when its base is another task's branch; that task is its
 // parent. Nothing else records the relationship, so it can't disagree with base.
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+)
 
 // Branches indexes task files by project and branch, for parentOf.
 type Branches map[string]Task
@@ -93,6 +98,67 @@ func (idx Branches) restackReason(t Task, repo string) string {
 		return ""
 	}
 	return p.ID() + " moved"
+}
+
+// raiseRisk makes a task high risk when its branch changes a file that matches
+// one of the project's SENSITIVE_PATHS (git pathspecs), and logs the first such
+// file. It never lowers a tier. It looks at the branch here and on origin, as last
+// fetched, since either may have commits the other lacks: each one's changes since
+// it left origin/<base>. It starts at base_sha instead when a rebased parent left
+// the merge base behind the parent's work (as noteBaseSHA does), or when a merged
+// parent's branch is gone from origin (as crew observe does). It returns the line
+// it logged, or nothing, and an error when it couldn't look. Call it with the lock
+// held.
+func raiseRisk(t Task, p *Project) (string, error) {
+	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
+	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
+		return "", nil
+	}
+	repo, base := p.Repo(), "refs/remotes/origin/"+t.Base()
+	var touched []string
+	looked := false
+	for _, tip := range []string{"refs/heads/" + t.Branch(), "refs/remotes/origin/" + t.Branch()} {
+		if !gitOK(repo, "show-ref", "--verify", "--quiet", tip) {
+			continue
+		}
+		since, err := git(repo, "merge-base", base, tip)
+		bs := t.Get("base_sha")
+		if bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, tip) &&
+			(err != nil || !gitOK(repo, "merge-base", "--is-ancestor", bs, since)) {
+			since, err = bs, nil
+		}
+		if err != nil {
+			if !gitOK(repo, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
+				return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: origin/%s is gone, and base_sha doesn't say where %s starts", t.Base(), t.Branch())
+			}
+			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: %s has no merge base with origin/%s", t.Branch(), t.Base())
+		}
+		out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, tip, "--"}, pathspecs...)...)
+		if err != nil {
+			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS (%s): git diff failed; is each one a pathspec?", strings.Join(pathspecs, " "))
+		}
+		for _, f := range strings.Split(out, "\x00") {
+			if f != "" && !slices.Contains(touched, f) {
+				touched = append(touched, f)
+			}
+		}
+		looked = true
+	}
+	if !looked {
+		return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: branch %s isn't here or on origin", t.Branch())
+	}
+	if len(touched) == 0 {
+		return "", nil
+	}
+	slices.Sort(touched)
+	line := "risk → high: touches " + touched[0]
+	if len(touched) > 1 {
+		line += fmt.Sprintf(" (+%d more)", len(touched)-1)
+	}
+	t.Set("risk", string(RiskHigh))
+	t.Touch()
+	t.Log(line)
+	return line, nil
 }
 
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of

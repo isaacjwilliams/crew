@@ -9,6 +9,7 @@ restack_sent:
 branch: {{BRANCH}}
 depends_on:
 goal:
+risk:
 pre_pr_review: {{PRE_PR_REVIEW}}
 pr_mode: {{PR_MODE}}
 worktree:
@@ -73,8 +74,9 @@ updated: {{NOW}}
      that shows the criterion holds and its output, in a fenced block trimmed to what shows the
      result; or, where only a look would show it, what you saw and how (the page, the steps, the
      tool); or, for a check only the user can make, what to try and why you couldn't. Indent any
-     output line that starts with "## ", or it ends this section. `crew hand-over` refuses until
-     every criterion has an entry. -->
+     output line that starts with "## ", or it ends this section. A high-risk task also has a
+     "### Security review" entry: what /security-review found and what you did about it.
+     `crew hand-over` refuses until every criterion has an entry, and a high-risk task this one. -->
 
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker

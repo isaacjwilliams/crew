@@ -300,6 +300,54 @@ func (s Status) InFlight() bool {
 // Finished is merged or abandoned: nothing more happens to the task.
 func (s Status) Finished() bool { return s == Merged || s == Abandoned }
 
+// A task's risk tier: what kind of look its PR needs from the user. The lead
+// sets it at intake, and crew raises it to high when the branch touches one of
+// the project's sensitive paths. Crew never lowers it.
+type Risk string
+
+const (
+	RiskLow    Risk = "low"
+	RiskMedium Risk = "medium"
+	RiskHigh   Risk = "high"
+)
+
+// risks are the tiers, cheapest look first.
+var risks = []Risk{RiskLow, RiskMedium, RiskHigh}
+
+func (r Risk) Valid() bool { return slices.Contains(risks, r) }
+
+// Look is what the tier asks of the user before they merge. A task without a
+// tier, one marked ready before crew ready asked for one say, gets the safe
+// look: the diff.
+func (r Risk) Look() string {
+	switch r {
+	case RiskLow:
+		return "approve from the evidence"
+	case RiskMedium:
+		return "read the diff"
+	case RiskHigh:
+		return "read the diff; security review ran"
+	}
+	return "read the diff"
+}
+
+// Label names the tier, or says there's none.
+func (r Risk) Label() string {
+	if !r.Valid() {
+		return "no risk tier"
+	}
+	return string(r)
+}
+
+// order puts tiers cheapest look first. A task without a tier needs the diff
+// read, so it comes after high.
+func (r Risk) order() int {
+	if i := slices.Index(risks, r); i >= 0 {
+		return i
+	}
+	return len(risks)
+}
+
 // A goal's status.
 type GoalStatus string
 
@@ -322,6 +370,7 @@ func (t Task) PR() string        { return t.Get("pr") }
 func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
+func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
 // goes first. A task without one has priority 0.
@@ -380,25 +429,14 @@ func (t Task) AcceptanceCriteria() []string {
 }
 
 // EvidenceGaps is the numbers of the acceptance criteria that have no evidence
-// yet. The evidence for criterion n is a "### n." entry under ## Evidence with
-// something under its heading. A heading inside a fenced block is output, not
-// an entry. It counts the entries and doesn't judge them.
+// yet. The evidence for criterion n is a "### n." entry under ## Evidence
+// (evidenceEntries). It counts the entries and doesn't judge them.
 func (t Task) EvidenceGaps() []int {
 	recorded := map[int]bool{}
-	entry := 0  // the entry the line is in, or 0 outside one
-	fence := "" // the fence the line is inside, or "" outside one
-	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		inFence := fence != ""
-		if !inFence {
-			fence = fenceOpening(l)
-		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
-			fence = ""
-		}
-		if rest, ok := strings.CutPrefix(l, "### "); ok && !inFence {
-			num, _, _ := strings.Cut(rest, ".")
-			entry, _ = strconv.Atoi(num)
-		} else if entry > 0 {
-			recorded[entry] = true
+	for _, h := range t.evidenceEntries() {
+		num, _, _ := strings.Cut(strings.TrimPrefix(h, "### "), ".")
+		if n, err := strconv.Atoi(num); err == nil {
+			recorded[n] = true
 		}
 	}
 	var gaps []int
@@ -408,6 +446,35 @@ func (t Task) EvidenceGaps() []int {
 		}
 	}
 	return gaps
+}
+
+// evidenceEntries is the heading of each entry under ## Evidence that has
+// something under it, such as "### 1. the criterion". A heading inside a fenced
+// block is output, not an entry.
+func (t Task) evidenceEntries() []string {
+	var entries []string
+	heading, filled := "", false
+	fence := "" // the fence the line is inside, or "" outside one
+	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
+		inFence := fence != ""
+		if !inFence {
+			fence = fenceOpening(l)
+		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+			fence = ""
+		}
+		if strings.HasPrefix(l, "### ") && !inFence {
+			if filled {
+				entries = append(entries, heading)
+			}
+			heading, filled = strings.TrimRight(l, " \t"), false
+		} else if heading != "" {
+			filled = true
+		}
+	}
+	if filled {
+		entries = append(entries, heading)
+	}
+	return entries
 }
 
 // fenceOpening is the run of three or more backticks or tildes that opens a
@@ -422,6 +489,21 @@ func fenceOpening(l string) string {
 	}
 	return ""
 }
+
+// securityReview heads the entry under ## Evidence that records a high-risk
+// task's security review: what it found and what the worker did about it.
+const securityReview = "### Security review"
+
+// SecurityReviewed: ## Evidence has a securityReview entry with something under
+// it, which a high-risk task needs before its hand-over. The entry isn't
+// numbered, so EvidenceGaps doesn't count it as a criterion's.
+func (t Task) SecurityReviewed() bool {
+	return slices.Contains(t.evidenceEntries(), securityReview)
+}
+
+// AwaitsSecurityReview: the task is high risk and its security review isn't
+// recorded yet.
+func (t Task) AwaitsSecurityReview() bool { return t.Risk() == RiskHigh && !t.SecurityReviewed() }
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the

@@ -57,7 +57,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    branch without BRANCH_PREFIX (default: from title).
                                    --on stacks it on TASK's unmerged branch; --goal
                                    makes it one of GOAL's tasks
-  crew ready TASK                  Check the brief is complete and mark it ready
+  crew ready TASK                  Check the brief is complete and has a risk tier,
+                                   and mark it ready
   crew dispatch TASK [--force]     Create worktree + branch and start an implementer
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
@@ -74,7 +75,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    now if the worker is idle, else by crew tick
   crew hand-over TASK              Hand the task's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
-                                   under ## Evidence (used by workers)
+                                   under ## Evidence, and a high-risk task a security
+                                   review; a branch that touches SENSITIVE_PATHS makes
+                                   it high risk (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...
@@ -97,11 +100,16 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    Tasks with worker state, and what each one not yet
                                    dispatched waits for. A goal's tasks are grouped,
                                    the next ones in dispatch order; stacked tasks are
-                                   listed under their parent. For one project, it ends
-                                   with what's waiting on you in the others
+                                   listed under their parent. An open PR's row says
+                                   the look it needs, and each project ends with its
+                                   PRs to review, cheapest look first. For one
+                                   project, it ends with what's waiting on you in the
+                                   others
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
-                                   report stacked tasks that need a restack
+                                   raise to high the risk of tasks whose branch
+                                   touches SENSITIVE_PATHS; report stacked tasks that
+                                   need a restack
   crew tick                        Do what needs no decision, across all projects:
                                    sync, record new PR comments and red CI, send
                                    review rounds and restacks to idle workers, mark

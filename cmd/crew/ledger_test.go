@@ -195,6 +195,51 @@ func TestEvidenceGaps(t *testing.T) {
 	}
 }
 
+func TestSecurityReviewed(t *testing.T) {
+	for evidence, want := range map[string]bool{
+		"## Evidence\n### 1. one\nok\n### Security review\nNo findings.\n\n":   true,
+		"## Evidence\n### 1. one\nok\n\n":                                      false,
+		"## Evidence\n<!-- ### Security review -->\n\n":                        false,
+		"## Goal\n### Security review\n\n":                                     false,
+		"## Evidence\n### 1. one\nok\n### Security review\n\n":                 false,
+		"## Evidence\n### Security review\n<!-- to do -->\n### 1. one\nok\n\n": false,
+		"## Evidence\n### 1. one\n```\n### Security review\nok\n```\n\n":       false,
+		"## Evidence\n### 1. one\n~~~\n### Security review\nok\n~~~\n\n":       false,
+	} {
+		task := Task{docWith(t, criteria+evidence+"## Log\n")}
+		if got := task.SecurityReviewed(); got != want {
+			t.Errorf("SecurityReviewed with %q = %v, want %v", evidence, got, want)
+		}
+		if gaps := task.EvidenceGaps(); want && !slices.Equal(gaps, []int{2, 3}) {
+			t.Errorf("a security review counts as a criterion's evidence: gaps %v", gaps)
+		}
+	}
+}
+
+func TestRiskLook(t *testing.T) {
+	for r, want := range map[Risk]string{
+		RiskLow:    "approve from the evidence",
+		RiskMedium: "read the diff",
+		RiskHigh:   "read the diff; security review ran",
+		"":         "read the diff",
+		"bogus":    "read the diff",
+	} {
+		if got := r.Look(); got != want {
+			t.Errorf("Risk(%q).Look() = %q, want %q", r, got, want)
+		}
+	}
+	for r, want := range map[Risk]bool{RiskLow: true, RiskMedium: true, RiskHigh: true, "": false, "High": false} {
+		if r.Valid() != want {
+			t.Errorf("Risk(%q).Valid() = %v", r, !want)
+		}
+	}
+	for r, want := range map[Risk]string{RiskMedium: "medium", "": "no risk tier", "High": "no risk tier"} {
+		if got := r.Label(); got != want {
+			t.Errorf("Risk(%q).Label() = %q, want %q", r, got, want)
+		}
+	}
+}
+
 // Two CI rounds, one of them ticked, a round of comments with a CI line, and a
 // question about a head that stayed red. A line quoted in a comment, or in the
 // brief, reports nothing.
@@ -273,6 +318,27 @@ func TestStatusesMatchLedgerDoc(t *testing.T) {
 	}
 	if strings.Join(documented, " ") != strings.Join(known, " ") {
 		t.Errorf("goal statuses in LEDGER.md %v, in crew %v", documented, known)
+	}
+}
+
+// LEDGER.md lists exactly crew's risk tiers, cheapest look first, each with the
+// look Risk.Look gives it.
+func TestRisksMatchLedgerDoc(t *testing.T) {
+	b, err := os.ReadFile("../../LEDGER.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(b), "## Risk tiers\n")
+	rest, _, _ = strings.Cut(rest, "\n## ")
+	var documented, known []string
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z]+)` \\| ([^|]+) \\|").FindAllStringSubmatch(rest, -1) {
+		documented = append(documented, m[1]+": "+m[2])
+	}
+	for _, r := range risks {
+		known = append(known, string(r)+": "+r.Look())
+	}
+	if !slices.Equal(documented, known) {
+		t.Errorf("risk tiers in LEDGER.md %q, in crew %q", documented, known)
 	}
 }
 

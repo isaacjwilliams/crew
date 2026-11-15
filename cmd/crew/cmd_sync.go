@@ -7,8 +7,9 @@ import (
 )
 
 // crew sync [--quiet] [--all]: finds missing PR URLs, records each PR's state and
-// when it last changed, marks merged tasks, and reports stacked tasks that need a
-// restack, in the current project or all of them.
+// when it last changed, marks merged tasks, raises the risk of tasks that touch a
+// sensitive path, and reports stacked tasks that need a restack, in the current
+// project or all of them.
 func cmdSync(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -110,22 +111,38 @@ func cmdSync(c *Crew, args []string) error {
 				say("%s: PR closed without merging (status left as '%s')", t.ID(), st)
 			}
 		}
-		// Stacked tasks: say which need a restack, now that the merges above are known.
+		// Tasks in flight, now that the merges above are known: raise the risk of
+		// those whose branch touches a sensitive path, and say which stacked tasks
+		// need a restack.
+		// Both read origin's branches, so the project's clone is fetched first, once.
 		idx, fetched := c.branches(name), false
+		fetch := func() {
+			if !fetched {
+				if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+					warn("%s: git fetch failed; using the refs as last fetched", name)
+				}
+				fetched = true
+			}
+		}
+		sensitive := strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != ""
 		for _, t := range c.tasks(name) {
 			if !t.Status().InFlight() {
 				continue
+			}
+			if sensitive {
+				fetch()
+			}
+			if raised, err := raiseRisk(t, p); err != nil {
+				warn("%s: %v", t.ID(), err)
+			} else if raised != "" {
+				changed = true
+				fmt.Printf("%s: %s\n", t.ID(), raised)
 			}
 			parent, ok := idx.parentOf(t)
 			if !ok {
 				continue
 			}
-			if !fetched {
-				if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-					warn("%s: git fetch failed; checking stacks against local refs", name)
-				}
-				fetched = true
-			}
+			fetch()
 			if noteBaseSHA(t, parent, p.Repo()) {
 				changed = true
 			}

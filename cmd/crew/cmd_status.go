@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -228,6 +229,48 @@ func (s *statusView) project(name string) {
 	if n := s.memorySuggestions(name); n > 0 {
 		fmt.Printf("  memory suggestions: %d  (projects/%s/memory-suggestions.md)\n", n, name)
 	}
+	if line := toReview(s.tasks(name)); line != "" {
+		fmt.Println("  " + line)
+	}
+}
+
+// lookNote says what look a PR waiting on the user needs: its tier and the
+// tier's look, or, for a high-risk task, that its security review is still to come.
+func lookNote(t Task) string {
+	if t.AwaitsSecurityReview() {
+		return "high: no security review yet"
+	}
+	return t.Risk().Label() + ": " + t.Risk().Look()
+}
+
+// toReview lists the PRs waiting on the user, cheapest look first, so the ones
+// that need only the evidence can be cleared, and what's stacked on them freed,
+// before those that need the diff read: "to review: #41 low, #38 medium, #35 high".
+func toReview(tasks []Task) string {
+	var open []Task
+	for _, t := range tasks {
+		if t.Status() == PROpen {
+			open = append(open, t)
+		}
+	}
+	if len(open) == 0 {
+		return ""
+	}
+	slices.SortStableFunc(open, func(a, b Task) int {
+		return cmp.Or(cmp.Compare(a.Risk().order(), b.Risk().order()), cmp.Compare(atoiOr0(a.PRNumber()), atoiOr0(b.PRNumber())))
+	})
+	items := make([]string, len(open))
+	for i, t := range open {
+		ref := "#" + t.PRNumber()
+		if t.PR() == "" {
+			ref = taskNumber(t)
+		}
+		items[i] = ref + " " + t.Risk().Label()
+		if t.AwaitsSecurityReview() {
+			items[i] += " (no security review yet)"
+		}
+	}
+	return "to review: " + strings.Join(items, ", ")
 }
 
 // idWidth is the ID column's width, with whatever goes before the ID: a goal
@@ -443,6 +486,9 @@ func (s *statusView) notes(t Task) []string {
 	var notes []string
 	if prs := t.Get("pr_state"); prs != "" {
 		notes = append(notes, "("+prs+")")
+	}
+	if st == PROpen {
+		notes = append(notes, lookNote(t))
 	}
 	if st.InFlight() && s.repo != "" {
 		if reason := s.branches.restackReason(t, s.repo); reason != "" {

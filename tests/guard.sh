@@ -171,6 +171,15 @@ check "only first-run step 10 hands the PR over with crew hand-over" \
   "[[ \$(grep -c 'crew hand-over' $A/implementer.md) == 1 ]] && grep -q '^10\\. \\*\\*Hand over\\*\\*: .crew hand-over <task>.' $A/implementer.md"
 check "every pass of automated review refreshes the evidence its fixes changed, before it pushes" \
   "awk '/^## Workflow: automated review/ {w=1} w && /If your fixes changed what an .## Evidence. entry shows, rerun it/ && !e {e=NR} w && /Then run the checks and push/ && !p {p=NR} END {exit !(e && p && e <= p)}' $A/implementer.md"
+# --- risk tiers: the lead sets one at intake; a high-risk worker runs a security review
+check "the lead sets the risk tier at intake, with the rule for each tier in a line" \
+  "grep -q 'Set it with .crew set <task> risk low|medium|high.' $A/lead.md && grep -q '^     - \\*\\*high\\*\\* when the plan touches one of the project.s sensitive paths (.crew config SENSITIVE_PATHS --project <p>.)' $A/lead.md && grep -q '^     - \\*\\*medium\\*\\* when it adds or changes structure' $A/lead.md && grep -q '^     - \\*\\*low\\*\\* when it adds none' $A/lead.md"
+check "a high-risk worker runs /security-review in step 5, after the observer, and records it under Evidence" \
+  "awk '/^## Workflow: first run/ {w=1} w && /^5\\. \\*\\*Pre-PR review\\*\\*/ && !p {p=NR} w && /Don.t run the observer a second time/ && !o {o=NR} w && /^   \\*\\*Security review\\*\\*, when the task.s .risk. is .high./ && !r {r=NR} w && /^6\\. / && !e {e=NR} END {exit !(p && o && r && e && p < o && o < r && r < e)}' $A/implementer.md && grep -q 'run ./security-review. and act on its findings.*add a .### Security review. entry under .## Evidence.' $A/implementer.md"
+check "a tier raised after the hand-over sends the worker back for a security review: the lead relays it, and a review round runs it before pr-open" \
+  "grep -q 'A .pr-open. row that says .high: no security review yet.*crew followup <task> --note' $A/lead.md && awk '/^## Workflow: review rounds/ {w=1} w && /^9\\. / {print; exit}' $A/implementer.md | grep -q 'If the task.s .risk. is now .high.*run the security review as first-run step 5 says.*Then .crew set <task> status pr-open.'"
+check "the PR body's Risk section opens with the tier and its look" \
+  "grep -q 'Its Risk section opens with the task.s tier and the look it asks for' $A/implementer.md && [[ \$(awk '/^## Risk\$/ {r=1; next} r && NF {print; exit}' $C/../templates/pr-body.md) == '<Low | Medium | High> risk: <the look>.' ]]"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
 check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
