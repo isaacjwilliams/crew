@@ -54,6 +54,8 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
+Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log).
+
 "In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
 
 ## Risk tiers
@@ -179,3 +181,9 @@ A pass that has run all its reviews, and still needed fixes for the last one, di
 A round can also ask for another pass of automated review, with the line `- [ ] Automated review requested (<source>)`, last in the round: one line for each request, and one pass answers them all. The source is `comment <id>`, for your PR comment whose whole text is `crew review` (which the round lists in place of the comment), or `crew review`, for a round of its own that the `crew review TASK` command appends. The worker runs the pass after the round's comments, and ticks the line; the pass's summary comment answers it. A round that only asks for a pass counts toward `MAX_REVIEW_ROUNDS` like any other.
 
 When CI goes red on a PR its worker has handed to you (`pr-open`), `crew tick` runs `crew ci-fix TASK`, which appends a round of its own holding one line: `- [ ] CI failed on <short sha>: <check>, <check>`. It does so once every check on that head commit has finished, and once for each head: the line is the record, and no key keeps it. The worker deals with it before any comments in the same round, posts a comment with `crew ci-summary` saying why CI was red and what it did, and ticks the line. That comment carries `<!-- crew -->` and `<!-- crew ci-summary: <short sha> -->`, so a second `crew ci-summary` for the same head edits it. The worker names the head (`crew ci-summary TASK SHA FILE`), which a CI line must report. A round that only reports red CI doesn't count toward `MAX_REVIEW_ROUNDS`. Once a task has had `MAX_CI_FIXES` of these lines, red CI on a new head goes under Open questions instead, as `- [ ] CI is still red on <short sha> after <n> CI rounds (MAX_CI_FIXES=<n>): <checks>. Look at it yourself, or tell the worker to try again.`, and `crew tick` marks the task `needs-input`. That question is yours even in a goal's task: the goal lead isn't sent it. The lead ticks it once you've answered, and sets the task back to `pr-open` if the worker isn't resumed.
+
+## Log
+
+A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you.
+
+`crew stats` reads those lines, the `Reviewers:`, `Agreed severity:` and `Outcome:` lines under Automated reviews, and the comment items of Review rounds. So their forms are a contract with it: a change to one needs a change to `crew stats`.

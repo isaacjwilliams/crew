@@ -197,9 +197,8 @@ func cmdReady(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	t.Set("status", string(Ready))
+	t.SetStatus(Ready)
 	t.Touch()
-	t.Log("marked ready")
 	c.commit("ready " + t.ID())
 	fmt.Println("ready: " + t.ID())
 	return nil
@@ -263,7 +262,7 @@ func cmdHandOver(c *Crew, args []string) error {
 	if t.AwaitsSecurityReview() {
 		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
 	}
-	t.Set("status", string(PROpen))
+	t.SetStatus(PROpen)
 	t.Touch()
 	t.Log("handed over")
 	c.commit("hand over " + t.ID())

@@ -107,6 +107,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    PRs to review, cheapest look first. For one
                                    project, it ends with what's waiting on you in the
                                    others
+  crew stats [--since YYYY-MM-DD] [--all|--project P]
+                                   For each task merged since the date (default 30
+                                   days ago): your review rounds and comments, how
+                                   long its PR and questions waited on you, and how
+                                   its automated reviews went. Reads the ledger
+                                   only, so it changes nothing and runs anywhere
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    raise to high the risk of tasks whose branch

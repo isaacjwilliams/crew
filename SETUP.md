@@ -356,6 +356,22 @@ crew tick          # sync with GitHub and do whatever needs no decision (see bel
 
 Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you.
 
+### How much of your time it took
+
+```sh
+crew stats         # tasks merged in the last 30 days (--since YYYY-MM-DD; --project P, --all)
+```
+
+One row for each merged task:
+
+- **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI isn't counted.
+- **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
+- **questions waited on you**: from each time it went to `needs-input` until it left it. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
+- **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
+- **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column.
+
+Then the totals, and the median waits. It reads only the ledger, so it changes nothing and works on any machine.
+
 ### What a worker's PR looks like
 
 Each PR is short and has the same shape, so you can tell at a glance whether to merge it, look at its evidence, or read the code closely: what changed and why in at most three sentences, then **Risk** (what could break, for whom, and how far it reaches), **How to revert** (and anything a revert alone doesn't undo), **Evidence**, and Notes for reviewers only when there's a trade-off or an open question. A stacked PR first names the PR it's stacked on. The template is `templates/pr-body.md` in your crew home.

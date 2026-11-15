@@ -286,7 +286,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	}
 	if questions.Len() > 0 {
 		t.AppendToSection("## Open questions", questions.String())
-		t.Log(fmt.Sprintf("%d collaborator comment(s) recorded under Open questions for the user", no))
+		t.Log(fmt.Sprintf("%d collaborator comment(s) %s", no, recordedForTheUser))
 	}
 	t.Set("pr", pr)
 	t.Set("feedback_since", stamp)
