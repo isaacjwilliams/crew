@@ -181,8 +181,12 @@ func cmdReady(c *Crew, args []string) error {
 	if len(missing) > 0 {
 		return fail("brief is incomplete, fill in: %s", strings.Join(missing, " "))
 	}
-	if len(t.AcceptanceCriteria()) == 0 {
-		return fail("write the acceptance criteria as '- ' items, one for each: the worker shows evidence for each one")
+	// The worker shows evidence for each criterion by its number, so each is a
+	// "- " item, with any detail indented under it.
+	for _, l := range strings.Split(t.Section("## Acceptance criteria"), "\n") {
+		if !strings.HasPrefix(l, "- ") && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			return fail("write each acceptance criterion as a '- ' item, any detail indented under it; this line isn't one: %s", l)
+		}
 	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)

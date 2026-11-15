@@ -52,7 +52,8 @@ updated: {{NOW}}
 ## Acceptance criteria
 <!-- Checkable statements, including how to verify (tests to add or run, manual checks). When the goal
      is about how code is organised, at least one checks the code's shape, not only its behaviour.
-     One "- " item each: the worker records evidence for each one, by its number. -->
+     One "- " item each, any detail indented under it: the worker records evidence for each one,
+     by its number. -->
 
 ## Out of scope
 <!-- Tempting adjacent work the worker must NOT do. Follow-up ideas go in the Log. -->

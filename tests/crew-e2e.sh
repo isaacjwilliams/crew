@@ -195,8 +195,10 @@ check "ready refuses an empty brief" '! crew ready 1 2>/dev/null'
 fill "$F1"; sed -i '/^s$/d' "$F1"
 check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"fill in: Structure"* ]]'
 sed -i -e '/^## Structure$/a s' -e 's/^- z$/1. z/' "$F1"
-check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write the acceptance criteria as '"'"'- '"'"' items"* ]]'
-sed -i 's/^1\. z$/- z/' "$F1"; crew ready 1 >/dev/null
+check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write each acceptance criterion as a '"'"'- '"'"' item"*"this line isn'"'"'t one: 1. z" ]]'
+sed -i -e 's/^1\. z$/- z/' -e '/^- z$/a \  in detail\nAlso: z holds.' "$F1"
+check "ready refuses a criterion beside the '- ' items, and takes detail indented under one" '[[ $(crew ready 1 2>&1) == *"this line isn'"'"'t one: Also: z holds." ]]'
+sed -i '/^Also: z holds\.$/d' "$F1"; crew ready 1 >/dev/null
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
