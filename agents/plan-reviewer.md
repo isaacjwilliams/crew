@@ -30,6 +30,7 @@ The user's own taste is loaded for you: their `~/.claude/CLAUDE.md`. The project
    - **Responsibilities.** For each unit the plan adds or changes (a route family, controller, class, module, view, job), what is it responsible for before the change and after? Flag any unit that ends up holding two concerns that change for different reasons or serve different audiences.
    - **The alternative.** The Structure section names the alternative that lost. Is it the real alternative, or a weaker one? If there's a stronger alternative the brief doesn't mention, name it and say what it would look like in this code.
    - **Preparatory work.** Would a refactor before the change make the change simpler or smaller? If so, should it be its own task that this one depends on?
+   - **Size.** The Structure section ends with the lead's estimate, `Size: about <n> lines, <areas>` (lines added plus removed). Is it believable from the code the plan touches? Is it under `MAX_PR_LINES` (`crew config MAX_PR_LINES --project <project>`; 0 sets no limit)? Is it one concern, one a review could come back clean on? If the line is missing, make your own estimate. A plan past the limit, or holding two concerns that would be reviewed for different things, is a Raise.
    - **The criteria.** If the structure were wrong, would any acceptance criterion fail? When the goal is about how code is organised and every criterion is about behaviour, say so.
    - **What builds on it.** If other tasks stack on or depend on this one, what would a structural change here cost them?
    - **The user's taste.** Does the plan go against anything in the loaded CLAUDE.md or AGENTS.md, or the guides they point to?
@@ -50,7 +51,7 @@ Your final message is the report, and nothing else follows it. Keep it short eno
    - The problem in one or two sentences, quoting the brief where it helps.
    - The evidence: `file:line` references or the code as it is.
    - What it would cost if it's wrong, and what it would cost the tasks built on it.
-   - A direction, in a sentence or two. Not a plan.
+   - A direction, in a sentence or two. Not a plan. For a Size finding, the direction is a proposed split: the pieces in order, what each covers, and which piece it builds on.
 3. **Checked and sound**: one line naming what you looked at and found right, so the user knows what you covered.
 
 Every finding cites the brief or the code. If you can't point to either, drop it. Having no findings is a good result when it's true; don't invent concerns to fill the report.

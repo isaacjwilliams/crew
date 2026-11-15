@@ -69,7 +69,7 @@ When the user brings new work, your job is to get to a plan they'd approve at a 
 
    The structural points (where the code lives, extend or introduce, the alternative, the refactor) go in the brief's Structure section.
 5. **Agree on acceptance criteria**: checkable statements, including how to verify them, written as one `- ` item each. The worker records evidence for each one before it hands the PR over, and `crew ready` refuses criteria in any other form. When the goal is about how code is organised, at least one criterion checks the code's shape (for example, "no controller serves both public and admin pages"), not only its behaviour.
-6. **Right-size it.** If the change would clearly exceed a few hundred lines of diff or cross module boundaries, split it into tasks linked with `depends_on`: open a draft for each new piece with `crew new`, and narrow the first draft to match. Small PRs get better reviews. When a later piece builds on an earlier one and the user doesn't want to wait for that merge, stack it (see "Stacked tasks").
+6. **Right-size it.** Estimate the change's size: the lines its PR will add plus remove, tests and docs included. Split it before the plan review when the estimate is past `MAX_PR_LINES` (`crew config MAX_PR_LINES --project <p>`; 0 sets no limit), or when it holds two concerns that would be reviewed for different things. "Splitting a task" says how. Small PRs get better reviews, and the worker checks its branch against the same limit before it opens its PR. When a later piece builds on an earlier one and the user doesn't want to wait for that merge, stack it (see "Stacked tasks").
 7. **Finish the brief** to the brief standard below, then **start a plan review and show the summary without waiting for it.** The user reads the plan while the reviewer reads the code.
    - Spawn the `plan-reviewer` subagent with the task file's path and nothing else: no summary, no reasons, no hints about what to check. Its value is a read that isn't anchored on yours. It runs in the background, so you stay free to talk.
    - Straight away, show the user a compact summary: branch name, goal (with their words quoted), structure, plan bullets, acceptance criteria, anything you're unsure of. Give structure its own line, ahead of the plan bullets: where the code lives and the alternative that lost. It's the decision most expensive to change after the code is written. End with "Plan review running."
@@ -85,6 +85,7 @@ A worker starts with no memory of your conversation. It gets the task file, the 
 - Put decisions in the brief, not just outcomes: "extend `SearchQuery` with an optional `filters` field; do not create a new query type".
 - Prescribe structure and names. State a condition as the rule it enforces ("the menu link is highlighted on every admin page except the setup page"), not as an expression, unless the expression itself is the decision.
 - Name files, functions, and patterns concretely, as they appear in the code.
+- End the Structure section with `Size: about <n> lines, <the areas it spans>`: your estimate of the lines the PR will add plus remove, tests and docs included, made from the code the plan touches. Step 6 and the plan reviewer hold it to `MAX_PR_LINES`.
 - State what is out of scope, especially tempting adjacent cleanups. Follow-ups stay out of the diff; the worker writes down those worth keeping as proposals.
 - Record why when the choice isn't obvious, so the worker doesn't "fix" it.
 - Leave the HTML-comment guidance in place or delete it; `crew ready` ignores it.
@@ -110,7 +111,7 @@ A task can be based on another task's unmerged branch, so its PR targets that br
 
 ## Splitting a task
 
-Split a task into smaller ones when it's too big for one PR. That happens at intake (step 6), or after dispatch, when its worker's split proposal is taken. Each piece has one concern and is under `MAX_PR_LINES`, and together they cover the brief.
+Split a task into smaller ones when it's too big for one PR. That happens at intake (step 6, or a plan review's Size finding), or after dispatch, when its worker's split proposal is taken. Each piece has one concern and is under `MAX_PR_LINES`, and together they cover the brief.
 
 1. **Make the pieces**, in the order they build on each other. Open each new one with `crew new` (in a goal, `--goal <goal>`), `--on` the piece it builds on, if any. When a task is stacked on the one you split, make the pieces one stack, each on the one before, so the last carries all of their work.
    - A task not yet dispatched becomes the first piece: narrow its brief to match, and open the rest.

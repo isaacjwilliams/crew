@@ -170,6 +170,7 @@ The home's own files (code, config, templates) are never part of a ledger commit
 ```
 you ⇄ lead (a session in <home>/lead, for one project or every one; reads code in crew checkout <p>)
   lead: confirm goal → crew new "<title>" --branch <name> → investigate → plan → acceptance criteria
+        → size estimate (Structure's Size: line); past MAX_PR_LINES or two concerns → split ("Splitting a task")
         → plan-reviewer subagent in the background (task file path only) → summary right away
         → review arrives → findings settled → Raise findings to you
         (each point written into the draft task file as it's agreed)
@@ -193,6 +194,8 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
           │     process reports a session ID that starts with the job ID (job `failed` → stop, record nothing)
           └─ record worktree, worker_name/job/session; status → working
 ```
+
+Size is checked against one setting, `MAX_PR_LINES`, twice: at intake, where the brief's `Size:` line is the lead's estimate and the plan reviewer's Size question checks it against the code, and by the worker on its real diff before it opens a PR (below).
 
 ### Worker first run
 The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Once they pass, it checks the branch's size once, against `MAX_PR_LINES`: past it, it goes to "Workflow: split proposal" (below) instead of opening a PR. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. For each acceptance criterion it runs what shows it holds and records the command and its output under `## Evidence`, one `### <n>.` entry per criterion. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run) with a body filled in from `templates/pr-body.md`, its Evidence built from the task's, and records the PR with `crew set TASK pr …` and `crew log`.
@@ -697,6 +700,7 @@ Changing any of these means updating every side listed.
 | The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard", "Stacked tasks" and "Splitting a task" of the installed `lead.md` | `lead.md` → `goal-lead.md`, and `agentFiles`, which counts `lead.md` in a goal lead's fingerprint; checked in `tests/guard.sh` |
 | A goal task's worker question that the goal lead leaves for the user gets a "For the user: …" Log line | `goal-lead.md` → `lead.md` "Goals"; checked in `tests/guard.sh` |
 | A split question's three answers, `split as proposed`, `review it anyway` and `take it as it is`, and what the worker does for each at the size check and at the end of a pass that didn't converge | implementer "Workflow: split proposal" → `goal-lead.md` "Workflow: new input" and `lead.md` "Status" (who answers), `lead.md` "Splitting a task" (the pieces, and moving what waits on the old task); the summary's unconverged ending in `templates/review-comment.md`; checked in `tests/guard.sh` |
+| A brief's Structure ends with `Size: about <n> lines, <areas>`, held to `MAX_PR_LINES`; a plan past it or holding two concerns is split as `lead.md` "Splitting a task" says | `lead.md` "The brief standard" and intake step 6 → `plan-reviewer.md` (the Size question, a Raise with a proposed split) → `goal-lead.md` (settling a Size finding); `templates/task.md`; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
