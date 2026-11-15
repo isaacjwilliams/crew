@@ -145,7 +145,9 @@ func statsOf(t Task) taskStats {
 			case OutcomeFixed:
 				s.fixed++
 			case OutcomeLeftForUser:
-				s.leftForUser++
+				if !f.StillOpen() { // counted in the review that first left it
+					s.leftForUser++
+				}
 			}
 			if f.SetAside() {
 				s.setAside++

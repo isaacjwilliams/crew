@@ -559,6 +559,13 @@ func (f Finding) Outcome() Outcome {
 	return OutcomeOther
 }
 
+// StillOpen: the finding repeats one an earlier review left for the user,
+// which the user hasn't decided yet ("left for the user: still open from
+// review <N>").
+func (f Finding) StillOpen() bool {
+	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
+}
+
 // SetAside: the worker judged the finding not a defect, either settling a
 // split that way or disputing a finding no reviewer refuted.
 func (f Finding) SetAside() bool {
