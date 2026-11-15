@@ -104,8 +104,9 @@ func (idx Branches) restackReason(t Task, repo string) string {
 // one of the project's SENSITIVE_PATHS (git pathspecs), and logs the first such
 // file. It never lowers a tier. It looks at the branch here and on origin, as last
 // fetched, since either may have commits the other lacks: each one's changes since
-// it left origin/<base>. It returns the line it logged, or nothing, and an error
-// when it couldn't look. Call it with the lock held.
+// it left origin/<base>, or since base_sha when a rebased parent left the merge base
+// behind the parent's work (as noteBaseSHA does). It returns the line it logged, or
+// nothing, and an error when it couldn't look. Call it with the lock held.
 func raiseRisk(t Task, p *Project) (string, error) {
 	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
 	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
@@ -121,6 +122,9 @@ func raiseRisk(t Task, p *Project) (string, error) {
 		since, err := git(repo, "merge-base", base, tip)
 		if err != nil {
 			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: %s has no merge base with origin/%s", t.Branch(), t.Base())
+		}
+		if bs := t.Get("base_sha"); bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, tip) && !gitOK(repo, "merge-base", "--is-ancestor", bs, since) {
+			since = bs
 		}
 		out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, tip, "--"}, pathspecs...)...)
 		if err != nil {

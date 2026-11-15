@@ -602,7 +602,11 @@ check "after a merge, restack targets the default branch and has the worker reta
 check "crew leaves base alone until the worker has restacked" '[[ $(crew get 10 base) == agent/season-model ]]'
 (cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; crew set 10 status pr-open
 T10b=$(tip season-admin)
+echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"
 out=$(crew sync)
+check "sync raises a stacked task for its own changes, not its rebased parent's: 11 still holds 10's old commits" \
+  '[[ $(crew get 10 risk) == high && $(crew get 11 risk) == low && $out != *"011-season-picker: risk"* ]]'
+sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
