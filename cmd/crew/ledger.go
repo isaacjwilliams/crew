@@ -429,25 +429,14 @@ func (t Task) AcceptanceCriteria() []string {
 }
 
 // EvidenceGaps is the numbers of the acceptance criteria that have no evidence
-// yet. The evidence for criterion n is a "### n." entry under ## Evidence with
-// something under its heading. A heading inside a fenced block is output, not
-// an entry. It counts the entries and doesn't judge them.
+// yet. The evidence for criterion n is a "### n." entry under ## Evidence
+// (evidenceEntries). It counts the entries and doesn't judge them.
 func (t Task) EvidenceGaps() []int {
 	recorded := map[int]bool{}
-	entry := 0  // the entry the line is in, or 0 outside one
-	fence := "" // the fence the line is inside, or "" outside one
-	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		inFence := fence != ""
-		if !inFence {
-			fence = fenceOpening(l)
-		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
-			fence = ""
-		}
-		if rest, ok := strings.CutPrefix(l, "### "); ok && !inFence {
-			num, _, _ := strings.Cut(rest, ".")
-			entry, _ = strconv.Atoi(num)
-		} else if entry > 0 {
-			recorded[entry] = true
+	for _, h := range t.evidenceEntries() {
+		num, _, _ := strings.Cut(strings.TrimPrefix(h, "### "), ".")
+		if n, err := strconv.Atoi(num); err == nil {
+			recorded[n] = true
 		}
 	}
 	var gaps []int
@@ -457,6 +446,35 @@ func (t Task) EvidenceGaps() []int {
 		}
 	}
 	return gaps
+}
+
+// evidenceEntries is the heading of each entry under ## Evidence that has
+// something under it, such as "### 1. the criterion". A heading inside a fenced
+// block is output, not an entry.
+func (t Task) evidenceEntries() []string {
+	var entries []string
+	heading, filled := "", false
+	fence := "" // the fence the line is inside, or "" outside one
+	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
+		inFence := fence != ""
+		if !inFence {
+			fence = fenceOpening(l)
+		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+			fence = ""
+		}
+		if strings.HasPrefix(l, "### ") && !inFence {
+			if filled {
+				entries = append(entries, heading)
+			}
+			heading, filled = strings.TrimRight(l, " \t"), false
+		} else if heading != "" {
+			filled = true
+		}
+	}
+	if filled {
+		entries = append(entries, heading)
+	}
+	return entries
 }
 
 // fenceOpening is the run of three or more backticks or tildes that opens a
