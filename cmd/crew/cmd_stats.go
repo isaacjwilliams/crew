@@ -197,7 +197,13 @@ func changesStatus(e logEntry) bool {
 	// task's status without a status line, so their own lines mark the change in
 	// tasks merged before then. Remove this after 2026-12-31: those tasks are
 	// outside the default 30 days by then.
-	return strings.HasPrefix(e.msg, "dispatched") || strings.HasPrefix(e.msg, "followup (") || e.msg == "PR merged"
+	return strings.HasPrefix(e.msg, "dispatched") || (strings.HasPrefix(e.msg, "followup (") && !onlyAfterAPause(e)) || e.msg == "PR merged"
+}
+
+// onlyAfterAPause: a followup whose only news was that a pause cut the
+// worker's turn short. It leaves the status as it was.
+func onlyAfterAPause(e logEntry) bool {
+	return strings.Contains(e.msg, ", carrying on after a pause") && !strings.Contains(e.msg, " — note: ")
 }
 
 // The report's columns after the task's, each headed by two lines.
