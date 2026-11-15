@@ -245,12 +245,14 @@ func cmdHandOver(c *Crew, args []string) error {
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			strings.Join(nums, ", "), len(criteria))
 	}
+	// A raise stands even when the hand-over is refused below: the branch touches
+	// a sensitive path whatever happens next.
 	if raised := raiseRisk(t, p); raised != "" {
 		fmt.Println(raised)
 		c.commit("raise risk " + t.ID())
 	}
 	if t.Risk() == RiskHigh && !t.SecurityReviewed() {
-		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '### Security review', then hand over again")
+		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
 	}
 	t.Set("status", string(PROpen))
 	t.Touch()

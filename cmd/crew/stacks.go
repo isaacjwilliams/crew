@@ -112,8 +112,9 @@ func raiseRisk(t Task, p *Project) string {
 	}
 	repo := p.Repo()
 	branch, origin := "refs/heads/"+t.Branch(), "refs/remotes/origin/"+t.Branch()
-	if !gitOK(repo, "show-ref", "--verify", "--quiet", branch) || gitOK(repo, "merge-base", "--is-ancestor", branch, origin) {
-		branch = origin
+	localMissing := !gitOK(repo, "show-ref", "--verify", "--quiet", branch)
+	if localMissing || gitOK(repo, "merge-base", "--is-ancestor", branch, origin) {
+		branch = origin // also when the two are the same commit
 	}
 	since, err := git(repo, "merge-base", "refs/remotes/origin/"+t.Base(), branch)
 	if err != nil {

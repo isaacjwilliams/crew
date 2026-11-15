@@ -322,10 +322,29 @@ func (r Risk) Look() string {
 	switch r {
 	case RiskLow:
 		return "approve from the evidence"
+	case RiskMedium:
+		return "read the diff"
 	case RiskHigh:
 		return "read the diff; security review ran"
 	}
 	return "read the diff"
+}
+
+// Label names the tier, or says there's none.
+func (r Risk) Label() string {
+	if !r.Valid() {
+		return "no risk tier"
+	}
+	return string(r)
+}
+
+// order puts tiers cheapest look first. A task without a tier needs the diff
+// read, so it comes after high.
+func (r Risk) order() int {
+	if i := slices.Index(risks, r); i >= 0 {
+		return i
+	}
+	return len(risks)
 }
 
 // A goal's status.
@@ -452,12 +471,16 @@ func fenceOpening(l string) string {
 	return ""
 }
 
-// SecurityReviewed: ## Evidence has a "### Security review" entry, which a
-// high-risk task needs before its hand-over. The entry isn't numbered, so
-// EvidenceGaps doesn't count it as a criterion's.
+// securityReview heads the entry under ## Evidence that records a high-risk
+// task's security review: what it found and what the worker did about it.
+const securityReview = "### Security review"
+
+// SecurityReviewed: ## Evidence has a securityReview entry, which a high-risk
+// task needs before its hand-over. The entry isn't numbered, so EvidenceGaps
+// doesn't count it as a criterion's.
 func (t Task) SecurityReviewed() bool {
 	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		if strings.TrimRight(l, " \t") == "### Security review" {
+		if strings.TrimRight(l, " \t") == securityReview {
 			return true
 		}
 	}

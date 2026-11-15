@@ -229,6 +229,11 @@ func TestRiskLook(t *testing.T) {
 			t.Errorf("Risk(%q).Valid() = %v", r, !want)
 		}
 	}
+	for r, want := range map[Risk]string{RiskMedium: "medium", "": "no risk tier", "High": "no risk tier"} {
+		if got := r.Label(); got != want {
+			t.Errorf("Risk(%q).Label() = %q, want %q", r, got, want)
+		}
+	}
 }
 
 // Two CI rounds, one of them ticked, a round of comments with a CI line, and a

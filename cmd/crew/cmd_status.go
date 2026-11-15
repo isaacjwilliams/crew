@@ -241,16 +241,13 @@ func lookNote(t Task) string {
 	switch {
 	case r == RiskHigh && !t.SecurityReviewed():
 		return "high: no security review yet"
-	case !r.Valid():
-		return "no risk tier: " + r.Look()
 	}
-	return string(r) + ": " + r.Look()
+	return r.Label() + ": " + r.Look()
 }
 
 // toReview lists the PRs waiting on the user, cheapest look first, so the ones
 // that need only the evidence can be cleared, and what's stacked on them freed,
 // before those that need the diff read: "to review: #41 low, #38 medium, #35 high".
-// A task without a tier needs the diff read, so it comes last.
 func toReview(tasks []Task) string {
 	var open []Task
 	for _, t := range tasks {
@@ -261,14 +258,8 @@ func toReview(tasks []Task) string {
 	if len(open) == 0 {
 		return ""
 	}
-	rank := func(t Task) int {
-		if i := slices.Index(risks, t.Risk()); i >= 0 {
-			return i
-		}
-		return len(risks)
-	}
 	slices.SortStableFunc(open, func(a, b Task) int {
-		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(atoiOr0(a.PRNumber()), atoiOr0(b.PRNumber())))
+		return cmp.Or(cmp.Compare(a.Risk().order(), b.Risk().order()), cmp.Compare(atoiOr0(a.PRNumber()), atoiOr0(b.PRNumber())))
 	})
 	items := make([]string, len(open))
 	for i, t := range open {
@@ -276,11 +267,7 @@ func toReview(tasks []Task) string {
 		if t.PR() == "" {
 			ref = taskNumber(t)
 		}
-		tier := string(t.Risk())
-		if rank(t) == len(risks) {
-			tier = "no risk tier"
-		}
-		items[i] = ref + " " + tier
+		items[i] = ref + " " + t.Risk().Label()
 	}
 	return "to review: " + strings.Join(items, ", ")
 }
