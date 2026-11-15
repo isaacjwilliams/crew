@@ -46,6 +46,8 @@ You've derived intent already, in your report, so read the briefing whole. Check
 - **withdraw**: only for a finding you raised, when the evidence against it holds;
 - **reseverity**: it stands at a different severity, which you name.
 
+A confirm or a reseverity keeps the finding's `pre-existing` tag as it stands. Add `pre-existing` to give it the tag, or `not pre-existing` to drop it, when the code at the fork point says so.
+
 Evidence is a `file:line`, a test, or a fact about the code. "I considered that" isn't evidence. Hold your ground when the evidence is on your side, and withdraw when it isn't: a round is for getting the findings right, not for winning.
 
 Your final message is the reply, and nothing else follows it:
@@ -53,7 +55,7 @@ Your final message is the reply, and nothing else follows it:
 ```markdown
 ### Round <n>
 
-1. <confirm | refute | withdraw | reseverity: <severity>> — <the evidence>
+1. <confirm | refute | withdraw | reseverity: <severity>>[, pre-existing | , not pre-existing] — <the evidence>
 2. …
 
 ### New findings

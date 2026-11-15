@@ -251,6 +251,8 @@ referee: you decide what's open, and you add your counter-evidence. `crew config
 - a finding raised by one reviewer is open to the other, until it has weighed it;
 - a refutation is open to the reviewer that raised the finding, so it can answer it or withdraw;
 - an answer to a refutation is open to the reviewer that refuted, to weigh in turn;
+- a `pre-existing` tag that one reviewer holding the finding gave and another didn't is open to the one that didn't,
+  so it can take the tag or reject it;
 - your counter-evidence is open to both.
 
 A confirmation, a withdrawal or a change of severity closes an item. A difference in severity between the reviewers
@@ -277,7 +279,8 @@ wait for both answers before you close the round.
   > findings, and evidence from the change's author. You've derived intent already, in your report, so read the
   > briefing whole. Check every item against the code yourself. Answer each one with exactly one of: confirm, refute,
   > withdraw (only a finding you raised) or reseverity with the new severity, and your evidence: a `file:line`, a
-  > test, or a fact about the code. Reply under `### Round <n>`, one numbered line per item, then list any new finding
+  > test, or a fact about the code. A confirm or a reseverity keeps the finding's `pre-existing` tag as it stands;
+  > add `pre-existing` to give it the tag, or `not pre-existing` to drop it. Reply under `### Round <n>`, one numbered line per item, then list any new finding
   > in the rubric's format under `### New findings`, or write "None.". Use `git --no-optional-locks`; the sandbox is
   > read-only.
 
@@ -325,11 +328,11 @@ raised and then withdrew.
 When a reviewer tagged the finding `pre-existing`, settle the tag from what step 5 found at the fork point, and cite
 that code on the Verdict line:
 
-- The same failure happens there, and every reviewer that raised the finding tagged it: put `pre-existing: ` before
-  the severity, wherever the agreed severity names one. For example `pre-existing: should fix`, or
-  `split: held at pre-existing: must fix, Codex refutes`.
-- The same failure happens there, but only one of the two reviewers that raised it tagged it: it's `uncertain`. The
-  rounds never weighed the tag, so whether to fix it is the user's call.
+- The same failure happens there, and every reviewer that holds the finding gave it the tag, in its report or a
+  round: put `pre-existing: ` before the severity, wherever the agreed severity names one. For example
+  `pre-existing: should fix`, or `split: held at pre-existing: must fix, Codex refutes`.
+- The same failure happens there, but the reviewers that hold it still disagree about the tag after the rounds: it's
+  `uncertain`, so whether to fix it is the user's call.
 - It doesn't: the agreed severity stays as it is.
 
 A repeat may also have changed its verdict. Look up the earlier finding's `Agreed severity:` and `Outcome:` lines in
