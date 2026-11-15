@@ -89,9 +89,38 @@ func (d Doc) Set(key, value string) error {
 // Touch sets updated: to now.
 func (d Doc) Touch() error { return d.Set("updated", now()) }
 
+// logTime is how a Log line gives the time it was written, to the minute.
+const logTime = "2006-01-02 15:04"
+
 // Log appends a dated line to the end of the file, which is the Log section's.
 func (d Doc) Log(msg string) error {
-	return d.appendRaw("- " + time.Now().Format("2006-01-02 15:04") + " — " + msg + "\n")
+	return d.appendRaw("- " + time.Now().Format(logTime) + " — " + msg + "\n")
+}
+
+// A line of a file's Log: when it was written, and its message.
+type logEntry struct {
+	at  time.Time
+	msg string
+}
+
+// LogEntries is the file's Log, oldest first: the lines Log wrote, read back.
+// A line that isn't one, such as one that continues a message, is skipped.
+func (d Doc) LogEntries() []logEntry {
+	var entries []logEntry
+	for _, l := range strings.Split(d.Section("## Log"), "\n") {
+		stamp, msg, ok := strings.Cut(strings.TrimPrefix(l, "- "), " — ")
+		at, err := time.ParseInLocation(logTime, stamp, time.Local)
+		if ok && err == nil && strings.HasPrefix(l, "- ") {
+			entries = append(entries, logEntry{at, msg})
+		}
+	}
+	return entries
+}
+
+// status is the status the entry changed the task to, when SetStatus wrote it.
+func (e logEntry) status() (Status, bool) {
+	s, ok := strings.CutPrefix(e.msg, statusLogged)
+	return Status(s), ok && slices.Contains(taskStatuses, Status(s))
 }
 
 // Section is a section's text, without HTML comments and blank lines.
@@ -373,7 +402,7 @@ func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 
 // statusLogged begins the Log line of every change to a task's status:
-// "status → pr-open", say.
+// "status → pr-open", say. crew stats reads the waits on the user from them.
 const statusLogged = "status → "
 
 // SetStatus writes the task's status and logs the change. Every change of a
@@ -426,6 +455,103 @@ func (t Task) NewestReview() int {
 		}
 	}
 	return n
+}
+
+// An automated review in the task's record: whether the Claude reviewer
+// reported, and each finding.
+type AutomatedReview struct {
+	ClaudeReported bool
+	Findings       []Finding
+}
+
+// A finding of an automated review: the rest of its "- Agreed severity:" and
+// "- Outcome:" lines in the record.
+type Finding struct{ severity, outcome string }
+
+// AutomatedReviews is the reviews under ## Automated reviews, oldest first. A
+// review's "- Reviewers:" line says "Claude reviewer (failed: …)" when that
+// reviewer didn't report; one that failed only in a round reported first.
+func (t Task) AutomatedReviews() []AutomatedReview {
+	var reviews []AutomatedReview
+	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
+		if strings.HasPrefix(l, "### Automated review ") {
+			reviews = append(reviews, AutomatedReview{ClaudeReported: true})
+			continue
+		}
+		if len(reviews) == 0 {
+			continue
+		}
+		r := &reviews[len(reviews)-1]
+		if reviewers, ok := strings.CutPrefix(l, "- Reviewers: "); ok {
+			r.ClaudeReported = !strings.Contains(reviewers, "Claude reviewer (failed:")
+		} else if strings.HasPrefix(l, "#### ") {
+			r.Findings = append(r.Findings, Finding{})
+		} else if len(r.Findings) > 0 {
+			f := &r.Findings[len(r.Findings)-1]
+			if sev, ok := strings.CutPrefix(l, "- Agreed severity:"); ok {
+				f.severity = strings.TrimSpace(sev)
+			} else if out, ok := strings.CutPrefix(l, "- Outcome:"); ok {
+				f.outcome = strings.TrimSpace(out)
+			}
+		}
+	}
+	return reviews
+}
+
+// Clean is implementer.md's rule for a review that ends a pass: the worker
+// fixed nothing at must fix or should fix for it, and the Claude reviewer
+// reported.
+func (r AutomatedReview) Clean() bool {
+	for _, f := range r.Findings {
+		if held := f.heldAt(); f.Outcome() == OutcomeFixed && (held == "must fix" || held == "should fix") {
+			return false
+		}
+	}
+	return r.ClaudeReported
+}
+
+// heldAt is the severity in a finding's agreed severity, without its labels:
+// "must fix" in "split: held at pre-existing: must fix, Codex refutes", say.
+func (f Finding) heldAt() string {
+	s := f.severity
+	for _, label := range []string{"flipped: ", "split: held at ", "pre-existing: "} {
+		s = strings.TrimPrefix(s, label)
+	}
+	s, _, _ = strings.Cut(s, ",")
+	return s
+}
+
+// What the worker did about a finding, from the first words of its outcome:
+// "left for the user: pre-existing, …" is OutcomeLeftForUser, say.
+type Outcome string
+
+const (
+	OutcomeFixed       Outcome = "fixed"             // fixed in <sha>
+	OutcomeProposal    Outcome = "proposal"          // proposal <file>
+	OutcomeRecorded    Outcome = "recorded"          // a nitpick outside the PR's lines
+	OutcomeWithdrawn   Outcome = "withdrawn"         // withdrawn in round <n>
+	OutcomeNotADefect  Outcome = "not a defect"      // not a defect: <evidence>
+	OutcomeLeftForUser Outcome = "left for the user" // left for the user[: <reason>]
+	OutcomeOpen        Outcome = "open"              // nothing yet
+	OutcomeOther       Outcome = "other"             // a form crew doesn't know
+)
+
+func (f Finding) Outcome() Outcome {
+	if f.outcome == "" {
+		return OutcomeOpen
+	}
+	for _, o := range []Outcome{OutcomeFixed, OutcomeProposal, OutcomeRecorded, OutcomeWithdrawn, OutcomeNotADefect, OutcomeLeftForUser} {
+		if strings.HasPrefix(f.outcome, string(o)) {
+			return o
+		}
+	}
+	return OutcomeOther
+}
+
+// SetAside: the worker judged the finding not a defect, either settling a
+// split that way or disputing a finding no reviewer refuted.
+func (f Finding) SetAside() bool {
+	return f.Outcome() == OutcomeNotADefect || strings.HasPrefix(f.severity, "disputed")
 }
 
 // AcceptanceCriteria is the first line of each of the task's criteria: the
@@ -531,15 +657,25 @@ const (
 // ciLineHead is the head commit an item reports red CI on, when it's a line of
 // that kind (ciFailedOn or ciStillRedOn), checked or not.
 func ciLineHead(l, kind string) (string, bool) {
-	rest, ok := strings.CutPrefix(l, "- [")
-	if !ok || len(rest) < 3 || rest[1:3] != "] " {
+	item, ok := checklistItem(l)
+	if !ok {
 		return "", false
 	}
-	if rest, ok = strings.CutPrefix(rest[3:], kind); !ok {
+	rest, ok := strings.CutPrefix(item, kind)
+	if !ok {
 		return "", false
 	}
 	head, _, _ := strings.Cut(rest, " ")
 	return strings.TrimSuffix(head, ":"), true
+}
+
+// checklistItem is the text of a checklist item, "- [ ] …" or "- [x] …".
+func checklistItem(l string) (string, bool) {
+	rest, ok := strings.CutPrefix(l, "- [")
+	if !ok || len(rest) < 3 || rest[1:3] != "] " {
+		return "", false
+	}
+	return rest[3:], true
 }
 
 // CIFailures is the head commits the task's review rounds reported red CI on,
@@ -581,6 +717,21 @@ func (t Task) FeedbackRounds() int {
 		case !ci && !hasFeedback:
 			n++
 			hasFeedback = true
+		}
+	}
+	return n
+}
+
+// ReviewComments counts the user's comments in the task's review rounds:
+// review summaries, inline comments and conversation comments (reviewRound.add
+// writes their items). Red CI and requests for another automated review
+// aren't comments.
+func (t Task) ReviewComments() int {
+	n := 0
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		item, ok := checklistItem(l)
+		if ok && (strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")) {
+			n++
 		}
 	}
 	return n
