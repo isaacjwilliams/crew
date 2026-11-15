@@ -560,7 +560,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `WORKER_AUTOCOMPACT_WINDOW` | `400k` | How full a worker's conversation gets before Claude Code compacts it: 100k to 1M tokens, or `auto` for Claude Code's default (about 967k on a 1M model). Applies to workers started after you change it |
 | `LEAD_PERMISSION_MODE` | `auto` | For `lead` and goal leads: `auto`, `acceptEdits`, or `default` |
 | `PRE_PR_REVIEW` | `yes` | Default for new tasks: casual-observer pass before the PR |
-| `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready` (a draft until the hand-over, then marked ready), or `none` (push only) |
+| `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready` (a draft until its first hand-over, then marked ready), or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI don't count |
 | `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
