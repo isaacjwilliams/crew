@@ -1466,5 +1466,8 @@ n=$(wc -l <"$HOME/claude-calls.log")
 out=$(crew gardener --project "$PJ" 2>&1)
 check "a second run with nothing new starts no session" \
   '[[ $out == *"$PJ: no newly merged tasks with your comments after automated review"* && $(wc -l <"$HOME/claude-calls.log") == "$n" ]]'
+MP=$(crew propose "Name things for the domain" --source misses --project "$PJ")
+check "crew propose takes --source misses, and names the misses agent as its author" \
+  '[[ $(crew get "$MP" source) == misses && $(section "$MP" "## Log") == *"proposed by the misses agent"* ]]'
 
 summary crew-e2e

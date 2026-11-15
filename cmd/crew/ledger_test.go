@@ -707,7 +707,7 @@ func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
 
 func TestProposalAuthor(t *testing.T) {
 	for source, want := range map[string]string{
-		"gardener": "the gardener", "user": "the user", "lead": "a lead",
+		"gardener": "the gardener", "misses": "the misses agent", "user": "the user", "lead": "a lead",
 		"worker:007-saved-filters": "the worker on 007-saved-filters", "": "", "bob": "",
 	} {
 		pr := Proposal{docWith(t, "---\nsource: "+source+"\n---\n## Log\n")}

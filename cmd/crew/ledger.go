@@ -861,7 +861,7 @@ func (p Proposal) Author() string {
 	if task, ok := strings.CutPrefix(s, "worker:"); ok {
 		return "the worker on " + task
 	}
-	return map[string]string{"gardener": "the gardener", "user": "the user", "lead": "a lead"}[s]
+	return map[string]string{"gardener": "the gardener", "misses": "the misses agent", "user": "the user", "lead": "a lead"}[s]
 }
 
 // TaskContext is the Context of the task the proposal becomes: where it came
