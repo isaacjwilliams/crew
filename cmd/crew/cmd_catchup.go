@@ -50,8 +50,11 @@ func cmdCatchUp(c *Crew, args []string) error {
 	if t.PR() == "" {
 		return fail("%s has no PR", t.ID())
 	}
+	if parent, stacked := c.branches(p.Name).parentOf(t); stacked {
+		return nothingToDo("%s is stacked on %s, so its conflicts are a restack's (crew restack)", t.ID(), parent.ID())
+	}
 	// Read the PR afresh: mergeable is only crew tick's filter.
-	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,mergeable,baseRefName,baseRefOid")
+	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,mergeable,baseRefName")
 	if err != nil {
 		return quietly(err)
 	}
@@ -59,12 +62,11 @@ func cmdCatchUp(c *Crew, args []string) error {
 		State       string `json:"state"`
 		Mergeable   string `json:"mergeable"`
 		BaseRefName string `json:"baseRefName"`
-		BaseRefOid  string `json:"baseRefOid"`
 	}
 	if err := json.Unmarshal(out, &pr); err != nil {
 		return fail("can't read whether %s conflicts with its base: %v", t.PR(), err)
 	}
-	num := t.PRNumber()
+	num, base := t.PRNumber(), t.Base()
 	switch {
 	case pr.State != "OPEN":
 		return nothingToDo("PR #%s is %s", num, strings.ToLower(pr.State))
@@ -72,8 +74,22 @@ func cmdCatchUp(c *Crew, args []string) error {
 		return nothingToDo("GitHub hasn't worked out yet whether PR #%s conflicts with %s", num, pr.BaseRefName)
 	case pr.Mergeable != "CONFLICTING":
 		return nothingToDo("PR #%s merges cleanly into %s", num, pr.BaseRefName)
+	case pr.BaseRefName != base:
+		// GitHub worked the conflict out against the PR's base, and only the
+		// task's counts: a PR still on another branch is retargeted first.
+		return nothingToDo("PR #%s targets %s, not the task's base %s", num, pr.BaseRefName, base)
 	}
-	// The task is read under the lock, so one abandoned or restacked while gh
+	// The base's commit comes from origin. GitHub's baseRefOid won't do: it stays
+	// at an older commit of the base, even after the head is pushed.
+	ref, err := git(p.Repo(), "ls-remote", "origin", "refs/heads/"+base)
+	if err != nil {
+		return fail("can't read %s on origin: %v", base, err)
+	}
+	sha, _, _ := strings.Cut(ref, "\t")
+	if sha == "" {
+		return fail("origin has no branch %s", base)
+	}
+	// The task's status is read under the lock, so one abandoned while gh and git
 	// ran isn't sent anything, and two runs can't both report the same commit.
 	if err := c.lock(); err != nil {
 		return err
@@ -84,15 +100,7 @@ func cmdCatchUp(c *Crew, args []string) error {
 	case st != PROpen:
 		return nothingToDo("%s is %s, and its conflicts are its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
-	if parent, stacked := c.branches(p.Name).parentOf(t); stacked {
-		return nothingToDo("%s is stacked on %s, so its conflicts are a restack's (crew restack)", t.ID(), parent.ID())
-	}
-	// GitHub worked out the conflict against the PR's base, and only the task's
-	// counts: a PR still on another branch is retargeted first.
-	if pr.BaseRefName != t.Base() {
-		return nothingToDo("PR #%s targets %s, not the task's base %s", num, pr.BaseRefName, t.Base())
-	}
-	conflict := baseConflict{t.Base(), shortSHA(pr.BaseRefOid)}
+	conflict := baseConflict{base, shortSHA(sha)}
 	if t.ConflictReported(conflict.at) {
 		return nothingToDo("the conflict with %s at %s is reported already", conflict.base, conflict.at)
 	}
