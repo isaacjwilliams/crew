@@ -47,6 +47,19 @@ last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
+# What a worker does to put its task in pr-open: evidence for each acceptance criterion,
+# the first time, then crew hand-over. A refusal fails the suite, since the checks after
+# it would run against a task that isn't pr-open.
+hand_over() {  # task
+  local f n i; f=$(crew path "$1")
+  if ! section "$f" "## Evidence" | grep -q '^### '; then
+    n=$(section "$f" "## Acceptance criteria" | grep -c '^- ')
+    for ((i = n; i >= 1; i--)); do  # each lands just under the heading, so the last goes first
+      sed -i "/^## Evidence\$/a ### $i.\\nok" "$f"
+    done
+  fi
+  crew hand-over "$1" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: hand_over %s refused at line %s\n' "$1" "${BASH_LINENO[0]}"; }
+}
 # The latest --settings sets CREW_PROJECT to project $1, CREW_HOME to the home, and
 # CREW_LEAD_FINGERPRINT to nothing: a background session takes its environment from
 # Claude Code's daemon, not from crew, and a lead's own shell may have started that.
@@ -219,17 +232,28 @@ check "workers start with the configured auto-compact window" 'grep -- "--agent 
 check "workers get the shipped settings, with their project, the home and the pause hook, when the project adds none" \
   '[[ $(given_settings) == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P" && has_pause_hook'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
-# The hand-over to the user: crew hand-over is the checked move to pr-open, and
-# crew set stays a plain write. Three criteria; the nested bullet isn't one.
+# The hand-over to the user: crew hand-over is the one way into pr-open, and checks
+# the task every time. Three criteria; the nested bullet isn't one.
 sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F1"
 check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
 mode=$(crew get 1 pr_mode); crew set 1 pr_mode none
 check "hand-over needs no PR when the task opens none" '[[ $(crew hand-over 1 2>&1) == *"evidence missing for acceptance criteria 1, 2, 3 of 3"* ]]'
 crew set 1 pr_mode "$mode"
-check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
-  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
-check "hand-over refuses a task handed over already" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open yet can be handed over"* ]]'
+check "worker can update the ledger from its worktree" \
+  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12) && [[ $(crew get 1 pr) == https://github.com/isaac/webapp/pull/12 ]]'
+refused=0
+for st in draft ready working needs-input addressing-feedback merged abandoned; do
+  crew set 1 status "$st"; out=$(crew set 1 status pr-open 2>&1) && continue
+  [[ $out == *"use crew hand-over 001-saved-search-filters: it checks the evidence"* && $(crew get 1 status) == "$st" ]] && refused=$((refused + 1))
+done
 crew set 1 status working
+check "crew set refuses status pr-open from every other status, and names crew hand-over" '((refused == 7))'
+refused=0
+crew set 1 status 'pr-open ' 2>/dev/null || refused=$((refused + 1))
+crew set 1 status $'\tpr-open' 2>/dev/null || refused=$((refused + 1))
+crew set 1 status pr-open "" 2>/dev/null || refused=$((refused + 1))  # joined with a space
+check "crew set refuses pr-open with a space or tab around it, which reading the status back would drop" \
+  '((refused == 3)) && [[ $(crew get 1 status) == working ]]'
 sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
 check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
   'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
@@ -254,6 +278,8 @@ check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand o
 sed -i 's/^SENSITIVE_PATHS=.*/SENSITIVE_PATHS="db\/migrate :(glob)**\/auth*"/' "$PE"
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
+check "hand-over refuses a task handed over already, and so does crew set" \
+  '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight, and not in pr-open, can be handed over"* && $(crew set 1 status pr-open 2>&1) == *"use crew hand-over"* ]]'
 check "status shows a pr-open task's look" '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  low: approve from the evidence"* ]]'
 # Someone else pushes to the PR's branch: a suggestion applied on GitHub, say.
 git -C "$WT" push -q -u origin HEAD 2>/dev/null
@@ -263,18 +289,24 @@ check "sync fetches and raises the risk of a task whose branch on origin gained 
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
 check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
-crew set 1 status working; crew set 1 risk medium
+# A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
+crew set 1 status addressing-feedback; crew set 1 risk medium
 commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
 out=$(crew hand-over 1 2>&1); st=$?
-check "hand-over raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
-  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
+check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
+  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
-  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == working ]]'
+  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
 check "hand-over hands a high-risk task over once its security review is under Evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
+returned=0
+for st in needs-input working; do
+  crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
+done
+check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
@@ -548,18 +580,18 @@ F10=$(crew new "Season admin" --branch season-admin --on 9); fill "$F10"; crew r
 check "--on bases the task on its parent's branch and keeps the dependency" '[[ $(crew get 10 base) == agent/season-model && $(crew get 10 depends_on) == 009-season-model ]]'
 setstate "done" null; out=$(crew dispatch 10 2>&1)
 check "a stacked task waits until its parent's branch is on origin" '[[ $out == *"on origin yet"* && $(crew get 10 status) == ready && -z $(crew get 10 worktree) ]]'
-work "$WT9" model.txt; crew set 9 pr https://github.com/isaac/webapp/pull/21; crew set 9 status pr-open
+work "$WT9" model.txt; crew set 9 pr https://github.com/isaac/webapp/pull/21; hand_over 9
 check "a pushed, unmerged parent is enough to dispatch" 'crew dispatch 10 >/dev/null 2>&1'
 WT10=$(crew get 10 worktree); T9=$(tip season-model)
 check "the stacked worktree starts on the parent's tip, which is recorded" '[[ $(git -C "$WT10" rev-parse HEAD) == "$T9" && $(crew get 10 base_sha) == "$T9" ]]'
 check "the worker is told which task and PR it is stacked on" 'grep -q "stacked on task 009-season-model (PR #21): agent/season-model" "$HOME/claude-calls.log"'
-work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; crew set 10 status pr-open
+work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; hand_over 10
 out=$(crew status)
 check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                      pr-open "* ]]'
 # The PRs waiting on the user, by the look they need: 9 and 10 are pr-open, and 2
 # and 5 join them for a moment.
-crew set 2 pr https://github.com/isaac/webapp/pull/41; crew set 2 status pr-open
-crew set 5 pr https://github.com/isaac/webapp/pull/38; crew set 5 risk medium; crew set 5 status pr-open; crew set 10 risk high
+crew set 2 pr https://github.com/isaac/webapp/pull/41; hand_over 2
+crew set 5 pr https://github.com/isaac/webapp/pull/38; crew set 5 risk medium; hand_over 5; crew set 10 risk high
 check "status ends a project's block with its PRs to review, cheapest look first, then by PR number" \
   '[[ $(crew status | tail -1) == "  to review: #21 low, #41 low, #38 medium, #22 high (no security review yet)" ]]'
 crew set 5 risk high; sed -i 's/^risk: high$/risk:/' "$F10"; out=$(crew status)
@@ -579,7 +611,7 @@ check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(l
 setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
-(cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; crew set 10 status pr-open
+(cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; hand_over 10
 out=$(crew sync)
 check "sync sees the restack and moves base_sha to the parent's new tip" '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" ]]'
 setstate "done" null
@@ -588,7 +620,7 @@ check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'
 
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
 crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
-work "$WT11" picker.txt; crew set 11 status pr-open
+work "$WT11" picker.txt; crew set 11 pr https://github.com/isaac/webapp/pull/23; hand_over 11
 check "status nests a three-deep stack in order" '[[ $(crew status | grep -A2 "^  009-season-model " | tail -1) == "    └ 011-season-picker "* ]]'
 # The user squash-merges 9, and GitHub deletes its branch.
 git merge -q --squash origin/agent/season-model >/dev/null && git commit -qm "Season model (#21)" && git push -q origin main
@@ -615,7 +647,7 @@ check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first
 crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
 check "after a merge, restack targets the default branch and has the worker retarget the PR" '[[ $(last_prompt) == *"git rebase --onto $M $T9b\`"* && $(last_prompt) == *"gh pr edit --base main"* && $(last_prompt) == *"crew set 010-season-admin base main"* ]]'
 check "crew leaves base alone until the worker has restacked" '[[ $(crew get 10 base) == agent/season-model ]]'
-(cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; crew set 10 status pr-open
+(cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; hand_over 10
 T10b=$(tip season-admin)
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"
 out=$(crew sync)
@@ -625,7 +657,7 @@ sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
-(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; crew set 11 status pr-open
+(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
 check "--on refuses a merged task" '! crew new "Too late" --on 9 2>/dev/null'
@@ -641,14 +673,14 @@ crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
 resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13 >/dev/null
-crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; crew set 13 status pr-open
+crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
 check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
-crew set 13 status pr-open; setstate working 4242
+hand_over 13; setstate working 4242
 out=$(crew tick)
 check "a task with open questions isn't marked waiting on the user while its worker is busy" '[[ -z $out && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
@@ -667,12 +699,12 @@ check "tick holds a round for a worker with an open prompt, and says so" '[[ $ou
 setstate blocked 4242 busy
 out=$(crew tick)
 check "tick sends a round to a worker that ended its turn on a question" '[[ $out == *"013-tick-routing: round 2 sent to its worker"* && $(crew get 13 last_round_sent) == 2 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
-setstate "done" null; crew set 13 status pr-open
+setstate "done" null; hand_over 13
 s13=$(crew get 13 worker_session); crew set 13 feedback_since 1970-01-01T00:00:00Z; setstate working 4242 busy; transcript "$s13" ended; n=$(resumes)
 check "status shows a worker whose turn ended as idle, though a shell it left running keeps it working" '[[ $(crew status) == *"worker: idle, background task running"* ]]'
 out=$(crew tick)
 check "tick sends a round to a worker whose turn ended, though a shell it left running keeps it working" '[[ $out == *"013-tick-routing: round 3 sent to its worker"* && $(crew get 13 last_round_sent) == 3 && $(resumes) == $((n + 1)) ]]'
-rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; crew set 13 status pr-open
+rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; hand_over 13
 crew set 13 feedback_since 1970-01-01T00:00:00Z; crew tick >/dev/null; crew set 13 feedback_since 1970-01-01T00:00:00Z; waiting=$(crew tick 2>/dev/null)
 setstate "done" null
 out=$(crew tick)
@@ -681,7 +713,7 @@ check "rounds that piled up behind a busy worker are all named while they wait, 
 round() { awk -v h="### Round $2 " 'index($0, h) == 1 {on=1; next} on && /^##/ {exit} on && NF' "$1"; }
 comment() { jq -cn --arg id "$1" --arg who "$2" --arg as "$3" --arg b "$4" '{id: ($id | tonumber), user: {login: $who, type: "User"}, author_association: $as, body: $b, html_url: ("u" + $id), created_at: "2026-09-25T21:40:00Z", issue_url: "https://api.github.com/repos/isaac/webapp/issues/12"}'; }
 { comment 130 isaac OWNER $'  Crew Review\r\n'; comment 131 bob COLLABORATOR "crew review"; comment 132 isaac OWNER "Once that's in, crew review it again."; comment 133 isaac OWNER "crew review"; } >"$HOME/gh-more-comments"
-crew set 13 status pr-open; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
+hand_over 13; crew set 13 feedback_since 2026-09-25T21:35:00Z; setstate working 4242; n=$(resumes)
 crew feedback 13 >/dev/null 2>&1; r6=$(round "$F13" 6)
 check "the user's 'crew review' comment, in any case and with space around it, becomes a request line in a new round" '[[ $r6 == *"- [ ] Automated review requested (comment 130)"* && $r6 != *"Crew Review"* ]]'
 check "two 'crew review' comments in one round each get a request line, so the worker reacts to both" '[[ $r6 == *$'"'"'- [ ] Automated review requested (comment 130)\n- [ ] Automated review requested (comment 133)'"'"'* ]]'
@@ -697,7 +729,7 @@ out=$(crew review 13 2>/dev/null)
 check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
 setstate "done" null; out=$(crew tick 2>/dev/null)
 check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
-crew set 13 status pr-open; setstate "done" null
+hand_over 13; setstate "done" null
 check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
 # Red CI on a PR: crew tick sends it to the worker as a review round once the worker has
 # handed the PR over (pr-open), once for each head commit, and asks you past MAX_CI_FIXES.
@@ -714,13 +746,13 @@ out=$(crew tick 2>/dev/null)
 check "red CI before the worker hands its PR over is recorded by sync, and left to the worker" '[[ $(crew get 13 ci_state) == failing && $(crew get 13 review_rounds) == 8 && $out != *CI* && $(resumes) == "$n" ]] && ! grep -q "CI failed on" "$F13"'
 out=$(crew ci-fix 13); code=$?
 check "crew ci-fix, run by hand before the hand-over, leaves it alone too" '[[ $out == *"is working, and its CI is its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == 8 ]]'
-crew set 13 status pr-open; ci aaaa1111ffff test:FAILURE lint:-
+hand_over 13; ci aaaa1111ffff test:FAILURE lint:-
 out=$(crew tick 2>/dev/null)
 check "red CI while another check on the head is still running is left alone" '[[ $(crew get 13 ci_state) == running && $(crew get 13 review_rounds) == 8 && -z $out ]]'
 ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED build:CANCELLED
 out=$(crew tick 2>/dev/null)
 check "once every check has finished, a tick records the red CI as a round and sends it to the idle worker" '[[ $out == $'"'"'013-tick-routing: CI round 9 recorded: red on aaaa111\n013-tick-routing: round 9 sent to its worker'"'"' && $(round "$F13" 9) == "- [ ] CI failed on aaaa111: test" && $(crew get 13 last_round_sent) == 9 && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
-setstate "done" null; crew set 13 status pr-open
+setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "a second tick on the same red head records nothing" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(resumes) == $((n + 1)) ]]'
 echo 'MAX_CI_FIXES=0' >>"$PE"; ci bbbb2222ffff test:FAILURE
@@ -733,21 +765,21 @@ check "a task abandoned while crew ci-fix reads GitHub is sent nothing" '[[ $out
 rm "$HOME/gh-pr-view-hook"; n=$(resumes); WT13=$(crew get 13 worktree); crew set 13 worktree /elsewhere/13
 out=$(crew followup 13 --note "carry on" 2>&1)
 check "crew followup won't resume the worker of an abandoned task, or rebuild its worktree" '[[ $out == *"013-tick-routing is abandoned; not resuming its worker"* && $(resumes) == "$n" && $(crew get 13 status) == abandoned && $(crew get 13 worktree) == /elsewhere/13 ]]'
-crew set 13 worktree "$WT13"; crew set 13 status pr-open
+crew set 13 worktree "$WT13"; crew set 13 status working; hand_over 13
 # Only crew ci-fix asks for headRefOid, so the hook leaves crew sync's read alone.
 printf '#!/bin/sh\ncase "$*" in *headRefOid*) crew set 13 status abandoned ;; esac\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
 sed -i '/^## Open questions$/a - [ ] Euros or pounds?' "$F13"
 crew tick >/dev/null 2>&1
 check "a task abandoned during a tick isn't marked needs-input by it" '[[ $(crew get 13 status) == abandoned ]]'
-rm "$HOME/gh-pr-view-hook"; sed -i '/^- \[ \] Euros or pounds?$/d' "$F13"; crew set 13 status pr-open
+rm "$HOME/gh-pr-view-hook"; sed -i '/^- \[ \] Euros or pounds?$/d' "$F13"; crew set 13 status working; hand_over 13
 echo CLOSED >"$HOME/gh-pr-state"
 out=$(crew tick 2>/dev/null); byhand=$(crew ci-fix 13)
 check "red CI on a PR closed without merging is left alone, by tick and by hand" '[[ -z $out && $byhand == *"PR #12 is closed"* && $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open && $(crew get 13 review_rounds) == 9 ]]'
 echo OPEN >"$HOME/gh-pr-state"
-crew tick >/dev/null 2>&1; setstate "done" null; crew set 13 status pr-open; ci cccc3333ffff test:FAILURE lint:FAILURE
+crew tick >/dev/null 2>&1; setstate "done" null; hand_over 13; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
 check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
-crew set 13 status pr-open; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
+hand_over 13; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
 out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
 out=$(crew ci-fix 13); code=$?
@@ -762,7 +794,7 @@ check "a second ci-summary for the same commit edits the first, given its full S
 printf 'CI was red\n\nStill red.\n' >"$HOME/ci.md"
 out=$(crew ci-summary 13 cccc333 "$HOME/ci.md" 2>&1)
 check "the commit the open question past MAX_CI_FIXES names gets a comment of its own, and the earlier one is left alone" '[[ $out == "posted the CI summary for cccc333 on PR #12" && $(cat "$HOME/gh-summaries/121") == *"<!-- crew ci-summary: cccc333 -->"* && $(cat "$HOME/gh-summaries/120") == *"the rerun passed."* ]]'
-echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew set 13 status pr-open; crew ci-fix 13 >/dev/null; sed -i '/^MAX_CI_FIXES=3$/d' "$PE"
+echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew ci-fix 13 >/dev/null; sed -i '/^MAX_CI_FIXES=3$/d' "$PE"
 printf 'CI was red\n\nOlder round, written last.\n' >"$HOME/ci.md"
 out=$(crew ci-summary 13 bbbb222 "$HOME/ci.md" 2>&1)
 check "with a newer CI round recorded, a comment for an older one still goes to its own commit" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"written last."* && ! -e $HOME/gh-summaries/122 ]]'
@@ -771,7 +803,7 @@ check "ci-summary refuses a commit the task reports no red CI on" '[[ $(crew ci-
 out=$(crew feedback 13 --since 1970-01-01T00:00:00Z)
 check "crew feedback doesn't read the CI summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]]'
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set 13 last_round_sent "$(crew get 13 review_rounds)"
-setstate "done" null; crew set 13 status pr-open
+setstate "done" null
 # A PR that conflicts with its base: crew tick sends the worker a round once it has handed the
 # PR over (pr-open), once for each commit of the base on origin, and never for a stacked task.
 base_moves() {  # another PR merges into main on origin; prints main's new short SHA
@@ -782,14 +814,14 @@ crew set 13 status working; n=$(resumes); r=$(crew get 13 review_rounds)
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; B1=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a conflict before the worker hands its PR over is recorded by sync, and left to the worker, by tick and by hand" '[[ $(crew get 13 mergeable) == conflicting && $out != *onflict* && $byhand == *"is working, and its conflicts are its worker'"'"'s own business"* && $code == 3 && $(crew get 13 review_rounds) == "$r" && $(resumes) == "$n" ]]'
-crew set 13 status pr-open
+hand_over 13
 printf '#!/bin/sh\ncrew set 13 status abandoned\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
 out=$(crew catch-up 13)
 check "a task abandoned while crew catch-up reads GitHub is sent nothing" '[[ $out == "nothing to do: 013-tick-routing is abandoned" && $(crew get 13 review_rounds) == "$r" ]]'
-rm "$HOME/gh-pr-view-hook"; crew set 13 status pr-open
+rm "$HOME/gh-pr-view-hook"; crew set 13 status working; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "once the PR is handed over, a tick records the conflict with main's tip on origin as a round of its own, and sends it to the idle worker" '[[ $out == *"013-tick-routing: catch-up round $((r + 1)) recorded: conflicts with main"* && $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(round "$F13" $((r + 1))) == "- [ ] Conflicts with main at $B1" && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
-setstate "done" null; crew set 13 status pr-open
+setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo UNKNOWN >"$HOME/gh-pr-mergeable"; B2=$(base_moves)
@@ -809,7 +841,7 @@ out=$(crew tick 2>/dev/null)
 check "a new commit on the base that still conflicts gets a round of its own" '[[ $out == *"013-tick-routing: catch-up round $((r + 2)) recorded: conflicts with main"* && $(round "$F13" $((r + 2))) == "- [ ] Conflicts with main at $B2" && $(resumes) == $((n + 1)) ]]'
 rm "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew sync >/dev/null 2>&1
 check "sync clears mergeable once the PR merges cleanly again" '[[ -z $(crew get 13 mergeable) ]]'
-setstate "done" null; crew set 13 status pr-open
+setstate "done" null; hand_over 13
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
 check "launched sessions never inherit crew's lock fds" '! grep -q "LEAK LOCK FD" "$HOME/claude-calls.log"'
@@ -821,14 +853,14 @@ rm -r "$L/projects/zz-other"
 # Restacks: 15 is stacked on 14; 14's branch moves.
 F14=$(crew new "Tick parent" --branch tick-parent); fill "$F14"; crew ready 14 >/dev/null
 crew set 13 status abandoned; setstate "done" null; crew dispatch 14 >/dev/null; WT14=$(crew get 14 worktree)
-work "$WT14" p1.txt; crew set 14 pr https://github.com/isaac/webapp/pull/31; crew set 14 status pr-open
+work "$WT14" p1.txt; crew set 14 pr https://github.com/isaac/webapp/pull/31; hand_over 14
 F15=$(crew new "Tick child" --branch tick-child --on 14); fill "$F15"; crew ready 15 >/dev/null
 crew dispatch 15 >/dev/null; WT15=$(crew get 15 worktree)
-work "$WT15" c1.txt; crew set 15 pr https://github.com/isaac/webapp/pull/32; crew set 15 status pr-open
+work "$WT15" c1.txt; crew set 15 pr https://github.com/isaac/webapp/pull/32; hand_over 15
 work "$WT14" p2.txt; setstate "done" null; n=$(resumes)
 out=$(crew tick)
 check "tick restacks a stacked task whose parent moved" '[[ $out == "015-tick-child: restack sent to its worker (014-tick-parent moved)" && $(last_prompt) == *"git rebase --onto $(tip tick-parent)"* && $(resumes) == $((n + 1)) ]]'
-crew set 15 status pr-open; setstate "done" null
+hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 1)) ]]'
 
@@ -836,13 +868,13 @@ check "tick doesn't send the same restack again when the worker didn't manage it
 # piece can. 15 restacks onto 14 first, so its branch already holds 16's.
 (cd "$WT15" && git rebase -q --onto "$(tip tick-parent)" "$(crew get 15 base_sha)") && restack_push "$WT15"
 FR=$(crew new "Tick replacement" --branch tick-replacement --on 14); fill "$FR"; crew ready "$FR" >/dev/null
-crew set 15 base agent/tick-replacement; crew set 15 status pr-open; rs15=$(crew get 15 restack_sent)
+crew set 15 base agent/tick-replacement; rs15=$(crew get 15 restack_sent)
 echo agent/tick-parent >"$HOME/gh-pr-base-32"
 out=$(crew sync)
 check "sync records the branch each PR targets on GitHub" '[[ $(crew get 15 pr_base) == agent/tick-parent ]]'
 check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
 setstate "done" null; crew dispatch "$FR" >/dev/null; (cd "$(crew get "$FR" worktree)" && git push -q -u origin HEAD 2>/dev/null)
-crew set "$FR" pr https://github.com/isaac/webapp/pull/33; crew set "$FR" status pr-open
+crew set "$FR" pr https://github.com/isaac/webapp/pull/33; hand_over "$FR"
 echo agent/tick-old >"$HOME/gh-pr-base-31"
 out=$(crew sync)
 check "sync reports each PR that targets a branch other than its task's base, stacked or not" \
@@ -856,7 +888,7 @@ check "with nothing to rebase, tick sends a retarget alone, to a stacked task an
 p15=$(prompt_of 015-tick-child)
 check "a retarget note asks for gh pr edit --base and no rebase or push, and is recorded apart from restacks" \
   '[[ $p15 == *"Retarget (PR targets agent/tick-parent, not agent/tick-replacement)"*"\`gh pr edit --base agent/tick-replacement\`"* && $p15 != *"git rebase"* && $p15 != *"git push"* && $(crew get 15 retarget_sent) == agent/tick-replacement && $(crew get 15 restack_sent) == "$rs15" ]]'
-crew set 14 status pr-open; crew set 15 status pr-open; setstate "done" null
+hand_over 14; hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 2)) ]]'
 check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(resumes) == $((n + 2)) ]]'
@@ -906,7 +938,7 @@ crew set "$F17" status abandoned >/dev/null
 # for (12 steps aside): sync fetches for the PR itself.
 crew set 12 status abandoned >/dev/null
 FB=$(crew new "Moved base" --branch moved-base); fill "$FB"; crew ready "$FB" >/dev/null; setstate "done" null; crew dispatch "$FB" >/dev/null
-work "$(crew get "$FB" worktree)" b.txt; crew set "$FB" pr https://github.com/isaac/webapp/pull/34; crew set "$FB" status pr-open
+work "$(crew get "$FB" worktree)" b.txt; crew set "$FB" pr https://github.com/isaac/webapp/pull/34; hand_over "$FB"
 (cd "$SB/other-clone" && git fetch -q origin && git push -q origin origin/main:refs/heads/release/next)
 crew set "$FB" base release/next; echo main >"$HOME/gh-pr-base-34"
 out=$(crew sync)
@@ -936,7 +968,7 @@ check "and only once: the next tick finds the new worker" '[[ $out != *"a fresh 
 crew set "$F18" status abandoned >/dev/null
 F19=$(crew new "Open PR when it moved" --branch pr-moved); fill "$F19"; crew ready "$F19" >/dev/null; setstate "done" null; crew dispatch "$F19" >/dev/null
 WT19=$(crew get "$F19" worktree); work "$WT19" p.txt
-crew set "$F19" pr https://github.com/isaac/webapp/pull/12; crew set "$F19" status pr-open; crew set "$F19" feedback_since 2099-01-01T00:00:00Z
+crew set "$F19" pr https://github.com/isaac/webapp/pull/12; hand_over "$F19"; crew set "$F19" feedback_since 2099-01-01T00:00:00Z
 moved_away "$F19"; setstate "done" null; n=$(fresh_launches)
 out=$(crew tick 2>&1)
 check "tick leaves a moved task with an open PR alone while nothing waits for its worker" '[[ $out != *"$(basename "$F19" .md)"* && ! -d $WT19 && $(fresh_launches) == "$n" ]]'
@@ -1576,7 +1608,7 @@ crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
 crew followup "$PI" --note "check the docs" >/dev/null 2>&1
 check "a hand-run crew followup --note also tells the worker to carry on, and clears interrupted" \
   '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY Note from the lead"*"check the docs"* && -z $(crew get "$PI" interrupted) ]]'
-crew set "$PI" status pr-open; crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
+hand_over "$PI"; crew set "$PI" interrupted "$(date -Iseconds)"; setstate "done" null; n=$(calls)
 crew followup "$PI" >/dev/null 2>&1
 check "a followup whose only news is the pause leaves the status as the worker last set it" \
   '[[ $(since "$n") == *"New input for task $TPI ("*"$CARRY"* && $(crew get "$PI" status) == pr-open && -z $(crew get "$PI" interrupted) ]]'

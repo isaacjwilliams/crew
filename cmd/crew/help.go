@@ -153,7 +153,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew show TASK | crew path TASK  Print a task file / its path
   crew find TASK                   Print the resolved task id
   crew get TASK KEY                Read a front-matter field
-  crew set TASK KEY VALUE...       Write a front-matter field
+  crew set TASK KEY VALUE...       Write a front-matter field (not status pr-open:
+                                   crew hand-over sets that)
   crew log TASK MESSAGE...         Append to the task's Log
   crew cleanup TASK|--merged [--project P] [--force]
                                    Remove worktree/local branch of merged tasks and

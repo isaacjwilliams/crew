@@ -50,7 +50,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `ready` | brief complete and approved: by you, or for a goal's task by its goal lead | `crew ready` |
 | `working` | worker running on first pass | `crew dispatch` |
 | `needs-input` | waiting on you: an unchecked item under Open questions (a worker's question, a collaborator's PR comment, or CI still red after `MAX_CI_FIXES` CI rounds). In a goal's task, the goal lead sees a worker's question first | worker, or `crew tick` once the worker is idle |
-| `pr-open` | PR is up and waiting for your review | worker, with `crew hand-over` the first time, which refuses until every acceptance criterion has evidence |
+| `pr-open` | PR is up and waiting for your review | `crew hand-over` only: the worker's, or the lead's for a task whose worker isn't running. It refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `done` | a spike's report is in (see Kinds of task) | `crew hand-over` |
@@ -188,7 +188,7 @@ A task's `## Decisions` holds one dated line per decision about the task: your a
 
 ## Evidence
 
-A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the worker's first move to `pr-open`, refuses until every criterion has an entry with something under its heading: it counts them, and doesn't judge them. So that each criterion has a number, `crew ready` refuses criteria that aren't `- ` items. Later returns to `pr-open`, after a review round or a restack, are plain `crew set`s.
+A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the only way into `pr-open`, refuses until every criterion has an entry with something under its heading: it counts them, and doesn't judge them. It runs every time a task goes back to `pr-open`, after a review round or a restack too. So that each criterion has a number, `crew ready` refuses criteria that aren't `- ` items.
 
 ## Automated reviews
 
