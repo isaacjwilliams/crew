@@ -362,6 +362,34 @@ Each PR is short and has the same shape, so you can tell at a glance whether to 
 
 **Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the worker can't hand the PR over to you (`pr-open`) until every criterion has one: `crew hand-over` counts them, though it doesn't judge them.
 
+### Risk tiers: what look each PR needs
+
+Every task has a risk tier, which says how closely you need to look at its PR. The lead sets it at intake, from what the plan touches, and names it in the plan it shows you:
+
+| Tier | The look it needs | When |
+|---|---|---|
+| `low` | approve from the evidence | the plan adds no structure: docs, copy, tests, a fix inside existing code |
+| `medium` | read the diff | the plan adds or changes structure |
+| `high` | read the diff; security review ran | the plan touches a sensitive path, or does something irreversible: a migration, a public API, a new dependency, a change to a design principle |
+
+A high-risk task's worker also runs Claude Code's `/security-review` before handing the PR over, and records what it found beside the rest of its evidence. Each PR's Risk section opens with its tier and look.
+
+**Sensitive paths.** List the paths where a change always needs your close look, in the project's `projects/<project>/project.env`, as git pathspecs:
+
+```sh
+SENSITIVE_PATHS="db/migrate config/credentials :(glob)app/**/auth*"
+```
+
+When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A task raised after its hand-over shows `high: no security review yet` in `crew status` until its worker has run one; ask the lead to send it.
+
+**In `crew status`**, each open PR's row says the look it needs (`low: approve from the evidence`), and each project ends with the PRs waiting on you, cheapest look first, then by number:
+
+```
+  to review: #41 low, #38 medium, #35 high
+```
+
+Clear the ones that need only the evidence first, which also frees whatever is stacked on them. A task from before tiers existed shows `no risk tier: read the diff` and comes last.
+
 ### Automated review, before yours
 
 Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (shipped in the crew home, so the crew's sessions load it and your other Claude Code sessions don't) has an independent reviewer agent read the PR cold, with only your words about the change: your request as the task's Goal quotes it, your decisions (the lines under Decisions marked `(user)`), the PR text and the commit messages. A reviewer names each finding's kind of defect and every place it occurs, so one fix covers them all. The worker then checks each finding against the code. It fixes the ones it agrees must or should be fixed, and leaves the ones it disputes or can't settle for you. A suggested improvement in lines the PR changed is made in the PR when it's small, and left for you with its size when it isn't; one outside those lines is written up as a proposal. A defect that was already there when the PR's branch was made doesn't hold the PR back: the worker leaves it alone and tells you how big the fix is, so you can ask for it in this PR. A must-fix finding is closed only by a code change, never by a deploy step or a note in the PR; when that's the only remedy, it's left for you with its cost. Then it reviews again, until a review comes back clean or `AUTO_REVIEWS` reviews have run (3 by default). The first review reads the whole PR; each later one reads only the commits since the last finished review, or the whole PR again after a rebase. A later reviewer also gets the earlier reviews' findings and what became of them, but only after it has written its own, so its first read stays fresh. It doesn't raise again what an earlier review set aside unless it has new evidence. When reviews disagree anyway, a finding one review set aside and the next says should be fixed, the worker leaves it for you rather than settle it. Every finding and what became of it is recorded in the task file, under `## Automated reviews`.
@@ -542,6 +570,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `CODEX_MODEL` | `gpt-6-astra` | The model Codex reviews with |
 | `CODEX_MODEL_EFFORT` | `xhigh` | Codex's reasoning effort (`model_reasoning_effort`) |
 | `AUTO_REVIEW_REBUTTALS` | 2 | Rounds between Codex and the reviewer agent in each review: `0`, `1` or `2`. With 1, a refutation made in round 1 can't be answered: round 1 is when each first sees the other's findings, so the answer would come in round 2 |
+| `SENSITIVE_PATHS` | empty | Git pathspecs, space-separated: a task whose branch changes a matching file becomes high risk (see [Risk tiers](#risk-tiers-what-look-each-pr-needs)). Set per project |
 | `WORKTREE_COPY` | empty | Gitignored files copied into each new worktree |
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
