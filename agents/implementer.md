@@ -82,14 +82,14 @@ A person reads your reports and PR replies, and apart from the crew they work al
 
 After you open your PR, you review it before the user does: that's the first pass of automated review. The user can ask for another pass later, with a line in a review round, and you run this workflow again for it (see "Workflow: review rounds").
 
-A pass is the reviews recorded after the last `Summary posted` line, or every review when there's no such line yet. A pass that ended before its summary was posted (a blocked one, say) runs on into the next, and the next summary covers both. Review numbers carry on from one pass to the next.
+A pass is the reviews recorded after the last `Summary posted` line, or every review when there's no such line yet. A pass that ended before its summary was posted (a blocked one, say) runs on into the next, and the next summary covers both. Review numbers carry on from one pass to the next. The PR's first review reads all of it; each later one reads only the commits since the review before it, unless the skill finds it has to read the whole PR again (after a rebase, say).
 
 `AUTO_REVIEWS` (`crew config AUTO_REVIEWS --project <project>`) is how many reviews you may run in a pass. A pass the user asked for runs at least one, even when `AUTO_REVIEWS` is 0.
 
 1. Run the `pr-review` skill with your task's ID (`/pr-review <task>`). It records the review in your task file as `### Automated review N`, under `## Automated reviews`: every finding with its agreed severity and an empty `Outcome:` line.
 
    If the skill stops without recording a review, that isn't a review and doesn't count. It says why: an uncommitted change, say, or a PR that doesn't show your last push yet. Fix what it names and run it again. If it stops a second time for the same reason, you're blocked: ask (see "When you're blocked"), and don't post the summary or mark the PR ready.
-2. Act on each finding by its agreed severity, and write what you did on its `Outcome:` line:
+2. Act on each finding by its agreed severity, and write what you did on its `Outcome:` line. One kind comes first, whatever its severity: a repeat of a finding an earlier review left for the user (its `Earlier:` line names it, and that finding's outcome starts `left for the user`). It stays with the user, so don't change the code: `left for the user: still open from review <N>`. For the rest:
    - **must fix, should fix**: fix it in the PR, one commit per finding or coherent group: `fixed in <short sha>`. In that commit, fix every instance of the finding's class that fails because of this change: the ones the reviewer listed, and any others you find (`git grep`, read the callers), in lines the change adds or in old code it newly reaches. When there's more than one, say how many: `fixed in <short sha> (<n> instances)`. An instance that already failed the same way at the fork point isn't this change's to fix. Leave it, and unless a pre-existing finding covers it, name it for the user: `fixed in <short sha> (<n> instances); left for the user: also at the fork point, <path:line>, …`. If it questions the brief's structure, don't change the code; treat it as in first-run step 5, under "Findings the brief settled": `left for the user`.
 
      Only a code change that removes the failure fixes a must fix. A deploy step, a note in the docs or a paragraph in the PR description doesn't. If one of those is the only remedy you see (a deploy window in which old and new code disagree, say), don't write it in: `left for the user: <the cost: what fails, for whom, and for how long>`.
@@ -98,6 +98,7 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    - **pre-existing** (`pre-existing: <severity>`): the failure already happens at the fork point, so don't change the code. For `pre-existing: nitpick`, `recorded`. Otherwise write a proposal (as for fix later) whose why gives the size of the fix and what it touches: `left for the user: pre-existing, <the fix's size>; proposal <its file name>`. The user can ask for it in this PR.
    - **withdrawn**: its raiser withdrew it in a round and no reviewer holds it; don't change the code: `withdrawn in round <n>`.
    - **split**: one reviewer holds it and the other refutes it, and you settle it. With cited evidence that sides with the refuter (a `file:line`, a passing test, a fact about the code), don't change the code: `not a defect: <the evidence>`. Otherwise act on it as above, at the severity it's held at.
+   - **flipped**: an earlier review settled it as not a defect, and this one holds it at must fix or should fix. The reviews disagree, so don't change the code: `left for the user: verdict changed since review <N>`.
    - **disputed, uncertain**: don't change the code: `left for the user`.
 
    Then run the checks and push.
