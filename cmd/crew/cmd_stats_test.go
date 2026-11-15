@@ -54,9 +54,14 @@ func TestStatsOfWaits(t *testing.T) {
 				"- 2026-11-02 13:05 — cleaned up worktree (merged)\n",
 			at("2026-11-02 13:00"), 26 * time.Hour, 0},
 		{"a followup whose only news is a pause leaves the PR waiting", "---\ngoal:\n---\n## Log\n" +
-			"- 2026-11-01 09:00 — status → pr-open\n- 2026-11-01 10:00 — followup (resume): worker a, carrying on after a pause\n" +
+			"- 2026-11-01 08:00 — status → working\n- 2026-11-01 08:00 — dispatched: worker a\n- 2026-11-01 09:00 — status → pr-open\n- 2026-11-01 10:00 — followup (resume): worker a, carrying on after a pause\n" +
 			"- 2026-11-01 15:00 — status → merged\n",
 			at("2026-11-01 15:00"), 6 * time.Hour, 0},
+		{"an older task's followup ends a wait, though it also says a pause cut the worker short",
+			"---\ngoal:\n---\n## Log\n- 2026-11-01 08:00 — dispatched: worker a\n" +
+				"- 2026-11-01 09:00 — status → pr-open\n- 2026-11-01 10:00 — followup (resume): worker a, carrying on after a pause\n" +
+				"- 2026-11-01 14:00 — status → pr-open\n- 2026-11-01 15:00 — PR merged\n",
+			at("2026-11-01 15:00"), 2 * time.Hour, 0},
 		{"a wait the merge didn't end isn't counted", "---\ngoal:\n---\n## Log\n- 2026-11-01 10:00 — status → needs-input\n",
 			time.Time{}, 0, 0},
 	} {

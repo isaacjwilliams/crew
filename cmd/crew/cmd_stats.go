@@ -111,7 +111,7 @@ func (s taskStats) cleanAfterText() string {
 
 // statsOf measures a task from its file.
 func statsOf(t Task) taskStats {
-	log := t.LogEntries()
+	log := withStatusLines(t.LogEntries())
 	s := taskStats{
 		task:     t,
 		merged:   mergedAt(log),
@@ -159,13 +159,11 @@ func statsOf(t Task) taskStats {
 }
 
 // mergedAt is when the task's Log says it merged, the last time if it says so
-// more than once, or zero if it never does: such a task isn't reported. crew
-// sync logs "PR merged" after the status line; before Task.SetStatus it logged
-// only that, so this reads it as changesStatus does, and until the same date.
+// more than once, or zero if it never does: such a task isn't reported.
 func mergedAt(log []logEntry) time.Time {
 	var at time.Time
 	for _, e := range log {
-		if st, ok := e.status(); (ok && st == Merged) || e.msg == "PR merged" {
+		if changedTo(Merged)(e) {
 			at = e.at
 		}
 	}
@@ -197,22 +195,49 @@ func waited(log []logEntry, starts, ends func(logEntry) bool) time.Duration {
 	return total
 }
 
-// changesStatus: the entry marks a change of the task's status.
+// changesStatus: the entry is a status line.
 func changesStatus(e logEntry) bool {
-	if _, ok := e.status(); ok {
-		return true
-	}
-	// Before Task.SetStatus, crew dispatch, crew followup and crew sync changed a
-	// task's status without a status line, so their own lines mark the change in
-	// tasks merged before then. Remove this after 2026-12-31: those tasks are
-	// outside the default 30 days by then.
-	return strings.HasPrefix(e.msg, "dispatched") || (strings.HasPrefix(e.msg, "followup (") && !onlyAfterAPause(e)) || e.msg == "PR merged"
+	_, ok := e.status()
+	return ok
 }
 
-// onlyAfterAPause: a followup whose only news was that a pause cut the
-// worker's turn short. It leaves the status as it was.
-func onlyAfterAPause(e logEntry) bool {
-	return strings.Contains(e.msg, ", carrying on after a pause") && !strings.Contains(e.msg, " — note: ")
+// withStatusLines adds the status lines a task dispatched before
+// Task.SetStatus lacks. Back then crew dispatch, crew followup and crew sync
+// changed the status without one, so each status line goes after the line the
+// command did write. Remove this after 2026-12-31: tasks merged before then are
+// outside the default 30 days by then.
+func withStatusLines(log []logEntry) []logEntry {
+	if !dispatchedBeforeSetStatus(log) {
+		return log
+	}
+	var out []logEntry
+	for _, e := range log {
+		out = append(out, e)
+		var status Status
+		switch {
+		case strings.HasPrefix(e.msg, "dispatched"):
+			status = Working
+		case strings.HasPrefix(e.msg, "followup ("):
+			status = AddressingFeedback // or working, after a note: the worker's turn either way
+		case e.msg == "PR merged":
+			status = Merged
+		}
+		if status != "" {
+			out = append(out, logEntry{e.at, statusLogged + string(status)})
+		}
+	}
+	return out
+}
+
+// dispatchedBeforeSetStatus: the task's "dispatched" line has no status line
+// just before it, as crew dispatch writes one now.
+func dispatchedBeforeSetStatus(log []logEntry) bool {
+	for i, e := range log {
+		if strings.HasPrefix(e.msg, "dispatched") {
+			return i == 0 || !changedTo(Working)(log[i-1])
+		}
+	}
+	return false
 }
 
 // The report's columns after the task's, each headed by two lines.
