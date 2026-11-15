@@ -184,8 +184,9 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 
 // sendToWorker resumes a task's idle worker with the first of these it hasn't
 // had: unsent review rounds, word that a pause cut its last turn short, or a
-// restack. It reports whether it tried. Nothing goes out twice: last_round_sent,
-// interrupted and restack_sent record what was sent.
+// restack (a rebase, a retarget or both). It reports whether it tried. Nothing
+// goes out twice: last_round_sent, interrupted, restack_sent and retarget_sent
+// record what was sent.
 func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 	id := t.ID()
 	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
@@ -201,14 +202,28 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 		}
 		return true
 	}
-	reason := idx.restackReason(t, p.Repo())
-	if t.Status() == PROpen && reason != "" && !strings.HasSuffix(reason, " abandoned") && !idx.parentNeedsRestack(t, p.Repo()) {
-		if target := idx.restackTarget(t, p.Repo()); target != "" && t.Get("restack_sent") != target {
-			if c.step(nil, "restack", t.Path) == 0 {
-				fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
-			}
-			return true
+	if t.Status() != PROpen {
+		return false
+	}
+	repo := p.Repo()
+	restack := func(reason string) bool {
+		if c.step(nil, "restack", t.Path) == 0 {
+			fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
 		}
+		return true
+	}
+	// As in crew restack: a retarget goes with a rebase when there is one, and on
+	// its own only when the branch needs no rebase (onBase). So a rebase that has
+	// to wait (for its parent's, say) holds its retarget back with it.
+	if reason := idx.restackReason(t, repo); reason != "" {
+		target := idx.restackTarget(t, repo)
+		if strings.HasSuffix(reason, " abandoned") || idx.parentNeedsRestack(t, repo) || target == "" || t.Get("restack_sent") == target {
+			return false
+		}
+		return restack(reason)
+	}
+	if reason := idx.retargetReason(t, repo); reason != "" && idx.onBase(t, repo) && t.Get("retarget_sent") != t.Base() {
+		return restack(reason)
 	}
 	return false
 }
