@@ -1756,4 +1756,86 @@ MP=$(crew propose "Name things for the domain" --source misses --project "$PJ")
 check "crew propose takes --source misses, and names the misses agent as its author" \
   '[[ $(crew get "$MP" source) == misses && $(section "$MP" "## Log") == *"proposed by the misses agent"* ]]'
 
+# crew review-eval, over a merged task whose automated review read the PR's two
+# commits. Round 1, before the review, has a comment of the user's; round 2,
+# after it, has two: each is a case, and so is the fix task naming it. The PR's
+# commits are only on origin's refs/pull/77/head, as after a squash merge.
+git clone -q "$SB/remote.git" "$SB/pr77" 2>/dev/null
+(cd "$SB/pr77" && echo a >a.go && git add -A && git commit -qm "Add a" && echo b >b.go && git add -A &&
+  git commit -qm $'Add b\n\n## Why\nb is needed' && git push -q origin HEAD:refs/pull/77/head)
+EF=$(git -C "$SB/pr77" rev-parse HEAD~2) EH=$(git -C "$SB/pr77" rev-parse HEAD)
+ET=$PD/tasks/095-eval-one.md EX=$PD/tasks/096-eval-fix.md
+sed -e 's/^status: .*/status: merged/' -e "s/^project: .*/project: $PJ/" -e 's/^kind: .*/kind: build/' -e 's/^base: .*/base: main/' -e 's|^pr:.*|pr: https://github.com/isaac/webapp/pull/77|' \
+  -e '/^## Goal$/a > Make it fast' \
+  -e "/^## Automated reviews\$/a ### Automated review 1 — 2026-11-10 10:00\\n\\n- Range: \`$EF..$EH\`, 2 commits on \`b\` since \`main\` (fork point \`$EF\`)\\n- Reviewers: Claude reviewer\\n\\nNo findings." \
+  -e '/^## Review rounds$/a ### Round 1 — 2026-11-10 09:00 (PR #77)\n\n**Conversation comments**\n- [x] comment 3 — [link](u3)\n  > an earlier wish\n\n### Round 2 — 2026-11-10 13:00 (PR #77)\n\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > b.go has no test\n\n**Inline comments**\n- [x] `a.go:1` — comment 6 — [link](u6)\n  > why is a.go here?' \
+  "$L/templates/task.md" >"$ET"
+sed -e 's/^status: .*/status: merged/' -e "s/^project: .*/project: $PJ/" -e 's/^kind: .*/kind: fix/' -e 's/^fixes:.*/fixes: 095-eval-one/' -e 's/^title: .*/title: Fix the b race/' "$L/templates/task.md" >"$EX"
+crew commit "review eval fixtures" >/dev/null
+EW=$(crew config WORK_ROOT --project "$PJ")/$PJ/_eval
+judged() { grep -c -- '^claude -p --tools  --permission-prompts none ' <<<"$1"; }
+echo "b.go has no test" >"$HOME/judge-finds"
+n=$(calls)
+out=$(crew review-eval --project "$PJ" 2>&1); st=$?
+call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md); EB=$(ls "$L"/logs/review-eval-"$PJ"-*/095-eval-one-review-1.briefing.md)
+check "crew review-eval reruns the reviewer once for the review's three cases, on its range, in its own checkout of the PR's head fetched from origin" \
+  '((st == 0)) && [[ $(grep -c -- "--agent reviewer " <<<"$call") == 1 && $call == *"Review \`$EF..HEAD\` in \`$EW\`"* && $call == *"--settings $L/config/readonly-settings.json "* && $(git -C "$EW" rev-parse HEAD) == "$EH" ]]'
+check "the briefing has the skill's headings and the user's words from before the review, and none of the misses" \
+  '[[ $(head -1 "$EB") == "Code review" && $(grep "^## " "$EB" | tr "\n" ,) == "## Scope,## How to verify,## Hard constraints,## Stated intent," ]] &&
+   grep -qx "> Make it fast" "$EB" && grep -qx "> an earlier wish" "$EB" && grep -qx "#### Why" "$EB" && ! grep -q "b.go has no test\|why is a.go here\|b race" "$EB"'
+check "a judge weighs each case's miss, with an inline comment's place and the user's earlier words, against the report" \
+  '[[ $(judged "$call") == 3 && $call == *"## The miss"*"b.go has no test"*"## The brief, and what the user had said before the review"*"> an earlier wish"*"## The report"*"A stub finding"* && $call == *"On \`a.go:1\`: why is a.go here?"* && $call == *"Fix the b race"* ]]'
+check "the report gives each case's verdict and range, the totals and what was tested, and is committed" \
+  '[[ $(grep -c "^- \`095-eval-one/" "$EV") == 3 ]] && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **found** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — #### 1. [should fix] A stub finding" "$EV" &&
+   grep -qF -- "- \`095-eval-one/round-2/comment-6\` **missed** — \`${EF:0:7}..${EH:0:7}\` — On \`a.go:1\`: why is a.go here?" "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **missed**" "$EV" && grep -qx "Found 1 of 3 misses." "$EV" &&
+   grep -qF -- "- Rubric: \`$L/.claude/skills/pr-review/rubric.md\` (" "$EV" && grep -qF -- "- Reviewer: \`$HOME/.claude/agents/reviewer.md\` (" "$EV" && grep -qx -- "- Claude Code: 2.1.290" "$EV" && grep -qx -- "- Cases: all" "$EV" &&
+   [[ $out == *"Found 1 of 3 misses. Report: $EV"* && $(git -C "$L" log -1 --format=%s) == "review eval $PJ (3 cases)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
+# A second run, against another rubric, finds the other comment instead.
+mv "$EV" "$PD/review-eval/2026-11-14-090000.md" && crew commit "an earlier eval" >/dev/null
+echo "why is a.go here?" >"$HOME/judge-finds"; echo "Look harder." >"$SB/rubric.md"
+n=$(calls)
+out=$(crew review-eval --project "$PJ" --rubric "$SB/rubric.md" 2>&1); st=$?
+call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1); EV2=$(basename "$EV")
+check "a second run compares verdicts on the cases both runs have, and says the rubric changed" \
+  '((st == 0)) && grep -q "^Compared with the last full run, \`2026-11-14-090000.md\`: 1 now found, 1 now missed, of 3 shared case(s); 0 new case(s). Since then: the rubric changed (.* → .*); the reviewer'"'"'s prompt is the same; Claude Code is the same.$" "$EV" &&
+   [[ $out == *"1 now found, 1 now missed"* ]]'
+check "--rubric has the reviewer follow that rubric, and the report names it" \
+  '[[ $call == *"Follow the rubric at \`$SB/rubric.md\`"* ]] && grep -qF -- "- Rubric: \`$SB/rubric.md\` (" "$EV"'
+sleep 1; n=$(calls)   # a report is named for the second its run started
+out=$(crew review-eval --project "$PJ" --limit 1 2>&1); st=$?
+call=$(since "$n")
+check "--limit 1 runs only the first case, and its report says so" \
+  '((st == 0)) && [[ $(grep -c -- "--agent reviewer " <<<"$call") == 1 && $(judged "$call") == 1 && $out == *"Found 0 of 1 misses."* ]] && grep -qx -- "- Cases: --limit 1" "$(ls "$PD"/review-eval/*.md | tail -1)"'
+# A pause, or a new rubric or reviewer from crew upgrade, during a review stops
+# the run: it starts no more sessions, and its report is never a baseline.
+sleep 1; echo "$PD/paused" >"$HOME/reviewer-writes"; n=$(calls)
+out=$(crew review-eval --project "$PJ" 2>&1); st=$?
+rm "$PD/paused"; call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1)
+check "a pause while the reviewer runs stops the run: no judge starts, and the report says it was cut short" \
+  '((st == 0)) && [[ $(grep -c -- "--agent reviewer " <<<"$call") == 1 && $(judged "$call") == 0 ]] && grep -qx -- "- Cases: all, cut short: the project was paused" "$EV" &&
+   grep -qx "Found 0 of 0 misses. Not run: 3." "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **not run** — \`${EF:0:7}..${EH:0:7}\` — Fix the b race — the project was paused" "$EV"'
+sleep 1; echo "$SB/rubric.md" >"$HOME/reviewer-writes"; n=$(calls)
+out=$(crew review-eval --project "$PJ" --rubric "$SB/rubric.md" 2>&1); st=$?
+call=$(since "$n")
+check "a rubric that changes while the reviewer runs stops the run the same way" \
+  '((st == 0)) && [[ $(judged "$call") == 0 ]] && grep -qx -- "- Cases: all, cut short: the rubric changed" "$(ls "$PD"/review-eval/*.md | tail -1)"'
+sleep 1; echo reviewer >"$HOME/fail-agent"; n=$(calls)
+out=$(crew review-eval --task 095-eval-one 2>&1); st=$?
+rm "$HOME/fail-agent"; call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1)
+check "when the reviewer fails, its cases aren't run or judged, and the report says so and compares with the last full run, not a cut-short one" \
+  '((st == 0)) && [[ $(judged "$call") == 0 ]] && grep -q "^Compared with the last full run, \`$EV2\`" "$EV" && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **not run** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — the reviewer exited with 1; see 095-eval-one-review-1.report.log" "$EV" && grep -qx "Found 0 of 0 misses. Not run: 3." "$EV"'
+n=$(calls)
+out=$(crew review-eval --project "$P2" --task 095-eval-one 2>&1); st=$?
+check "--task looks for the task in the project --project names" \
+  '((st == 1)) && [[ $out == *"--task '"'"'095-eval-one'"'"' doesn'"'"'t match exactly one task in $P2"* && $(calls) == "$n" ]]'
+printf -- '---\nby: crew pause\n---\n' >"$PD/paused"
+out=$(crew review-eval --project "$PJ" 2>&1); st=$?
+rm "$PD/paused"
+check "a paused project's review eval waits, starting nothing" '((st == 4)) && [[ $out == *"$PJ is paused"* && $(calls) == "$n" ]]'
+out=$(flock "$L/.crew-eval-$PJ.lock" crew review-eval --project "$PJ" 2>&1); st=$?
+check "a second review eval of a project refuses while one runs" '((st == 1)) && [[ $out == *"a review eval of $PJ is running already"* && $(calls) == "$n" ]]'
+out=$(crew review-eval --project "$PJ" --task 090-misses-one 2>&1); st=$?
+check "with no cases, crew review-eval says so, starts no session and writes no report" \
+  '((st == 0)) && [[ $out == "$PJ: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 6 ]]'
+
 summary crew-e2e

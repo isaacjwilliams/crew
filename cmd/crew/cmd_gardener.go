@@ -140,7 +140,7 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	for _, t := range tasks {
 		fmt.Fprintf(&list, "- %s\n", t.task.Path)
 		for _, cm := range t.comments {
-			fmt.Fprintf(&list, "  - round %d, after automated review %d: %s\n", cm.Round, cm.Review.Number, cm.Comment)
+			fmt.Fprintf(&list, "  - round %d, after automated review %d: %s\n", cm.Round, cm.Review.Number, cm.Comment.Item)
 		}
 	}
 	prompt := fmt.Sprintf("Project: %s\nProposals directory: %s\nProposal template: %s\nCrew's review rubric: %s\nToday's date: %s\nTasks to read, and the comments to sort in each:\n%sFollow your process and write proposals only into the proposals directory.",

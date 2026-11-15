@@ -34,7 +34,7 @@ func TestTasksToSort(t *testing.T) {
 	var got []string
 	for _, p := range picked {
 		got = append(got, p.task.Path)
-		if len(p.comments) != 1 || p.comments[0].Comment != "comment 5 — [link](u5)" || p.comments[0].Review.Number != 1 {
+		if len(p.comments) != 1 || p.comments[0].Comment.Item != "comment 5 — [link](u5)" || p.comments[0].Review.Number != 1 {
 			t.Errorf("%s: comments %+v", p.task.Path, p.comments)
 		}
 	}

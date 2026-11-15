@@ -487,7 +487,7 @@ crew pause --project <p>      # --all for every project; without either, the lea
 crew resume --project <p>     # let it go on
 ```
 
-While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup` and `crew goal start` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
+While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup`, `crew goal start` and `crew review-eval` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
 
 Nothing is lost: worktrees, branches and conversations stay. When crew stops a session, it also ends what that session left running in the background in its worktree, such as a dev server or a Codex review, as cleanup does; `--force` does that for sessions that had already closed, too. A background subagent the session started may still run on: Claude Code carries those over to the session's next process. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
 
@@ -597,6 +597,23 @@ crew propose "Give each tax jurisdiction a PricingStrategy" --project isaac-weba
   --why "Tax inclusion, currency and receipt fields all vary by place; a strategy would keep each place's rules in one class." \
   --revisit-when "a second pricing rule beyond the tax rate varies by place"
 ```
+
+### Testing review on past misses
+
+The misses agent fixes the cause of a miss; the review eval tells you whether review now catches it. Run it after you change crew's review rubric, the reviewer's prompt (`agents/reviewer.md`) or its model:
+
+```sh
+crew review-eval --project isaac-webapp --limit 2   # a cheap trial: the first two cases
+crew review-eval --project isaac-webapp             # every case
+crew review-eval --task 042                         # only one task's cases
+crew review-eval --project isaac-webapp --rubric ~/code/crew/.claude/skills/pr-review/rubric.md
+```
+
+Each case is something you found on a merged task's PR after automated review had passed it: a comment of yours in a review round after an automated review, or a fix task naming the task. crew finds them in the ledger every time, so new cases join as tasks merge. For each one it reruns the reviewer on the PR as that review saw it, with only what existed then, and has a separate session judge whether the report raised what you found: **found**, **missed**, or **not a review finding** (a question or praise, a change of mind, something the brief or your decisions settled).
+
+The report goes to `~/crew/projects/<project>/review-eval/` and is committed. It names the rubric and reviewer prompt it used, each with a short hash, and the Claude Code version; then the totals, and one line per case with the finding the judge matched. Once there's a full run before it, it compares verdicts with the newest full run on the cases both have ("2 now found, 1 now missed, of 14 shared cases") and says which of the rubric, the reviewer's prompt and Claude Code changed. The briefings, reviewer reports and judgements are in `~/crew/logs/`, in the directory the report names, so you can check a verdict.
+
+A run narrowed by `--limit` or `--task` is a trial: it says so in its report, and the next run compares with the last full run instead. It costs a review for each reviewed range, plus a short judgement per case, so crew never runs it on its own. A paused project's eval waits until you resume it, and one project runs one eval at a time. If the project is paused during a run, or the rubric or the reviewer's prompt changes (as `crew upgrade` does), the run stops starting sessions, marks the rest `not run` and says it was cut short; like a trial, it's never what the next run compares with. `--rubric PATH` tests a rubric from another checkout before you release it; the reviewer's prompt is always the installed one, in `~/.claude/agents/`.
 
 ## 8. Safety model
 

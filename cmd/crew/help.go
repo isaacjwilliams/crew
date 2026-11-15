@@ -190,6 +190,12 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
                                    Run the gardener over newly merged commits, and
                                    the misses agent over your comments on newly
                                    merged PRs
+  crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]
+                                   Rerun the reviewer on past misses (your comments
+                                   and later fixes after automated review) and
+                                   report which it finds now, compared with the
+                                   last run. Each case costs a review: --limit N
+                                   runs the first N. --rubric tests another rubric
   crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
                [--project P]
                                    Write down an idea worth keeping as a proposal;

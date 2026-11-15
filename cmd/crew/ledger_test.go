@@ -220,6 +220,33 @@ func TestAutomatedReviews(t *testing.T) {
 	}
 }
 
+func TestReviewedRange(t *testing.T) {
+	for line, want := range map[string][2]string{
+		// A review of the whole PR, in the record's form before 027 and after.
+		"`f1..h1`, 4 commits on `b` since `main` (fork point from the PR's base)": {"f1", "h1"},
+		"`f1..h1`, 4 commits on `b` since `main` (fork point `f1`)":               {"f1", "h1"},
+		// A review of the commits since an earlier one names its fork point.
+		"`h1..h2`, 2 commits on `b` since review 1 (fork point `f1`)": {"f1", "h2"},
+		"not a range":     {"", ""},
+		"`h1`, 2 commits": {"", ""},
+	} {
+		if fork, head := reviewedRange(line); fork != want[0] || head != want[1] {
+			t.Errorf("reviewedRange(%q) = %q, %q; want %q, %q", line, fork, head, want[0], want[1])
+		}
+	}
+	task := "## Automated reviews\n### Automated review 1 — 2026-11-10 10:00\n\n- Range: `f1..h1`, 4 commits on `b` since `main` (fork point `f1`)\n" +
+		"### Automated review 2 — 2026-11-10 11:00\n\n- Range: `h1..h2`, 2 commits on `b` since review 1 (fork point `f1`)\n" +
+		"#### 1. [nitpick] a — `a.go:1`\n- Finding:\n  > - Range: `x..y`\n" +
+		"### Automated review 3 — 2026-11-10 12:00\n\n## Log\n"
+	var got []string
+	for _, r := range (Task{docWith(t, task)}).AutomatedReviews() {
+		got = append(got, r.Fork+".."+r.Head)
+	}
+	if want := []string{"f1..h1", "f1..h2", ".."}; !slices.Equal(got, want) {
+		t.Errorf("reviewed ranges = %q, want %q", got, want)
+	}
+}
+
 func TestCleanReadsTheSeverityHeld(t *testing.T) {
 	for severity, clean := range map[string]bool{
 		"must fix": false, "should fix": false, "pre-existing: should fix": false,
@@ -496,15 +523,15 @@ func TestReviewRounds(t *testing.T) {
 	for _, r := range rounds {
 		line := fmt.Sprintf("%d %s:", r.Number, r.At.Format(logTime))
 		for _, cm := range r.Comments {
-			line += " [" + cm + "]"
+			line += fmt.Sprintf(" [%s: %q]", cm.Item, cm.Text)
 		}
 		got = append(got, line)
 	}
 	want := []string{
-		"1 2026-11-10 10:00: [comment 5 — [link](u5)]",
+		`1 2026-11-10 10:00: [comment 5 — [link](u5): "too early"]`,
 		"2 2026-11-10 13:00:",
-		"3 2026-11-10 14:00: [review 7 (changes_requested)] [`a.go:3` — comment 9 — [link](u9)]",
-		"4 2026-11-11 10:00: [comment 12 — [link](u12)]",
+		`3 2026-11-10 14:00: [review 7 (changes_requested): "Two things.\n- [ ] not an item"] [` + "`a.go:3`" + ` — comment 9 — [link](u9): "why?"]`,
+		`4 2026-11-11 10:00: [comment 12 — [link](u12): "ok"]`,
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)
@@ -514,7 +541,7 @@ func TestReviewRounds(t *testing.T) {
 func TestCommentsAfterReview(t *testing.T) {
 	var got []string
 	for _, c := range (Task{docWith(t, commentedTask)}).CommentsAfterReview() {
-		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment, c.Review.Number))
+		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment.Item, c.Review.Number))
 	}
 	// Round 1 came before any review, and round 2 holds no comment.
 	want := []string{"round 3, review 7 (changes_requested), after review 1", "round 3, `a.go:3` — comment 9 — [link](u9), after review 1", "round 4, comment 12 — [link](u12), after review 2"}
