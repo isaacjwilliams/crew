@@ -112,7 +112,7 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
 
    The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then follow "Workflow: split proposal" instead of steps 4 and 5: it posts the summary and asks.
 4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-5. Carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds". Either hands over next, and only first-run step 10 marks the PR ready.
+5. Carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
 
 After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3. A pass that didn't converge, with its summary posted, needs the split question (step 4 of "Workflow: split proposal"), unless it's already waiting under Open questions or Decisions has answered it since that summary.
 
@@ -130,7 +130,7 @@ You come here at one of two moments: the size check in first-run step 4, when th
 4. **Ask** (see "When you're blocked"): one Open questions item with what got in the way, the pieces, and these answers, and say which you recommend:
    - **split as proposed**: you stop here. The lead, or in a goal the goal lead, opens the pieces as tasks and abandons this one. Leave the status as it is and end your turn.
    - **review it anyway**: at the size check, go on to first-run step 5. At the end of a pass, run another pass of "Workflow: automated review"; if it doesn't converge either, it asks again.
-   - **take it as it is**: at the end of a pass, carry on as step 5 of "Workflow: automated review" says: hand over, and in a first run mark the PR ready after it. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
+   - **take it as it is**: at the end of a pass, carry on as step 5 of "Workflow: automated review" says. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
 
    End your turn with the question, the pieces in a line each, as your final message.
 
@@ -155,7 +155,7 @@ When your prompt says there's new feedback, your reactions tell the user, on Git
 6. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push. When a change alters what an acceptance criterion's evidence shows, rerun it and update its entry under `## Evidence` and the PR body's Evidence.
 7. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
 8. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, react 🚀 to the comment behind each `Automated review requested (comment <id>)` line, run a new pass of "Workflow: automated review", and tick the line. One pass answers every such line in the rounds you were sent. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
-9. Tick the checkboxes in the rounds. Hand over again: `crew hand-over <task>`. It checks the round's commits as it did the first run's: if one touched a sensitive path, the task is now high risk and needs the security review first (first-run step 5). When it refuses, do what first-run step 10 says. Then `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
+9. Tick the checkboxes in the rounds. Hand over again, as first-run step 10 says: `crew hand-over <task>` checks the round's commits as it did the first run's. Then `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).
 10. Finish with a short report listing each comment and what you did, what was behind any red CI, and, after a pass, what automated review left for the user.
 
 ## Stacked tasks
@@ -175,7 +175,7 @@ When your prompt says to restack, the parent's branch has moved, or it has merge
 3. Run the project's checks. Then `git log --oneline <new base commit>..HEAD` should list your commits and nothing else.
 4. Push with the `git push --force-with-lease=…` command the note gives, exactly as written and on its own (see "On GitHub" item 2; the note has recorded the lease for you). This is the one time rewriting commits a reviewer has seen is right.
 5. If the note says your base changed, run the two commands it gives (`gh pr edit --base` and `crew set <task> base`), only after the push. Take "Stacked on #…" out of the PR body if your base is now the default branch.
-6. If the task was `pr-open` before this restack (you had handed it over), hand over again: `crew hand-over <task>`, as first-run step 10 says. If it wasn't, set the status back to what it was. Then `crew log <task> "Restacked onto <new base> at <short sha>"`.
+6. If you had handed the task over before this restack (your Log shows it reaching `pr-open`), hand over again: `crew hand-over <task>`, as first-run step 10 says. If it wasn't, set the status back to what it was. Then `crew log <task> "Restacked onto <new base> at <short sha>"`.
 7. Finish with a short report: what you rebased onto, any conflicts and how you resolved them.
 
 ## When you're blocked

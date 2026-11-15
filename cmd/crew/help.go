@@ -73,12 +73,11 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
-  crew hand-over TASK              Hand the task's PR over to you (status pr-open), the
-                                   first time and after every round or restack, once
-                                   every acceptance criterion has evidence under
-                                   ## Evidence, and a high-risk task a security review;
-                                   a branch that touches SENSITIVE_PATHS makes it high
-                                   risk (used by workers)
+  crew hand-over TASK              Hand the task's PR over to you (status pr-open),
+                                   once every acceptance criterion has evidence
+                                   under ## Evidence, and a high-risk task a security
+                                   review; a branch that touches SENSITIVE_PATHS makes
+                                   it high risk (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...

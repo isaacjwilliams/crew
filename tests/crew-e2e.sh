@@ -53,7 +53,9 @@ hand_over() {  # task
   local f n i; f=$(crew path "$1")
   if ! section "$f" "## Evidence" | grep -q '^### '; then
     n=$(section "$f" "## Acceptance criteria" | grep -c '^- ')
-    for ((i = n; i >= 1; i--)); do sed -i "/^## Evidence\$/a ### $i.\\nok" "$f"; done
+    for ((i = n; i >= 1; i--)); do  # each lands just under the heading, so the last goes first
+      sed -i "/^## Evidence\$/a ### $i.\\nok" "$f"
+    done
   fi
   crew hand-over "$1" >/dev/null || echo "  hand_over $1 refused at line ${BASH_LINENO[0]}" >&2
 }

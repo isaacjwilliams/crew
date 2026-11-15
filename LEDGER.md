@@ -49,7 +49,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `ready` | brief complete and approved: by you, or for a goal's task by its goal lead | `crew ready` |
 | `working` | worker running on first pass | `crew dispatch` |
 | `needs-input` | waiting on you: an unchecked item under Open questions (a worker's question, a collaborator's PR comment, or CI still red after `MAX_CI_FIXES` CI rounds). In a goal's task, the goal lead sees a worker's question first | worker, or `crew tick` once the worker is idle |
-| `pr-open` | PR is up and waiting for your review | `crew hand-over` only, every time: the worker's, or the lead's for a task whose worker isn't running. It refuses until every acceptance criterion has evidence |
+| `pr-open` | PR is up and waiting for your review | `crew hand-over` only: the worker's, or the lead's for a task whose worker isn't running. It refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `abandoned` | dropped | you or the lead via `crew set` |
