@@ -359,7 +359,7 @@ Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches onl
 
 Each PR is short and has the same shape, so you can tell at a glance whether to merge it, look at its evidence, or read the code closely: what changed and why in at most three sentences, then **Risk** (what could break, for whom, and how far it reaches), **How to revert** (and anything a revert alone doesn't undo), **Evidence**, and Notes for reviewers only when there's a trade-off or an open question. A stacked PR first names the PR it's stacked on. The template is `templates/pr-body.md` in your crew home.
 
-**Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the task can't turn `pr-open` until every criterion has one: `crew hand-over` counts them, though it doesn't judge them.
+**Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the worker can't hand the PR over to you (`pr-open`) until every criterion has one: `crew hand-over` counts them, though it doesn't judge them.
 
 ### Automated review, before yours
 
