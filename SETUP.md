@@ -1,6 +1,6 @@
 # Agent crew: setup and usage
 
-Seven Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
+Eight Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
 
 Everything lives in one private git repo of yours, your **crew home**, cloned to `~/crew`: the crew's code, your settings, and the ledger. It's a copy of the public crew repo, [isaacjwilliams/crew](https://github.com/isaacjwilliams/crew), and pulls new versions from it. Any machine with a clone can run the crew, one at a time.
 
@@ -525,7 +525,7 @@ crew promote 2026-09-29-extract-retry   # turns a proposal into a draft task; th
 
 Proposals live in `~/crew/projects/<project>/proposals/`. The gardener writes at most three per run and skips anything already proposed, accepted, or rejected.
 
-The same command then runs the misses agent. It reads the tasks merged since its last run where you commented on the PR after automated review had been through it (first run: from the same 14 days), sorts each comment as a miss or not, and proposes a fix at the source for the misses: the repo's AGENTS.md, a lint rule, your `~/.claude/CLAUDE.md` or crew's review rubric, at most three per run. A proposal for your `CLAUDE.md` or the rubric starts `Target: <file>`: it's a change for you to make by hand, not a task, and once you've made it the lead marks the proposal accepted. When no merged task has such a comment, it starts no session.
+The same command then runs the misses agent. It reads the tasks merged since its last run where you commented on the PR after automated review had been through it (first run: from the last commit before those 14 days, as for the gardener), sorts each comment as a miss or not, and proposes a fix at the source for the misses: the repo's AGENTS.md, a lint rule, your `~/.claude/CLAUDE.md` or crew's review rubric, at most three per run. A proposal for your `CLAUDE.md` or the rubric starts `Target: <file>`: it's a change for you to make by hand, not a task, and once you've made it the lead marks the proposal accepted. When no merged task has such a comment, it starts no session.
 
 `crew host up` schedules it (weekly, Monday 06:00). To pause it, `systemctl --user disable --now crew-gardener.timer`, or on a Mac `launchctl bootout gui/$(id -u)/crew-gardener && launchctl disable gui/$(id -u)/crew-gardener`; the next `crew host up` turns it on again.
 

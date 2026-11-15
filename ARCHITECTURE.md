@@ -4,7 +4,7 @@ This document is for anyone changing the crew, human or Claude Code. `SETUP.md` 
 
 ## What the system is
 
-Seven Claude Code agents run on one machine at a time (principle 8):
+Eight Claude Code agents run on one machine at a time (principle 8):
 
 - **lead**: the only agent you talk to, for every project, from a terminal or from Claude Mobile. It turns requests into briefs, dispatches work, routes PR feedback, and reports status.
 - **implementer**: one background session per task, each in its own git worktree and branch. It opens a PR and addresses review rounds.
@@ -403,8 +403,8 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 
 1. Fetches the default branch and moves `_gardener` to `origin/<default>`. This checkout always uses plain `git worktree`, whatever `WORKTREE_TOOL` says: both agents only read, so they don't need the project's per-worktree setup.
 2. **The gardener** (`reviewCommits`): sets the review range to `gardener.last..HEAD`. On the first run it starts from the commit before `GARDENER_LOOKBACK`. With no new commits, it starts no session.
-3. **The misses agent** (`sortMisses`): picks the project's merged tasks whose merge (the Log's, `mergedAt`) is after the time in `misses.last` and that have a comment of the user's after an automated review (`Task.CommentsAfterReview`). On the first run it starts from the date of the default branch's newest commit before `GARDENER_LOOKBACK`. A task merged in the current minute waits for the next run, so one synced later in that minute can't tie with the cursor. With no tasks, it starts no session.
-4. Each runs `claude -p --add-dir <home> --agent <gardener|misses> --permission-mode acceptEdits --permission-prompts none --max-turns … --settings "<gardener settings, env: project and home>" "<prompt>"` (`runAgent`), writing its output to `logs/`. The misses agent's prompt names the task files.
+3. **The misses agent** (`sortMisses`, `tasksWithMisses`): picks the project's merged tasks whose merge (the Log's, `mergedAt`) is after the time in `misses.last` and that have a comment of the user's after an automated review (`Task.CommentsAfterReview`). On the first run it starts from the date of the default branch's newest commit before `GARDENER_LOOKBACK`. A task merged in the current minute waits for the next run, so one synced later in that minute can't tie with the cursor. With no tasks, it starts no session.
+4. Each runs `claude -p --add-dir <home> --agent <gardener|misses> --permission-mode acceptEdits --permission-prompts none --max-turns … --settings "<gardener settings, env: project and home>" "<prompt>"` (`runAgent`), writing its output to `logs/`. The misses agent's prompt lists the task files, and under each the comments to sort (`tasksWithMisses`), so the agent doesn't pick them again.
 5. On success, each updates its cursor and commits (`advance`): `gardener.last` to the head it reviewed, `misses.last` to the newest merge time it read.
 
 ### Proposals
