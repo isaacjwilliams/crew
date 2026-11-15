@@ -207,9 +207,9 @@ func cmdReady(c *Crew, args []string) error {
 
 // crew hand-over TASK: the worker's PR is ready for the user, with evidence for
 // every acceptance criterion, and a security review if it's high risk, which a
-// branch that touches a sensitive path makes it. Workers run it once, at the end
-// of their first run; a review round may have started by then. Their later moves
-// back to pr-open are plain crew set, since the PR was handed over already.
+// branch that touches a sensitive path makes it. It's the only way into pr-open
+// (crew set refuses it), so every return to the user, after a review round or a
+// restack, checks the branch as it is then.
 func cmdHandOver(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew hand-over TASK")
@@ -233,7 +233,7 @@ func cmdHandOver(c *Crew, args []string) error {
 		return err
 	}
 	if st := t.Status(); !st.InFlight() || st == PROpen {
-		return fail("task is '%s': only a task in flight that isn't pr-open yet can be handed over", st)
+		return fail("task is '%s': only a task in flight that isn't pr-open already can be handed over", st)
 	}
 	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
 		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())

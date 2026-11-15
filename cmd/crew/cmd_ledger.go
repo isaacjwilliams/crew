@@ -179,6 +179,9 @@ func cmdSet(c *Crew, args []string) error {
 	if key == "risk" && !Risk(value).Valid() {
 		return fail("risk must be low, medium or high, not '%s'", value)
 	}
+	if key == "status" && Status(value) == PROpen {
+		return fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}

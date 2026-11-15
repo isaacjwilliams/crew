@@ -229,17 +229,22 @@ check "workers start with the configured auto-compact window" 'grep -- "--agent 
 check "workers get the shipped settings, with their project, the home and the pause hook, when the project adds none" \
   '[[ $(given_settings) == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P" && has_pause_hook'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
-# The hand-over to the user: crew hand-over is the checked move to pr-open, and
-# crew set stays a plain write. Three criteria; the nested bullet isn't one.
+# The hand-over to the user: crew hand-over is the one way into pr-open, and checks
+# the task every time. Three criteria; the nested bullet isn't one.
 sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F1"
 check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
 mode=$(crew get 1 pr_mode); crew set 1 pr_mode none
 check "hand-over needs no PR when the task opens none" '[[ $(crew hand-over 1 2>&1) == *"evidence missing for acceptance criteria 1, 2, 3 of 3"* ]]'
 crew set 1 pr_mode "$mode"
-check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
-  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
-check "hand-over refuses a task handed over already" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open yet can be handed over"* ]]'
+check "worker can update the ledger from its worktree" \
+  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12) && [[ $(crew get 1 pr) == https://github.com/isaac/webapp/pull/12 ]]'
+refused=0
+for st in draft ready working needs-input addressing-feedback merged abandoned; do
+  crew set 1 status "$st"; out=$(crew set 1 status pr-open 2>&1) && continue
+  [[ $out == *"use crew hand-over 001-saved-search-filters: it checks the evidence"* && $(crew get 1 status) == "$st" ]] && refused=$((refused + 1))
+done
 crew set 1 status working
+check "crew set refuses status pr-open from every other status, and names crew hand-over" '((refused == 7))'
 sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
 check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
   'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
@@ -264,6 +269,8 @@ check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand o
 sed -i 's/^SENSITIVE_PATHS=.*/SENSITIVE_PATHS="db\/migrate :(glob)**\/auth*"/' "$PE"
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
+check "hand-over refuses a task handed over already, and so does crew set" \
+  '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open already can be handed over"* && $(crew set 1 status pr-open 2>&1) == *"use crew hand-over"* ]]'
 check "status shows a pr-open task's look" '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  low: approve from the evidence"* ]]'
 # Someone else pushes to the PR's branch: a suggestion applied on GitHub, say.
 git -C "$WT" push -q -u origin HEAD 2>/dev/null
@@ -273,18 +280,24 @@ check "sync fetches and raises the risk of a task whose branch on origin gained 
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
 check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
-crew set 1 status working; crew set 1 risk medium
+# A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
+crew set 1 status addressing-feedback; crew set 1 risk medium
 commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
 out=$(crew hand-over 1 2>&1); st=$?
-check "hand-over raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
-  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
+check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
+  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
-  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == working ]]'
+  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
 check "hand-over hands a high-risk task over once its security review is under Evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
+returned=0
+for st in needs-input working; do
+  crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
+done
+check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
