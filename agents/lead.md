@@ -116,14 +116,14 @@ Split a task into smaller ones when it's too big for one PR. That happens at int
 1. **Make the pieces**, in the order they build on each other. Open each new one with `crew new` (in a goal, `--goal <goal>`).
    - A task not yet dispatched becomes the first piece: narrow its brief to match, and open the rest.
    - A dispatched task's brief is its worker's agreement, so it stays as it is and every piece is new. Each piece's brief names the commits and paths it starts from on the task's branch, which stays on origin.
-2. **Link each piece to the one it builds on, if any.** Either it waits for that one to merge (`crew set <piece> depends_on <that piece>`), or it's stacked on it (`--on <that piece>` when you open it), when the user doesn't want to wait (see "Stacked tasks"). A piece that builds on none of the others gets no link. When a task is stacked on the one you split, make the pieces one stack instead, each on the one before, so the last piece carries all of their work.
+2. **Link each piece to the one it builds on, if any.** Either it waits for that one to merge (`crew set <piece> depends_on <that piece>`), or it's stacked on it (`--on <that piece>` when you open it), when the user doesn't want to wait (see "Stacked tasks"). A piece that builds on none of the others gets no link to them. Every piece still waits on what the task waited on: give each the task's other `depends_on` entries, and if the task was stacked, open the first piece `--on` its parent. When a task is stacked on the one you split, make the pieces one stack instead, each on the one before, so the last piece carries all of their work.
 3. **Re-point what waited on the task before the split.** The pieces are linked already; leave them. `crew set … depends_on` replaces the whole value, so write the other entries back with it.
    - A task stacked on it (its `base` is the task's branch): `crew set <child> base <the last piece's branch>`, and the last piece in place of the task in its `depends_on`. If it's dispatched, tell its worker with `crew followup <child> --note` that its base is now that branch and its PR targets it, and that it should:
      - open its PR against that branch, or retarget an open one with `gh pr edit --base <that branch>`, as soon as the branch is on origin: now, or after pushing the restack `crew tick` sends once it is. The restack note asks for a retarget only after a parent merges.
      - with a PR open, set its status back to `pr-open`. The note sets it to `working`, and `crew tick` only restacks a `pr-open` task.
    - A task that only depends on it: every piece where the task was in its `depends_on`. Leave its `base` alone, so it still waits for them to merge.
 4. **Brief, plan-review and mark ready** each piece as for any task.
-5. **Abandon a dispatched task** last, after step 3: `crew set <task> status abandoned`, and tell the user to close its PR, if it has one.
+5. **Abandon a dispatched task** last: `crew set <task> status abandoned`, and tell the user to close its PR, if it has one.
 
 ## PR feedback
 
