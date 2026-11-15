@@ -342,20 +342,27 @@ func (s Status) Delivered() bool { return s == Merged || s == Done }
 
 // A task's kind: what it makes, which decides what its brief needs and what its
 // hand-over checks. A build makes a PR; a spike tries a path on a branch nobody
-// merges, and makes a report.
+// merges, and makes a report. A fix is a build that mends a defect live in
+// production, and names the task that caused it and the check that missed it. A
+// refine is any other change to existing work, with a build's rules, so that a
+// fix means only a defect in production.
 type Kind string
 
 const (
-	KindBuild Kind = "build"
-	KindSpike Kind = "spike"
+	KindBuild  Kind = "build"
+	KindSpike  Kind = "spike"
+	KindFix    Kind = "fix"
+	KindRefine Kind = "refine"
 )
 
 // kindRules is what a kind asks of its task. Commands ask the task's rules and
 // never the kind's name.
 type kindRules struct {
 	kind Kind
-	// brief is the sections crew ready needs filled in.
+	// brief is the sections crew ready needs filled in, and keys the front-matter
+	// keys it needs set besides a risk tier, each to a value crew set takes.
 	brief []string
+	keys  []string
 	// pr: the kind makes a PR, so its branch is pushed for the user to review,
 	// and it needs a risk tier (the look its PR needs). Only such a kind takes
 	// part in stacks: a restack has its worker push, and a task stacked on
@@ -364,9 +371,12 @@ type kindRules struct {
 	pr bool
 	// link is the front-matter key that ties the task to another, or nothing when
 	// the kind takes none; crew new sets it from the flag of the same name
-	// (--informs). linkTo is the status that other task must have.
-	link   string
-	linkTo Status
+	// (--informs, --fixes). linkTo is the status that other task must have, and
+	// linkUnknown lets the link be "unknown" instead, for a task that can't be
+	// traced.
+	link        string
+	linkTo      Status
+	linkUnknown bool
 	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
 	// cmd_new.go), and handedOver the status it moves the task to.
 	handOver   func(*Crew, Task) error
@@ -390,6 +400,24 @@ var kinds = []kindRules{
 		handOver:   handOverReport,
 		handedOver: Done,
 	},
+	{
+		kind:        KindFix,
+		brief:       []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		pr:          true,
+		keys:        []string{"fixes", "missed_by"},
+		link:        "fixes",
+		linkTo:      Merged,
+		linkUnknown: true,
+		handOver:    handOverPR,
+		handedOver:  PROpen,
+	},
+	{
+		kind:       KindRefine,
+		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
+		pr:         true,
+		handOver:   handOverPR,
+		handedOver: PROpen,
+	},
 }
 
 // Valid: crew knows the kind.
@@ -408,7 +436,7 @@ func (k Kind) rules() (kindRules, bool) {
 	return kindRules{}, false
 }
 
-// kindNames lists the kinds as a sentence does: "build or spike".
+// kindNames lists the kinds as a sentence does: "build, spike, fix or refine".
 func kindNames() string {
 	names := make([]string, len(kinds))
 	for i, r := range kinds {
@@ -416,6 +444,10 @@ func kindNames() string {
 	}
 	return orList(names)
 }
+
+// missedBy are the checks a fix's missed_by can name, the one that should have
+// caught the defect, in the order work passes them.
+var missedBy = []string{"plan-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
 
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string {

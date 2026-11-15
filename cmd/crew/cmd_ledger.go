@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -227,7 +228,8 @@ func (c *Crew) checkStacks(t Task, key, value string) error {
 
 // checkValue is the value crew set records for key, or a refusal that says what
 // the key takes. A link to another task is recorded as that task's ID. Keys crew
-// doesn't know take any value.
+// doesn't know take any value. crew ready checks the keys a task's kind needs
+// with it too.
 func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	var ok bool
 	var takes string
@@ -241,6 +243,9 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	case "kind":
 		ok = Kind(value).Valid()
 		takes = kindNames()
+	case "missed_by":
+		ok = slices.Contains(missedBy, value)
+		takes = orList(missedBy)
 	default:
 		for _, r := range kinds {
 			if r.link == key {
