@@ -1713,6 +1713,6 @@ check "when the reviewer fails, its cases aren't run or judged, and the report s
 n=$(calls)
 out=$(crew review-eval --project "$PJ" --task 090-misses-one 2>&1); st=$?
 check "with no cases, crew review-eval says so, starts no session and writes no report" \
-  '((st == 0)) && [[ $out == "$PJ: no cases: no merged task has your comments after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 4 ]]'
+  '((st == 0)) && [[ $out == "$PJ: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 4 ]]'
 
 summary crew-e2e

@@ -306,6 +306,10 @@ check "the pr-review skill is where --add-dir <home> loads it, and names its rub
 check "crew review-eval's briefing has SKILL.md step 3's first line and headings, in its order" \
   "h=\$(awk '/^## 3\\. Write the briefing/ {w=1; next} /^## 4\\./ {w=0} w && /^### .## .*.\$/ {gsub(/^### .|.\$/, \"\"); printf \"%s\\\"%s\\\"\", s, \$0; s=\", \"}' $SK/SKILL.md) && [[ -n \$h ]] &&
    grep -qF \"var briefingHeadings = []string{\$h}\" <<<\"\$SRC\" && grep -q '^.Code review.\\. Then exactly these four' $SK/SKILL.md && grep -qF 'b.WriteString(\"Code review\\n\")' <<<\"\$SRC\""
+check "crew review-eval prompts the reviewer as SKILL.md step 4 does" \
+  "grep -qF \"> Review \\\`<from sha>..HEAD\\\` in \\\`<review root>\\\`. Use the scope exactly as given; don't widen it or reconstruct it.\" $SK/SKILL.md &&
+   grep -qF '> Follow the rubric at \`\${CLAUDE_SKILL_DIR}/rubric.md\` and the briefing at \`<briefing path>\`.' $SK/SKILL.md &&
+   grep -qF \"Use the scope exactly as given; don't widen it or reconstruct it. Follow the rubric at \\\`%s\\\` and the briefing at \\\`%s\\\`.\" <<<\"\$SRC\""
 check "workers can run pr-review through the Skill tool" "grep -qx 'name: pr-review' $SK/SKILL.md && ! grep -q '^disable-model-invocation' $SK/SKILL.md"
 check "pr-review reviews and never fixes: no step commits, pushes or posts" "! grep -qE 'git (commit|push)|gh pr (comment|edit|ready)|crew (reply|review-summary)' $SK/SKILL.md"
 check "the shipped rubric is generic: it names no framework" "! grep -qiE 'rails|django|laravel|react|active ?record|active storage|action text' $SK/rubric.md"

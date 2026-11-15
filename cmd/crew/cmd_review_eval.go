@@ -14,11 +14,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 )
+
+const reviewEvalUsage = "crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]"
 
 // crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]: every
 // case of the project's test set, or only T's, or the first N. Each costs a
@@ -34,7 +37,7 @@ func cmdReviewEval(c *Crew, args []string) error {
 	}
 	proj, task, limit := "", "", 0
 	rubric := c.path(".claude/skills/pr-review/rubric.md")
-	for len(args) > 1 {
+	for len(args) > 1 { // every flag takes a value: one left alone is a usage error, below
 		switch args[0] {
 		case "--project":
 			proj = args[1]
@@ -53,12 +56,12 @@ func cmdReviewEval(c *Crew, args []string) error {
 			}
 			rubric = abs
 		default:
-			return usage("crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]")
+			return usage(reviewEvalUsage)
 		}
 		args = args[2:]
 	}
 	if len(args) > 0 {
-		return usage("crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]")
+		return usage(reviewEvalUsage)
 	}
 	var only Task
 	if task != "" {
@@ -93,7 +96,7 @@ func cmdReviewEval(c *Crew, args []string) error {
 		cases = cases[:limit]
 	}
 	if len(cases) == 0 {
-		fmt.Printf("%s: no cases: no merged task has your comments after an automated review, or a fix naming it\n", p.Name)
+		fmt.Printf("%s: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it\n", p.Name)
 		return nil
 	}
 
@@ -141,9 +144,8 @@ func evalCases(tasks []Task) []evalCase {
 				cases = append(cases, evalCase{id, t, cm.Review, cm.Comment.Text})
 			}
 		}
-		last, ok := lastReviewedRange(t)
-		for _, f := range fixes[t.ID()] {
-			if ok {
+		if last, ok := lastReviewedRange(t); ok {
+			for _, f := range fixes[t.ID()] {
 				miss := f.Get("title") + "\n\n" + f.Section("## Goal")
 				cases = append(cases, evalCase{t.ID() + "/fix-" + f.ID(), t, last, miss})
 			}
@@ -242,17 +244,20 @@ func quotedLines(text string) string {
 }
 
 // userDecisionsBefore is the task's decisions that are the user's own, the
-// lines ending "(user)", dated before the day of at.
+// lines ending "(user)", dated before the day of at. A decision starts with
+// its date, "- 2026-11-14 — …", and most have no time, so one made on at's day
+// may have come after it: only earlier days are sure.
 func userDecisionsBefore(t Task, at time.Time) []string {
 	y, m, d := at.Date()
 	day := time.Date(y, m, d, 0, 0, 0, 0, at.Location())
 	var lines []string
 	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
 		item, ok := strings.CutPrefix(l, "- ")
-		if !ok || !strings.HasSuffix(strings.TrimRight(l, " "), "(user)") || len(item) < 10 {
+		if !ok || !strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
 			continue
 		}
-		if date, err := time.ParseInLocation("2006-01-02", item[:10], at.Location()); err == nil && date.Before(day) {
+		stamp, _, _ := strings.Cut(item, " ")
+		if date, err := time.ParseInLocation("2006-01-02", stamp, at.Location()); err == nil && date.Before(day) {
 			lines = append(lines, l)
 		}
 	}
@@ -307,20 +312,18 @@ type evalRun struct {
 // makes its directory and checkout.
 func startEvalRun(c *Crew, p *Project, rubric string) (*evalRun, error) {
 	now := time.Now()
+	reviewer := filepath.Join(installedAgents(), "reviewer.md")
+	version := "unknown"
+	if v, ok := claudeVersion(); ok && v != "" {
+		version = v
+	}
 	e := &evalRun{
-		c:       c,
-		p:       p,
-		started: now,
-		tested: evalSetup{
-			rubric: rubric, rubricHash: shortHash(rubric),
-			reviewer: filepath.Join(installedAgents(), "reviewer.md"), claude: "unknown",
-		},
+		c:        c,
+		p:        p,
+		started:  now,
+		tested:   evalSetup{rubric, shortHash(rubric), reviewer, shortHash(reviewer), version},
 		checkout: filepath.Join(p.WorkRoot(), p.Name, "_eval"),
 		logs:     c.path("logs", "review-eval-"+p.Name+"-"+now.Format("20060102-150405")),
-	}
-	e.tested.reviewerHash = shortHash(e.tested.reviewer)
-	if v, ok := claudeVersion(); ok && v != "" {
-		e.tested.claude = v
 	}
 	if err := os.MkdirAll(e.logs, 0o755); err != nil {
 		return nil, err
@@ -427,7 +430,8 @@ func (e *evalRun) rerun(t Task, r AutomatedReview, base string) (string, error) 
 	if err := os.WriteFile(briefing, []byte(evalBriefing(t, r, e.checkout, atoiOr0(count), commits)), 0o644); err != nil {
 		return "", err
 	}
-	// The pr-review skill's prompt for the Claude reviewer, SKILL.md step 4.
+	// The pr-review skill's prompt for the Claude reviewer, SKILL.md step 4;
+	// tests/guard.sh checks they match.
 	prompt := fmt.Sprintf("Review `%s..HEAD` in `%s`. Use the scope exactly as given; don't widen it or reconstruct it. Follow the rubric at `%s` and the briefing at `%s`.",
 		r.Fork, e.checkout, e.tested.rubric, briefing)
 	cmd := e.c.claude("-p", "--agent", "reviewer", "--add-dir", e.logs, "--add-dir", filepath.Dir(e.tested.rubric),
@@ -495,31 +499,39 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	return v, finding, nil
 }
 
-// parseJudgement reads the judge's answer: its verdict, the first word or
-// words of its first line, then the finding it quotes, on the rest of that
-// line or the next line with text, or "" for none.
+// parseJudgement reads the judge's answer: the verdict that starts its first
+// line, then the finding it quotes, on the rest of that line or else the next
+// line with text, or "" for none.
 func parseJudgement(answer string) (verdict, string, bool) {
 	lines := strings.Split(strings.TrimSpace(answer), "\n")
-	first := strings.Trim(lines[0], " *`_")
-	for _, v := range []verdict{verdictNotAFinding, verdictFound, verdictMissed} {
-		if len(first) < len(v) || !strings.EqualFold(first[:len(v)], string(v)) {
-			continue
-		}
-		rest := first[len(v):]
-		if rest != "" && (unicode.IsLetter(rune(rest[0])) || unicode.IsDigit(rune(rest[0]))) {
-			continue // "foundation", say
-		}
-		quote := strings.Trim(rest, " *`_.:—-")
-		for _, l := range lines[1:] {
-			if quote != "" {
-				break
-			}
+	v, rest, ok := leadingVerdict(lines[0])
+	if !ok {
+		return "", "", false
+	}
+	quote := strings.Trim(rest, " *`_.:—-") // "found: …", "**Found.**"
+	for _, l := range lines[1:] {
+		if quote == "" {
 			quote = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), ">"))
 		}
-		if strings.EqualFold(strings.Trim(quote, " .\"*"), "none") {
-			quote = ""
+	}
+	if strings.EqualFold(strings.Trim(quote, " .\"*"), "none") {
+		quote = ""
+	}
+	return v, quote, true
+}
+
+// leadingVerdict is the verdict line starts with, in any case and markdown,
+// and what follows it. A verdict must end a word: "foundation" isn't "found".
+func leadingVerdict(line string) (verdict, string, bool) {
+	line = strings.Trim(line, " *`_")
+	for _, v := range []verdict{verdictNotAFinding, verdictFound, verdictMissed} {
+		if len(line) < len(v) || !strings.EqualFold(line[:len(v)], string(v)) {
+			continue
 		}
-		return v, quote, true
+		rest := line[len(v):]
+		if rest == "" || !unicode.IsLetter(rune(rest[0])) && !unicode.IsDigit(rune(rest[0])) {
+			return v, rest, true
+		}
 	}
 	return "", "", false
 }
@@ -552,7 +564,9 @@ func printSession(cmd *exec.Cmd, out, who string) (string, error) {
 }
 
 // evalReport is the report of a run: what it tested with, the totals, how it
-// compares with the last run, then one line per case.
+// compares with the last run, then one line per case. The next run reads its
+// header and case lines back with parseEvalReport, so the two keep one format;
+// TestEvalReportAndComparison checks the round trip.
 func evalReport(project string, at time.Time, tested evalSetup, logs string, results []evalResult, comparison string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Review eval of %s, %s\n\n", project, at.Format(logTime))
@@ -615,6 +629,7 @@ func firstLine(text string, n int) string {
 // so the newest sorts last.
 func latestEvalReport(dir string) (string, bool) {
 	reports, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+	slices.Sort(reports)
 	if len(reports) == 0 {
 		return "", false
 	}
@@ -626,8 +641,8 @@ func latestEvalReport(dir string) (string, bool) {
 func parseEvalReport(text string) (evalSetup, map[string]verdict) {
 	var s evalSetup
 	hash := func(rest string) string { // "`<path>` (<hash>)"
-		i := strings.LastIndex(rest, " (")
-		return strings.TrimSuffix(rest[i+2:], ")")
+		_, h, _ := strings.Cut(rest, "` (")
+		return strings.TrimSuffix(h, ")")
 	}
 	verdicts := map[string]verdict{}
 	for _, l := range strings.Split(text, "\n") {
@@ -659,6 +674,7 @@ func compareEvals(prevFile string, prev evalSetup, prevVerdicts map[string]verdi
 		case !ok:
 			added++
 		case was == verdictNotRun || r.verdict == verdictNotRun:
+			// Not judged in one of the runs: nothing to compare.
 		default:
 			shared++
 			if was == verdictMissed && r.verdict == verdictFound {
