@@ -113,6 +113,7 @@ check "automated review runs up to 3 times by default, and crew config lists it"
 echo 'AUTO_REVIEWS=0' >>"$PE"
 check "a project can turn automated review off" '[[ $(cd "$HOME" && crew config AUTO_REVIEWS --project "$P") == 0 ]]'
 sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
+check "a worker asks to split a branch past 1000 lines by default, and crew config lists it" '[[ $(crew config MAX_PR_LINES) == 1000 ]] && crew config | grep -qx MAX_PR_LINES=1000'
 check "Codex is off in automated review by default, with 2 rounds between the reviewers when it's on" '[[ $(crew config CODEX_REVIEW) == no && $(crew config AUTO_REVIEW_REBUTTALS) == 2 ]] && crew config | grep -qx CODEX_MODEL_EFFORT=xhigh'
 # crew codex: one read-only review by Codex, through tests/stubs/codex.
 mkdir -p "$SB/rev" && echo "Adversarially review the briefing." >"$SB/rev/prompt.md"

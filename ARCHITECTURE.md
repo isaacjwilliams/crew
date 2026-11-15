@@ -193,7 +193,7 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
 ```
 
 ### Worker first run
-The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run), and records the PR with `crew set TASK pr …` and `crew log`.
+The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Once they pass, it checks the branch's size once, against `MAX_PR_LINES`: past it, it goes to "Workflow: split proposal" (below) instead of opening a PR. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run), and records the PR with `crew set TASK pr …` and `crew log`.
 
 Then, unless `AUTO_REVIEWS` is 0, it reviews its own PR:
 ```
@@ -213,8 +213,10 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
           and repeats of what was already left for the user, among them) → its Outcome line
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
-        → gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
+        → converged: gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
+        → didn't converge (fixes for the last review): the summary gives the proposed pieces; split proposal
 ```
+A pass that didn't converge, like a branch past `MAX_PR_LINES`, ends in the implementer's "Workflow: split proposal": the worker says what got in the way, proposes smaller pieces to replace the branch (each naming the commits and paths it carries over), and asks under Open questions: split as proposed, review it anyway, or take it as it is. The question takes the usual path to the user, or in a goal to the goal lead, which answers it: to split, it opens the pieces with `crew new … --goal`, re-points tasks stacked on the old one, and abandons it.
 That's the first pass of automated review. A review round with an `Automated review requested` line (below) has the worker run another, once it has addressed the round's comments. A pass is the reviews after the last `Summary posted`, derived from the record rather than stored: it runs up to `AUTO_REVIEWS` reviews (at least one when the user asked for it), numbered on from the last pass, and posts a summary comment of its own.
 
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
@@ -686,6 +688,7 @@ Changing any of these means updating every side listed.
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" pause --hook`, matcher `*`, added by `addPauseHook` to every worker's and goal lead's settings and to no settings file; it reads only `CREW_PROJECT` and the mark until the project is paused, then also the `session_id` on its input, sets `interrupted` on that session's file, and prints `{"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": …}}` | `workerSettings`, `goalLeadSettings` (`addPauseHook`) → `crew pause --hook` (`pauseHook`) → `implementer.md`, `goal-lead.md`; checked in `tests/crew-e2e.sh` |
 | The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks" of the installed `lead.md` | `lead.md` → `goal-lead.md`, and `agentFiles`, which counts `lead.md` in a goal lead's fingerprint; checked in `tests/guard.sh` |
 | A goal task's worker question that the goal lead leaves for the user gets a "For the user: …" Log line | `goal-lead.md` → `lead.md` "Goals"; checked in `tests/guard.sh` |
+| A split question's three answers, `split as proposed`, `review it anyway` and `take it as it is`, and what the worker does for each at the size check and at the end of a pass that didn't converge | implementer "Workflow: split proposal" → `goal-lead.md` "Workflow: new input" (opens the pieces, re-points stacked tasks), `lead.md` "Status"; the summary's unconverged ending in `templates/review-comment.md`; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
@@ -748,7 +751,7 @@ Changing any of these means updating every side listed.
 | Change coding standards | The user's `~/.claude/CLAUDE.md` (taste) or the repo's `AGENTS.md` (project conventions). `implementer.md` holds no standards of its own; it relies on those loading |
 | Change the PR-body format | `implementer.md` (first run, step 7) |
 | Tune the readability review | `casual-observer.md` (budget, checklist, severity, model) |
-| Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
+| Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; the size past which a worker proposes a split is `MAX_PR_LINES`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
 | Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 7 of `lead.md` |
 | Tune the gardener | `gardener.md`; the range and turn limit are in `config/defaults.env` (set them in `config/crew.env`) |
 | Allow or deny a command | `config/*-settings.json` (`allow` for fewer prompts, `deny` as a tripwire); what an agent may do on GitHub goes in its prompt |
