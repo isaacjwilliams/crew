@@ -342,11 +342,19 @@ func TestTaskKind(t *testing.T) {
 func TestKindRules(t *testing.T) {
 	build, _ := KindBuild.rules()
 	spike, _ := KindSpike.rules()
-	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.informs != "" || build.handedOver != PROpen {
+	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.link != "" || build.handedOver != PROpen {
 		t.Errorf("build's rules: %+v", build)
 	}
-	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.informs != Draft || spike.handedOver != Done {
+	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.link != "informs" || spike.linkTo != Draft || spike.handedOver != Done {
 		t.Errorf("spike's rules: %+v", spike)
+	}
+}
+
+func TestOrList(t *testing.T) {
+	for want, items := range map[string][]string{"": nil, "low": {"low"}, "low or high": {"low", "high"}, "low, medium or high": {"low", "medium", "high"}} {
+		if got := orList(items); got != want {
+			t.Errorf("orList(%q) = %q, want %q", items, got, want)
+		}
 	}
 }
 

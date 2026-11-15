@@ -42,7 +42,7 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	if !ok {
 		return Task{}, fail("--kind must be %s, not '%s'", kindNames(), kindArg)
 	}
-	if informs != "" && rules.informs == "" {
+	if informs != "" && rules.link != "informs" {
 		return Task{}, fail("a %s task doesn't take --informs", kind)
 	}
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
@@ -87,15 +87,10 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		}
 		base = parent.Branch()
 	}
-	var linked Task
-	if informs != "" {
-		f, matches := resolveIn(informs, c.files("tasks", proj))
-		if f == "" {
-			return Task{}, ambiguousFail(informs, matches, "--informs '%s' doesn't match exactly one task in %s", informs, proj)
-		}
-		linked = Task{Doc{f}}
-		if st := linked.Status(); st != rules.informs {
-			return Task{}, fail("%s is '%s'; --informs takes a %s task", linked.ID(), st, rules.informs)
+	link := informs
+	if link != "" {
+		if link, err = c.resolveLink(proj, rules, link); err != nil {
+			return Task{}, err
 		}
 	}
 
@@ -123,9 +118,9 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		return Task{}, err
 	}
 	msg := "created as a " + string(kind)
-	if linked.Path != "" {
-		t.Set("informs", linked.ID())
-		msg += ", informs " + linked.ID()
+	if link != "" {
+		t.Set(rules.link, link)
+		msg += ", " + rules.link + " " + link
 	}
 	if parent.Path != "" {
 		t.Set("depends_on", parent.ID())
@@ -141,6 +136,24 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		fmt.Println(t.Path)
 	}
 	return t, nil
+}
+
+// resolveLink is what a task of a kind with rules r records as its link: the ID
+// of the one task in proj that value names, which must have the status r.linkTo.
+func (c *Crew) resolveLink(proj string, r kindRules, value string) (string, error) {
+	takes := fmt.Sprintf("a %s task in %s", r.linkTo, proj)
+	if value == "" {
+		return "", mustBe(r.link, takes, value)
+	}
+	f, matches := resolveIn(value, c.files("tasks", proj))
+	if f == "" {
+		return "", ambiguousFail(value, matches, "%s must be %s; '%s' doesn't match exactly one task", r.link, takes, value)
+	}
+	linked := Task{Doc{f}}
+	if st := linked.Status(); st != r.linkTo {
+		return "", fail("%s must be %s; %s is '%s'", r.link, takes, linked.ID(), st)
+	}
+	return linked.ID(), nil
 }
 
 // ambiguousFail lists the matches of an ambiguous argument, if there are any,

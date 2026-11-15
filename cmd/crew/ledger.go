@@ -362,9 +362,11 @@ type kindRules struct {
 	// another needs that branch on origin. A kind that makes no PR keeps its
 	// branch local and throws it away.
 	pr bool
-	// informs is the status of the task this kind may inform (crew new
-	// --informs), or nothing when it informs none.
-	informs Status
+	// link is the front-matter key that ties the task to another, or nothing when
+	// the kind takes none; crew new sets it from the flag of the same name
+	// (--informs). linkTo is the status that other task must have.
+	link   string
+	linkTo Status
 	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
 	// cmd_new.go), and handedOver the status it moves the task to.
 	handOver   func(*Crew, Task) error
@@ -383,7 +385,8 @@ var kinds = []kindRules{
 	{
 		kind:       KindSpike,
 		brief:      []string{"## Goal", "## Plan", "## Acceptance criteria"},
-		informs:    Draft,
+		link:       "informs",
+		linkTo:     Draft,
 		handOver:   handOverReport,
 		handedOver: Done,
 	},
@@ -411,7 +414,19 @@ func kindNames() string {
 	for i, r := range kinds {
 		names[i] = string(r.kind)
 	}
-	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+	return orList(names)
+}
+
+// orList lists items as a sentence does: "low, medium or high".
+func orList[T ~string](items []T) string {
+	s := make([]string, len(items))
+	for i, item := range items {
+		s[i] = string(item)
+	}
+	if len(s) < 2 {
+		return strings.Join(s, "")
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
 }
 
 // A task's risk tier: what kind of look its PR needs from the user. The lead

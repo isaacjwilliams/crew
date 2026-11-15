@@ -1087,11 +1087,13 @@ check "new refuses a kind crew doesn't know, and --informs on a kind that takes 
 check "new refuses to stack a spike: its branch stays local" \
   '[[ $(crew new "Stacked spike" --kind spike --on "$KD" 2>&1) == *"a spike'"'"'s branch stays local, so it can'"'"'t be stacked"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 check "new --informs refuses a task that isn't a draft" \
-  '[[ $(crew new "Late spike" --kind spike --informs "$OR" 2>&1) == *"; --informs takes a draft task"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+  '[[ $(crew new "Late spike" --kind spike --informs "$OR" 2>&1) == *"informs must be a draft task in $(basename "$PD"); $(basename "$OR" .md) is '"'"'abandoned'"'"'"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 KS=$(crew new "Try cursor paging" --kind spike --informs "$KD" --goal "$GF8"); KSI=$(basename "$KS" .md)
 KT=$(crew new "Try a full scan" --kind spike --informs "$KD" --goal "$GF8")
 check "new --kind spike --informs makes a spike tied to the draft, and logs it" \
   '[[ $(crew get "$KS" kind) == spike && $(crew get "$KS" informs) == "$KDI" && $(crew get "$KD" kind) == build && $(section "$KS" "## Log") == *" — created as a spike, informs $KDI, for goal $G8" ]]'
+check "set checks a spike's informs as new does, and records the draft's ID" \
+  '! crew set "$KS" informs "$OR" 2>/dev/null && crew set "$KS" informs "$(num "$KD")" && [[ $(crew get "$KS" informs) == "$KDI" ]]'
 check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build or spike, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
 sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Plan$/a 1. Page through the API.' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
 check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Structure or risk" \
