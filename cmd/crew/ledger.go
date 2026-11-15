@@ -89,7 +89,8 @@ func (d Doc) Set(key, value string) error {
 // Touch sets updated: to now.
 func (d Doc) Touch() error { return d.Set("updated", now()) }
 
-// logTime is how a Log line gives the time it was written, to the minute.
+// logTime is how the ledger gives a time, to the minute: in a Log line, and
+// in the heading of a review round or an automated review.
 const logTime = "2006-01-02 15:04"
 
 // Log appends a dated line to the end of the file, which is the Log section's.
@@ -454,21 +455,21 @@ func (t Task) PRNumber() string {
 func (t Task) Dispatched() bool { return t.WorkerJob() != "" || t.Worktree() != "" }
 
 // NewestReview is the number of the newest automated review the task records,
-// the last "### Automated review N" under ## Automated reviews, or 0 when it
-// records none.
+// or 0 when it records none.
 func (t Task) NewestReview() int {
-	n := 0
-	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
-		if num, ok := strings.CutPrefix(l, "### Automated review "); ok {
-			n = atoiOr0(num)
-		}
+	reviews := t.AutomatedReviews()
+	if len(reviews) == 0 {
+		return 0
 	}
-	return n
+	return reviews[len(reviews)-1].Number
 }
 
-// An automated review in the task's record: whether the Claude reviewer
-// reported, and each finding.
+// An automated review in the task's record: its number and when it was
+// recorded, from its heading, whether the Claude reviewer reported, and each
+// finding.
 type AutomatedReview struct {
+	Number         int
+	At             time.Time
 	ClaudeReported bool
 	Findings       []Finding
 }
@@ -489,9 +490,11 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 		reviewers, isReviewers := strings.CutPrefix(l, "- Reviewers: ")
 		severity, isSeverity := strings.CutPrefix(l, "- Agreed severity:")
 		outcome, isOutcome := strings.CutPrefix(l, "- Outcome:")
+		heading, isHeading := strings.CutPrefix(l, "### Automated review ")
 		switch {
-		case strings.HasPrefix(l, "### Automated review "):
-			reviews = append(reviews, AutomatedReview{ClaudeReported: true})
+		case isHeading:
+			n, at := numberedHeading(heading)
+			reviews = append(reviews, AutomatedReview{Number: n, At: at, ClaudeReported: true})
 			r, f = &reviews[len(reviews)-1], nil
 		case r == nil:
 		case isReviewers:
@@ -507,6 +510,16 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 		}
 	}
 	return reviews
+}
+
+// numberedHeading reads what follows "### Round " or "### Automated review " in
+// a heading: the number, and the time after the dash, as in "3 — 2026-11-11
+// 10:00 (PR #12)". The time is zero when the heading has none.
+func numberedHeading(rest string) (int, time.Time) {
+	num, stamp, _ := strings.Cut(rest, " — ")
+	stamp, _, _ = strings.Cut(stamp, " (")
+	at, _ := time.ParseInLocation(logTime, stamp, time.Local)
+	return atoiOr0(num), at
 }
 
 // Clean is the rule for a review that ends a pass, as implementer.md's
@@ -740,19 +753,97 @@ func (t Task) FeedbackRounds() int {
 	return n
 }
 
-// ReviewComments counts the user's comments in the task's review rounds:
-// review summaries, inline comments and conversation comments (reviewRound.add
-// writes their items). Red CI and requests for another automated review
-// aren't comments.
-func (t Task) ReviewComments() int {
-	n := 0
+// A review round: its number, when crew recorded it, and the user's comments
+// in it.
+type ReviewRound struct {
+	Number   int
+	At       time.Time
+	Comments []ReviewComment
+}
+
+// A comment of the user's in a review round: a review summary, an inline
+// comment or a conversation comment. Item is its checklist item, such as
+// "comment 10 — [link](u10)", and Text what the round quotes of it.
+type ReviewComment struct{ Item, Text string }
+
+// ReviewRounds is the task's review rounds, oldest first, as reviewRound.add
+// writes them. Red CI and requests for another automated review aren't
+// comments, so a round of only those has none.
+func (t Task) ReviewRounds() []ReviewRound {
+	var rounds []ReviewRound
+	var comment *ReviewComment // the comment whose quote the line may continue
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		item, ok := checklistItem(l)
-		if ok && (strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")) {
-			n++
+		if rest, ok := strings.CutPrefix(l, "### Round "); ok {
+			n, at := numberedHeading(rest)
+			rounds, comment = append(rounds, ReviewRound{Number: n, At: at}), nil
+			continue
+		}
+		if len(rounds) == 0 {
+			continue
+		}
+		r := &rounds[len(rounds)-1]
+		if quote, ok := strings.CutPrefix(l, "  >"); ok && comment != nil {
+			if comment.Text != "" {
+				comment.Text += "\n"
+			}
+			comment.Text += strings.TrimPrefix(quote, " ")
+		} else if item, ok := checklistItem(l); ok && isComment(item) {
+			r.Comments = append(r.Comments, ReviewComment{Item: item})
+			comment = &r.Comments[len(r.Comments)-1]
+		} else {
+			comment = nil
 		}
 	}
+	return rounds
+}
+
+// isComment: the checklist item in a review round is one of the user's
+// comments: "review 7 (changes_requested)", "comment 10 — …" or
+// "`a.go:3` — comment 9 — …".
+func isComment(item string) bool {
+	return strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")
+}
+
+// ReviewComments counts the user's comments in the task's review rounds.
+func (t Task) ReviewComments() int {
+	n := 0
+	for _, r := range t.ReviewRounds() {
+		n += len(r.Comments)
+	}
 	return n
+}
+
+// A comment the user made after automated review had been through the PR:
+// the round it's in, and Review, the newest automated review recorded before
+// that round.
+type CommentAfterReview struct {
+	Round   int
+	Comment ReviewComment
+	Review  AutomatedReview
+}
+
+// CommentsAfterReview is the user's comments in the rounds recorded after an
+// automated review, oldest first: each is a point that review could have
+// raised first. A review or round without a time in its heading can't be
+// placed, so it counts as neither.
+func (t Task) CommentsAfterReview() []CommentAfterReview {
+	reviews := t.AutomatedReviews()
+	var after []CommentAfterReview
+	for _, round := range t.ReviewRounds() {
+		var followed *AutomatedReview
+		for i, rv := range reviews {
+			if !rv.At.IsZero() && rv.At.Before(round.At) {
+				followed = &reviews[i]
+			}
+		}
+		if followed == nil {
+			continue
+		}
+		for _, cm := range round.Comments {
+			after = append(after, CommentAfterReview{round.Number, cm, *followed})
+		}
+	}
+	return after
 }
 
 type Goal struct{ Doc }
