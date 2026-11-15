@@ -494,16 +494,11 @@ func fenceOpening(l string) string {
 // task's security review: what it found and what the worker did about it.
 const securityReview = "### Security review"
 
-// SecurityReviewed: ## Evidence has a securityReview entry, which a high-risk
-// task needs before its hand-over. The entry isn't numbered, so EvidenceGaps
-// doesn't count it as a criterion's.
+// SecurityReviewed: ## Evidence has a securityReview entry with something under
+// it, which a high-risk task needs before its hand-over. The entry isn't
+// numbered, so EvidenceGaps doesn't count it as a criterion's.
 func (t Task) SecurityReviewed() bool {
-	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		if strings.TrimRight(l, " \t") == securityReview {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.evidenceEntries(), securityReview)
 }
 
 // AwaitsSecurityReview: the task is high risk and its security review isn't

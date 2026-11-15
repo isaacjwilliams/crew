@@ -197,10 +197,14 @@ func TestEvidenceGaps(t *testing.T) {
 
 func TestSecurityReviewed(t *testing.T) {
 	for evidence, want := range map[string]bool{
-		"## Evidence\n### 1. one\nok\n### Security review\nNo findings.\n\n": true,
-		"## Evidence\n### 1. one\nok\n\n":                                    false,
-		"## Evidence\n<!-- ### Security review -->\n\n":                      false,
-		"## Goal\n### Security review\n\n":                                   false,
+		"## Evidence\n### 1. one\nok\n### Security review\nNo findings.\n\n":   true,
+		"## Evidence\n### 1. one\nok\n\n":                                      false,
+		"## Evidence\n<!-- ### Security review -->\n\n":                        false,
+		"## Goal\n### Security review\n\n":                                     false,
+		"## Evidence\n### 1. one\nok\n### Security review\n\n":                 false,
+		"## Evidence\n### Security review\n<!-- to do -->\n### 1. one\nok\n\n": false,
+		"## Evidence\n### 1. one\n```\n### Security review\nok\n```\n\n":       false,
+		"## Evidence\n### 1. one\n~~~\n### Security review\nok\n~~~\n\n":       false,
 	} {
 		task := Task{docWith(t, criteria+evidence+"## Log\n")}
 		if got := task.SecurityReviewed(); got != want {
