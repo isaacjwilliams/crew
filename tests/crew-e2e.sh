@@ -194,7 +194,9 @@ check "non-ascii title falls back to task-N" '[[ $(basename "$F3") == 003-task-3
 check "ready refuses an empty brief" '! crew ready 1 2>/dev/null'
 fill "$F1"; sed -i '/^s$/d' "$F1"
 check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"fill in: Structure"* ]]'
-sed -i '/^## Structure$/a s' "$F1"; crew ready 1 >/dev/null
+sed -i -e '/^## Structure$/a s' -e 's/^- z$/1. z/' "$F1"
+check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write the acceptance criteria as '"'"'- '"'"' items"* ]]'
+sed -i 's/^1\. z$/- z/' "$F1"; crew ready 1 >/dev/null
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
@@ -213,15 +215,22 @@ check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
 # crew set stays a plain write. Three criteria; the nested bullet isn't one.
 sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F1"
 check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
+mode=$(crew get 1 pr_mode); crew set 1 pr_mode none
+check "hand-over needs no PR when the task opens none" '[[ $(crew hand-over 1 2>&1) == *"evidence missing for acceptance criteria 1, 2, 3 of 3"* ]]'
+crew set 1 pr_mode "$mode"
 check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
   '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
-check "hand-over refuses a task that isn't working" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"', not working or addressing feedback"* ]]'
+check "hand-over refuses a task handed over already" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open yet can be handed over"* ]]'
 crew set 1 status working
 sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
 check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
   'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
-sed -i -e '/^### 3. z$/i ### 2. z3\nseen' "$F1"
-check "hand-over sets pr-open and logs it once every acceptance criterion has evidence" \
+sed -i -e '/^### 3. z$/i ### 2. z3\nseen' -e 's/^\(- z[23]\?\)$/1. \1/' "$F1"
+check "hand-over refuses acceptance criteria that aren't '- ' items, and says to ask" '[[ $(crew hand-over 1 2>&1) == *"no '"'"'- '"'"' items to show evidence for: ask"* ]]'
+sed -i 's/^1\. \(- z[23]\?\)$/\1/' "$F1"
+# A task in flight may be waiting on a collaborator's question when its worker finishes.
+crew set 1 status needs-input
+check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \

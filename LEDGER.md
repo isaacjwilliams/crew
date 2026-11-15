@@ -135,7 +135,7 @@ A task's `## Decisions` holds one dated line per decision about the task: your a
 
 ## Evidence
 
-A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the worker's first move to `pr-open`, refuses until every criterion has an entry: it counts them, and doesn't judge them. Later returns to `pr-open`, after a review round or a restack, are plain `crew set`s.
+A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the worker's first move to `pr-open`, refuses until every criterion has an entry with something under its heading: it counts them, and doesn't judge them. So that each criterion has a number, `crew ready` refuses criteria that aren't `- ` items. Later returns to `pr-open`, after a review round or a restack, are plain `crew set`s.
 
 ## Automated reviews
 

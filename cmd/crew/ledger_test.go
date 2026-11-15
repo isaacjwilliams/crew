@@ -161,6 +161,17 @@ func TestNewestReview(t *testing.T) {
 const criteria = "## Acceptance criteria\n<!-- Checkable statements:\n- not a criterion -->\n" +
 	"- one\n- two, with details:\n  - nested\n  - nested\n  continued\n- three <!-- - inline -->\n\n"
 
+func TestAcceptanceCriteria(t *testing.T) {
+	task := Task{docWith(t, criteria+"## Log\n")}
+	if got := task.AcceptanceCriteria(); !slices.Equal(got, []string{"one", "two, with details:", "three "}) {
+		t.Errorf("AcceptanceCriteria = %q", got)
+	}
+	numbered := Task{docWith(t, "## Acceptance criteria\n1. one\n2. two\n\n## Log\n")}
+	if got := numbered.AcceptanceCriteria(); got != nil {
+		t.Errorf("criteria as a numbered list: AcceptanceCriteria = %q, want none", got)
+	}
+}
+
 func TestEvidenceGaps(t *testing.T) {
 	for _, c := range []struct {
 		name, evidence string
@@ -170,11 +181,13 @@ func TestEvidenceGaps(t *testing.T) {
 		{"one entry missing", "## Evidence\n### 1. one\nok\n### 3. three\nok\n\n", []int{2}},
 		{"no Evidence section", "", []int{1, 2, 3}},
 		{"entries in a comment don't count", "## Evidence\n<!-- ### 1. like this -->\n### 2. two\nok\n\n", []int{1, 3}},
+		{"an entry with nothing under its heading doesn't count", "## Evidence\n### 1. one\n\n### 2. two\nok\n### 3. three\n\n", []int{1, 3}},
+		{"an entry with only a comment under it doesn't count", "## Evidence\n### 1. one\n<!-- to do -->\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
+		{"lines under another heading belong to no entry", "## Evidence\n### 1. one\n### Notes\nok\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
 	} {
 		task := Task{docWith(t, criteria+c.evidence+"## Log\n")}
-		gaps, n := task.EvidenceGaps()
-		if !slices.Equal(gaps, c.gaps) || n != 3 {
-			t.Errorf("%s: EvidenceGaps = %v, %d; want %v, 3", c.name, gaps, n, c.gaps)
+		if gaps := task.EvidenceGaps(); !slices.Equal(gaps, c.gaps) {
+			t.Errorf("%s: EvidenceGaps = %v; want %v", c.name, gaps, c.gaps)
 		}
 	}
 }

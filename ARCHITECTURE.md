@@ -174,7 +174,8 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
         → review arrives → findings settled → Raise findings to you
         (each point written into the draft task file as it's agreed)
   you: "go"                             # if the review is still running, the lead dispatches once it's settled
-  lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty
+  lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty,
+                                        # and the criteria are '- ' items
         crew dispatch TASK
           ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS, the goal's max_in_flight; unlock
           │     a stacked task's parent is exempt from "must be merged";
@@ -568,7 +569,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Ledger files (`ledger.go`):**
   - A `Doc` is a task, goal or proposal file. It reads the file afresh for every value and writes it back at once, under the ledger lock: agents edit these files too, so nothing is kept in memory. `Task`, `Goal` and `Proposal` wrap one with the keys each has. `Status` and `GoalStatus` are the statuses; a Go test checks them against `LEDGER.md`.
   - `Get`/`Set` handle *flat* `key: value` between the first two `---` lines. `Set` quotes values containing `: `, ` #` or `"`, replaces newlines with spaces, and adds missing keys before the closing `---`. Keep front matter flat; there's no YAML parser.
-  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `Task.EvidenceGaps` uses it too, to find the acceptance criteria without an entry under `## Evidence`, for `crew hand-over`. `InsertBefore` puts review rounds before `## Log`.
+  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `Task.AcceptanceCriteria` uses it too, for `crew ready` and `crew hand-over`, and `Task.EvidenceGaps` to find the criteria without an entry under `## Evidence`, for `crew hand-over`. `InsertBefore` puts review rounds before `## Log`.
   - `Log` appends to the end of the file, so **`## Log` must stay the last section**.
 - **Resolution (`resolve.go`):** `resolve` accepts:
   - a path;
@@ -694,7 +695,7 @@ Changing any of these means updating every side listed.
 | A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 7; checked in `tests/guard.sh` |
 | Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew hand-over`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
 | Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Evidence`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew hand-over`, `crew feedback`, `Doc.Log`, `crew promote` |
-| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` | `templates/task.md`, implementer first run step 6 (and steps 10 and review rounds step 6, which keep it true) → `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
+| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 5, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `Task.AcceptanceCriteria` (`crew ready`), `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies, the automated-review summary and the CI comment | `crew reply`, `crew review-summary`, `crew ci-summary` (`postOrEditComment`) → the `crew feedback` filter |

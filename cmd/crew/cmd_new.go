@@ -181,6 +181,9 @@ func cmdReady(c *Crew, args []string) error {
 	if len(missing) > 0 {
 		return fail("brief is incomplete, fill in: %s", strings.Join(missing, " "))
 	}
+	if len(t.AcceptanceCriteria()) == 0 {
+		return fail("write the acceptance criteria as '- ' items, one for each: the worker shows evidence for each one")
+	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)
 	}
@@ -207,23 +210,23 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if st := t.Status(); st != Working && st != AddressingFeedback {
-		return fail("task is '%s', not working or addressing feedback", st)
+	if st := t.Status(); !st.InFlight() || st == PROpen {
+		return fail("task is '%s': only a task in flight that isn't pr-open yet can be handed over", st)
 	}
 	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
 		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
 	}
-	gaps, criteria := t.EvidenceGaps()
-	if criteria == 0 {
-		return fail("## Acceptance criteria has no '- ' items, so there's nothing to show evidence for")
+	criteria := t.AcceptanceCriteria()
+	if len(criteria) == 0 {
+		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
 	}
-	if len(gaps) > 0 {
+	if gaps := t.EvidenceGaps(); len(gaps) > 0 {
 		nums := make([]string, len(gaps))
 		for i, n := range gaps {
 			nums[i] = strconv.Itoa(n)
 		}
-		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry under ## Evidence for each, with the command and its output",
-			strings.Join(nums, ", "), criteria)
+		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
+			strings.Join(nums, ", "), len(criteria))
 	}
 	if err := c.lock(); err != nil {
 		return err
