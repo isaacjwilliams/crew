@@ -272,9 +272,9 @@ func cmdReady(c *Crew, args []string) error {
 
 // crew hand-over TASK: the worker's work is ready for whoever reads it next.
 // The task's kind says what that needs (handOverPR, handOverReport) and which
-// status it moves to. Workers run it once, at the end of their first run; a
-// review round may have started by then. Their later moves back to pr-open are
-// plain crew set, since the PR was handed over already.
+// status it moves to. It's the only way into pr-open (crew set refuses it), so
+// every return of a PR to the user, after a review round or a restack, checks
+// the branch as it is then.
 func cmdHandOver(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew hand-over TASK")
@@ -305,7 +305,7 @@ func cmdHandOver(c *Crew, args []string) error {
 		return err
 	}
 	if st := t.Status(); !st.InFlight() || st == PROpen {
-		return fail("task is '%s': only a task in flight that isn't pr-open yet can be handed over", st)
+		return fail("task is '%s': only a task in flight, and not in pr-open, can be handed over", st)
 	}
 	if err := rules.handOver(c, t); err != nil {
 		return err

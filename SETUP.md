@@ -365,19 +365,36 @@ crew stats         # tasks merged in the last 30 days (--since YYYY-MM-DD; --pro
 
 One row for each merged task:
 
-- **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI isn't counted.
+- **kind**: build, fix or refine.
+- **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI or a conflict with the base isn't counted.
 - **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
 - **questions waited on you**: from each time it went to `needs-input` until it left it. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
 - **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
 - **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column.
+- **later fixes** and **reverts**: the fix tasks that merged naming this task in `fixes`, and the reverts of its PR, whenever they came.
 
-Then the totals, and the median waits. It reads only the ledger, so it changes nothing and works on any machine.
+Then the totals, and the median waits.
+
+**By risk tier** groups the same tasks by `risk`: low, medium, high, then those with no risk tier. For each tier it gives how many merged, the median of their review rounds, their comments per task, and the later fixes and reverts since the date that trace to tasks of that tier. A low-risk PR should need only a look at its evidence, so when low-risk PRs drew more comments per task than medium ones, the report says so: the tiers the lead sets, or the `SENSITIVE_PATHS` that raise them, may be off. Read those PRs' comments for what they had in common.
+
+**Later fixes and reverts** lists each fix that merged and each revert made since the date, with the task it traces to and that task's tier, however long before the date that task merged. The last line counts those fixes by `missed_by`:
+
+```
+Later fixes and reverts since 2026-11-05:
+  051-round-totals fixes 012-invoice-totals (low risk), missed by tests
+  revert of #35 → 029-export (medium risk)
+  missed by: tests 1
+```
+
+A fix traces to its task through `fixes`, or to an unknown task when that's `unknown`. A revert is a commit on the default branch whose message says `This reverts commit <sha>`, as `git revert` and GitHub's revert button write, where that commit is a PR's merge commit (`Merge pull request #35 from …`) or squash commit (`… (#35)`). It traces to the task whose `pr` is that PR, or to an unknown task when none is. Undoing a revert, by reverting it or the PR that made it, isn't counted, and each commit counts as reverted once.
+
+It reads the ledger, and for reverts the default branch in the project's clone, which it fetches first. It changes nothing else, so it works on any machine; without the project's clone, or with a shallow one, it reports the rest and says `reverts: not checked`.
 
 ### What a worker's PR looks like
 
 Each PR is short and has the same shape, so you can tell at a glance whether to merge it, look at its evidence, or read the code closely: what changed and why in at most three sentences, then **Risk** (what could break, for whom, and how far it reaches), **How to revert** (and anything a revert alone doesn't undo), **Evidence**, and Notes for reviewers only when there's a trade-off or an open question. A stacked PR first names the PR it's stacked on. The template is `templates/pr-body.md` in your crew home.
 
-**Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the worker can't hand the PR over to you (`pr-open`) until every criterion has one: `crew hand-over` counts them, though it doesn't judge them.
+**Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the worker can't hand the PR over to you (`pr-open`) until every criterion has one: `crew hand-over` counts them, though it doesn't judge them. It's the only way into `pr-open` (`crew set` refuses it), so the same checks run each time the PR comes back to you, after a review round or a restack.
 
 ### Risk tiers: what look each PR needs
 
@@ -413,7 +430,7 @@ Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (
 
 **When it's too big to settle.** A PR too big for one review rarely comes back clean: each round of fixes brings new findings. So a worker checks its branch's size once, when its checks first pass and before it opens a PR: past `MAX_PR_LINES` (1000 lines added plus removed by default), it doesn't open one. And when the last of `AUTO_REVIEWS` reviews still needed fixes, the review didn't converge: the worker posts its summary but doesn't mark the PR ready. Either way, it proposes smaller pieces to replace the branch, each with the commits and files it carries over, and asks you: split as proposed, review it anyway (at the end of a pass, another pass), or take it as it is. In a goal, the goal lead answers, and opens the pieces as tasks if it takes the split.
 
-Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done and every acceptance criterion has evidence, and the lead's report of the PR repeats what was left for you.
+Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. Then it hands the PR over: the task turns `pr-open` once every acceptance criterion has evidence, and a high-risk task its security review. With `PR_MODE=ready` the PR stays a draft until that hand-over succeeds, and is marked ready right after it. The lead's report of the PR repeats what was left for you.
 
 **Another pass, after your review.** Once the worker has made the changes you asked for, you can have automated review check them: comment `crew review` on the PR (the whole comment, in any case), or ask the lead, which runs `crew review <task>`. Either way the request joins your review comments as a line in a review round, so it waits for a busy worker like any round. The worker addresses the round's comments first, then runs a new pass: up to `AUTO_REVIEWS` more reviews, at least one even when `AUTO_REVIEWS` is 0, each reading the commits since the last finished review, or the whole PR again after a rebase. The reviewers get your review comments as part of what you asked for. The pass ends with a new summary comment of its own, and the earlier ones stay as they were. Only your own `crew review` counts: a collaborator's goes under Open questions, like their other comments.
 
@@ -455,6 +472,12 @@ A task gets `MAX_CI_FIXES` of these rounds (2 by default). After that, red CI on
 
 **CI other than GitHub Actions.** Workers read GitHub Actions logs and rerun its failed jobs with `gh run`, which their settings allow. For any other CI, say in the project's `AGENTS.md` or its crew memory how to read the logs and rerun failed jobs, and allow those commands in `projects/<project>/worker-settings.json`. Without that, a worker reproduces the failure locally from the CI config in the repo, and asks you rather than rerun it.
 
+### Conflicts with the base
+
+As you merge PRs, another open PR that touches the same files can stop merging cleanly: GitHub shows it as conflicting. Once a worker has handed its PR to you (`pr-open`), `crew tick` notices and sends the worker a review round of its own saying so, once for each commit of the base branch. You don't have to ask. The worker merges the base branch into its own, resolves the conflicts, runs the checks and pushes. It doesn't rebase or force-push, so the commits you may have reviewed stay as they were, and the merge commit shows how it was resolved. It posts no comment. If a conflict means the plan no longer fits, the worker asks you.
+
+Before the hand-over, a conflict is the worker's own business: it rebases onto the base when it conflicts. A stacked task's conflicts are handled by a restack instead (see "Stacked tasks"). Rounds that only report a conflict don't count toward `MAX_REVIEW_ROUNDS`.
+
 ### Pausing
 
 To stop work on a project without losing any (when your usage is running low, say), tell the lead, or run:
@@ -464,7 +487,7 @@ crew pause --project <p>      # --all for every project; without either, the lea
 crew resume --project <p>     # let it go on
 ```
 
-While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments and red CI), the gardener skips it, and `crew dispatch`, `crew followup`, `crew goal start` and `crew review-eval` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
+While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup`, `crew goal start` and `crew review-eval` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
 
 Nothing is lost: worktrees, branches and conversations stay. When crew stops a session, it also ends what that session left running in the background in its worktree, such as a dev server or a Codex review, as cleanup does; `--force` does that for sessions that had already closed, too. A background subagent the session started may still run on: Claude Code carries those over to the session's next process. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
 
@@ -603,7 +626,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
-| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post an automated-review summary on each for every pass of automated review, and mark it ready after the first | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
+| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post an automated-review summary on each for every pass of automated review, and mark it ready after its first hand-over | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Codex only reads when it reviews | `crew codex` runs Codex every time with the read-only sandbox and approvals off, fixed in code. A `deny` rule in `config/worker-settings.json` catches workers running `codex` directly |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
@@ -627,9 +650,9 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `WORKER_AUTOCOMPACT_WINDOW` | `400k` | How full a worker's conversation gets before Claude Code compacts it: 100k to 1M tokens, or `auto` for Claude Code's default (about 967k on a 1M model). Applies to workers started after you change it |
 | `LEAD_PERMISSION_MODE` | `auto` | For `lead` and goal leads: `auto`, `acceptEdits`, or `default` |
 | `PRE_PR_REVIEW` | `yes` | Default for new tasks: casual-observer pass before the PR |
-| `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready`, or `none` (push only) |
+| `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready` (a draft until its first hand-over, then marked ready), or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
-| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI don't count |
+| `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI or a conflict don't count |
 | `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
 | `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a plan at intake, and a worker asks whether to split its branch before it opens a PR; `0` sets no limit for either |
@@ -658,6 +681,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 - **A session on the phone stopped answering.** Sessions started from the phone hang once the `crew-lead` service restarts (after `crew upgrade`, or a crash). Start a new one: the lead picks up from the ledger.
 - **The phone doesn't list `crew`.** The lead service runs only on the machine that runs the crew, and on a Mac only while it's awake and you're logged in. On that machine, `systemctl --user status crew-lead` shows why it isn't running, or on a Mac `launchctl print gui/$(id -u)/crew-lead` and `~/crew/logs/crew-lead.log`; `crew doctor` checks the rest. The two first-time prompts in [The lead on your phone](#the-lead-on-your-phone) are the usual cause.
 - **`crew upgrade` stopped on a conflict.** An edit you made to crew's own files (an agent prompt, say) conflicts with the new version. Resolve the files it lists, `git -C ~/crew commit`, and run `crew upgrade` again, which lifts the pause; or `git -C ~/crew merge --abort` to stay on the old version, and `crew resume --project <p>` for each project it names (not `--all`, which would lift your own pauses too). The crew stays paused until you do one or the other. While the merge is open, git won't take the crew's ledger commits: each change stays in the files, `crew` warns, and the next commit after the merge takes it. Don't leave it open long.
+- **A task can't go back to `pr-open` after an upgrade.** Every move to `pr-open` goes through `crew hand-over`, which checks the task each time. A task dispatched before your home had `crew hand-over` has no `## Evidence` entries, so its next return, after a review round, a restack or a question you answered, is refused until its worker records evidence for each acceptance criterion; the lead resumes it with a note saying so. A task whose acceptance criteria aren't `- ` items is refused too, and that one is the lead's to fix: it rewrites them as `- ` items, keeping their words, and hands over again. Until then the task stays where it was, and its PR on GitHub is unchanged.
 - **`crew tick` says it stood down.** Another machine took the lease. This one's timers are off and its workers stopped. If it says it kept work on a `lost/…` branch, those are ledger changes origin never got: compare them with `git -C ~/crew log -p lost/…` and copy over what matters on the machine that runs the crew.
 
 - **`crew dispatch` says it couldn't start the worker.** It prints Claude Code's own output.

@@ -173,7 +173,8 @@ func cmdSet(c *Crew, args []string) error {
 	if len(args) < 2 || args[1] == "" {
 		return fail("key required")
 	}
-	key, value := args[1], strings.Join(args[2:], " ")
+	// Trimmed once, so the checks below see what Lookup will read back.
+	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
 	// An empty value clears the key. crew ready refuses a task whose kind needs
 	// one it cleared.
 	if value != "" {
@@ -184,6 +185,9 @@ func cmdSet(c *Crew, args []string) error {
 	// done means a spike's report is in, which crew hand-over checks.
 	if key == "status" && Status(value) == Done {
 		return fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
+	}
+	if key == "status" && Status(value) == PROpen {
+		return fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
 	}
 	if err := c.checkStacks(t, key, value); err != nil {
 		return err

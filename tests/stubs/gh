@@ -27,7 +27,8 @@
 # just after the newest comment above, unless $HOME/gh-pr-updated gives another time.
 # PR #<n>'s base branch is $HOME/gh-pr-base-<n>; without it, its baseRefName is empty.
 # A PR's head commit is $HOME/gh-pr-head, and its statusCheckRollup the JSON array in
-# $HOME/gh-pr-checks; without them, it has no checks. `pr view` runs $HOME/gh-pr-view-hook
+# $HOME/gh-pr-checks; without them, it has no checks. A PR merges cleanly into its base, unless
+# $HOME/gh-pr-mergeable says otherwise (CONFLICTING, UNKNOWN). `pr view` runs $HOME/gh-pr-view-hook
 # first, when it exists, with gh's arguments: something that happens while crew waits for GitHub.
 echo "gh $*" >>"$HOME/gh-calls.log"
 for a in "$@"; do [[ $a == body=* ]] && printf '%s' "${a#body=}" >"$HOME/gh-last-body"; done
@@ -89,7 +90,8 @@ case "$*" in
     [[ -x $HOME/gh-pr-view-hook ]] && "$HOME/gh-pr-view-hook" "$@"
     jq -cn --arg state "$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)" --arg updated "$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)" \
       --arg head "$(cat "$HOME/gh-pr-head" 2>/dev/null || echo 0123456789abcdef)" --argjson checks "$(cat "$HOME/gh-pr-checks" 2>/dev/null || echo '[]')" \
-      --arg base "$(cat "$HOME/gh-pr-base-${3##*/}" 2>/dev/null)" \
-      '{state: $state, isDraft: false, reviewDecision: "APPROVED", updatedAt: $updated, baseRefName: $base, headRefOid: $head, statusCheckRollup: $checks}' ;;
+      --arg mergeable "$(cat "$HOME/gh-pr-mergeable" 2>/dev/null || echo MERGEABLE)" --arg base "$(cat "$HOME/gh-pr-base-${3##*/}" 2>/dev/null)" \
+      '{state: $state, isDraft: false, reviewDecision: "APPROVED", updatedAt: $updated, baseRefName: $base, headRefOid: $head, statusCheckRollup: $checks,
+        mergeable: $mergeable}' ;;
   "auth status") exit 0 ;;
 esac
