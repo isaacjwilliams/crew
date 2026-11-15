@@ -409,6 +409,11 @@ func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 // "status → pr-open", say. crew stats reads the waits on the user from them.
 const statusLogged = "status → "
 
+// recordedForTheUser ends the Log line crew feedback and crew ci-fix write when
+// they put a question to the user under Open questions: a collaborator's PR
+// comment, or red CI past MAX_CI_FIXES. crew stats reads it.
+const recordedForTheUser = "recorded under Open questions for the user"
+
 // SetStatus writes the task's status and logs the change. Every change of a
 // task's status goes through here, so the Log has a line for each.
 func (t Task) SetStatus(s Status) error {

@@ -117,16 +117,22 @@ func statsOf(t Task) taskStats {
 		merged:   mergedAt(log),
 		rounds:   t.FeedbackRounds(),
 		comments: t.ReviewComments(),
-		prWait:   waited(log, changedTo(PROpen)),
+		prWait:   waited(log, changedTo(PROpen), changesStatus),
 	}
 	asked := changedTo(NeedsInput)
 	if t.Goal() != "" {
-		// The goal lead answers most of its tasks' questions itself. Only those
-		// it leaves for the user wait on them, and for each it logs a "For the
-		// user: …" line (goal-lead.md).
-		asked = func(e logEntry) bool { return strings.HasPrefix(e.msg, "For the user:") }
+		// The goal lead answers most of its tasks' workers' questions itself.
+		// Only those it leaves for the user wait on them, and for each it logs a
+		// "For the user: …" line (goal-lead.md). A collaborator's comment and red
+		// CI past MAX_CI_FIXES go to the user directly.
+		asked = func(e logEntry) bool {
+			return strings.HasPrefix(e.msg, "For the user:") || strings.HasSuffix(e.msg, recordedForTheUser)
+		}
 	}
-	s.questionWait = waited(log, asked)
+	// A question is answered once the task moves on: crew tick marking it
+	// needs-input, once its worker is idle, isn't an answer.
+	answered := func(e logEntry) bool { return changesStatus(e) && !changedTo(NeedsInput)(e) }
+	s.questionWait = waited(log, asked, answered)
 
 	reviews := t.AutomatedReviews()
 	s.reviews = len(reviews)
@@ -172,12 +178,12 @@ func changedTo(s Status) func(logEntry) bool {
 }
 
 // waited adds up the time from each Log entry that starts a wait on the user
-// to the next change of the task's status, which ends it.
-func waited(log []logEntry, starts func(logEntry) bool) time.Duration {
+// to the next one that ends it.
+func waited(log []logEntry, starts, ends func(logEntry) bool) time.Duration {
 	var total time.Duration
 	var since time.Time // when the wait under way began, or zero
 	for _, e := range log {
-		if !since.IsZero() && changesStatus(e) {
+		if !since.IsZero() && ends(e) {
 			total += e.at.Sub(since)
 			since = time.Time{}
 		}
