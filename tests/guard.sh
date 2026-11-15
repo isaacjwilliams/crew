@@ -187,6 +187,10 @@ check "implementer has the sections crew's stack prompts name" \
   "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' <<<\"\$SRC\" && grep -q 'Stacked tasks.. in your instructions' <<<\"\$SRC\""
 check "implementer records the new base only after pushing the restack" \
   "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease=/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
+check "a retarget note is one the implementer's restack workflow knows: gh pr edit alone, and nothing to rebase" \
+  "grep -qF 'note := fmt.Sprintf(\"Retarget (%s): ' <<<\"\$SRC\" && grep -qF 'Run \`gh pr edit --base %s\`, then follow your restack workflow.' <<<\"\$SRC\" && grep -q 'A retarget note, one that starts \"Retarget\", has nothing to rebase or push: run the .gh pr edit --base. command it gives' $A/implementer.md"
+check "a restack note's retarget comes after the push, as the implementer runs it" \
+  "grep -qF 'not your base: after pushing, run \`gh pr edit --base %s\`.' <<<\"\$SRC\" && grep -q 'If the note asks you to retarget your PR (.gh pr edit --base.) or to record a new base (.crew set <task> base.), run what it gives, only after the push' $A/implementer.md"
 check "lead restacks with crew restack and never edits base or depends_on to force a dispatch" \
   "grep -q 'run .crew restack <task>.' $A/lead.md && grep -q 'Never clear .depends_on. or edit .base. to get a dispatch through' $A/lead.md"
 # --- conversations are disposable: intake is written to the ledger as it happens, and agents trust it over a summary

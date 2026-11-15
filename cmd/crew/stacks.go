@@ -161,6 +161,22 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	return line, nil
 }
 
+// retargetReason says why a task's open PR has to be pointed at another branch,
+// or nothing: "PR targets <pr_base>, not <base>" when the base crew sync last read
+// from GitHub isn't the task's. It applies to any task, stacked or not, and never
+// asks for a rebase: that's restackReason's. It stays quiet until origin has the
+// base, as last fetched, since GitHub can't target a branch it doesn't have.
+func retargetReason(t Task, repo string) string {
+	prBase, base := t.Get("pr_base"), t.Base()
+	if !t.HasOpenPR() || prBase == "" || prBase == base {
+		return ""
+	}
+	if !gitOK(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+base) {
+		return ""
+	}
+	return fmt.Sprintf("PR targets %s, not %s", prBase, base)
+}
+
 // restackTarget is the commit a stacked task's branch belongs on now: the tip of
 // its effective base on origin, as last fetched. Empty if that branch isn't on
 // origin.

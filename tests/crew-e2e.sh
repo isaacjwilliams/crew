@@ -787,6 +787,46 @@ crew set 15 status pr-open; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 1)) ]]'
 
+# Retargets: 15 moves onto 16, a new task stacked on 14 that holds all of 14's work, as a split's last
+# piece can. 15 restacks onto 14 first, so its branch already holds 16's.
+(cd "$WT15" && git rebase -q --onto "$(tip tick-parent)" "$(crew get 15 base_sha)") && restack_push "$WT15"
+FR=$(crew new "Tick replacement" --branch tick-replacement --on 14); fill "$FR"; crew ready "$FR" >/dev/null
+crew set 15 base agent/tick-replacement; crew set 15 status pr-open; rs15=$(crew get 15 restack_sent)
+echo agent/tick-parent >"$HOME/gh-pr-base-32"
+out=$(crew sync)
+check "sync records the branch each PR targets on GitHub" '[[ $(crew get 15 pr_base) == agent/tick-parent ]]'
+check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+setstate "done" null; crew dispatch "$FR" >/dev/null; (cd "$(crew get "$FR" worktree)" && git push -q -u origin HEAD 2>/dev/null)
+crew set "$FR" pr https://github.com/isaac/webapp/pull/33; crew set "$FR" status pr-open
+echo agent/tick-old >"$HOME/gh-pr-base-31"
+out=$(crew sync)
+check "sync reports each PR that targets a branch other than its task's base, stacked or not" \
+  '[[ $out == *"015-tick-child: PR targets agent/tick-parent, not agent/tick-replacement (run '"'"'crew restack 015-tick-child'"'"')"* && $out == *"014-tick-parent: PR targets agent/tick-old, not main"* && $out != *"needs a restack"* ]]'
+check "status shows it" '[[ $(crew status) == *"PR targets agent/tick-parent, not agent/tick-replacement"* ]]'
+prompt_of() { grep -- "--resume" "$HOME/claude-calls.log" | grep -F "New input for task $1 (" | tail -1; }
+setstate "done" null; n=$(resumes)
+out=$(crew tick)
+check "with nothing to rebase, tick sends a retarget alone, to a stacked task and an unstacked one" \
+  '[[ $out == *"015-tick-child: restack sent to its worker (PR targets agent/tick-parent, not agent/tick-replacement)"* && $out == *"014-tick-parent: restack sent to its worker (PR targets agent/tick-old, not main)"* && $(resumes) == $((n + 2)) ]]'
+p15=$(prompt_of 015-tick-child)
+check "a retarget note asks for gh pr edit --base and no rebase or push, and is recorded apart from restacks" \
+  '[[ $p15 == *"Retarget (PR targets agent/tick-parent, not agent/tick-replacement)"*"\`gh pr edit --base agent/tick-replacement\`"* && $p15 != *"git rebase"* && $p15 != *"git push"* && $(crew get 15 retarget_sent) == agent/tick-replacement && $(crew get 15 restack_sent) == "$rs15" ]]'
+crew set 14 status pr-open; crew set 15 status pr-open; setstate "done" null
+out=$(crew tick 2>&1)
+check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 2)) ]]'
+check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(resumes) == $((n + 2)) ]]'
+# 14's worker retargeted its PR. 16 moves, and its own PR targets the wrong branch.
+echo main >"$HOME/gh-pr-base-31"; echo main >"$HOME/gh-pr-base-33"; work "$(crew get "$FR" worktree)" r1.txt
+setstate "done" null; out=$(crew tick)
+check "a parent whose PR targets the wrong branch doesn't hold back its child's rebase" \
+  '[[ $out == *"016-tick-replacement: restack sent to its worker (PR targets main, not agent/tick-parent)"* && $out == *"015-tick-child: restack sent to its worker (016-tick-replacement moved)"* && $out != *014-tick-parent* ]]'
+p15=$(prompt_of 015-tick-child)
+check "a rebase note asks for the retarget still due, after the push" \
+  '[[ $p15 == *"git rebase --onto $(tip tick-replacement) "*"Your PR targets agent/tick-parent, not your base: after pushing, run \`gh pr edit --base agent/tick-replacement\`."* ]]'
+echo agent/tick-replacement >"$HOME/gh-pr-base-32"; echo agent/tick-parent >"$HOME/gh-pr-base-33"
+check "once a PR targets its task's base, nothing says otherwise" 'crew sync >/dev/null && [[ $(crew status) != *"PR targets"* ]]'
+rm -f "$HOME"/gh-pr-base-*
+
 echo MERGED >"$HOME/gh-pr-state"; setstate "done" null; touch "$HOME/rm-fail"
 out=$(crew tick 2>&1)
 check "tick cleans up merged tasks" '[[ $out == *"014-tick-parent: merged; worktree cleaned up"* && ! -d $WT14 && $(crew get 14 status) == merged ]]'

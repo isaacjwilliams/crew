@@ -6,6 +6,7 @@ status: draft
 base: {{BASE}}
 base_sha:
 restack_sent:
+retarget_sent:
 branch: {{BRANCH}}
 depends_on:
 goal:
@@ -15,6 +16,7 @@ pr_mode: {{PR_MODE}}
 worktree:
 pr:
 pr_state:
+pr_base:
 pr_updated:
 ci_state:
 worker_name:
