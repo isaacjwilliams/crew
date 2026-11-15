@@ -120,24 +120,19 @@ func (c *Crew) reviewCommits(p *Project, wt string) error {
 	return c.advance(lastFile, head, "gardener "+p.Name+" ("+rng+")")
 }
 
-// sortMisses runs the misses agent over the project's tasks merged after the
-// time in misses.last that have the user's comments after an automated review.
-// The first run starts from the date of the default branch's newest commit
-// before GARDENER_LOOKBACK, in wt, a checkout of the branch. misses.last then
-// holds the newest merge time the run read, so a task merged before it but
-// synced into the ledger later is still read next time.
+// sortMisses runs the misses agent over the project's tasks merged after
+// missesSince that have the user's comments after an automated review, in wt, a
+// checkout of the default branch. misses.last then holds the newest merge time
+// the run read. A merge time is when crew sync logged the merge, so a task
+// synced late still comes after the cursor.
 func (c *Crew) sortMisses(p *Project, wt string) error {
 	lastFile := filepath.Join(p.Dir, "misses.last")
-	var since time.Time
-	if b, err := os.ReadFile(lastFile); err == nil {
-		if since, err = time.Parse(time.RFC3339, strings.TrimSpace(string(b))); err != nil {
-			return fail("%s: '%s' isn't a time", lastFile, strings.TrimSpace(string(b)))
-		}
-	} else if date, _ := git(wt, "log", "-1", "--format=%cI", "--before="+p.Settings["GARDENER_LOOKBACK"], "HEAD"); date != "" {
-		since, _ = time.Parse(time.RFC3339, date)
+	since, err := missesSince(p, wt, lastFile)
+	if err != nil {
+		return err
 	}
-	// A task merged in this minute waits for the next run: one synced later in
-	// the minute would have the same merge time as the cursor, and be skipped.
+	// Log times are to the minute, so a task synced later in this minute would
+	// tie with a cursor set now, and be skipped. It waits for the next run.
 	thisMinute := time.Now().Truncate(time.Minute)
 	var files []string
 	newest := since
@@ -165,7 +160,27 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	return c.advance(lastFile, newest.Format(time.RFC3339), fmt.Sprintf("misses %s (%d tasks)", p.Name, len(files)))
 }
 
-// runAgent runs agent once in wt, with the gardener's settings and powers, and
+// missesSince is where the misses agent's run starts: the time in lastFile,
+// or on the first run the date of the newest commit in wt before
+// GARDENER_LOOKBACK. A repo younger than that has none, so the first run reads
+// every merged task.
+func missesSince(p *Project, wt, lastFile string) (time.Time, error) {
+	b, err := os.ReadFile(lastFile)
+	if errors.Is(err, os.ErrNotExist) {
+		date, _ := git(wt, "log", "-1", "--format=%cI", "--before="+p.Settings["GARDENER_LOOKBACK"], "HEAD")
+		since, _ := time.Parse(time.RFC3339, date)
+		return since, nil
+	} else if err != nil {
+		return time.Time{}, err
+	}
+	since, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b)))
+	if err != nil {
+		return since, fail("%s: '%s' isn't a time", lastFile, strings.TrimSpace(string(b)))
+	}
+	return since, nil
+}
+
+// runAgent runs agent once in wt, with config/gardener-settings.json, and
 // writes its output to a log of its own. doing says what the run is for. It
 // warns with the agent's exit code when the run fails.
 func (c *Crew) runAgent(p *Project, wt, agent, doing, prompt string) error {
@@ -198,10 +213,12 @@ func (c *Crew) runAgent(p *Project, wt, agent, doing, prompt string) error {
 	return nil
 }
 
-// advance records a finished run: it writes the run's cursor, file, and
-// commits the ledger with msg.
+// advance records a finished run: it writes cursor into file, and commits the
+// ledger with msg.
 func (c *Crew) advance(file, cursor, msg string) error {
-	os.WriteFile(file, []byte(cursor+"\n"), 0o644)
+	if err := os.WriteFile(file, []byte(cursor+"\n"), 0o644); err != nil {
+		return err
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}

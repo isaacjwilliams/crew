@@ -830,7 +830,7 @@ func (t Task) CommentsAfterReview() []CommentAfterReview {
 	reviews := t.AutomatedReviews()
 	var after []CommentAfterReview
 	for _, round := range t.ReviewRounds() {
-		var followed *AutomatedReview
+		var followed *AutomatedReview // the last before the round: reviews are oldest first
 		for i, rv := range reviews {
 			if !rv.At.IsZero() && rv.At.Before(round.At) {
 				followed = &reviews[i]
@@ -840,7 +840,7 @@ func (t Task) CommentsAfterReview() []CommentAfterReview {
 			continue
 		}
 		for _, cm := range round.Comments {
-			after = append(after, CommentAfterReview{round.Number, cm, *followed})
+			after = append(after, CommentAfterReview{Round: round.Number, Comment: cm, Review: *followed})
 		}
 	}
 	return after
