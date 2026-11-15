@@ -263,6 +263,26 @@ func userWordsBefore(t Task, r AutomatedReview) []string {
 	return stated
 }
 
+// briefSections are the parts of a task's brief that can settle a point, as
+// agents/misses.md reads a brief, besides the Goal and the decisions.
+var briefSections = []string{"Structure", "Plan", "Constraints and conventions", "Out of scope"}
+
+// briefBefore is what the judge needs to tell a miss from a point the brief
+// settled or a change of mind: the brief's sections, then the user's words
+// before review r. A brief is written before the work starts, so the task
+// file's is the one r had. The reviewer's briefing leaves these sections out,
+// as the pr-review skill's does: they're the plan's reasoning, not the user's
+// intent.
+func briefBefore(t Task, r AutomatedReview) []string {
+	var brief []string
+	for _, name := range briefSections {
+		if text := strings.TrimSpace(t.Section("## " + name)); text != "" {
+			brief = append(brief, "### "+name+"\n\n"+text)
+		}
+	}
+	return append(brief, userWordsBefore(t, r)...)
+}
+
 // quotedLines is the lines of text that are a quote, "> …".
 func quotedLines(text string) string {
 	var quote []string
@@ -528,21 +548,21 @@ func (e *evalRun) checkOut(t Task, head string) error {
 
 // notAFinding is what the judge counts as not a review finding: the kinds of
 // comment that agents/misses.md says aren't a miss, in its words. The judge
-// tells the last two from the user's words before the review. misses.md's
-// last kind, a point the review already raised, needs the review's record,
-// which the judge doesn't see.
+// tells the last two from the brief and the user's words before the review.
+// misses.md's last kind, a point the review already raised, needs the review's
+// record, which the judge doesn't see.
 var notAFinding = []string{
 	"a question, or praise",
 	"a change of mind: the user asking for something other than what they approved",
 	"something the brief or the user's decisions settled, such as a structure the brief chose",
 }
 
-// judgePrompt asks whether report raised miss. said is what the user had said
-// on the task before the review, which tells a change of mind or a settled
-// point from a miss.
-func judgePrompt(miss string, said []string, report string) string {
-	if len(said) == 0 {
-		said = []string{"Nothing recorded."}
+// judgePrompt asks whether report raised miss. brief is the task's brief and
+// what the user had said on it before the review, which tell a change of mind
+// or a settled point from a miss.
+func judgePrompt(miss string, brief []string, report string) string {
+	if len(brief) == 0 {
+		brief = []string{"Nothing recorded."}
 	}
 	return "You judge one case of a review eval. A code reviewer reviewed a pull request; its report is below. " +
 		"After that review, the user found the miss below on the same pull request.\n\n" +
@@ -550,10 +570,10 @@ func judgePrompt(miss string, said []string, report string) string {
 		"A finding that only touches the same code doesn't count.\n\n" +
 		"Answer on the first line with exactly one of: found, missed, not a review finding. " +
 		"The miss is not a review finding when it is " + strings.Join(notAFinding, "; or ") + ". " +
-		"What the user had asked for and decided before the review is below the miss.\n\n" +
+		"The task's brief, and what the user had asked for and decided before the review, are below the miss.\n\n" +
 		"On the next line, quote the finding that raised it, word for word: its title line is enough. " +
 		"Write none if no finding did.\n\n" +
-		"## The miss\n\n" + miss + "\n\n## What the user had said before the review\n\n" + strings.Join(said, "\n\n") +
+		"## The miss\n\n" + miss + "\n\n## The brief, and what the user had said before the review\n\n" + strings.Join(brief, "\n\n") +
 		"\n\n## The report\n\n" + report + "\n"
 }
 
@@ -562,7 +582,7 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	out := filepath.Join(e.logs, strings.ReplaceAll(ec.id, "/", "-")+".judge.md")
 	// --tools takes a list: the flag after it ends the list, so the prompt
 	// isn't taken for a tool.
-	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, userWordsBefore(ec.task, ec.review), report))
+	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, briefBefore(ec.task, ec.review), report))
 	cmd.Dir = os.TempDir() // away from any repo's CLAUDE.md
 	answer, err := e.session(cmd, out, "the judge")
 	if err != nil {

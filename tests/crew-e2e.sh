@@ -1683,7 +1683,7 @@ check "the briefing has the skill's headings and the user's words from before th
   '[[ $(head -1 "$EB") == "Code review" && $(grep "^## " "$EB" | tr "\n" ,) == "## Scope,## How to verify,## Hard constraints,## Stated intent," ]] &&
    grep -qx "> Make it fast" "$EB" && grep -qx "> an earlier wish" "$EB" && grep -qx "#### Why" "$EB" && ! grep -q "b.go has no test\|why is a.go here\|b race" "$EB"'
 check "a judge weighs each case's miss, with an inline comment's place and the user's earlier words, against the report" \
-  '[[ $(judged "$call") == 3 && $call == *"## The miss"*"b.go has no test"*"## What the user had said before the review"*"> an earlier wish"*"## The report"*"A stub finding"* && $call == *"On \`a.go:1\`: why is a.go here?"* && $call == *"Fix the b race"* ]]'
+  '[[ $(judged "$call") == 3 && $call == *"## The miss"*"b.go has no test"*"## The brief, and what the user had said before the review"*"> an earlier wish"*"## The report"*"A stub finding"* && $call == *"On \`a.go:1\`: why is a.go here?"* && $call == *"Fix the b race"* ]]'
 check "the report gives each case's verdict and range, the totals and what was tested, and is committed" \
   '[[ $(grep -c "^- \`095-eval-one/" "$EV") == 3 ]] && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **found** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — #### 1. [should fix] A stub finding" "$EV" &&
    grep -qF -- "- \`095-eval-one/round-2/comment-6\` **missed** — \`${EF:0:7}..${EH:0:7}\` — On \`a.go:1\`: why is a.go here?" "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **missed**" "$EV" && grep -qx "Found 1 of 3 misses." "$EV" &&

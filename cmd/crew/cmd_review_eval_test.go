@@ -65,6 +65,7 @@ func TestEvalCases(t *testing.T) {
 func TestEvalBriefing(t *testing.T) {
 	task := taskIn(t, t.TempDir(), "020-a", "---\nbase: main\n---\n"+
 		"## Goal\n> Make search fast.\n\nRestatement: an assistant's words.\n\n"+
+		"## Structure\nA cache package of its own.\n\n"+
 		"## Decisions\n"+
 		"- 2026-11-09 — Cache per user (user)\n"+
 		"- 2026-11-09 — Use Redis (lead)\n"+
@@ -102,7 +103,7 @@ func TestEvalBriefing(t *testing.T) {
 	}
 	// Nothing from after the review, nobody's words but the user's, and nothing
 	// the briefing can't know as it was then.
-	for _, out := range []string{"the miss itself", "Round 2", "Cache per team", "Redis", "Restatement", "### Pull request"} {
+	for _, out := range []string{"the miss itself", "Round 2", "Cache per team", "Redis", "Restatement", "A cache package", "### Pull request"} {
 		if strings.Contains(got, out) {
 			t.Errorf("briefing has %q:\n%s", out, got)
 		}
@@ -226,13 +227,30 @@ func TestLastFullEvalSkipsPartialRuns(t *testing.T) {
 	}
 }
 
-// The judge gets what the user had said before the review, to tell a change
-// of mind or a settled point from a miss.
-func TestJudgePromptHasTheUsersEarlierWords(t *testing.T) {
-	got := judgePrompt("On `a.go:3`: why?", []string{"### The user's request\n\n> Make search fast."}, "#### 1. [nitpick] x")
-	for _, in := range []string{"## The miss\n\nOn `a.go:3`: why?\n", "## What the user had said before the review\n\n### The user's request\n\n> Make search fast.\n", "## The report\n\n#### 1. [nitpick] x"} {
+// The judge gets the brief and what the user had said before the review, to
+// tell a change of mind or a settled point from a miss.
+func TestJudgePromptHasTheBrief(t *testing.T) {
+	task := taskIn(t, t.TempDir(), "021-a", "---\nbase: main\n---\n"+
+		"## Goal\n> Make search fast.\n\n"+
+		"## Structure\n<!-- a template's note -->\nA cache package of its own.\n\n"+
+		"## Plan\n1. Add the cache.\n\n"+
+		"## Constraints and conventions\n\n"+
+		"## Out of scope\nEviction.\n\n"+
+		"## Log\n")
+	at, _ := time.ParseInLocation(logTime, "2026-11-10 12:00", time.Local)
+	got := judgePrompt("On `a.go:3`: why?", briefBefore(task, AutomatedReview{Number: 1, At: at}), "#### 1. [nitpick] x")
+	for _, in := range []string{
+		"## The miss\n\nOn `a.go:3`: why?\n",
+		"## The brief, and what the user had said before the review\n\n### Structure\n\nA cache package of its own.\n\n### Plan\n\n1. Add the cache.\n\n### Out of scope\n\nEviction.\n\n### The user's request\n\n> Make search fast.\n",
+		"## The report\n\n#### 1. [nitpick] x",
+	} {
 		if !strings.Contains(got, in) {
 			t.Errorf("judge prompt lacks %q:\n%s", in, got)
+		}
+	}
+	for _, out := range []string{"template's note", "### Constraints"} {
+		if strings.Contains(got, out) {
+			t.Errorf("judge prompt has %q:\n%s", out, got)
 		}
 	}
 }
