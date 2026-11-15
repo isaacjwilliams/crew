@@ -291,8 +291,7 @@ wait for both answers before you close the round.
 Label each item with where it came from (`Codex's finding`, `the Claude reviewer's refutation`, `the author's
 evidence`) and quote the reviewers verbatim, a finding's `Earlier:` mark included. Your counter-evidence is stated
 flat, as a fact with its citation: "`cmd/x.go:40` returns before the write when the file is missing". Never your
-reasons, what you meant, or why you
-built it that way: that's the interpretation the one rule keeps out.
+reasons, what you meant, or why you built it that way: that's the interpretation the one rule keeps out.
 
 A reviewer that fails in a round leaves the rounds; note it for the record, keep what it said earlier, and stop: the
 rounds need both.
@@ -385,8 +384,9 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 ```
 
 The Range line says `since <base branch>` when this review reads the whole PR, and `since review <N>`, the review
-whose head it starts from, when it reads only the new commits. The `Earlier:` line is the mark as the reviewers wrote it and you checked it: `new` for every finding of the PR's first
-review, and for one whose repeat mark you rejected, with your evidence on the Verdict line.
+whose head it starts from, when it reads only the new commits. The `Earlier:` line is the mark as the reviewers wrote
+it and you checked it: `new` for every finding of the PR's first review, and for one whose repeat mark you rejected,
+with your evidence on the Verdict line.
 
 Leave out the Codex lines and `Rounds:` when Codex didn't run, and a `Round` line for each round that didn't address
 the finding. Report both derived intents verbatim and unmerged: two reviewers who read the same change and came away
