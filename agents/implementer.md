@@ -98,7 +98,7 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
 
      Only a code change that removes the failure fixes a must fix. A deploy step, a note in the docs or a paragraph in the PR description doesn't. If one of those is the only remedy you see (a deploy window in which old and new code disagree, say), don't write it in: `left for the user: <the cost: what fails, for whom, and for how long>`.
    - **fix later**: where it is decides what you do. (A `pre-existing: fix later` follows the pre-existing bullet instead.)
-     - In lines this PR changed, with a fix that's small and inside the plan (no module boundaries, schemas, migrations, public APIs or new dependencies, as "Stay in scope" says): fix it in the PR, every instance of its class as for should fix: `fixed in <short sha>`.
+     - In lines this PR changed, with a fix that's small and inside the plan, as "Stay in scope" bounds it: fix it in the PR, every instance of its class as for should fix: `fixed in <short sha>`.
      - In those lines, with a bigger fix: don't change the code, so the user can weigh it: `left for the user: <the fix's cost: its size and what it touches>`.
      - Outside them: write a proposal (first-run step 8): `proposal <its file name>`. When the finding is a repeat and its earlier finding's outcome already names a proposal, name that one instead of writing another.
    - **nitpick**: fix it if it's in lines this PR changed (`fixed in <short sha>`); otherwise `recorded`.

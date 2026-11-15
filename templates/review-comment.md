@@ -5,7 +5,8 @@
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
      agents. Each finding is listed by its outcome. One whose outcome is "withdrawn in round <n>"
      isn't listed. A finding that repeats one from earlier in this pass is one line, from its latest
-     review's outcome. A fix-later finding fixed in the PR goes under "Fixed", like any other;
+     review's outcome. A fix-later finding fixed in the PR goes under "Fixed", like any other, and
+     one whose fix is too big for this PR goes under "Left for you";
      "Left for later" holds only work outside the lines this PR changed. A finding left for the
      user because it already failed at the fork point goes under "Already on <base branch>", not
      "Left for you".
