@@ -1,6 +1,6 @@
 # Agent ledger
 
-The coordination state for the crew: the `lead`, `implementer` workers, `casual-observer`, and `gardener`. It lives in the crew home (`~/crew`, a clone of the crew repo), under `projects/`, outside every repository you work on, so none of it shows up for collaborators. The home is a git repo: `crew` commits the ledger after every mutating command, so `git log -- projects` there is the history of who decided what. Those commits take only the ledger, never the home's code or config. Each one is pushed to the home's `origin`, your private repo, in the background a moment later, and `crew tick` pushes anything that didn't make it.
+The coordination state for the crew: the `lead`, `implementer` workers, `casual-observer`, `gardener` and `misses`. It lives in the crew home (`~/crew`, a clone of the crew repo), under `projects/`, outside every repository you work on, so none of it shows up for collaborators. The home is a git repo: `crew` commits the ledger after every mutating command, so `git log -- projects` there is the history of who decided what. Those commits take only the ledger, never the home's code or config. Each one is pushed to the home's `origin`, your private repo, in the background a moment later, and `crew tick` pushes anything that didn't make it.
 
 ## Layout
 
@@ -27,10 +27,11 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     memory.md            facts about the project the user approved (see Project memory)
     memory-suggestions.md  facts suggested for memory.md, waiting on the user
     gardener.last        last commit the gardener reviewed
+    misses.last          newest merge time of the tasks the misses agent read
     paused               there while the project is paused (see Pausing)
   reports/               free-form notes the lead keeps
   host                   the machine that runs the crew; `crew host up` claims it
-  logs/                  gardener runs, Worktrunk hook output and background pushes (not committed)
+  logs/                  gardener and misses runs, Worktrunk hook output and background pushes (not committed)
 ```
 
 `<project>` is `<owner>-<repo>` from the `origin` remote.
@@ -93,16 +94,18 @@ The goal lead hears about two things, through `crew goal followup`, which `crew 
 
 ## Proposals
 
-A proposal is an idea worth keeping that isn't ready to be a task, in `proposals/<YYYY-MM-DD>-<slug>.md`. The gardener writes refactor proposals on its schedule; the user, a lead or a worker writes one with `crew propose "<title>" --why "<a paragraph>"`. A proposal stays out of the task list, so it doesn't look like work in progress. The lead raises an open one at intake when it touches the task's area, and `crew promote` turns one into a draft task.
+A proposal is an idea worth keeping that isn't ready to be a task, in `proposals/<YYYY-MM-DD>-<slug>.md`. The gardener writes refactor proposals on its schedule, and the misses agent proposals that fix the cause of your review comments that automated review missed; the user, a lead or a worker writes one with `crew propose "<title>" --why "<a paragraph>"`. A proposal stays out of the task list, so it doesn't look like work in progress. The lead raises an open one at intake when it touches the task's area, and `crew promote` turns one into a draft task.
 
 | status | meaning | set by |
 |---|---|---|
-| `open` | kept, not acted on yet | `crew propose`, or the gardener |
+| `open` | kept, not acted on yet | `crew propose`, the gardener or the misses agent |
 | `deferred` | set aside for now; can still be promoted | you or the lead via `crew set` |
-| `accepted` | promoted; `task` names the draft task it became | `crew promote` |
+| `accepted` | promoted; `task` names the draft task it became. A `Target:` proposal (below) is never promoted: it's accepted once you've made its change, with a Log line saying so | `crew promote`, or the lead via `crew set` |
 | `rejected` | not wanted; the Log says why | you or the lead via `crew set` |
 
-Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener fills them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
+Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `misses`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (set by `crew promote`), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener and the misses agent fill them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
+
+A proposal from the misses agent may target a file outside the project: your `~/.claude/CLAUDE.md`, or crew's review rubric (`.claude/skills/pr-review/rubric.md` in crew's repo). Its Proposal section then starts `Target: <file>. A change for you to make, not a task in this project.` You make the change by hand, and the lead sets the proposal `accepted`.
 
 ## Project memory
 

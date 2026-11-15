@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- crew gardener: review newly merged commits and write refactor proposals.
+<!-- crew gardener: the gardener on newly merged commits, the misses agent on your comments on merged PRs; both write proposals.
      The Mac's twin of systemd/crew-gardener.service and crew-gardener.timer.
      launchd expands nothing, so crew install writes your crew home and your
      home directory into the paths below. -->
