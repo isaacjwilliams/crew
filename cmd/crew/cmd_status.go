@@ -439,7 +439,7 @@ func (s *statusView) waitsOn(t Task) ([]Task, error) {
 	if d, ok := s.deps[t.Path]; ok {
 		return d.tasks, d.err
 	}
-	deps, err := s.unmergedDeps(s.branches, t)
+	deps, err := s.pendingDeps(s.branches, t)
 	s.deps[t.Path] = depsOf{deps, err}
 	return deps, err
 }

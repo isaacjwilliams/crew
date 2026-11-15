@@ -129,8 +129,8 @@ func cmdSync(c *Crew, args []string) error {
 			if !t.Status().InFlight() {
 				continue
 			}
-			// A kind without a risk tier, a spike say, has nothing to raise.
-			if rules, err := t.rules(); err == nil && rules.risk {
+			// A kind that makes no PR, a spike say, has no risk tier to raise.
+			if rules, err := t.rules(); err == nil && rules.pr {
 				if sensitive {
 					fetch()
 				}

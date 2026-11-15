@@ -42,8 +42,11 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	if !ok {
 		return Task{}, fail("--kind must be %s, not '%s'", kindNames(), kindArg)
 	}
-	if informs != "" && rules.link != "informs" {
+	if informs != "" && rules.informs == "" {
 		return Task{}, fail("a %s task doesn't take --informs", kind)
+	}
+	if on != "" && !rules.pr {
+		return Task{}, fail("a %s task doesn't take --on: its branch stays local, so it can't be stacked", kind)
 	}
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
 		return Task{}, fail("--branch '%s': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)", name)
@@ -82,6 +85,13 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		if st := parent.Status(); st.Finished() {
 			return Task{}, fail("%s is '%s', so it has no open branch to stack on", parent.ID(), st)
 		}
+		parentRules, err := parent.rules()
+		if err != nil {
+			return Task{}, err
+		}
+		if !parentRules.pr {
+			return Task{}, fail("%s is a %s: its branch is never pushed, so nothing can stack on it", parent.ID(), parent.Kind())
+		}
 		base = parent.Branch()
 	}
 	var linked Task
@@ -91,8 +101,8 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 			return Task{}, ambiguousFail(informs, matches, "--informs '%s' doesn't match exactly one task in %s", informs, proj)
 		}
 		linked = Task{Doc{f}}
-		if st := linked.Status(); st != rules.linkTo {
-			return Task{}, fail("%s is '%s'; --informs takes a %s task", linked.ID(), st, rules.linkTo)
+		if st := linked.Status(); st != rules.informs {
+			return Task{}, fail("%s is '%s'; --informs takes a %s task", linked.ID(), st, rules.informs)
 		}
 	}
 
@@ -121,8 +131,8 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	}
 	msg := "created as a " + string(kind)
 	if linked.Path != "" {
-		t.Set(rules.link, linked.ID())
-		msg += ", " + rules.link + " " + linked.ID()
+		t.Set("informs", linked.ID())
+		msg += ", informs " + linked.ID()
 	}
 	if parent.Path != "" {
 		t.Set("depends_on", parent.ID())
@@ -223,7 +233,7 @@ func cmdReady(c *Crew, args []string) error {
 	if n := t.StillToLearn(); n > 0 {
 		return fail("%d item(s) under Still to learn are open: answer each, with a spike where it needs trying (crew new --kind spike --informs %s), then tick it", n, t.ID())
 	}
-	if rules.risk && !t.Risk().Valid() {
+	if rules.pr && !t.Risk().Valid() {
 		return fail("set its risk: crew set %s risk low|medium|high", t.ID())
 	}
 	if st := t.Status(); st != Draft && st != Ready {

@@ -255,15 +255,15 @@ func TestTaskKind(t *testing.T) {
 	}
 }
 
-// A spike asks less of its brief than a build, ties itself to a draft, and ends
-// done rather than with a PR for the user.
+// A spike asks less of its brief than a build, informs a draft, and ends done
+// rather than with a PR for the user.
 func TestKindRules(t *testing.T) {
 	build, _ := KindBuild.rules()
 	spike, _ := KindSpike.rules()
-	if !slices.Contains(build.brief, "## Structure") || !build.risk || build.link != "" || build.handedOver != PROpen {
+	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.informs != "" || build.handedOver != PROpen {
 		t.Errorf("build's rules: %+v", build)
 	}
-	if slices.Contains(spike.brief, "## Structure") || spike.risk || spike.link != "informs" || spike.linkTo != Draft || spike.handedOver != Done {
+	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.informs != Draft || spike.handedOver != Done {
 		t.Errorf("spike's rules: %+v", spike)
 	}
 }

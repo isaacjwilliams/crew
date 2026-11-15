@@ -180,8 +180,8 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
                                         #   Plan / Acceptance criteria, and a risk tier), the criteria are '- ' items,
                                         #   and nothing is open under Still to learn
         crew dispatch TASK
-          ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS, the goal's max_in_flight; unlock
-          │     a stacked task's parent is exempt from "must be merged";
+          ├─ lock; check status, depends_on (same project, must be merged or done), MAX_WORKERS, the goal's max_in_flight; unlock
+          │     a stacked task's parent is exempt from "must be merged or done";
           │     a parent that has already merged → base rewritten to its base
           ├─ git fetch origin <base> (must succeed for a stacked task: the parent's branch has to be pushed);
           │   create ~/agent-work/<p>/<id> on a new <branch> from origin/<base>, recorded as base_sha:
@@ -254,9 +254,9 @@ crew tick: a done task's worktree and local branch → crew cleanup
 lead or goal lead: the spikes' answers side by side under the item → tick it → finish the plan
 ```
 
-- **What a kind asks is one table**, `kinds` in `ledger.go`: the sections `crew ready` needs, whether it needs a risk tier, the link key `crew new` may set and the status the linked task must have, and the check `crew hand-over` runs and the status it moves to. `crew new`, `crew ready` and `crew hand-over` ask the task's rules (`Task.rules`) and never a kind's name. A task without a `kind` is a build.
-- **A spike leaves nothing in the shared repo.** Its worker never pushes, and opens no PR: the code is thrown away, and the report in the ledger is the record. So nothing needs cleaning up on origin, and `crew cleanup` deletes the local branch as it does a merged task's (`Status.Delivered`: merged or done).
-- **`done` always means the report is there**: only `crew hand-over` sets it, after `Task.Answer` finds the answer line. So the goal lead is never told of a report that doesn't exist, and `report_sent` keeps it from being told twice.
+- **What a kind asks is one table**, `kinds` in `ledger.go`: the sections `crew ready` needs, whether it makes a PR (`pr`: then it needs a risk tier and takes part in stacks), the status of the task it may inform (`crew new --informs`), and the check `crew hand-over` runs and the status it moves to. `crew new`, `crew ready` and `crew hand-over` ask the task's rules (`Task.rules`) and never a kind's name. A task without a `kind` is a build.
+- **A spike leaves nothing in the shared repo.** Its worker never pushes, and opens no PR: the code is thrown away, and the report in the ledger is the record. So nothing needs cleaning up on origin, and `crew cleanup` deletes the local branch as it does a merged task's (`Status.Delivered`: merged or done). A spike takes no part in stacks: a restack has its worker push, and a task stacked on it would wait for a branch that never reaches origin. So `crew new` refuses `--on` for a spike and a spike as anyone's `--on`. A plain `depends_on` a spike clears once it's done (`pendingDeps`).
+- **`done` always means the report is there**: only `crew hand-over` sets it, after `Task.Answer` finds the answer line, and `crew set` refuses it. So the goal lead is never told of a report that doesn't exist, and `report_sent` keeps it from being told twice.
 - **Spikes count toward `max_in_flight`** while they run. Not counting them would change what the cap is for (principle 5); they're short, and `MAX_WORKERS` counts them either way.
 - **The answers are put side by side by whoever owns the draft**, not by the spikes' workers: workers never edit other tasks, and weighing several answers is a judgment. Outside a goal, `crew status` shows the draft's open items and its spikes on its row.
 
@@ -303,7 +303,7 @@ worker: crew react TASK eyes <every ID in the unsent rounds>
 A task is *stacked* when its `base` is another task's `branch`; that task is its *parent*. Nothing else records the relationship (`parentOf` looks the base up among the project's task branches), so it can't disagree with `base`, and `crew set TASK base <a task's branch>` stacks an existing task. `depends_on` stays as it was written.
 
 ```
-crew new "<title>" --on PARENT   # base = parent's branch, depends_on = parent; refuses a merged or abandoned parent
+crew new "<title>" --on PARENT   # base = parent's branch, depends_on = parent; refuses a finished parent or a spike
 crew dispatch TASK               # needs origin/<parent branch>, not a merged parent; records base_sha = the parent's tip
 worker                           # gh pr create --base <parent branch>; PR body starts "Stacked on #N."
 crew sync                        # after the PR pass: git fetch origin (only for projects with a live stacked task or SENSITIVE_PATHS),
@@ -365,7 +365,7 @@ crew tick
   │    every task finished                        → crew goal done
   ├─ dispatchReady: the ready tasks of running goals, every unpaused project's together,
   │    highest priority first, then by project and ID (sortForDispatch)
-  │    waiting on other tasks (unmergedDeps)     → skipped, without a word
+  │    waiting on other tasks (pendingDeps)     → skipped, without a word
   │    the rest                                  → crew dispatch, each in turn (exit 4, a dispatch that has to
   │                                                  wait: nothing said, and the next task is tried)
   └─ push_ledger in the foreground (soft): whatever a background push missed
@@ -405,8 +405,8 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
 - **Parked is a task state, not a goal one.** The goal lead parks an item by leaving its task in `draft` with unchecked Open questions, so the rest of the goal carries on. The user answers through the lead, which records the answer in the task and passes it on with `crew goal note`.
 - **The goal lead is told only what's new.** `crew goal note` records the user's words under the goal's Decisions and counts them in `unsent_notes`. A goal task's worker that asks something is found from its Open questions (not the `@login` lines `crew feedback` writes for collaborators); `questions_routed`, a checksum of the questions last sent, keeps one the goal lead left for the user from being sent again. A done spike's report is sent once too, with its answer and the draft it informs, and `report_sent` records it. `crew goal followup` sends all three, once the goal lead is free, and resets them.
 - **The goal lead works one turn per input** and never polls (its prompt, and `disallowedTools` without `ScheduleWakeup` or cron). Every turn starts in a freshly fetched checkout. It doesn't count toward `MAX_WORKERS`, which caps workers: what it produces is capped where it reaches the user, by the goal's `max_in_flight`.
-- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a paused project (checked first), an unmerged dependency (`unmergedDeps`), a cap, or a stacked parent that hasn't pushed. It counts the caps only once the dependencies have merged, since counting the workers running asks `claude agents`. `crew tick` leaves out paused projects' tasks, skips a task with unmerged dependencies without running `crew dispatch` for it, and prints nothing for exit 4; it tries both again next tick. Any other refusal is a warning.
-- **`crew status` shows what holds dispatch back**, from the same `unmergedDeps`, `workerSlots`, `goalSlots` and `sortForDispatch`, so the two agree on dependencies, caps and order. It counts the caps once for each project and goal, not for each task. A cap set to something that isn't a whole number shows as `?`, with the error on that project's or goal's line. Each note means one thing:
+- **Dispatches wait quietly.** `dispatchChecks` refuses with exit 4 (`notYet`) when a task only has to wait: a paused project (checked first), a dependency that isn't merged or done yet (`pendingDeps`), a cap, or a stacked parent that hasn't pushed. It counts the caps only once the dependencies are through, since counting the workers running asks `claude agents`. `crew tick` leaves out paused projects' tasks, skips a task with pending dependencies without running `crew dispatch` for it, and prints nothing for exit 4; it tries both again next tick. Any other refusal is a warning.
+- **`crew status` shows what holds dispatch back**, from the same `pendingDeps`, `workerSlots`, `goalSlots` and `sortForDispatch`, so the two agree on dependencies, caps and order. It counts the caps once for each project and goal, not for each task. A cap set to something that isn't a whole number shows as `?`, with the error on that project's or goal's line. Each note means one thing:
   - `after <tasks>`: the dependencies that haven't merged. An abandoned one is always named, `<task> (abandoned)`, since it never will. A stacked task's abandoned parent counts, whether it's in `depends_on` or only the `base`.
   - `on <parent>`: a ready task whose parent is in flight. It can go once the parent's branch is on origin, which status can't see. When the task's own parent has merged, the parent named is the first task down the stack that hasn't (`liveParent`), since that's where `crew dispatch` puts the task.
   - `full` on a goal's line: the goal is at its `max_in_flight`.
@@ -740,7 +740,7 @@ Changing any of these means updating every side listed.
 | Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 6, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `crew ready` (each criterion a `- ` item), `Task.AcceptanceCriteria` and `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | Risk values `low medium high`, and the look each asks of the user (`Risk.Look`) | `ledger.go` → `crew set`, `crew ready`, `raiseRisk`, `crew status`; `lead.md` (the tier rule), `templates/pr-body.md` (the Risk line), `LEDGER.md` (checked by a Go test), `SETUP.md` ("Risk tiers") |
 | A high-risk task's `### Security review` entry under `## Evidence`, unnumbered so it's no criterion's | implementer first-run step 5 → `Task.SecurityReviewed` (`crew hand-over`, `crew status`); `templates/task.md` |
-| Kind values `build spike`, and what each asks: brief sections, risk, link key (`informs`), hand-over check and status (`kinds`) | `ledger.go` → `crew new --kind`, `crew set`, `crew ready`, `crew hand-over`; `implementer.md` ("Workflow: spike"), `lead.md` (intake step 4), `goal-lead.md`, `LEDGER.md` (checked by a Go test), `SETUP.md` ("Spikes") |
+| Kind values `build spike`, and what each asks: brief sections, whether it makes a PR, the status of the task it informs, hand-over check and status (`kinds`) | `ledger.go` → `crew new --kind`, `crew set`, `crew ready`, `crew hand-over`; `implementer.md` ("Workflow: spike"), `lead.md` (intake step 4), `goal-lead.md`, `LEDGER.md` (checked by a Go test), `SETUP.md` ("Spikes") |
 | A spike's `## Report` starts with `Answer: <one line>`, before `## Automated reviews` (or `## Log`) | implementer "Workflow: spike" → `Task.Answer` (`crew hand-over`, `crew goal followup`); `LEDGER.md` |
 | `report_sent: yes` once a goal's done spike's report has gone to the goal lead; written by `crew` only | `crew goal followup` → `goalHasInput`, `unsentReport`; `templates/task.md`, `LEDGER.md` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |

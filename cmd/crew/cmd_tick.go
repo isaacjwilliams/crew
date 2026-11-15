@@ -244,7 +244,7 @@ func (c *Crew) dispatchReady() {
 			continue
 		}
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
-		if deps, err := c.unmergedDeps(idx, t); err == nil && len(deps) > 0 {
+		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
 			continue
 		}
 		var errs strings.Builder

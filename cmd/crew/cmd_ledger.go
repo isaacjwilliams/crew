@@ -182,6 +182,10 @@ func cmdSet(c *Crew, args []string) error {
 	if key == "kind" && !Kind(value).Valid() {
 		return fail("kind must be %s, not '%s'", kindNames(), value)
 	}
+	// done means a spike's report is in, which crew hand-over checks.
+	if key == "status" && Status(value) == Done {
+		return fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
+	}
 	if err := c.lock(); err != nil {
 		return err
 	}

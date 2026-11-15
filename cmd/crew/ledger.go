@@ -320,16 +320,17 @@ const (
 // never the kind's name.
 type kindRules struct {
 	kind Kind
-	// brief is the sections crew ready needs filled in. risk says whether it needs
-	// a risk tier: the tier is the look a PR needs, so a kind that makes none
-	// has no tier.
+	// brief is the sections crew ready needs filled in.
 	brief []string
-	risk  bool
-	// link is the front-matter key that ties the task to another, or nothing when
-	// the kind takes none; crew new sets it from the flag of the same name
-	// (--informs). linkTo is the status that other task must have.
-	link   string
-	linkTo Status
+	// pr: the kind makes a PR, so its branch is pushed for the user to review,
+	// and it needs a risk tier (the look its PR needs). Only such a kind takes
+	// part in stacks: a restack has its worker push, and a task stacked on
+	// another needs that branch on origin. A kind that makes no PR keeps its
+	// branch local and throws it away.
+	pr bool
+	// informs is the status of the task this kind may inform (crew new
+	// --informs), or nothing when it informs none.
+	informs Status
 	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
 	// cmd_new.go), and handedOver the status it moves the task to.
 	handOver   func(*Crew, Task) error
@@ -341,15 +342,14 @@ var kinds = []kindRules{
 	{
 		kind:       KindBuild,
 		brief:      []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"},
-		risk:       true,
+		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
 	},
 	{
 		kind:       KindSpike,
 		brief:      []string{"## Goal", "## Plan", "## Acceptance criteria"},
-		link:       "informs",
-		linkTo:     Draft,
+		informs:    Draft,
 		handOver:   handOverReport,
 		handedOver: Done,
 	},
@@ -376,9 +376,6 @@ func kindNames() string {
 	names := make([]string, len(kinds))
 	for i, r := range kinds {
 		names[i] = string(r.kind)
-	}
-	if len(names) == 1 {
-		return names[0]
 	}
 	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
