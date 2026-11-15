@@ -81,7 +81,7 @@ func cmdSync(c *Crew, args []string) error {
 				t.Set("pr_updated", info.UpdatedAt)
 				changed = true
 			}
-			// For retargetReason.
+			// The branch the PR targets, which retargetReason compares with base.
 			if t.Get("pr_base") != info.BaseRefName {
 				t.Set("pr_base", info.BaseRefName)
 				changed = true

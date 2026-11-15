@@ -211,7 +211,8 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 		return true
 	}
 	// As in crew restack: a retarget goes with a rebase when there is one, and on
-	// its own only when there's nothing to rebase.
+	// its own only when there's nothing to rebase. So a rebase that has to wait
+	// (for its parent's, say) holds its retarget back with it.
 	if reason := idx.restackReason(t, repo); reason != "" {
 		target := idx.restackTarget(t, repo)
 		if strings.HasSuffix(reason, " abandoned") || idx.parentNeedsRestack(t, repo) || target == "" || t.Get("restack_sent") == target {

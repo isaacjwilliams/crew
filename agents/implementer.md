@@ -171,7 +171,7 @@ Your first message says so when your task is stacked: its `base` is another task
 
 When your prompt says to restack, the parent's branch has moved or merged, or your PR targets a branch that isn't your base. A restack note gives you the exact rebase and push commands. The rebase names two commits: the new base commit to move onto, and the last of the parent's commits in your branch, where the cut goes.
 
-A retarget note, one that starts "Retarget", has nothing to rebase or push: run the `gh pr edit --base` command it gives, fix the PR body as step 5 says, and go on with step 6.
+A retarget note, one that starts "Retarget", has nothing to rebase or push: run the `gh pr edit --base` command it gives, make "Stacked on #…" in the PR body match your base as step 5 says, then do steps 6 and 7.
 
 1. Check `git status` is clean, then run the command exactly as given. It moves only your own commits. Don't substitute a plain `git rebase` or a merge: after a squash merge that would replay the parent's commits and conflict with them.
 2. Resolve conflicts in your own commits so each still does what it did. If a conflict means the plan no longer fits what the parent became, stop and ask (see "When you're blocked"); `git rebase --abort` first if you can't finish.

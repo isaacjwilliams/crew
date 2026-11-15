@@ -228,18 +228,21 @@ func cmdRestack(c *Crew, args []string) error {
 		}
 		c.unlock()
 	}
-	// A retarget alone moves no commits, so it never waits for the parent's restack.
-	if retarget := retargetReason(t, repo); retarget != "" && idx.restackReason(t, repo) == "" {
+	// With nothing to rebase, a retarget goes on its own, whatever the parent's
+	// state. Otherwise it goes in the rebase note, and waits with it.
+	retarget := retargetReason(t, repo)
+	if retarget != "" && idx.restackReason(t, repo) == "" {
 		return c.sendRetarget(p, t, retarget, again)
 	}
 	if !stacked {
 		return fail("%s isn't stacked: its base '%s' isn't another task's branch", t.ID(), t.Base())
 	}
-	return c.sendRebase(p, idx, t, parent, again)
+	return c.sendRebase(p, idx, t, parent, retarget, again)
 }
 
 // sendRetarget resumes a task's worker to point its PR at the task's base, with
-// nothing to rebase.
+// nothing to rebase. retarget_sent is that base, not the PR's: moving the task
+// to yet another branch is a new retarget, to be sent.
 func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error {
 	base := t.Base()
 	if !again && t.Get("retarget_sent") == base {
@@ -259,8 +262,8 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 
 // sendRebase resumes a stacked task's worker to rebase its branch onto its
 // parent's latest commit, or onto what the parent merged into, and to retarget
-// its PR when that's needed too.
-func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, again bool) error {
+// its PR when that's needed too. retarget is retargetReason's answer for t.
+func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarget string, again bool) error {
 	repo, base, branch, pid := p.Repo(), t.Base(), t.Branch(), parent.ID()
 	if idx.parentNeedsRestack(t, repo) {
 		return fail("%s needs a restack itself (%s); restack it first, a stack goes bottom-up", pid, idx.restackReason(parent, repo))
@@ -296,10 +299,10 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, again b
 		reason, target, old, target, newBase, old, pid, branch, lease, branch)
 	retargetTo := ""
 	switch {
-	case newBase != base:
+	case newBase != base: // The parent merged: the task moves to what it merged into, PR and all.
 		retargetTo = newBase
 		note += fmt.Sprintf(" Your base is now %s: after pushing, run `gh pr edit --base %s` and `crew set %s base %s`.", newBase, newBase, t.ID(), newBase)
-	case retargetReason(t, repo) != "":
+	case retarget != "": // The task moved already, and its PR hasn't followed.
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
