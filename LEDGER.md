@@ -147,7 +147,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
   - `left for the user`: a finding it disputes or can't settle, or one the brief settled;
   - `left for the user: pre-existing, <the fix's size>; proposal <file name>`: a defect that already failed the same way at the fork point;
   - `left for the user: verdict changed since review N`: a flipped finding;
-  - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user;
+  - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user, which the user hasn't decided since;
   - `left for the user: <the cost>`: a must fix that only a deploy step or the docs could close. The cost says what fails, for whom, and for how long;
 - each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the pass's summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary: review N -->`, N the newest review, so a second `crew review-summary` for the same review edits it instead of posting another.

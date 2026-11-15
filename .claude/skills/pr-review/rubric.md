@@ -103,8 +103,9 @@ written your findings. Then, for each finding:
   otherwise. When more than one earlier review raised it, name the latest: its settlement is the one that stands.
   With no earlier-reviews file, every finding is `new`.
 - Drop a repeat of a finding that an earlier review settled any way but `fixed in …` (withdrawn, disputed, not a
-  defect, a proposal, recorded, left for the user), unless you have evidence that the settlement missed. Then keep
-  it, and state that evidence in the finding.
+  defect, a proposal, recorded, left for the user), unless you have evidence that the settlement missed, or the
+  user's decisions or review comments in the briefing ask for it. Then keep it, and state that evidence in the
+  finding.
 - If a finding settled as `fixed in <sha>` is still there in the code, raise it as a finding, marked as a repeat of
   it.
 
