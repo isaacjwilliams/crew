@@ -30,7 +30,7 @@ and, from the PR's second review on, the same earlier reviews, and nothing else.
 | Test, lint and run commands | Justification for a trade-off you chose |
 | The user's decisions, the lines marked `(user)` | Which findings you expect, or a defence in advance |
 | The user's review comments, as the task's review rounds quote them | Your reading of the user's intent |
-| Earlier reviews' findings, agreed severities and outcomes, quoted from the record | Your verdicts on them, or anything from their rounds |
+| Earlier reviews' findings, agreed severities and outcomes, and the reply that withdrew a finding, quoted from the record | Your verdicts on them, your evidence in their rounds, or any other round reply |
 
 Verbatim means verbatim. Quote; don't condense.
 
@@ -157,10 +157,14 @@ quote from the record:
   > <its Finding quote>
 - Agreed severity: <the rest of its line>
 - Outcome: <the rest of its line>
+- Round <n>, <reviewer>:
+  > <the reply in which its raiser withdrew it>
 ```
 
-For a review with no findings, write `No findings.` under its Range line. Nothing else goes in: no Verdict lines, no
-derived or stated intents, no rounds, no conclusions. For the PR's first review there is no file.
+The `Round` lines go in only for a finding whose agreed severity is `withdrawn`: quote, verbatim, the round reply in
+which its raiser withdrew it (each raiser's, when both raised it), so a later reviewer can see why it was dropped. For
+a review with no findings, write `No findings.` under its Range line. Nothing else goes in: no Verdict lines, no
+derived or stated intents, no other round replies, no conclusions. For the PR's first review there is no file.
 
 ## 4. Launch the reviewers
 

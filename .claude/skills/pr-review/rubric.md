@@ -97,8 +97,8 @@ Treat any framing you infer as unverified, and never let the briefing substitute
 ## Earlier reviews
 
 From a pull request's second review on, `earlier-reviews.md`, beside the briefing, holds its earlier reviews: each
-one's range and findings, with how each finding was settled, quoted from the record. Don't read it until you have
-written your findings. Then, for each finding:
+one's range and findings, with how each finding was settled and, for a withdrawn one, the reply that withdrew it,
+quoted from the record. Don't read it until you have written your findings. Then, for each finding:
 
 - Mark it `Earlier: repeat of review <N> #<k>` when it's the same defect as finding k of review N, and `Earlier: new`
   otherwise. When more than one earlier review raised it, name the latest: its settlement is the one that stands.
