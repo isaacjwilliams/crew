@@ -3,8 +3,9 @@ package main
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments and red CI on PRs handed to the user, send
 // review rounds and restacks to idle workers, mark tasks that wait on the user,
-// clean up merged ones and done spikes, pass goal leads their input and close finished goals.
-// Last, it dispatches the ready tasks of running goals, highest priority first.
+// clean up those that delivered (merged, or a spike done), pass goal leads their
+// input and close finished goals. Last, it dispatches the ready tasks of running
+// goals, highest priority first.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
 // prints one line per thing it did.
 //
@@ -109,8 +110,9 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 }
 
 // tickTask is one task's share of a tick, for a task already under way: its
-// cleanup once it has delivered (merged, or a spike done), or what its worker is sent while it's in flight, which is
-// nothing while its project is paused. Dispatching ready tasks is dispatchReady's.
+// cleanup once it has delivered (Status.Delivered), or what its worker is sent
+// while it's in flight, which is nothing while its project is paused.
+// Dispatching ready tasks is dispatchReady's.
 func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool) {
 	id, st := t.ID(), t.Status()
 	if st.Delivered() {

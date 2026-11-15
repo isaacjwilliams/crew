@@ -290,7 +290,8 @@ func unroutedQuestions(t Task) (string, bool) {
 }
 
 // unsentReport: a task of the goal is done, so its report is in, and the goal
-// lead hasn't been sent it. report_sent records that it has.
+// lead hasn't been sent it. Only a spike's hand-over sets done, after checking
+// the report starts with its answer. report_sent records that it was sent.
 func unsentReport(t Task) bool {
 	return t.Status() == Done && t.Get("report_sent") != "yes"
 }

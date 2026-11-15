@@ -508,6 +508,7 @@ func (s *statusView) notes(t Task) []string {
 	if l := s.learning(t); l != "" {
 		notes = append(notes, l)
 	}
+	// informs holds the draft's full ID, as crew new writes it: NNN-<name>.
 	if d := t.Get("informs"); d != "" {
 		n, _, _ := strings.Cut(d, "-")
 		notes = append(notes, "informs "+n)

@@ -320,17 +320,18 @@ const (
 // never the kind's name.
 type kindRules struct {
 	kind Kind
-	// brief is the sections crew ready needs filled in, and risk whether it needs
-	// a risk tier.
+	// brief is the sections crew ready needs filled in. risk says whether it needs
+	// a risk tier: the tier is the look a PR needs, so a kind that makes none
+	// has no tier.
 	brief []string
 	risk  bool
-	// link is the front-matter key that ties the task to another, set by crew new
-	// --<link>, or nothing when the kind takes none; linkTo is the status that
-	// other task must have.
+	// link is the front-matter key that ties the task to another, or nothing when
+	// the kind takes none; crew new sets it from the flag of the same name
+	// (--informs). linkTo is the status that other task must have.
 	link   string
 	linkTo Status
-	// handOver is what crew hand-over checks, and handedOver the status it moves
-	// the task to.
+	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
+	// cmd_new.go), and handedOver the status it moves the task to.
 	handOver   func(*Crew, Task) error
 	handedOver Status
 }
@@ -352,6 +353,12 @@ var kinds = []kindRules{
 		handOver:   handOverReport,
 		handedOver: Done,
 	},
+}
+
+// Valid: crew knows the kind.
+func (k Kind) Valid() bool {
+	_, ok := k.rules()
+	return ok
 }
 
 // rules are what the kind asks, and whether crew knows it.
