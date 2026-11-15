@@ -43,7 +43,7 @@
 
 <N> automated reviews ran before this PR was ready for you. <Who reviewed, from the list above.> <What they read, from the list above.> <How the last one ended, from the list above.>
 
-- <a smaller PR proposed instead: what it would cover, in a line>
+- <only after "Proposed instead:", one line per smaller PR: what it would cover>
 
 **Fixed**
 - [<severity>] <what was wrong, in a line> (<short sha>)

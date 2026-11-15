@@ -54,7 +54,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 3. Make a short plan with your task-list tool that follows the brief's plan.
 4. Implement in logical commits, with tests that cover the behaviour in the acceptance criteria. Push after every commit, `git push -u origin HEAD` the first time and `git push` after that, so your work never exists only on this machine: if it fails, the task carries on elsewhere from your branch. Run the project's tests, linters, and type checks as AGENTS.md describes. Everything must pass before you continue.
 
-   Once they pass, check the branch's size, once: the lines added plus the lines removed in `git diff --shortstat $(git merge-base origin/<base> HEAD)..HEAD`. If it's past `crew config MAX_PR_LINES --project <project>` (0 turns the check off), and the task's Decisions don't already say to go on, follow "Workflow: split proposal" instead of going on to step 5.
+   Once they pass, check the branch's size: its insertions plus its deletions in `git diff --shortstat $(git merge-base origin/<base> HEAD)..HEAD`. If that's past `crew config MAX_PR_LINES --project <project>` (0 turns the check off), follow "Workflow: split proposal" instead of going on to step 5. Check only once: when Decisions already hold an answer to the split question, go on, so fixes that grow the branch don't bring the question back.
 5. **Pre-PR review** (if the task's `pre_pr_review` is `yes`): spawn the `casual-observer` subagent. Tell it the base ref (`origin/<base>`, where `<base>` is from the task file) and one sentence on what the change is for. Nothing more: its value is that it hasn't seen your reasoning. For each finding:
    - If it's right, fix it (a separate commit is fine).
    - If you disagree, don't change the code; record the finding and your reason under a "Pre-PR review" entry in the Log.
@@ -108,11 +108,11 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    Then run the checks and push.
 3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and this pass has run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 
-   The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then work out the pieces first (steps 1 and 2 of "Workflow: split proposal"), so the summary can give them.
-4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone, and the pieces when the pass didn't converge. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-5. If the pass didn't converge, don't mark the PR ready: ask the split question (step 3 of "Workflow: split proposal"). Otherwise, if the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
+   The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then follow "Workflow: split proposal" instead of steps 4 and 5: it posts the summary and asks.
+4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
+5. If the task's `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark the PR ready: `gh pr ready <url>`. Then carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
 
-After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3.
+After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3. A pass that didn't converge, with its summary posted but no split question under Open questions, needs the question (step 4 of "Workflow: split proposal").
 
 ## Workflow: split proposal
 
@@ -124,10 +124,11 @@ You come here at one of two moments: the size check in first-run step 4, when th
    - the commits (short SHAs) and paths it carries over from this branch, and what's still to write: this branch stays on origin, so a piece starts from the code already written rather than rebuilding it;
    - the piece it builds on, if any;
    - why it should come back clean on its own: it has one concern, and it's under `MAX_PR_LINES`.
-3. **Ask** (see "When you're blocked"): one Open questions item with what got in the way, the pieces, and these answers, and say which you recommend:
+3. **At the end of a pass, post the summary** as step 4 of "Workflow: automated review" says, with the pieces, which it calls "smaller PRs". Don't mark the PR ready.
+4. **Ask** (see "When you're blocked"): one Open questions item with what got in the way, the pieces, and these answers, and say which you recommend:
    - **split as proposed**: you stop here. The lead, or in a goal the goal lead, opens the pieces as tasks and abandons this one. Leave the status as it is and end your turn.
-   - **review it anyway**: at the size check, go on to first-run step 5, without checking the size again. At the end of a pass, run another pass of "Workflow: automated review"; it can end in this question again.
-   - **take it as it is**: at the size check, the same as "review it anyway". At the end of a pass, go on with step 5 of "Workflow: automated review" as for a pass that converged.
+   - **review it anyway**: at the size check, go on to first-run step 5. At the end of a pass, run another pass of "Workflow: automated review"; if it doesn't converge either, it asks again.
+   - **take it as it is**: at the end of a pass, mark the PR ready as step 5 of "Workflow: automated review" does, and carry on from there. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
 
    End your turn with the question, the pieces in a line each, as your final message.
 
