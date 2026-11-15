@@ -60,25 +60,19 @@ A person reads your reports and PR replies, and apart from the crew they work al
    - If you disagree, don't change the code; record the finding and your reason under a "Pre-PR review" entry in the Log.
    - If it questions the brief's structure (where code lives, which units change, the alternative the brief chose against), don't change the code either. List it in the Log entry under "Findings the brief settled", with one line on why it might matter. The user decided the structure, so they're the one to weigh it. Code the brief spells out is held to the same standard as yours: if a finding shows a prescribed check can never change the result, it's right, so remove it and say in the Log that the brief prescribed it.
    Re-run checks after fixes. Don't run the observer a second time unless you made substantial changes.
-6. **Push** anything not pushed yet: `git push`.
+6. **Record the evidence, then push** anything not pushed yet. For each acceptance criterion, run what shows it holds, and write the command and its output under `## Evidence` in the task file, as its comment says: one `### <n>.` entry per top-level criterion, in order. Where only a look shows it, write what you saw and how (the page, the steps, the tool). A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try and why you can't. Then `git push`.
 7. **Open the PR** according to the task's `pr_mode`:
    - `draft`: `gh pr create --draft --base <base> ...`
    - `ready`: `gh pr create --base <base> ...`, or with `--draft` when automated review will run (step 9), so the user never sees a ready PR that's still changing; you mark it ready after it.
    - `none`: skip this step, and say in your report that the branch is pushed.
 
-   The PR body is for the user's human collaborators too. Include:
-   - **Summary**: what changed and why, in a few sentences;
-   - **Changes**: short bullets by area;
-   - **How to verify**: tests added or run, and any manual steps;
-   - **Notes for reviewers**: any trade-offs or open questions.
-
-   Don't mention the ledger, task files, or agent machinery.
+   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task, with its Evidence built from `## Evidence`. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
 
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
    - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
 9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0: follow "Workflow: automated review" below.
-10. `crew set <task> status pr-open`. Only now: `pr-open` tells the user and the lead the PR is waiting on the user, and until automated review is done it may still change. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
+10. **Hand over**: `crew hand-over <task>`. It sets `pr-open`, and refuses until every acceptance criterion has an entry under `## Evidence`. Only now: `pr-open` tells the user and the lead the PR is waiting on the user, and until automated review is done it may still change. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
 
 ## Workflow: automated review
 
@@ -108,7 +102,7 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    - **flipped**: an earlier review settled it as not a defect, and this one holds it at must fix or should fix. Unless the user has since decided it (above), the reviews disagree, so don't change the code: `left for the user: verdict changed since review <N>`.
    - **disputed, uncertain**: don't change the code: `left for the user`.
 
-   Then run the checks and push.
+   If your fixes changed what an `## Evidence` entry shows, rerun it and update the entry, and the PR body's Evidence with `gh pr edit`, so the evidence is of the branch as it now stands. Then run the checks and push.
 3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. Fix-later and nitpick fixes don't count: they're improvements, not defects, and making them wait for another review would only push the pass toward its limit. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and this pass has run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 
    The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then follow "Workflow: split proposal" instead of steps 4 and 5: it posts the summary and asks.
@@ -153,7 +147,7 @@ When your prompt says there's new feedback, your reactions tell the user, on Git
    - if it's praise or otherwise asks for nothing, enjoy it and thank them in your reply.
 
    A comment you don't change code for keeps only its 👀. A `CI failed on` line or an `Automated review requested` line isn't a comment to address or reply to: steps 4 and 8 handle them.
-6. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push.
+6. Run checks, commit (one commit per comment or per coherent group, with messages that reference what they address), and push. When a change alters what an acceptance criterion's evidence shows, rerun it and update its entry under `## Evidence` and the PR body's Evidence.
 7. Your prompt says whether to reply. If it does, reply to each comment in the rounds with `crew reply <task> <id> "<text>"`, using the ID the round lists for it. Keep each reply to one or two lines: what you changed and the short SHA, why you didn't change anything, or a short, genuine thank-you for praise (something specific beats a bare "Thanks!"). `crew reply` tags your replies so they aren't read back as new feedback in the next round.
 8. If a round has an `Automated review requested` line, the user wants the PR reviewed again, now that it has the changes they asked for. Once the other comments are addressed and pushed, react 🚀 to the comment behind each `Automated review requested (comment <id>)` line, run a new pass of "Workflow: automated review", and tick the line. One pass answers every such line in the rounds you were sent. Don't `crew reply` to the comment that asked for it: the pass's summary comment is the answer.
 9. Tick the checkboxes in the rounds, then `crew set <task> status pr-open` and `crew log <task> "Round N addressed: ..."` (or `"Rounds N to M addressed: ..."`).

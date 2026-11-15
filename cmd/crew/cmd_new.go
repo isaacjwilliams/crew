@@ -1,12 +1,14 @@
 package main
 
-// Making tasks: crew new, crew ready.
+// Making tasks, and the checked moves of a task's status: crew new, crew ready
+// and crew hand-over.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -179,6 +181,13 @@ func cmdReady(c *Crew, args []string) error {
 	if len(missing) > 0 {
 		return fail("brief is incomplete, fill in: %s", strings.Join(missing, " "))
 	}
+	// The worker shows evidence for each criterion by its number, so each is a
+	// "- " item, with any detail indented under it.
+	for _, l := range strings.Split(t.Section("## Acceptance criteria"), "\n") {
+		if !strings.HasPrefix(l, "- ") && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			return fail("write each acceptance criterion as a '- ' item, any detail indented under it; this line isn't one: %s", l)
+		}
+	}
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)
 	}
@@ -190,5 +199,48 @@ func cmdReady(c *Crew, args []string) error {
 	t.Log("marked ready")
 	c.commit("ready " + t.ID())
 	fmt.Println("ready: " + t.ID())
+	return nil
+}
+
+// crew hand-over TASK: the worker's PR is ready for the user, with evidence for
+// every acceptance criterion. Workers run it once, at the end of their first
+// run; a review round may have started by then. Their later moves back to
+// pr-open are plain crew set, since the PR was handed over already.
+func cmdHandOver(c *Crew, args []string) error {
+	if len(args) == 0 {
+		return usage("crew hand-over TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	// Check under the lock: crew sync may be marking the task merged, or the
+	// lead abandoning it, at the same moment.
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if st := t.Status(); !st.InFlight() || st == PROpen {
+		return fail("task is '%s': only a task in flight that isn't pr-open yet can be handed over", st)
+	}
+	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
+		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
+	}
+	criteria := t.AcceptanceCriteria()
+	if len(criteria) == 0 {
+		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
+	}
+	if gaps := t.EvidenceGaps(); len(gaps) > 0 {
+		nums := make([]string, len(gaps))
+		for i, n := range gaps {
+			nums[i] = strconv.Itoa(n)
+		}
+		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
+			strings.Join(nums, ", "), len(criteria))
+	}
+	t.Set("status", string(PROpen))
+	t.Touch()
+	t.Log("handed over")
+	c.commit("hand over " + t.ID())
+	fmt.Println("handed over: " + t.ID())
 	return nil
 }
