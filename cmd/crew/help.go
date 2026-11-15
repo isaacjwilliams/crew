@@ -52,13 +52,17 @@ Setup
                                    overrides
 
 Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
-  crew new "<title>" [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
-                                   Create a draft task; prints its path. NAME is the
-                                   branch without BRANCH_PREFIX (default: from title).
-                                   --on stacks it on TASK's unmerged branch; --goal
-                                   makes it one of GOAL's tasks
-  crew ready TASK                  Check the brief is complete and has a risk tier,
-                                   and mark it ready
+  crew new "<title>" [--kind KIND] [--informs TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
+                                   Create a draft task; prints its path. KIND is build
+                                   (the default) or spike, which tries a path and
+                                   reports instead of making a PR; --informs ties a
+                                   spike to the draft TASK whose question it answers.
+                                   NAME is the branch without BRANCH_PREFIX (default:
+                                   from title). --on stacks it on TASK's unmerged
+                                   branch; --goal makes it one of GOAL's tasks
+  crew ready TASK                  Check the brief is complete for its kind (a build
+                                   needs a risk tier) with nothing left under Still to
+                                   learn, and mark it ready
   crew dispatch TASK [--force]     Create worktree + branch and start an implementer
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
@@ -73,11 +77,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
-  crew hand-over TASK              Hand the task's PR over to you (status pr-open),
+  crew hand-over TASK              Hand a build's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
                                    under ## Evidence, and a high-risk task a security
                                    review; a branch that touches SENSITIVE_PATHS makes
-                                   it high risk (used by workers)
+                                   it high risk. Mark a spike done once its ## Report
+                                   starts with "Answer:" (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...
@@ -134,7 +139,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew set TASK KEY VALUE...       Write a front-matter field
   crew log TASK MESSAGE...         Append to the task's Log
   crew cleanup TASK|--merged [--project P] [--force]
-                                   Remove worktree/local branch of merged tasks
+                                   Remove worktree/local branch of merged tasks and
+                                   done spikes
   crew commit [MESSAGE]            Commit pending ledger edits
   crew commit --hook               The same for one file, from an agent's PostToolUse
                                    hook JSON on stdin (always exits 0)

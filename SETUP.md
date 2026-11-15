@@ -354,7 +354,7 @@ crew status        # the project whose repo you're in, or all of them elsewhere 
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
 
-Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you.
+Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask or learn are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you, and so is one with something still to learn, with its spikes (see [Spikes](#spikes-try-a-path-before-planning-on-it)). `--done` adds merged and abandoned tasks, and done spikes.
 
 ### What a worker's PR looks like
 
@@ -485,6 +485,21 @@ crew status              # a stack is listed bottom first, each task under its p
 - **Let GitHub delete merged branches** ("Automatically delete head branches" in the repo settings) if you can: GitHub then retargets the next PR to the default branch itself. Don't delete an unmerged branch that has PRs stacked on it; GitHub closes them.
 - **A goal's `max_in_flight`** counts every task of a stack, as `MAX_WORKERS` counts every running worker.
 - To stack a task that already exists, set its base to the parent's branch: `crew set 046 base $(crew get 045 branch)`. Leave `depends_on` as it is.
+
+### Spikes: try a path before planning on it
+
+Some plans rest on something nobody has checked: whether an API pages, whether a query is fast enough, which of two designs fits the code. Rather than guess, the lead lists each question under the draft's `## Still to learn`, and `crew ready` refuses the draft until every item is ticked. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, and writes a report in its task file that starts with `Answer:`. It opens no PR, so there's nothing for you to review.
+
+```sh
+crew new "Try cursor paging" --kind spike --informs 040   # 040 is the draft whose question it answers
+crew ready 041 && crew dispatch 041     # a spike's brief needs Goal, Plan (what to try, a time box)
+                                        #   and Acceptance criteria (what would answer it); no Structure or risk
+crew status                             # 040's row: "2 to learn; 041 working, 042 draft"
+```
+
+- **The lead asks you first**, as for any task, but runs no plan review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
+- **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the plan from them.
+- **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 
 ## 6. The casual observer on its own
 
