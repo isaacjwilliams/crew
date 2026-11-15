@@ -531,7 +531,7 @@ crew ready 050                          # refuses a fix without fixes and missed
 
 - **`fixes`** is the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (the brief says why). The lead finds it from the code's history.
 - **`missed_by`** is one of `plan-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
-- **The worker proves the defect first**: its first commit is a test that reproduces it and fails, and the fix commit makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
+- **The worker proves the defect first**: it commits a test that reproduces it and fails, before the fix commit, which makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
 
 ## 6. The casual observer on its own
 

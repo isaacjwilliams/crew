@@ -216,7 +216,7 @@ check "crew tells the goal lead a spike reported in the words its workflow names
   "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
 # --- fixes: a defect live in production, proved by a failing test and traced to its cause
 check "a fix's worker commits a failing test that reproduces the defect before the fix, in step 4, and its evidence shows both runs" \
-  "awk '/^## Workflow: first run/ {w=1} w && /^4\\. / && !f {f=NR} w && /^   If your task is a fix .*prove the defect before you fix it/ && !x {x=NR} w && /^5\\. / && !p {p=NR} END {exit !(f && x && p && f < x && x < p)}' $A/implementer.md && grep -q 'Your first commit adds a test that reproduces the defect and fails on the code as it is' $A/implementer.md && grep -q 'shows both runs: the test failing before the fix, and passing after' $A/implementer.md"
+  "awk '/^## Workflow: first run/ {w=1} w && /^4\\. / && !f {f=NR} w && /^   If your task is a fix .*prove the defect before you fix it/ && !x {x=NR} w && /^5\\. / && !p {p=NR} END {exit !(f && x && p && f < x && x < p)}' $A/implementer.md && grep -q 'Commit a test that reproduces the defect and fails on the code as it is, before the fix commit' $A/implementer.md && grep -q 'shows both runs: the test failing before the fix, and passing after' $A/implementer.md"
 check "a fix's failing test takes the place of pinning the defective behaviour, and pins of what must stay may come first" \
   "grep -q 'If you also pin behaviour that must stay the same, those passing tests may come first: the failing test takes the place of pinning the defective behaviour, and it still comes before the fix commit' $A/implementer.md"
 # The checks a fix's missed_by can name, as lead.md lists them: "`plan-review`, `tests`, … or `user-review`".
