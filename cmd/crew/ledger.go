@@ -556,6 +556,14 @@ func (t Task) Kind() Kind {
 	return KindBuild
 }
 
+// Fixes is the ID of the merged task a fix mends, or "unknown" when nobody
+// could trace it.
+func (t Task) Fixes() string { return t.Get("fixes") }
+
+// MissedBy is the check that should have caught the defect a fix mends, one of
+// missedBy.
+func (t Task) MissedBy() string { return t.Get("missed_by") }
+
 // rules are what the task's kind asks, or an error for a kind crew doesn't know.
 func (t Task) rules() (kindRules, error) {
 	r, ok := t.Kind().rules()

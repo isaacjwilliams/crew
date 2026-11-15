@@ -1586,26 +1586,52 @@ out=$(crew resume --all 2>&1); st=$?
 check "and crew resume --all lifts its pause" '((st == 0)) && [[ ! -e $L/projects/$P2/paused && ! -e $MARK ]]'
 mv "$HOME/local.env.saved" "$L/projects/$P2/local.env"
 
-# crew stats, over a project of its own: two tasks merged since the date asked
-# for, and one before it. The first had a review round with one comment, and came
-# back clean on its second automated review; the second's question waited 2h.
-SP=$L/projects/stats; mkdir -p "$SP/tasks"; touch "$SP/project.env"
-for t in 001-stats-one 002-stats-two 003-stats-old; do sed 's/^status: .*/status: merged/' "$L/templates/task.md" >"$SP/tasks/$t.md"; done
+# crew stats, over a project of its own: three tasks merged since the date asked
+# for, and two before it. The first, low risk, had a review round with one
+# comment, and came back clean on its second automated review; the second,
+# medium risk, had its question wait 2h, and its PR (#35) was reverted in the
+# project's clone. 005 is a fix of 004, a low-risk task merged 60 days before.
+SP=$L/projects/stats; mkdir -p "$SP/tasks"; echo "DEFAULT_BRANCH=main" >"$SP/project.env"
+for t in 001-stats-one 002-stats-two 003-stats-old 004-stats-cause 005-stats-fix; do
+  sed -e 's/^status: .*/status: merged/' -e 's/^kind: .*/kind: build/' "$L/templates/task.md" >"$SP/tasks/$t.md"
+done
 sed -i -e '/^## Automated reviews$/a ### Automated review 1 — 2026-11-06 11:00\n- Reviewers: Claude reviewer\n#### 1. [should fix] a — `a.go:1`\n- Agreed severity: should fix\n- Outcome: fixed in abc1234\n### Automated review 2 — 2026-11-06 11:30\n- Reviewers: Claude reviewer\nNo findings.' \
   -e '/^## Review rounds$/a ### Round 1 — 2026-11-06 13:00 (PR #3)\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > rename it' "$SP/tasks/001-stats-one.md"
+sed -i 's/^risk:$/risk: low/' "$SP/tasks/001-stats-one.md" "$SP/tasks/004-stats-cause.md" "$SP/tasks/005-stats-fix.md"
+sed -i -e 's/^risk:$/risk: medium/' -e 's|^pr:$|pr: https://github.com/o/stats/pull/35|' "$SP/tasks/002-stats-two.md"
+sed -i -e 's/^kind: .*/kind: fix/' -e 's/^fixes:$/fixes: 004-stats-cause/' -e 's/^missed_by:$/missed_by: tests/' "$SP/tasks/005-stats-fix.md"
 printf -- '- 2026-11-06 09:00 — status → working\n- 2026-11-06 12:00 — status → pr-open\n- 2026-11-06 13:00 — status → addressing-feedback\n- 2026-11-06 14:00 — status → pr-open\n- 2026-11-06 16:00 — status → merged\n' >>"$SP/tasks/001-stats-one.md"
 printf -- '- 2026-11-07 09:00 — status → needs-input\n- 2026-11-07 11:00 — status → working\n- 2026-11-07 12:00 — status → pr-open\n- 2026-11-08 12:00 — status → merged\n' >>"$SP/tasks/002-stats-two.md"
 printf -- '- 2026-10-20 12:00 — status → merged\n' >>"$SP/tasks/003-stats-old.md"
+printf -- '- 2026-09-06 12:00 — status → merged\n' >>"$SP/tasks/004-stats-cause.md"
+printf -- '- 2026-11-09 12:00 — status → merged\n' >>"$SP/tasks/005-stats-fix.md"
 crew commit "stats fixtures" >/dev/null
+git init -q --bare "$SB/stats.git" && git clone -q "$SB/stats.git" "$SB/stats" 2>/dev/null
+(cd "$SB/stats" && echo two >two && git add two && git commit -qm "Merge pull request #35 from me/two" &&
+  GIT_COMMITTER_DATE=2026-11-10T12:00:00 git revert --no-edit HEAD >/dev/null && git push -q origin HEAD:main)
+echo "REPO=\"$SB/stats\"" >"$SP/local.env"
 head=$(git -C "$L" rev-parse @); dirty=$(git -C "$L" status --porcelain)
 out=$(cd "$HOME" && crew stats --project stats --since 2026-11-05); rows=$(tr -s ' ' <<<"$out")
-check "stats has a row for each task merged since the date: rounds, comments, PR and question waits, reviews, clean after, findings" \
-  '[[ $rows == *" 001-stats-one 1 1 3h - 2 2 1 0 0"* && $rows == *" 002-stats-two 0 0 24h 2h 0 - 0 0 0"* ]]'
-check "stats ends with the totals and the median waits" '[[ $rows == *" total 1 1 27h 2h 2 1 0 0"*" median 14h 1h" ]]'
+check "stats has a row for each task merged since the date: kind, rounds, comments, PR and question waits, reviews, clean after, findings, later fixes, reverts" \
+  '[[ $rows == *" 001-stats-one build 1 1 3h - 2 2 1 0 0 0 0"* && $rows == *" 002-stats-two build 0 0 24h 2h 0 - 0 0 0 0 1"* && $rows == *" 005-stats-fix fix 0 0 - - 0 - 0 0 0 0 0"* ]]'
+check "stats gives the totals and the median waits" '[[ $rows == *" total 1 1 27h 2h 2 1 0 0 0 1"*" median 3h -"* ]]'
 check "stats leaves out a task merged before the date" \
-  '[[ $out == "stats: 2 task(s) merged since 2026-11-05"* && $out != *003-stats-old* && $(crew stats --project stats --since 2026-10-01) == *003-stats-old* ]]'
+  '[[ $out == "stats: 3 task(s) merged since 2026-11-05"* && $out != *003-stats-old* && $(crew stats --project stats --since 2026-10-01) == *003-stats-old* ]]'
+check "a task merged before the date shows its later fix in its row" \
+  '[[ $(crew stats --project stats --since 2026-09-01 | tr -s " ") == *" 004-stats-cause build 0 0 - - 0 - 0 0 0 1 0"* ]]'
+check "stats groups the tasks by risk tier: merged, median rounds, comments per task, and the later fixes and reverts traced to the tier" \
+  '[[ $rows == *"By risk tier:"*" low 2 0.5 0.5 1 0"*" medium 1 0 0 0 1"*" high 0 - - 0 0"*" no risk tier 0 - - 0 0"* ]]'
+check "stats warns when low-risk PRs drew more comments than medium ones" \
+  '[[ $out == *"Low-risk PRs drew more comments than medium ones: the tiers or SENSITIVE_PATHS may be off."* ]]'
+later=$'Later fixes and reverts since 2026-11-05:\n  005-stats-fix fixes 004-stats-cause (low risk), missed by tests\n  revert of #35 → 002-stats-two (medium risk)\n  missed by: tests 1'
+check "stats traces a fix and a revert since the date to their tasks and tiers, though the fixed task merged earlier, and counts what missed the fixes" \
+  '[[ $out == *"$later" ]]'
 check "stats changes nothing in the home" '[[ $(git -C "$L" rev-parse @) == "$head" && $(git -C "$L" status --porcelain) == "$dirty" ]]'
 check "stats refuses a date it can't read" '[[ $(crew stats --project stats --since 11/05 2>&1) == *"--since takes a date, YYYY-MM-DD, not '"'"'11/05'"'"'"* ]]'
+rm "$SP/local.env"
+out=$(crew stats --project stats --since 2026-11-05 2>&1); st=$?
+check "without the project's clone, stats says it didn't check for reverts, and still reports" \
+  '((st == 0)) && [[ $out == *"005-stats-fix fixes 004-stats-cause"*"  reverts: not checked (no clone of the project on this machine)" && $out != *"revert of"* ]]'
 
 # The misses agent, run by crew gardener: it reads the project's tasks merged after
 # misses.last that have a comment of the user's in a round after an automated
