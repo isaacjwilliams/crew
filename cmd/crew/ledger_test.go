@@ -224,6 +224,7 @@ func TestCleanReadsTheSeverityHeld(t *testing.T) {
 	for severity, clean := range map[string]bool{
 		"must fix": false, "should fix": false, "pre-existing: should fix": false,
 		"split: held at must fix, Codex refutes": false, "flipped: should fix, was withdrawn in review 1": false,
+		"should fix (lowered from must fix: the pass still runs)": false, "should fix — lowered from must fix: it's rare": false,
 		"nitpick": true, "split: held at nitpick, Claude reviewer refutes": true, "fix later": true,
 	} {
 		r := AutomatedReview{ClaudeReported: true, Findings: []Finding{{severity, "fixed in abc1234"}}}

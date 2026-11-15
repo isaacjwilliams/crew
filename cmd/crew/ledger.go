@@ -514,22 +514,22 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 // must fix or should fix for it, and the Claude reviewer reported.
 func (r AutomatedReview) Clean() bool {
 	for _, f := range r.Findings {
-		if held := f.heldAt(); f.Outcome() == OutcomeFixed && (held == "must fix" || held == "should fix") {
+		if f.Outcome() == OutcomeFixed && f.mustOrShouldFix() {
 			return false
 		}
 	}
 	return r.ClaudeReported
 }
 
-// heldAt is the severity in a finding's agreed severity, without its labels:
-// "must fix" in "split: held at pre-existing: must fix, Codex refutes", say.
-func (f Finding) heldAt() string {
+// mustOrShouldFix: the finding is held at must fix or should fix, whatever
+// labels come before that ("split: held at pre-existing: must fix, …") and
+// notes after it ("should fix (lowered from must fix: …)").
+func (f Finding) mustOrShouldFix() bool {
 	s := f.severity
 	for _, label := range []string{"flipped: ", "split: held at ", "pre-existing: "} {
 		s = strings.TrimPrefix(s, label)
 	}
-	s, _, _ = strings.Cut(s, ",")
-	return s
+	return strings.HasPrefix(s, "must fix") || strings.HasPrefix(s, "should fix")
 }
 
 // What the worker did about a finding, from the first words of its outcome:
