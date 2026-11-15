@@ -248,6 +248,12 @@ for st in draft ready working needs-input addressing-feedback merged abandoned; 
 done
 crew set 1 status working
 check "crew set refuses status pr-open from every other status, and names crew hand-over" '((refused == 7))'
+refused=0
+crew set 1 status 'pr-open ' 2>/dev/null || refused=$((refused + 1))
+crew set 1 status $'\tpr-open' 2>/dev/null || refused=$((refused + 1))
+crew set 1 status pr-open "" 2>/dev/null || refused=$((refused + 1))  # joined with a space
+check "crew set refuses pr-open with a space or tab around it, which reading the status back would drop" \
+  '((refused == 3)) && [[ $(crew get 1 status) == working ]]'
 sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
 check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
   'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'

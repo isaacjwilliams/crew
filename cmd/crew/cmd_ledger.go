@@ -172,7 +172,8 @@ func cmdSet(c *Crew, args []string) error {
 	if len(args) < 2 || args[1] == "" {
 		return fail("key required")
 	}
-	key, value := args[1], strings.Join(args[2:], " ")
+	// Trimmed once, so the checks below see what Lookup will read back.
+	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
 	if _, ok := parsePriority(value); key == "priority" && !ok {
 		return fail("priority must be a whole number, not '%s'", value)
 	}
