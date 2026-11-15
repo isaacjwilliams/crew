@@ -365,13 +365,30 @@ crew stats         # tasks merged in the last 30 days (--since YYYY-MM-DD; --pro
 
 One row for each merged task:
 
+- **kind**: build, fix or refine.
 - **review rounds** and **comments**: the rounds of feedback you sent, and the comments in them. A round that only reports red CI isn't counted.
 - **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
 - **questions waited on you**: from each time it went to `needs-input` until it left it. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
 - **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
 - **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column.
+- **later fixes** and **reverts**: the fix tasks that merged naming this task in `fixes`, and the reverts of its PR, whenever they came.
 
-Then the totals, and the median waits. It reads only the ledger, so it changes nothing and works on any machine.
+Then the totals, and the median waits.
+
+**By risk tier** groups the same tasks by `risk`: low, medium, high, then those with no risk tier. For each tier it gives how many merged, the median of their review rounds, their comments per task, and the later fixes and reverts since the date that trace to tasks of that tier. A low-risk PR should need only a look at its evidence, so when low-risk PRs drew more comments per task than medium ones, the report says so: the tiers the lead sets, or the `SENSITIVE_PATHS` that raise them, may be off. Read those PRs' comments for what they had in common.
+
+**Later fixes and reverts** lists each fix that merged and each revert made since the date, with the task it traces to and that task's tier, however long before the date that task merged. The last line counts those fixes by `missed_by`:
+
+```
+Later fixes and reverts since 2026-11-05:
+  051-round-totals fixes 012-invoice-totals (low risk), missed by tests
+  revert of #35 → 029-export (medium risk)
+  missed by: tests 1
+```
+
+A fix traces to its task through `fixes`, or to an unknown task when that's `unknown`. A revert is a commit on the default branch whose message says `This reverts commit <sha>`, as `git revert` and GitHub's revert button write, where that commit is a PR's merge commit (`Merge pull request #35 from …`) or squash commit (`… (#35)`). It traces to the task whose `pr` is that PR, or to an unknown task when none is.
+
+It reads the ledger, and for reverts the default branch in the project's clone, which it fetches first. It changes nothing else, so it works on any machine; without the project's clone it reports the rest and says `reverts: not checked`.
 
 ### What a worker's PR looks like
 

@@ -92,6 +92,8 @@ A fix's brief names where the defect came from, in two keys, and `crew ready` re
 | `ci` | the checks on the PR |
 | `user-review` | your own review before you merged |
 
+`crew stats` traces each fix to its task through `fixes`, and counts fixes by `missed_by`.
+
 Its worker commits a test that reproduces the defect, and fails on the code as it is, before the commit that fixes it. Its `## Evidence` shows both runs: the test failing before the fix, and passing after. crew doesn't check the order of commits; the evidence shows it.
 
 ## Risk tiers
