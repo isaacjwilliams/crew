@@ -15,9 +15,11 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
 complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
-complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike' -d 'What the task makes'
+complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike fix refine' -d 'What the task makes'
 complete -c crew -n "__fish_seen_subcommand_from new" -l informs -x -d 'The draft whose question this spike answers' \
     -a "(crew list --status draft 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
+complete -c crew -n "__fish_seen_subcommand_from new" -l fixes -x -d 'The merged task that introduced the defect this fixes' \
+    -a "unknown (crew list --status merged 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'
