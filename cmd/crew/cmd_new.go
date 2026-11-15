@@ -233,7 +233,7 @@ func cmdHandOver(c *Crew, args []string) error {
 		return err
 	}
 	if st := t.Status(); !st.InFlight() || st == PROpen {
-		return fail("task is '%s': only a task in flight that isn't pr-open already can be handed over", st)
+		return fail("task is '%s': only a task in flight, and not in pr-open, can be handed over", st)
 	}
 	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
 		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())

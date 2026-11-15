@@ -272,7 +272,7 @@ sed -i 's/^SENSITIVE_PATHS=.*/SENSITIVE_PATHS="db\/migrate :(glob)**\/auth*"/' "
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "hand-over refuses a task handed over already, and so does crew set" \
-  '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open already can be handed over"* && $(crew set 1 status pr-open 2>&1) == *"use crew hand-over"* ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight, and not in pr-open, can be handed over"* && $(crew set 1 status pr-open 2>&1) == *"use crew hand-over"* ]]'
 check "status shows a pr-open task's look" '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  low: approve from the evidence"* ]]'
 # Someone else pushes to the PR's branch: a suggestion applied on GitHub, say.
 git -C "$WT" push -q -u origin HEAD 2>/dev/null

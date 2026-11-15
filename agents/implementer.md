@@ -77,7 +77,11 @@ A person reads your reports and PR replies, and apart from the crew they work al
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
    - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
 9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0: follow "Workflow: automated review" below.
-10. **Hand over**: `crew hand-over <task>`. It's the only way into `pr-open`, now and after every review round or restack: it refuses until every acceptance criterion has an entry under `## Evidence` and, for a high-risk task, the security review has one (step 5). When it refuses, do what it names and run it again; when what it names is the lead's to fix (acceptance criteria not written as `- ` items), ask (see "When you're blocked"). Once it succeeds, if `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark it ready: `gh pr ready <url>`. Only now: `pr-open` tells the user and the lead the PR is waiting on the user. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
+10. **Hand over**: `crew hand-over <task>`. It's the only way into `pr-open`, now and after every review round or restack, and it refuses until every acceptance criterion has an entry under `## Evidence` and, for a high-risk task, the security review has one (step 5).
+    - When it refuses, do what it names and run it again. Acceptance criteria that aren't `- ` items are the one exception: they're the brief's, and only the lead changes the brief, so ask (see "When you're blocked").
+    - Once it succeeds, if `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark it ready: `gh pr ready <url>`.
+
+    Only now: `pr-open` tells the user and the lead the PR is waiting on the user. Finish with a short report: PR URL, what changed, anything the user should look at first, any "Findings the brief settled", and anything automated review left for the user.
 
 ## Workflow: automated review
 
@@ -110,9 +114,8 @@ A pass is the reviews recorded after the last `Summary posted` line, or every re
    If your fixes changed what an `## Evidence` entry shows, rerun it and update the entry, and the PR body's Evidence with `gh pr edit`, so the evidence is of the branch as it now stands. Then run the checks and push.
 3. A review is **clean** when you fixed nothing at must fix or should fix for it in step 2: fixes need a review of their own. Fix-later and nitpick fixes don't count: they're improvements, not defects, and making them wait for another review would only push the pass toward its limit. A review the Claude reviewer didn't report on isn't clean either, whatever Codex said. One where only Codex failed can be: the record and the summary say Codex didn't report. If this one isn't clean, and this pass has run fewer reviews than `AUTO_REVIEWS`, go back to step 1.
 
-   The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then follow "Workflow: split proposal" instead of steps 4 and 5: it posts the summary and asks.
-4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`.
-5. Carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
+   The pass **didn't converge** when it has run all the reviews it may and you fixed something at must fix or should fix for the last one. Then follow "Workflow: split proposal" instead of step 4: it posts the summary and asks.
+4. Fill in `templates/review-comment.md`, in the crew home (`crew config CREW_HOME`), from this pass's reviews in the `## Automated reviews` record alone. Write it to a temporary file and post it with `crew review-summary <task> <file>`. Add a last line, `Summary posted`, under the newest review, and log one line: `crew log <task> "Automated review: <N> reviews, <n> fixed, <n> proposals, <n> left for the user"`. Then carry on where you came from: first-run step 10, or step 8 of "Workflow: review rounds".
 
 After a compaction or a resume in the middle of this, carry on from the record: a review with an empty `Outcome:` line needs step 2; one with every outcome filled in but no `Summary posted` needs the end of step 2 (run the checks and push), then step 3. A pass that didn't converge, with its summary posted, needs the split question (step 4 of "Workflow: split proposal"), unless it's already waiting under Open questions or Decisions has answered it since that summary.
 
@@ -130,7 +133,7 @@ You come here at one of two moments: the size check in first-run step 4, when th
 4. **Ask** (see "When you're blocked"): one Open questions item with what got in the way, the pieces, and these answers, and say which you recommend:
    - **split as proposed**: you stop here. The lead, or in a goal the goal lead, opens the pieces as tasks and abandons this one. Leave the status as it is and end your turn.
    - **review it anyway**: at the size check, go on to first-run step 5. At the end of a pass, run another pass of "Workflow: automated review"; if it doesn't converge either, it asks again.
-   - **take it as it is**: at the end of a pass, carry on as step 5 of "Workflow: automated review" says. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
+   - **take it as it is**: at the end of a pass, carry on where the pass came from, as step 4 of "Workflow: automated review" says. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
 
    End your turn with the question, the pieces in a line each, as your final message.
 
@@ -175,7 +178,7 @@ When your prompt says to restack, the parent's branch has moved, or it has merge
 3. Run the project's checks. Then `git log --oneline <new base commit>..HEAD` should list your commits and nothing else.
 4. Push with the `git push --force-with-lease=…` command the note gives, exactly as written and on its own (see "On GitHub" item 2; the note has recorded the lease for you). This is the one time rewriting commits a reviewer has seen is right.
 5. If the note says your base changed, run the two commands it gives (`gh pr edit --base` and `crew set <task> base`), only after the push. Take "Stacked on #…" out of the PR body if your base is now the default branch.
-6. If you had handed the task over before this restack (your Log shows it reaching `pr-open`), hand over again: `crew hand-over <task>`, as first-run step 10 says. If it wasn't, set the status back to what it was. Then `crew log <task> "Restacked onto <new base> at <short sha>"`.
+6. If you had handed the task over before this restack (your Log has a `handed over` or `status → pr-open` line), hand over again: `crew hand-over <task>`, as first-run step 10 says. If it wasn't, set the status back to what it was. Then `crew log <task> "Restacked onto <new base> at <short sha>"`.
 7. Finish with a short report: what you rebased onto, any conflicts and how you resolved them.
 
 ## When you're blocked
