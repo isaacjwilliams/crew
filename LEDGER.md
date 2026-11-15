@@ -139,7 +139,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
 
 - the range reviewed, the reviewers (the Claude reviewer, and Codex when `CODEX_REVIEW` is on; each marked `failed` when it didn't report), how many rounds they had between them, and each one's derived intent and reading of the stated intent;
 - every finding a reviewer raised, as a `####` heading with its severity, and lines for who raised it (`both`, `Codex` or `Claude reviewer`), the finding (quoted), each round's replies to it (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. Besides the rubric's four, an agreed severity can be `pre-existing: <severity>` (a reviewer tagged it `pre-existing` and the worker found the same failure at the fork point), `withdrawn` (its raiser took it back in a round, and no reviewer holds it), `split` (one reviewer holds it and the other refutes it; the worker settles it), `disputed` (the worker disagrees, with evidence, and no reviewer does) or `uncertain`. The worker fills in the outcome once it has acted:
-  - `fixed in <sha>`, with `(<n> instances)` when it fixed more than one instance of the finding's class;
+  - `fixed in <sha>`, with `(<n> instances)` when it fixed more than one instance of the finding's class, and `; left for the user: also at the fork point, <path:line>, …` when it found old instances no finding covers;
   - `proposal <file name>`;
   - `recorded`: a nitpick outside the PR's lines, or a pre-existing nitpick;
   - `withdrawn in round <n>`;
