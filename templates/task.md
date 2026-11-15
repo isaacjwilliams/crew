@@ -41,7 +41,7 @@ updated: {{NOW}}
 <!-- Where the new code lives (modules, classes, routes, components), whether it extends what exists
      or starts something new, the main alternative, and why it lost. If a preparatory refactor would
      make this simpler, name it here even if you decided against it. A change that adds no new code
-     paths says so in one line. -->
+     paths says so in one line. End with "Size: about <n> lines, <areas>" (added plus removed). -->
 
 ## Plan
 <!-- The agreed approach, as numbered steps. Name the files and functions to touch. -->
@@ -51,7 +51,9 @@ updated: {{NOW}}
 
 ## Acceptance criteria
 <!-- Checkable statements, including how to verify (tests to add or run, manual checks). When the goal
-     is about how code is organised, at least one checks the code's shape, not only its behaviour. -->
+     is about how code is organised, at least one checks the code's shape, not only its behaviour.
+     One "- " item each, any detail indented under it: the worker records evidence for each one,
+     by its number. -->
 
 ## Out of scope
 <!-- Tempting adjacent work the worker must NOT do. Follow-up ideas go in the Log. -->
@@ -64,6 +66,15 @@ updated: {{NOW}}
 ## Decisions
 <!-- Dated decisions made after dispatch, each ending with whose call it was: "(user)" for the
      user's own words or answer, otherwise "(lead)" or "(worker)". -->
+
+## Evidence
+<!-- Written by the worker before the hand-over: one "### <n>. <the criterion, in a line>" entry
+     for each top-level item of Acceptance criteria, numbered in order. Each holds the command
+     that shows the criterion holds and its output, in a fenced block trimmed to what shows the
+     result; or, where only a look would show it, what you saw and how (the page, the steps, the
+     tool); or, for a check only the user can make, what to try and why you couldn't. Indent any
+     output line that starts with "## ", or it ends this section. `crew hand-over` refuses until
+     every criterion has an entry. -->
 
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker

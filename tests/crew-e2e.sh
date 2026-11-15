@@ -195,7 +195,11 @@ check "non-ascii title falls back to task-N" '[[ $(basename "$F3") == 003-task-3
 check "ready refuses an empty brief" '! crew ready 1 2>/dev/null'
 fill "$F1"; sed -i '/^s$/d' "$F1"
 check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"fill in: Structure"* ]]'
-sed -i '/^## Structure$/a s' "$F1"; crew ready 1 >/dev/null
+sed -i -e '/^## Structure$/a s' -e 's/^- z$/1. z/' "$F1"
+check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write each acceptance criterion as a '"'"'- '"'"' item"*"this line isn'"'"'t one: 1. z" ]]'
+sed -i -e 's/^1\. z$/- z/' -e '/^- z$/a \  in detail\nAlso: z holds.' "$F1"
+check "ready refuses a criterion beside the '- ' items, and takes detail indented under one" '[[ $(crew ready 1 2>&1) == *"this line isn'"'"'t one: Also: z holds." ]]'
+sed -i '/^Also: z holds\.$/d' "$F1"; crew ready 1 >/dev/null
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
@@ -210,7 +214,32 @@ check "workers start with the configured auto-compact window" 'grep -- "--agent 
 check "workers get the shipped settings, with their project, the home and the pause hook, when the project adds none" \
   '[[ $(given_settings) == "$(jq -c . "$L/config/worker-settings.json")" ]] && session_env "$P" && has_pause_hook'
 check "git worktrees don't call wt" '[[ ! -e $HOME/wt-calls.log ]]'
-check "worker can update the ledger from its worktree" '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null'
+# The hand-over to the user: crew hand-over is the checked move to pr-open, and
+# crew set stays a plain write. Three criteria; the nested bullet isn't one.
+sed -i '/^## Acceptance criteria$/a - z2\n  - nested, not a criterion\n- z3' "$F1"
+check "hand-over refuses a task without a PR" '[[ $(crew hand-over 1 2>&1) == *"task has no PR"* && $(crew get 1 status) == working ]]'
+mode=$(crew get 1 pr_mode); crew set 1 pr_mode none
+check "hand-over needs no PR when the task opens none" '[[ $(crew hand-over 1 2>&1) == *"evidence missing for acceptance criteria 1, 2, 3 of 3"* ]]'
+crew set 1 pr_mode "$mode"
+check "worker can update the ledger from its worktree, and crew set writes pr-open without evidence" \
+  '(cd "$WT" && crew set 1 pr https://github.com/isaac/webapp/pull/12 && crew set 1 status pr-open) >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
+check "hand-over refuses a task handed over already" '[[ $(crew hand-over 1 2>&1) == *"task is '"'"'pr-open'"'"': only a task in flight that isn'"'"'t pr-open yet can be handed over"* ]]'
+crew set 1 status working
+sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
+check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
+  'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
+sed -i -e '/^### 3. z$/i ### 2. z3\nseen' -e 's/^\(- z[23]\?\)$/1. \1/' "$F1"
+check "hand-over refuses acceptance criteria that aren't '- ' items, and says to ask" '[[ $(crew hand-over 1 2>&1) == *"no '"'"'- '"'"' items to show evidence for: ask"* ]]'
+sed -i 's/^1\. \(- z[23]\?\)$/\1/' "$F1"
+# A hand-over waiting for the ledger lock checks the task as it is once it has it
+# (-o: the hand-over mustn't inherit the lock flock holds).
+flock -o "$L/.crew.lock" bash -c 'crew hand-over 1 >"$HOME/hand-over.out" 2>&1 & sleep 0.5; sed -i "s/^status: .*/status: abandoned/" "$1"' _ "$F1"
+check "a hand-over waiting on the lock refuses a task abandoned meanwhile" \
+  'wait_for "grep -q abandoned \"\$HOME/hand-over.out\"" && [[ $(crew get 1 status) == abandoned ]]'
+# A task in flight may be waiting on a collaborator's question when its worker finishes.
+crew set 1 status needs-input
+check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence" \
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'

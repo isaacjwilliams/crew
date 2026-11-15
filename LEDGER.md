@@ -14,7 +14,7 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
   config/crew.env        your own settings, over the defaults (caps, branch prefix, PR mode, ...)
   config/*-settings.json permission rules passed to sessions with --settings
   lead/.mcp.json         every project's MCP servers, for the leads; written by crew (not committed)
-  templates/             task.md, goal.md, proposal.md, review-comment.md and ci-comment.md
+  templates/             task.md, goal.md, proposal.md, review-comment.md, ci-comment.md and pr-body.md
   projects/<project>/
     project.env          REMOTE, DEFAULT_BRANCH, per-project overrides (e.g. WORKTREE_TOOL)
     local.env            REPO: this machine's clone of the project (not committed)
@@ -49,7 +49,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `ready` | brief complete and approved: by you, or for a goal's task by its goal lead | `crew ready` |
 | `working` | worker running on first pass | `crew dispatch` |
 | `needs-input` | waiting on you: an unchecked item under Open questions (a worker's question, a collaborator's PR comment, or CI still red after `MAX_CI_FIXES` CI rounds). In a goal's task, the goal lead sees a worker's question first | worker, or `crew tick` once the worker is idle |
-| `pr-open` | PR is up and waiting for your review | worker |
+| `pr-open` | PR is up and waiting for your review | worker, with `crew hand-over` the first time, which refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `abandoned` | dropped | you or the lead via `crew set` |
@@ -133,14 +133,18 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 
 A task's `## Decisions` holds one dated line per decision about the task: your answers and instructions, and the leads' and the worker's own calls. Each line ends with whose call it was: `(user)` when it records your own words or answer, otherwise `(lead)` or `(worker)`. Only a `(user)` line counts as yours: a worker's automated review gives its reviewer those lines as your decisions, and no others.
 
+## Evidence
+
+A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the worker's first move to `pr-open`, refuses until every criterion has an entry with something under its heading: it counts them, and doesn't judge them. So that each criterion has a number, `crew ready` refuses criteria that aren't `- ` items. Later returns to `pr-open`, after a review round or a restack, are plain `crew set`s.
+
 ## Automated reviews
 
 After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUTO_REVIEWS` times: the first *pass* of automated review. When a review round asks for another (below), it runs another pass, of up to `AUTO_REVIEWS` reviews and at least one. A pass is the reviews after the last `Summary posted` line, and numbers carry on across passes. The worker records each review in the task file, under `## Automated reviews` (just before `## Review rounds`), as `### Automated review N`. The record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it:
 
 - the range reviewed: `<from sha>..<HEAD sha>`, what it starts from (`since <base branch>` for a review that read the whole PR, or `since review N` for one that read only the commits since review N's head) and the fork point (`fork point <sha>`). The first review reads the whole PR; a later one reads only the new commits, unless the branch was rebased or its base moved. The reviewers (the Claude reviewer, and Codex when `CODEX_REVIEW` is on; each marked `failed` when it didn't report), how many rounds they had between them, and each one's derived intent and reading of the stated intent;
 - every finding a reviewer raised, as a `####` heading with its severity, and lines for who raised it (`both`, `Codex` or `Claude reviewer`), whether it's `new` or a `repeat of review N #k` (only a reviewer marks a repeat; the worker may reject the mark, never add one), the finding (quoted), each round's replies to it (quoted), the worker's verdict and evidence, the agreed severity, and the outcome. Besides the rubric's four, an agreed severity can be `pre-existing: <severity>` (every reviewer that holds it tagged it `pre-existing`, in its report or a round, and the worker found the same failure at the fork point), `withdrawn` (its raiser took it back in a round, and no reviewer holds it), `split` (one reviewer holds it and the other refutes it; the worker settles it), `flipped: <severity>, was <earlier> in review N` (a repeat that an earlier review settled as not a defect, and a reviewer now holds at must fix or should fix), `disputed` (the worker disagrees, with evidence, and no reviewer does) or `uncertain`. The worker fills in the outcome once it has acted:
-  - `fixed in <sha>`, with `(<n> instances)` when it fixed more than one instance of the finding's class, and `; left for the user: also at the fork point, <path:line>, …` when it found old instances no finding covers;
-  - `proposal <file name>`;
+  - `fixed in <sha>`: a must fix or should fix, or a fix-later or nitpick finding in the PR's lines; with `(<n> instances)` when it fixed more than one instance of the finding's class, and `; left for the user: also at the fork point, <path:line>, …` when it found old instances no finding covers;
+  - `proposal <file name>`: a fix-later finding outside the PR's lines;
   - `recorded`: a nitpick outside the PR's lines, or a pre-existing nitpick;
   - `withdrawn in round <n>`;
   - `not a defect: <evidence>`: a split it set aside;
@@ -149,6 +153,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
   - `left for the user: verdict changed since review N`: a flipped finding;
   - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user, which the user hasn't decided since;
   - `left for the user: <the cost>`: a must fix that only a deploy step or the docs could close. The cost says what fails, for whom, and for how long;
+  - `left for the user: <the fix's cost>`: a fix-later finding in the PR's lines whose fix is too big for the PR. The cost says the fix's size and what it touches;
 - each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the pass's summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary: review N -->`, N the newest review, so a second `crew review-summary` for the same review edits it instead of posting another.
 

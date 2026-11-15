@@ -100,6 +100,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
 | `templates/review-comment.md` | — | The automated-review summary a worker fills in from its task's `## Automated reviews` and posts with `crew review-summary` |
 | `templates/ci-comment.md` | — | Why CI was red on a worker's PR and what it did, which the worker fills in for a round's `CI failed on` line and posts with `crew ci-summary` |
+| `templates/pr-body.md` | — | The body of a worker's PR: a short summary, Risk, How to revert, Evidence, and Notes for reviewers when there's something to note. The worker fills it in from its task; nothing parses it |
 | `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
@@ -169,11 +170,13 @@ The home's own files (code, config, templates) are never part of a ledger commit
 ```
 you ⇄ lead (a session in <home>/lead, for one project or every one; reads code in crew checkout <p>)
   lead: confirm goal → crew new "<title>" --branch <name> → investigate → plan → acceptance criteria
+        → size estimate (Structure's Size: line); past MAX_PR_LINES or two concerns → split ("Splitting a task")
         → plan-reviewer subagent in the background (task file path only) → summary right away
         → review arrives → findings settled → Raise findings to you
         (each point written into the draft task file as it's agreed)
   you: "go"                             # if the review is still running, the lead dispatches once it's settled
-  lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty
+  lead: crew ready TASK                 # checks Goal / Structure / Plan / Acceptance criteria are non-empty,
+                                        # and the criteria are '- ' items
         crew dispatch TASK
           ├─ lock; check status, depends_on (same project, must be merged), MAX_WORKERS, the goal's max_in_flight; unlock
           │     a stacked task's parent is exempt from "must be merged";
@@ -192,8 +195,10 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
           └─ record worktree, worker_name/job/session; status → working
 ```
 
+Size is checked against one setting, `MAX_PR_LINES`, twice: at intake, where the brief's `Size:` line is the lead's estimate and the plan reviewer's Size question checks it against the code, and by the worker on its real diff before it opens a PR (below).
+
 ### Worker first run
-The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. When the plan changes existing code that no test covers yet, refactors included, its first commit adds tests that pin its behaviour as it is, and it logs that commit's SHA (`Pinned in …`) or why it skipped the pin. Once the checks pass, it runs `/simplify` on its branch's changes, keeps what stays inside the brief as a commit of its own, and logs what it folded (`Exhale: …`). Then it checks the branch's size once, against `MAX_PR_LINES`: past it, it goes to "Workflow: split proposal" (below) instead of opening a PR. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run), and records the PR with `crew set TASK pr …` and `crew log`.
+The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. When the plan changes existing code that no test covers yet, refactors included, its first commit adds tests that pin its behaviour as it is, and it logs that commit's SHA (`Pinned in …`) or why it skipped the pin. Once the checks pass, it runs `/simplify` on its branch's changes, keeps what stays inside the brief as a commit of its own, and logs what it folded (`Exhale: …`). Then it checks the branch's size once, against `MAX_PR_LINES`: past it, it goes to "Workflow: split proposal" (below) instead of opening a PR. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. For each acceptance criterion it runs what shows it holds and records the command and its output under `## Evidence`, one `### <n>.` entry per criterion. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run) with a body filled in from `templates/pr-body.md`, its Evidence built from the task's, and records the PR with `crew set TASK pr …` and `crew log`.
 
 Then, unless `AUTO_REVIEWS` is 0, it reviews its own PR:
 ```
@@ -209,15 +214,21 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
           │    (each reviewer started fresh, with a round file: its report, earlier rounds, this round's items)
           └─ checks each finding and repeat mark, settles its severity (flipped: when an earlier review set it aside),
                appends "### Automated review N" under "## Automated reviews"
-        → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user (flips,
-          and repeats of what was already left for the user, among them) → its Outcome line
+        → per finding, by agreed severity: fix and push (a small fix later in the PR's own lines too) / crew propose
+          (a fix later outside them) / settle a split / left for the user (flips, and repeats of what was already
+          left for the user, among them) → its Outcome line
+        → evidence the fixes changed, rerun and updated in the task and the PR body
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
-        → converged: gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
+        → converged: gh pr ready (pr_mode ready, PR still a draft)
+          → crew hand-over TASK  # refuses until every acceptance criterion has an entry (Task.EvidenceGaps);
+                                 # then status pr-open, "handed over" in the Log
         → didn't converge (fixes for the last review): the summary gives the proposed pieces; split proposal
 ```
-A pass that didn't converge, like a branch past `MAX_PR_LINES`, ends in the implementer's "Workflow: split proposal": the worker says what got in the way, proposes smaller pieces to replace the branch (each naming the commits and paths it carries over), and asks under Open questions: split as proposed, review it anyway, or take it as it is. The question takes the usual path to the user, or in a goal to the goal lead, which answers it: to split, it opens the pieces with `crew new … --goal`, moves the tasks stacked on or depending on the old one to the pieces, and abandons it (`lead.md` "Stacked tasks", "Replacing a task").
+A pass that didn't converge, like a branch past `MAX_PR_LINES`, ends in the implementer's "Workflow: split proposal": the worker says what got in the way, proposes smaller pieces to replace the branch (each naming the commits and paths it carries over), and asks under Open questions: split as proposed, review it anyway, or take it as it is. The question takes the usual path to the user, or in a goal to the goal lead, which answers it: to split, it opens the pieces with `crew new … --goal`, moves the tasks stacked on or depending on the old one to the pieces, and abandons it (`lead.md` "Splitting a task").
 That's the first pass of automated review. A review round with an `Automated review requested` line (below) has the worker run another, once it has addressed the round's comments. A pass is the reviews after the last `Summary posted`, derived from the record rather than stored: it runs up to `AUTO_REVIEWS` reviews (at least one when the user asked for it), numbered on from the last pass, and posts a summary comment of its own.
+
+With `AUTO_REVIEWS` at 0 it goes straight from opening the PR to `crew hand-over`. Only this first move to `pr-open` is checked: later ones, after a review round or a restack, are plain `crew set TASK status pr-open`, since the PR was handed over already.
 
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
@@ -569,7 +580,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Ledger files (`ledger.go`):**
   - A `Doc` is a task, goal or proposal file. It reads the file afresh for every value and writes it back at once, under the ledger lock: agents edit these files too, so nothing is kept in memory. `Task`, `Goal` and `Proposal` wrap one with the keys each has. `Status` and `GoalStatus` are the statuses; a Go test checks them against `LEDGER.md`.
   - `Get`/`Set` handle *flat* `key: value` between the first two `---` lines. `Set` quotes values containing `: `, ` #` or `"`, replaces newlines with spaces, and adds missing keys before the closing `---`. Keep front matter flat; there's no YAML parser.
-  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `InsertBefore` puts review rounds before `## Log`.
+  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `crew hand-over` reads the criteria with it (`Task.AcceptanceCriteria`) and the entries without one (`Task.EvidenceGaps`), and `crew ready` checks each criterion is a `- ` item. `InsertBefore` puts review rounds before `## Log`.
   - `Log` appends to the end of the file, so **`## Log` must stay the last section**.
 - **Resolution (`resolve.go`):** `resolve` accepts:
   - a path;
@@ -686,16 +697,18 @@ Changing any of these means updating every side listed.
 | `projects/<p>/paused` is front matter only: `by` (`crew pause`, `crew pause --force` or `crew upgrade`), `at`, `host`. Only `Project.Paused` and `Project.PausedBy` read it | `crew pause` and `crew upgrade` (`pause`) → every session-starting command, `crew tick`, `crew gardener`, `crew status`, `crew pause --hook`; `crew resume` removes it, and `crew upgrade` the marks it wrote (`liftUpgradePause`); `LEDGER.md` |
 | `interrupted` in task and goal files: set by `pause` on the files of sessions mid-turn, cleared only by `crew followup` and `crew goal followup` once they've told the session to carry on (`carryOn`); `crew tick` and `crew status` only read it | `crew pause` → `crew followup`, `crew goal followup`, `tickTask` (`sendToWorker`), `goalHasInput`, `crew status`; `templates/task.md`, `templates/goal.md`, `LEDGER.md`, `implementer.md`, `goal-lead.md` |
 | The PostToolUse hook `"${CREW_HOME:-$HOME/crew}/bin/crew" pause --hook`, matcher `*`, added by `addPauseHook` to every worker's and goal lead's settings and to no settings file; it reads only `CREW_PROJECT` and the mark until the project is paused, then also the `session_id` on its input, sets `interrupted` on that session's file, and prints `{"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": …}}` | `workerSettings`, `goalLeadSettings` (`addPauseHook`) → `crew pause --hook` (`pauseHook`) → `implementer.md`, `goal-lead.md`; checked in `tests/crew-e2e.sh` |
-| The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard" and "Stacked tasks" of the installed `lead.md` | `lead.md` → `goal-lead.md`, and `agentFiles`, which counts `lead.md` in a goal lead's fingerprint; checked in `tests/guard.sh` |
+| The goal lead follows the sections "Intake: turning a request into a brief", "The brief standard", "Stacked tasks" and "Splitting a task" of the installed `lead.md` | `lead.md` → `goal-lead.md`, and `agentFiles`, which counts `lead.md` in a goal lead's fingerprint; checked in `tests/guard.sh` |
 | A goal task's worker question that the goal lead leaves for the user gets a "For the user: …" Log line | `goal-lead.md` → `lead.md` "Goals"; checked in `tests/guard.sh` |
-| A split question's three answers, `split as proposed`, `review it anyway` and `take it as it is`, and what the worker does for each at the size check and at the end of a pass that didn't converge | implementer "Workflow: split proposal" → `goal-lead.md` "Workflow: new input" and `lead.md` "Status" (who answers), `lead.md` "Stacked tasks" ("Replacing a task": moving what waits on the old task); the summary's unconverged ending in `templates/review-comment.md`; checked in `tests/guard.sh` |
+| A split question's three answers, `split as proposed`, `review it anyway` and `take it as it is`, and what the worker does for each at the size check and at the end of a pass that didn't converge | implementer "Workflow: split proposal" → `goal-lead.md` "Workflow: new input" and `lead.md` "Status" (who answers), `lead.md` "Splitting a task" (the pieces, and moving what waits on the old task); the summary's unconverged ending in `templates/review-comment.md`; checked in `tests/guard.sh` |
+| A brief's Structure ends with `Size: about <n> lines, <areas>`, held to `MAX_PR_LINES`; a plan past it or holding two concerns is split as `lead.md` "Splitting a task" says | `lead.md` "The brief standard" and intake step 6 → `plan-reviewer.md` (the Size question, a Raise with a proposed split) → `goal-lead.md` (settling a Size finding); `templates/task.md`; checked in `tests/guard.sh` |
 | Collaborators' items under Open questions start with `- [ ] @<login>` | `crew feedback` → `workerQuestions` |
 | A task is stacked when its `base` equals another task's `branch` in the same project | `crew new --on`, `crew set TASK base` → `parentOf` (dispatch gate, `inFlight`, `crew status`, `crew sync`, `crew restack`) |
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
 | A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 7; checked in `tests/guard.sh` |
-| Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
-| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew hand-over`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
+| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Evidence`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew hand-over`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 5, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `crew ready` (each criterion a `- ` item), `Task.AcceptanceCriteria` and `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies, the automated-review summary and the CI comment | `crew reply`, `crew review-summary`, `crew ci-summary` (`postOrEditComment`) → the `crew feedback` filter |
@@ -749,9 +762,9 @@ Changing any of these means updating every side listed.
 |---|---|
 | Change how the lead interviews you or writes briefs | `lead.md` (intake, brief standard); `templates/task.md` if sections change (then check `crew ready` and the contracts above) |
 | Change coding standards | The user's `~/.claude/CLAUDE.md` (taste) or the repo's `AGENTS.md` (project conventions). `implementer.md` holds no standards of its own; it relies on those loading |
-| Change the PR-body format | `implementer.md` (first run, step 7) |
+| Change the PR-body format | `templates/pr-body.md`; `implementer.md` (first run, step 7) says how it's filled in |
 | Tune the readability review | `casual-observer.md` (budget, checklist, severity, model) |
-| Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; the size past which a worker proposes a split is `MAX_PR_LINES`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
+| Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; the size past which a worker proposes a split, and the lead splits a plan at intake, is `MAX_PR_LINES`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
 | Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 7 of `lead.md` |
 | Tune the gardener | `gardener.md`; the range and turn limit are in `config/defaults.env` (set them in `config/crew.env`) |
 | Allow or deny a command | `config/*-settings.json` (`allow` for fewer prompts, `deny` as a tripwire); what an agent may do on GitHub goes in its prompt |

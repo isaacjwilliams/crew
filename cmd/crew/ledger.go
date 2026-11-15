@@ -366,6 +366,63 @@ func (t Task) NewestReview() int {
 	return n
 }
 
+// AcceptanceCriteria is the first line of each of the task's criteria: the
+// top-level "- " items under ## Acceptance criteria, in order. Nested items and
+// the lines that continue an item aren't criteria of their own.
+func (t Task) AcceptanceCriteria() []string {
+	var criteria []string
+	for _, l := range strings.Split(t.Section("## Acceptance criteria"), "\n") {
+		if item, ok := strings.CutPrefix(l, "- "); ok {
+			criteria = append(criteria, item)
+		}
+	}
+	return criteria
+}
+
+// EvidenceGaps is the numbers of the acceptance criteria that have no evidence
+// yet. The evidence for criterion n is a "### n." entry under ## Evidence with
+// something under its heading. A heading inside a fenced block is output, not
+// an entry. It counts the entries and doesn't judge them.
+func (t Task) EvidenceGaps() []int {
+	recorded := map[int]bool{}
+	entry := 0  // the entry the line is in, or 0 outside one
+	fence := "" // the fence the line is inside, or "" outside one
+	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
+		inFence := fence != ""
+		if !inFence {
+			fence = fenceOpening(l)
+		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+			fence = ""
+		}
+		if rest, ok := strings.CutPrefix(l, "### "); ok && !inFence {
+			num, _, _ := strings.Cut(rest, ".")
+			entry, _ = strconv.Atoi(num)
+		} else if entry > 0 {
+			recorded[entry] = true
+		}
+	}
+	var gaps []int
+	for i := range t.AcceptanceCriteria() {
+		if !recorded[i+1] {
+			gaps = append(gaps, i+1)
+		}
+	}
+	return gaps
+}
+
+// fenceOpening is the run of three or more backticks or tildes that opens a
+// fenced block on line l, or "". A line of the same character at least as long
+// closes it.
+func fenceOpening(l string) string {
+	for _, c := range "`~" {
+		run := l[:len(l)-len(strings.TrimLeft(l, string(c)))]
+		if len(run) >= 3 {
+			return run
+		}
+	}
+	return ""
+}
+
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
 // user once the worker has had MAX_CI_FIXES rounds of them. They are the only
