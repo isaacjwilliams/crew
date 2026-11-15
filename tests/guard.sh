@@ -293,6 +293,8 @@ check "the implementer fixes every instance of a finding's class that the change
   "grep -q 'fix every instance of the finding.s class' $A/implementer.md && grep -q 'fixed in <short sha> (<n> instances)' $A/implementer.md && ! grep -q 'Leave alone an instance' $A/implementer.md && grep -q 'fix every instance of the finding.s class that fails because of this change' $A/implementer.md && grep -q 'left for the user: also at the fork point, <path:line>' $A/implementer.md && grep -q 'report them as two findings, and tag only the old one' $SK/rubric.md"
 check "the implementer changes no code for a pre-existing finding, and leaves it for the user with a proposal" \
   "grep -q '^   - \*\*pre-existing\*\* (.pre-existing: <severity>.):.*don.t change the code' $A/implementer.md && grep -q 'left for the user: pre-existing, <the fix.s size>; proposal <its file name>' $A/implementer.md"
+check "a repeat reuses its earlier finding's proposal instead of writing another" \
+  "grep -q 'When the finding is a repeat and its earlier finding.s outcome already names a proposal, name that one instead of writing another' $A/implementer.md && grep -q 'as for fix later, reusing a repeat.s earlier one' $A/implementer.md"
 check "only a code change closes a must fix: one that only a deploy step or the docs could close is left for the user with its cost" \
   "grep -q 'Only a code change that removes the failure fixes a must fix' $A/implementer.md && grep -q 'left for the user: <the cost: what fails, for whom, and for how long>' $A/implementer.md"
 check "the summary lists pre-existing findings in a section of their own after Left for later, and gives a deploy window's cost" \
