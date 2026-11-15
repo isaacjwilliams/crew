@@ -1111,7 +1111,7 @@ st=$(crew status)
 check "status shows a draft's open items and its spikes, and a spike the draft it informs" \
   '[[ $(row "$KDI") == *"draft"*"2 to learn; $(num "$KS") working, $(num "$KT") draft" && $(row "$KSI") == *"working"*"informs $(num "$KD")" ]]'
 check "status shows a task waiting on a running spike" '[[ $(row "$KAI") == *"after $(num "$KS")"* ]]'
-check "a running spike holds a slot of its goal's max_in_flight" '[[ $(row "goal $G8") == *"0 of 3 task(s) merged, 1/1 in flight: full" ]]'
+check "a running spike holds a slot of its goal's max_in_flight" '[[ $(row "goal $G8") == *"0 of 1 task(s) merged, 1/1 in flight: full" ]]'
 commit_in "$KWT" spike/paging.ts
 echo 'SENSITIVE_PATHS="spike"' >>"$PE"; out=$(crew sync 2>&1); sed -i '/^SENSITIVE_PATHS=/d' "$PE"
 check "sync leaves a spike that touches a sensitive path without a risk tier: it has none to raise" '[[ $out != *"risk →"* && -z $(crew get "$KS" risk) ]]'

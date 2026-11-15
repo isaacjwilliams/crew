@@ -118,8 +118,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew tick                        Do what needs no decision, across all projects:
                                    sync, record new PR comments and red CI, send
                                    review rounds and restacks to idle workers, mark
-                                   tasks waiting on you, clean up merged ones (run
-                                   by a timer)
+                                   tasks waiting on you, clean up merged tasks and
+                                   done spikes (run by a timer)
   crew pause [--project P|--all] [--force]
                                    Stop the project's work without losing any:
                                    nothing new starts, sessions mid-turn are told to

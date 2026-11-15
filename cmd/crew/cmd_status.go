@@ -322,8 +322,11 @@ func (s *statusView) goalRow(g Goal, tasks []Task) {
 	if lead != "" {
 		lead = "lead: " + lead
 	}
-	total, merged := 0, 0
+	total, merged := 0, 0 // of the tasks that make a PR; a spike's is never merged
 	for _, t := range s.goalTasks(g) {
+		if rules, err := t.rules(); err == nil && !rules.pr {
+			continue
+		}
 		total++
 		if t.Status() == Merged {
 			merged++
