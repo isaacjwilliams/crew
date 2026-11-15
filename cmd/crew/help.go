@@ -165,12 +165,14 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
   crew observe [TASK|PATH] [--base REF]
                                    Run the casual observer headless on a branch
   crew gardener [--all|--project P]
-                                   Run the gardener over newly merged commits
+                                   Run the gardener over newly merged commits, and
+                                   the misses agent over your comments on newly
+                                   merged PRs
   crew propose "<title>" [--why TEXT] [--revisit-when TEXT] [--source S]
                [--project P]
                                    Write down an idea worth keeping as a proposal;
                                    prints its path. S is lead (the default), user,
-                                   gardener or worker:TASK
+                                   gardener, misses or worker:TASK
   crew proposals [--any-status] [--all|--project P]
                                    List open proposals (--any-status: every one),
                                    with who wrote each and when to revisit it
@@ -181,7 +183,7 @@ Project memory  (facts about a project you approved, which its agents load)
   crew remember "<fact>" --why TEXT [--source S] [--project P]
                                    Suggest a fact for the project's memory; it waits
                                    on you in memory-suggestions.md. S is lead (the
-                                   default), user, gardener or worker:TASK
+                                   default), user, gardener, misses or worker:TASK
   crew memory [--project P]        Print the project's memory, after the rule for
                                    weighing it
   crew memory --hook               The same for CREW_PROJECT, from a SessionStart

@@ -379,6 +379,59 @@ func TestReviewComments(t *testing.T) {
 	}
 }
 
+// Round 1 comes before any automated review; review 1 follows it. Round 2
+// only reports red CI, round 3 has a review summary and an inline comment,
+// and round 4 a conversation comment, after review 2.
+const commentedTask = "## Automated reviews\n" +
+	"### Automated review 1 — 2026-11-10 12:00\n\n- Reviewers: Claude reviewer\n\n" +
+	"#### 1. [should fix] a — `a.go:1`\n- Agreed severity: should fix\n- Outcome: fixed in abc1234\n\nSummary posted\n\n" +
+	"### Automated review 2 — 2026-11-11 09:00\n\n- Reviewers: Claude reviewer\n\nNo findings.\n\nSummary posted\n\n" +
+	"## Review rounds\n" +
+	"### Round 1 — 2026-11-10 10:00 (PR #12)\n\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > too early\n\n" +
+	"### Round 2 — 2026-11-10 13:00 (PR #12)\n\n- [x] CI failed on aaa1111: test\n\n" +
+	"### Round 3 — 2026-11-10 14:00 (PR #12)\n\n**Review summaries**\n- [x] review 7 (changes_requested)\n  > Two things.\n  > - [ ] not an item\n\n" +
+	"**Inline comments**\n- [x] `a.go:3` — comment 9 — [link](u9)\n  > why?\n\n- [x] Automated review requested (comment 11)\n\n" +
+	"### Round 4 — 2026-11-11 10:00 (PR #12)\n\n**Conversation comments**\n- [ ] comment 12 — [link](u12)\n  > ok\n\n" +
+	"## Log\n"
+
+func TestReviewRounds(t *testing.T) {
+	rounds := Task{docWith(t, commentedTask)}.ReviewRounds()
+	var got []string
+	for _, r := range rounds {
+		line := fmt.Sprintf("%d %s:", r.Number, r.At.Format(logTime))
+		for _, cm := range r.Comments {
+			line += " [" + cm + "]"
+		}
+		got = append(got, line)
+	}
+	want := []string{
+		"1 2026-11-10 10:00: [comment 5 — [link](u5)]",
+		"2 2026-11-10 13:00:",
+		"3 2026-11-10 14:00: [review 7 (changes_requested)] [`a.go:3` — comment 9 — [link](u9)]",
+		"4 2026-11-11 10:00: [comment 12 — [link](u12)]",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestCommentsAfterReview(t *testing.T) {
+	var got []string
+	for _, c := range (Task{docWith(t, commentedTask)}).CommentsAfterReview() {
+		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment, c.Review.Number))
+	}
+	// Round 1 came before any review, and round 2 holds no comment.
+	want := []string{"round 3, review 7 (changes_requested), after review 1", "round 3, `a.go:3` — comment 9 — [link](u9), after review 1", "round 4, comment 12 — [link](u12), after review 2"}
+	if !slices.Equal(got, want) {
+		t.Errorf("CommentsAfterReview = %q\nwant %q", got, want)
+	}
+	// Without a time, a review can't be placed before a round.
+	undated := strings.Replace(strings.Replace(commentedTask, "1 — 2026-11-10 12:00", "1", 1), "2 — 2026-11-11 09:00", "2", 1)
+	if got := (Task{docWith(t, undated)}).CommentsAfterReview(); got != nil {
+		t.Errorf("after undated reviews: %v", got)
+	}
+}
+
 func TestLog(t *testing.T) {
 	d := docWith(t, "---\nid: 1\n---\n## Log")
 	d.Log("did a thing")
@@ -654,7 +707,7 @@ func TestFingerprintCountsAMissingFileAsMissing(t *testing.T) {
 
 func TestProposalAuthor(t *testing.T) {
 	for source, want := range map[string]string{
-		"gardener": "the gardener", "user": "the user", "lead": "a lead",
+		"gardener": "the gardener", "misses": "the misses agent", "user": "the user", "lead": "a lead",
 		"worker:007-saved-filters": "the worker on 007-saved-filters", "": "", "bob": "",
 	} {
 		pr := Proposal{docWith(t, "---\nsource: "+source+"\n---\n## Log\n")}

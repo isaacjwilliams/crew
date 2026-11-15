@@ -12,7 +12,7 @@ complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember 
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea, and why it is worth keeping'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
-complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener worker:' -d 'Who wrote it'
+complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
 complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
