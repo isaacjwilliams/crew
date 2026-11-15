@@ -141,13 +141,14 @@ func statsOf(t Task) taskStats {
 			s.cleanAfter = i + 1
 		}
 		for _, f := range r.Findings {
-			switch f.Outcome() {
-			case OutcomeFixed:
+			if f.StillOpen() {
+				continue // counted in the review that first left it for the user
+			}
+			if f.Outcome() == OutcomeFixed {
 				s.fixed++
-			case OutcomeLeftForUser:
-				if !f.StillOpen() { // counted in the review that first left it
-					s.leftForUser++
-				}
+			}
+			if f.Outcome() == OutcomeLeftForUser {
+				s.leftForUser++
 			}
 			if f.SetAside() {
 				s.setAside++

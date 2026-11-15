@@ -368,7 +368,7 @@ One row for each merged task:
 - **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
 - **questions waited on you**: from each time it went to `needs-input` until it moved on. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
 - **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
-- **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once.
+- **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column.
 
 Then the totals, and the median waits. It reads only the ledger, so it changes nothing and works on any machine.
 

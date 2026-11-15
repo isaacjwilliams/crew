@@ -70,14 +70,15 @@ func TestStatsOfWaits(t *testing.T) {
 
 func TestStatsOfReview(t *testing.T) {
 	// reviewedTask (ledger_test.go): four reviews, clean from the third, and a
-	// fifth that repeats a finding still left for the user, with one review
-	// round of two comments.
+	// fifth that repeats two findings still left for the user, one of them
+	// disputed, with one review round of two comments.
 	round := "## Review rounds\n### Round 1 — 2026-11-10 16:00 (PR #12)\n\n" +
 		"**Review summaries**\n- [x] review 7 (commented)\n  > see inline\n\n" +
 		"**Inline comments**\n- [x] `a.go:3` — comment 9 — [link](u9)\n  > why?\n\n## Log\n"
 	reviews, _, _ := strings.Cut(reviewedTask, "## Review rounds")
 	reviews += "### Automated review 5 — 2026-11-12 09:00\n\n- Reviewers: Claude reviewer\n\n" +
-		"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n"
+		"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n" +
+		"#### 2. [must fix] g — `g.go:7`\n- Earlier: repeat of review 3 #1\n- Agreed severity: disputed\n- Outcome: left for the user: still open from review 3\n\n"
 	s := statsOf(Task{docWith(t, reviews+round)})
 	got := []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
