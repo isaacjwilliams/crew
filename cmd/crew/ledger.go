@@ -372,6 +372,19 @@ func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 
+// statusLogged begins the Log line of every change to a task's status:
+// "status → pr-open", say.
+const statusLogged = "status → "
+
+// SetStatus writes the task's status and logs the change. Every change of a
+// task's status goes through here, so the Log has a line for each.
+func (t Task) SetStatus(s Status) error {
+	if err := t.Set("status", string(s)); err != nil {
+		return err
+	}
+	return t.Log(statusLogged + string(s))
+}
+
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
 // goes first. A task without one has priority 0.
 func (t Task) Priority() (int, error) {

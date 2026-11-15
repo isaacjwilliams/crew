@@ -288,6 +288,19 @@ func TestLog(t *testing.T) {
 	}
 }
 
+func TestSetStatusLogsTheChange(t *testing.T) {
+	task := Task{docWith(t, sampleTask)}
+	if err := task.SetStatus(PROpen); err != nil {
+		t.Fatal(err)
+	}
+	if task.Status() != PROpen {
+		t.Errorf("Status = %s after SetStatus(pr-open)", task.Status())
+	}
+	if !strings.HasSuffix(contents(t, task.Doc), " — status → pr-open\n") {
+		t.Errorf("SetStatus didn't log the change:\n%s", contents(t, task.Doc))
+	}
+}
+
 // Every status LEDGER.md documents is one crew knows, and the other way round.
 func TestStatusesMatchLedgerDoc(t *testing.T) {
 	b, err := os.ReadFile("../../LEDGER.md")
