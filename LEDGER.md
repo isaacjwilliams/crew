@@ -14,7 +14,7 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
   config/crew.env        your own settings, over the defaults (caps, branch prefix, PR mode, ...)
   config/*-settings.json permission rules passed to sessions with --settings
   lead/.mcp.json         every project's MCP servers, for the leads; written by crew (not committed)
-  templates/             task.md, goal.md, proposal.md, review-comment.md and ci-comment.md
+  templates/             task.md, goal.md, proposal.md, review-comment.md, ci-comment.md and pr-body.md
   projects/<project>/
     project.env          REMOTE, DEFAULT_BRANCH, per-project overrides (e.g. WORKTREE_TOOL)
     local.env            REPO: this machine's clone of the project (not committed)
@@ -49,7 +49,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `ready` | brief complete and approved: by you, or for a goal's task by its goal lead | `crew ready` |
 | `working` | worker running on first pass | `crew dispatch` |
 | `needs-input` | waiting on you: an unchecked item under Open questions (a worker's question, a collaborator's PR comment, or CI still red after `MAX_CI_FIXES` CI rounds). In a goal's task, the goal lead sees a worker's question first | worker, or `crew tick` once the worker is idle |
-| `pr-open` | PR is up and waiting for your review | worker |
+| `pr-open` | PR is up and waiting for your review | worker, with `crew hand-over` the first time, which refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
 | `abandoned` | dropped | you or the lead via `crew set` |
@@ -132,6 +132,10 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 ## Decisions
 
 A task's `## Decisions` holds one dated line per decision about the task: your answers and instructions, and the leads' and the worker's own calls. Each line ends with whose call it was: `(user)` when it records your own words or answer, otherwise `(lead)` or `(worker)`. Only a `(user)` line counts as yours: a worker's automated review gives its reviewer those lines as your decisions, and no others.
+
+## Evidence
+
+A task's `## Evidence`, just before `## Automated reviews`, is where its worker shows that the change works: one `### <n>.` entry for each top-level item of `## Acceptance criteria`, in order, holding the command that shows it and its output (or, where only a look shows it, what the worker saw and how; or, for a check only you can make, what to try). The worker records it before opening its PR, builds the PR body's Evidence from it, and keeps it true after automated review and review rounds. `crew hand-over`, the worker's first move to `pr-open`, refuses until every criterion has an entry: it counts them, and doesn't judge them. Later returns to `pr-open`, after a review round or a restack, are plain `crew set`s.
 
 ## Automated reviews
 

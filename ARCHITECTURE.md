@@ -100,6 +100,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
 | `templates/review-comment.md` | — | The automated-review summary a worker fills in from its task's `## Automated reviews` and posts with `crew review-summary` |
 | `templates/ci-comment.md` | — | Why CI was red on a worker's PR and what it did, which the worker fills in for a round's `CI failed on` line and posts with `crew ci-summary` |
+| `templates/pr-body.md` | — | The body of a worker's PR: a short summary, Risk, How to revert, Evidence, and Notes for reviewers when there's something to note. The worker fills it in from its task; nothing parses it |
 | `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
@@ -193,7 +194,7 @@ you ⇄ lead (a session in <home>/lead, for one project or every one; reads code
 ```
 
 ### Worker first run
-The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run), and records the PR with `crew set TASK pr …` and `crew log`.
+The worker reads the task file, then implements with commits, pushing its branch after each one so its work is never only on one machine, and runs the checks from `AGENTS.md`. Next it spawns casual-observer (if `pre_pr_review: yes`), fixes the findings it agrees with, and logs the ones it declines. For each acceptance criterion it runs what shows it holds and records the command and its output under `## Evidence`, one `### <n>.` entry per criterion. It pushes, runs `gh pr create` (draft by default, and always draft while automated review is to run) with a body filled in from `templates/pr-body.md`, its Evidence built from the task's, and records the PR with `crew set TASK pr …` and `crew log`.
 
 Then, unless `AUTO_REVIEWS` is 0, it reviews its own PR:
 ```
@@ -208,9 +209,14 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
         → per finding, by agreed severity: fix and push / crew propose / settle a split / left for the user → its Outcome line
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
-        → gh pr ready (pr_mode ready, PR still a draft) → crew set TASK status pr-open
+        → gh pr ready (pr_mode ready, PR still a draft)
+        → evidence the fixes changed, rerun and updated in the task and the PR body
+        → crew hand-over TASK    # refuses until every acceptance criterion has an entry (Task.EvidenceGaps);
+                                 # then status pr-open, "handed over" in the Log
 ```
 That's the first pass of automated review. A review round with an `Automated review requested` line (below) has the worker run another, once it has addressed the round's comments. A pass is the reviews after the last `Summary posted`, derived from the record rather than stored: it runs up to `AUTO_REVIEWS` reviews (at least one when the user asked for it), numbered on from the last pass, and posts a summary comment of its own.
+
+With `AUTO_REVIEWS` at 0 it goes straight from opening the PR to `crew hand-over`. Only this first move to `pr-open` is checked: later ones, after a review round or a restack, are plain `crew set TASK status pr-open`, since the PR was handed over already.
 
 The task file's record holds the loop's whole state, so a worker resumed or compacted in the middle carries on from it. If it gets blocked, it writes an Open question, sets `status needs-input`, and ends its turn with the question.
 
@@ -562,7 +568,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
 - **Ledger files (`ledger.go`):**
   - A `Doc` is a task, goal or proposal file. It reads the file afresh for every value and writes it back at once, under the ledger lock: agents edit these files too, so nothing is kept in memory. `Task`, `Goal` and `Proposal` wrap one with the keys each has. `Status` and `GoalStatus` are the statuses; a Go test checks them against `LEDGER.md`.
   - `Get`/`Set` handle *flat* `key: value` between the first two `---` lines. `Set` quotes values containing `: `, ` #` or `"`, replaces newlines with spaces, and adds missing keys before the closing `---`. Keep front matter flat; there's no YAML parser.
-  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `InsertBefore` puts review rounds before `## Log`.
+  - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `Task.EvidenceGaps` uses it too, to find the acceptance criteria without an entry under `## Evidence`, for `crew hand-over`. `InsertBefore` puts review rounds before `## Log`.
   - `Log` appends to the end of the file, so **`## Log` must stay the last section**.
 - **Resolution (`resolve.go`):** `resolve` accepts:
   - a path;
@@ -686,8 +692,9 @@ Changing any of these means updating every side listed.
 | The restack note: `git rebase --onto <target> <base_sha>`, the push `git push --force-with-lease=<branch>:<sha> origin <branch>` with the commit origin had before the rebase, and, when the base changes, `gh pr edit --base <new>` and `crew set TASK base <new>` | `crew restack` → implementer "Workflow: restack"; the worker's `crew set TASK base` is what ends the "needs restack" state after a merge |
 | "This task is stacked on task …" in the dispatch prompt | `crew dispatch` → implementer "Stacked tasks" |
 | A review round's followup prompt says whether to reply ("Reply to each comment in those rounds with `crew reply`", from `REPLY_TO_THREADS`) | `crew followup` → implementer "Workflow: review rounds" step 7; checked in `tests/guard.sh` |
-| Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
-| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Status values `draft ready working needs-input pr-open addressing-feedback merged abandoned` | `crew` (`Status.InFlight`, `crew ready`, `crew hand-over`, `crew sync`, `crew status`), `implementer.md`, `lead.md`, `LEDGER.md` |
+| Section headings (`## Goal`, `## Structure`, `## Plan`, `## Acceptance criteria`, `## Evidence`, `## Review rounds`, `## Context`, `## Log` last) | `templates/task.md` → `crew ready`, `crew hand-over`, `crew feedback`, `Doc.Log`, `crew promote` |
+| Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` | `templates/task.md`, implementer first run step 6 (and steps 10 and review rounds step 6, which keep it true) → `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
 | A PR's `updatedAt` moves whenever a comment is posted or a review submitted | GitHub → `crew sync` (`pr_updated`) → `prMayHaveNewComments` in `crew tick` |
 | `<!-- crew -->` marker on worker replies, the automated-review summary and the CI comment | `crew reply`, `crew review-summary`, `crew ci-summary` (`postOrEditComment`) → the `crew feedback` filter |
@@ -740,7 +747,7 @@ Changing any of these means updating every side listed.
 |---|---|
 | Change how the lead interviews you or writes briefs | `lead.md` (intake, brief standard); `templates/task.md` if sections change (then check `crew ready` and the contracts above) |
 | Change coding standards | The user's `~/.claude/CLAUDE.md` (taste) or the repo's `AGENTS.md` (project conventions). `implementer.md` holds no standards of its own; it relies on those loading |
-| Change the PR-body format | `implementer.md` (first run, step 7) |
+| Change the PR-body format | `templates/pr-body.md`; `implementer.md` (first run, step 7) says how it's filled in |
 | Tune the readability review | `casual-observer.md` (budget, checklist, severity, model) |
 | Tune the automated PR review | `.claude/skills/pr-review/` (`SKILL.md`: the briefing, reconciliation and record; `rubric.md`: what the reviewer looks for and its severities); `reviewer.md` (model, effort); acting on findings is the implementer's "Workflow: automated review"; the summary is `templates/review-comment.md`; the number of reviews is `AUTO_REVIEWS`; Codex is `CODEX_REVIEW`, `CODEX_MODEL`, `CODEX_MODEL_EFFORT` and `AUTO_REVIEW_REBUTTALS`, run by `cmd_codex.go` |
 | Tune the plan review | `plan-reviewer.md` (questions, report format, model); where the lead runs it and what it shows the user are intake step 7 of `lead.md` |

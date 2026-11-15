@@ -15,7 +15,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │      implementer workers   (background sessions, one per task,
            │                    │         each in ~/agent-work/<project>/<task>)
            │                    │  ├─ casual-observer pass before the PR
-           │                    │  ├─ push branch, open draft PR
+           │                    │  ├─ evidence for each criterion, push branch, open draft PR
            │                    ▼  └─ automated review of the PR, fixes, a summary comment
            └── review/merge ── GitHub PRs
                                    ▲
@@ -355,11 +355,17 @@ crew tick          # sync with GitHub and do whatever needs no decision (see bel
 
 Outside a goal, a ready task says `dispatch by hand`: `crew tick` dispatches only goals' tasks, so you or the lead run `crew dispatch`. Drafts with nothing to ask are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you.
 
+### What a worker's PR looks like
+
+Each PR is short and has the same shape, so you can tell at a glance whether to merge it, look at its evidence, or read the code closely: what changed and why in at most three sentences, then **Risk** (what could break, for whom, and how far it reaches), **How to revert** (and anything a revert alone doesn't undo), **Evidence**, and Notes for reviewers only when there's a trade-off or an open question. A stacked PR first names the PR it's stacked on. The template is `templates/pr-body.md` in your crew home.
+
+**Evidence** shows that the change works, rather than saying so: for each acceptance criterion, the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. The worker records the same entries in the task file, under `## Evidence`, and the task can't turn `pr-open` until every criterion has one: `crew hand-over` counts them, though it doesn't judge them.
+
 ### Automated review, before yours
 
 Once a worker opens its PR, it reviews it before you do. Its `pr-review` skill (shipped in the crew home, so the crew's sessions load it and your other Claude Code sessions don't) has an independent reviewer agent read the PR cold, with only your words about the change: your request as the task's Goal quotes it, your decisions (the lines under Decisions marked `(user)`), the PR text and the commit messages. The worker then checks each finding against the code. It fixes the ones it agrees must or should be fixed, writes up the ones that belong outside this PR as proposals, and leaves the ones it disputes or can't settle for you. Then it reviews again, until a review comes back clean or `AUTO_REVIEWS` reviews have run (3 by default). Every finding and what became of it is recorded in the task file, under `## Automated reviews`.
 
-Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done, and the lead's report of the PR repeats what was left for you.
+Last, the worker posts one comment on the PR saying what automated review fixed, what it left for later, and what it left for you. With `PR_MODE=ready` the PR stays a draft until then. The task turns `pr-open` once that's done and every acceptance criterion has evidence, and the lead's report of the PR repeats what was left for you.
 
 **Another pass, after your review.** Once the worker has made the changes you asked for, you can have automated review check them: comment `crew review` on the PR (the whole comment, in any case), or ask the lead, which runs `crew review <task>`. Either way the request joins your review comments as a line in a review round, so it waits for a busy worker like any round. The worker addresses the round's comments first, then runs a new pass: up to `AUTO_REVIEWS` more reviews, at least one even when `AUTO_REVIEWS` is 0, each of the whole PR. The reviewers get your review comments as part of what you asked for. The pass ends with a new summary comment of its own, and the earlier ones stay as they were. Only your own `crew review` counts: a collaborator's goes under Open questions, like their other comments.
 
