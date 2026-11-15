@@ -628,6 +628,12 @@ func (t Task) PRNumber() string {
 // Dispatched: crew records a worker or a worktree for it.
 func (t Task) Dispatched() bool { return t.WorkerJob() != "" || t.Worktree() != "" }
 
+// HasOpenPR: the task is in flight and has a PR that wasn't closed unmerged.
+// crew sync leaves the status of a task whose PR was closed as it was.
+func (t Task) HasOpenPR() bool {
+	return t.PR() != "" && t.Status().InFlight() && t.Get("pr_state") != "closed"
+}
+
 // NewestReview is the number of the newest automated review the task records,
 // or 0 when it records none.
 func (t Task) NewestReview() int {

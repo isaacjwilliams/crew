@@ -322,9 +322,8 @@ func cmdReview(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	// crew tick sends rounds only for tasks in flight, and crew sync leaves the
-	// status of a task whose PR was closed unmerged as it was.
-	if t.PR() == "" || !t.Status().InFlight() || t.Get("pr_state") == "closed" {
+	// crew tick sends rounds only for tasks in flight.
+	if !t.HasOpenPR() {
 		return fail("%s has no open PR", t.ID())
 	}
 	if err := c.lock(); err != nil {
