@@ -270,7 +270,7 @@ wait for both answers before you close the round.
   `codex-round-<n>.md`, and this prompt to `codex-prompt-<n>.md`, then run, in the background,
   `crew codex <review root> <briefing dir>/codex-prompt-<n>.md <briefing dir>/codex-answer-<n>`:
 
-  > Rebuttal round <n> on the change described in `<briefing path>`, under the rubric at
+  > Rebuttal round <n> on the work described in `<briefing path>`, under the rubric at
   > `${CLAUDE_SKILL_DIR}/rubric.md`. The round file `<briefing dir>/codex-round-<n>.md` holds your own earlier report,
   > each earlier round's items with your reply to them, and this round's numbered items: findings from a second
   > reviewer who reviewed the same change independently under the same rubric and briefing, its objections to your
