@@ -71,8 +71,8 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
   - No Claude Code sandbox. The user dropped it: on Linux it blocks `localhost`, so test suites that need a local database broke, and exempting them left little of it. Don't add it back unless the user asks. Leave the network open.
   - A project's `projects/<p>/worker-settings.json` is merged add-only (`workerSettings`): it may widen lists like `allow`, never override a value the shipped file sets or drop a `deny` rule. Keep it that way.
 - **Stacks** are derived, not declared: a task is stacked when its `base` is another task's `branch` (`parentOf`). Don't add a second marker.
-  - Whether a restack is needed is computed from git (`restackReason`), never stored. `crew sync` reports it and never restacks; `crew tick` restacks through `crew restack`, which never sends the same target twice (`restack_sent`).
-  - `crew restack` only resumes the worker with the rebase to run. The worker pushes, retargets its PR and sets `base` last, so a failed restack still shows as needed. Only `crew` writes `base_sha`.
+  - Whether a restack is needed is computed from git (`restackReason`), never stored. `crew sync` reports it and never restacks; `crew tick` restacks through `crew restack`, which never sends the same target twice (`restack_sent`, `retarget_sent`).
+  - `crew restack` only resumes the worker with the rebase or retarget to run. The worker pushes, retargets its PR and sets `base` last, so a failed restack still shows as needed. Only `crew` writes `base_sha`.
   - The restack note and the "Stacked tasks" / "Workflow: restack" sections of `implementer.md` are one contract; `tests/guard.sh` checks they agree.
 - **Worktrees** are created and removed only in `worktreeCreate`/`worktreeRemove` (`worktree.go`), for both `WORKTREE_TOOL` values (`git`, `worktrunk`). Never pass `--yes` to `wt`: unapproved repo hooks must stop the dispatch.
   - What workers may do on GitHub is spelled out in `implementer.md` ("On GitHub, you may do exactly this"). Keep it, the `allow`/`deny` rules in `worker-settings.json`, and `tests/guard.sh` in agreement.
