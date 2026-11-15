@@ -3,7 +3,8 @@
      with `crew review-summary <task> <file>`. Leave out this comment, the <…> placeholders and any
      section that would be empty. One line per finding: a reader should take it in at a glance.
      It's for the user's collaborators too, so it never mentions the ledger, tasks, proposals or
-     agents. Withdrawn findings aren't listed.
+     agents. Withdrawn findings aren't listed. A finding left for the user because it's already on
+     the base branch goes under "Already on <base branch>", not "Left for you".
 
      <N> counts every review in this pass, including one whose reviewers failed. When the record
      has a "Summary posted" line before this pass's reviews, open instead of the line below with
@@ -36,5 +37,8 @@
 **Left for later**
 - <what could be better, in a line>
 
+**Already on <base branch>**
+- [<severity>] <the finding, in a line> — <the size of its fix, in a few words>
+
 **Left for you**
-- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / kept as the plan designed it>
+- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / kept as the plan designed it / only a deploy window would close it, and what that costs in a few words>

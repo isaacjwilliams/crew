@@ -167,6 +167,12 @@ your **counter-evidence** against any finding you think is wrong: a cited `file:
 the code. If you can't cite something, it isn't counter-evidence. Don't decide anything yet: with two reviewers, the
 rounds come first.
 
+A reviewer may tag a finding `pre-existing`. Check the tag at the fork point: read the code there
+(`git show <fork sha>:<path>`) and ask whether the same failure happens for the same caller and input. Unchanged lines
+aren't enough: an old defect the range newly makes reachable is the range's own.
+Never add the tag to a finding no reviewer tagged. You wrote the change, so you're tilted toward "it was already like
+that".
+
 ## 6. Rounds between the reviewers
 
 Skip this step unless both reviewers reported. The rounds are where the reviewers test each other's findings. You
@@ -249,6 +255,10 @@ raised and then withdrew.
 - When you disagree and no reviewer refutes the finding, it's `disputed`.
 - When you're uncertain, it's `uncertain`.
 
+A `pre-existing` tag that the fork point confirms goes before the severity, wherever the agreed severity names one:
+`pre-existing: should fix`, or `split: held at pre-existing: must fix, Codex refutes`. A tag it doesn't confirm leaves
+the agreed severity as it is. Either way, the Verdict line cites the code at the fork point.
+
 ## 8. Record the review
 
 Append the review to the task file under `## Automated reviews`. If the file has no such section (a task created
@@ -277,7 +287,7 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 - Round <n>, <reviewer>:
   > <its reply on this finding, verbatim>
 - Verdict: <agree | disagree | uncertain> — <your evidence, with file:line>
-- Agreed severity: <must fix | should fix | fix later | nitpick | withdrawn | split: held at <severity>, <reviewer> refutes | disputed | uncertain>
+- Agreed severity: <must fix | should fix | fix later | nitpick | pre-existing: <severity> | withdrawn | split: held at <severity>, <reviewer> refutes | disputed | uncertain>
 - Outcome:
 
 **Conclusion — Claude reviewer:** <verbatim>
