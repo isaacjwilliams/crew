@@ -45,9 +45,6 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	if informs != "" && rules.informs == "" {
 		return Task{}, fail("a %s task doesn't take --informs", kind)
 	}
-	if on != "" && !rules.pr {
-		return Task{}, fail("a %s task doesn't take --on: its branch stays local, so it can't be stacked", kind)
-	}
 	if name != "" && (!branchName.MatchString(name) || len(name) > 40) {
 		return Task{}, fail("--branch '%s': use a few lowercase words joined by hyphens, at most 40 characters, without the prefix (e.g. fix-invoice-rounding)", name)
 	}
@@ -85,12 +82,8 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 		if st := parent.Status(); st.Finished() {
 			return Task{}, fail("%s is '%s', so it has no open branch to stack on", parent.ID(), st)
 		}
-		parentRules, err := parent.rules()
-		if err != nil {
+		if err := stackRefusal(kind, parent, parent.Kind()); err != nil {
 			return Task{}, err
-		}
-		if !parentRules.pr {
-			return Task{}, fail("%s is a %s: its branch is never pushed, so nothing can stack on it", parent.ID(), parent.Kind())
 		}
 		base = parent.Branch()
 	}

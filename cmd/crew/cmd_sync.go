@@ -52,6 +52,11 @@ func cmdSync(c *Crew, args []string) error {
 			if st == Draft || st == Ready || st.Finished() {
 				continue
 			}
+			// A kind that makes no PR has none to find: one under its branch's
+			// name is an old one, from a branch since deleted.
+			if rules, err := t.rules(); err == nil && !rules.pr {
+				continue
+			}
 			pr := t.PR()
 			if pr == "" && t.Branch() != "" {
 				if pr = prOfBranch(p.Repo(), t.Branch()); pr != "" {

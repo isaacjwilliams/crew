@@ -500,7 +500,7 @@ crew status                             # 040's row: "2 to learn; 041 working, 0
 - **The lead asks you first**, as for any task, but runs no plan review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
 - **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the plan from them.
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
-- **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked with `--on`, and nothing can stack on it. A task that `depends_on` a spike waits until it's done.
+- **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
 
 ## 6. The casual observer on its own
 
