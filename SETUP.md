@@ -286,9 +286,9 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
 - restacks stacked tasks whose parent moved or merged, bottom-up, never sending the same restack twice;
-- cleans up merged tasks;
+- cleans up merged tasks and done spikes;
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
-- for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes and its workers' questions, and closes the goal once every task is finished (merged, done or abandoned).
+- for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes, its workers' questions and its spikes' reports, and closes the goal once every task is finished (merged, done or abandoned).
 
 It starts a model session only when it resumes a worker or a goal lead. `crew host up` turns its timer on, on the machine that runs the crew. On Linux, to keep the timers and the lead's service running while you're logged out, and to read what a tick did:
 

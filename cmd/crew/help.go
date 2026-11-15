@@ -154,8 +154,9 @@ Goals  (GOAL = id, number, unique substring, or file path)
   crew goal note GOAL TEXT         Record your words under the goal's Decisions and
                                    pass them to its goal lead
   crew goal cap GOAL N             Let N of the goal's tasks be in flight at once
-  crew goal followup GOAL          Resume the goal lead with your unsent notes and its
-                                   workers' new questions (run by crew tick)
+  crew goal followup GOAL          Resume the goal lead with your unsent notes, its
+                                   workers' new questions and its spikes' reports
+                                   (run by crew tick)
   crew goal done GOAL              Close a goal whose tasks are all finished
                                    (run by crew tick)
   crew goal abandon GOAL           Stop the goal lead; its tasks stay as they are

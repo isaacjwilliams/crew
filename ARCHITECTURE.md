@@ -268,7 +268,7 @@ you review on GitHub → tell the lead (or run it yourself):
                          # skips: anyone else's comments, replies tagged <!-- crew -->,
                          #        comments in PENDING reviews; inline comments timed by review submitted_at
   crew followup TASK     # refuses if the worker is busy (mid-turn or on an open prompt), or if there's no new round and no --note
-                         # refuses a merged or abandoned task, checked under the ledger lock
+                         # refuses a finished task (merged, done or abandoned), checked under the ledger lock
                          # a worker that isn't busy but whose process is still open (pid set) → claude stop <job> first
                          # what a fresh worker would load (worker_fingerprint) changed since it started, or it has none
                          #   → fresh worker instead, "(fresh: <why>)" in the log line and the output
