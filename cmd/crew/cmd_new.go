@@ -235,9 +235,8 @@ func cmdReady(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	t.Set("status", string(Ready))
+	t.SetStatus(Ready)
 	t.Touch()
-	t.Log("marked ready")
 	c.commit("ready " + t.ID())
 	fmt.Println("ready: " + t.ID())
 	return nil
@@ -283,7 +282,7 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err := rules.handOver(c, t); err != nil {
 		return err
 	}
-	t.Set("status", string(rules.handedOver))
+	t.SetStatus(rules.handedOver)
 	t.Touch()
 	t.Log("handed over")
 	c.commit("hand over " + t.ID())

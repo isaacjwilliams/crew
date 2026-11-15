@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -153,6 +155,86 @@ func TestNewestReview(t *testing.T) {
 		"## Review rounds\n### Round 1\n  > ### Automated review 9\n\n## Log\n")}
 	if n := two.NewestReview(); n != 2 {
 		t.Errorf("NewestReview = %d, want 2", n)
+	}
+}
+
+// Four automated reviews over two passes: the first needs fixes, the second
+// fixes only a nitpick, but its Claude reviewer didn't report, the third is
+// clean though Codex failed, and the fourth, in a later pass, has no findings.
+// Their outcomes take every form the record has, 026's and 027's included.
+const reviewedTask = "## Automated reviews\n<!-- Appended by the worker. -->\n\n" +
+	"### Automated review 1 — 2026-11-10 10:00\n\n- Reviewers: Claude reviewer and Codex\n\n" +
+	"#### 1. [must fix] a — `a.go:1`\n- Finding:\n  > - Outcome: quoted, not a line of the record\n- Agreed severity: must fix\n- Outcome: fixed in abc1234\n\n" +
+	"#### 2. [should fix] b — `b.go:2`\n- Agreed severity: split: held at pre-existing: should fix, Codex refutes\n- Outcome: not a defect: `b.go:2` checks it first\n\n" +
+	"#### 3. [nitpick] c — `c.go:3`\n- Agreed severity: nitpick\n- Outcome: recorded\n\n" +
+	"#### 4. [fix later] d — `d.go:4`\n- Agreed severity: fix later\n- Outcome: proposal 012-d.md\n\n" +
+	"### Automated review 2 — 2026-11-10 11:00\n\n- Reviewers: Claude reviewer (failed: it stalled) and Codex\n\n" +
+	"#### 1. [nitpick] e — `e.go:5`\n- Agreed severity: nitpick\n- Outcome: fixed in def5678\n\n" +
+	"#### 2. [should fix] f — `f.go:6`\n- Agreed severity: withdrawn\n- Outcome: withdrawn in round 1\n\n" +
+	"### Automated review 3 — 2026-11-10 12:00\n\n- Reviewers: Claude reviewer (failed in round 2: it stalled) and Codex (failed: signed out)\n\n" +
+	"#### 1. [must fix] g — `g.go:7`\n- Agreed severity: disputed\n- Outcome: left for the user\n\n" +
+	"#### 2. [must fix] h — `h.go:8`\n- Agreed severity: pre-existing: must fix\n- Outcome: left for the user: pre-existing, proposal 013-h.md\n\n" +
+	"#### 3. [must fix] i — `i.go:9`\n- Agreed severity: flipped: must fix, was withdrawn in review 2\n- Outcome: left for the user: verdict changed since review 2\n\n" +
+	"#### 4. [nitpick] j — `j.go:10`\n- Agreed severity: nitpick\n- Outcome:\n\nSummary posted\n\n" +
+	"### Automated review 4 — 2026-11-11 09:00\n\n- Reviewers: Claude reviewer\n\nNo findings.\n\n" +
+	"## Review rounds\n### Round 1\n  > ### Automated review 9\n\n## Log\n"
+
+func TestAutomatedReviews(t *testing.T) {
+	reviews := Task{docWith(t, reviewedTask)}.AutomatedReviews()
+	var outcomes [][]Outcome
+	var reported, clean []bool
+	var setAside []string
+	for i, r := range reviews {
+		var found []Outcome
+		for k, f := range r.Findings {
+			found = append(found, f.Outcome())
+			if f.SetAside() {
+				setAside = append(setAside, fmt.Sprintf("%d.%d", i+1, k+1))
+			}
+		}
+		outcomes = append(outcomes, found)
+		reported = append(reported, r.ClaudeReported)
+		clean = append(clean, r.Clean())
+	}
+	want := [][]Outcome{
+		{OutcomeFixed, OutcomeNotADefect, OutcomeRecorded, OutcomeProposal},
+		{OutcomeFixed, OutcomeWithdrawn},
+		{OutcomeLeftForUser, OutcomeLeftForUser, OutcomeLeftForUser, OutcomeOpen},
+		nil,
+	}
+	if !reflect.DeepEqual(outcomes, want) {
+		t.Errorf("outcomes = %q\nwant %q", outcomes, want)
+	}
+	if want := []bool{true, false, true, true}; !slices.Equal(reported, want) {
+		t.Errorf("ClaudeReported = %v, want %v", reported, want)
+	}
+	if want := []bool{false, false, true, true}; !slices.Equal(clean, want) {
+		t.Errorf("Clean = %v, want %v", clean, want)
+	}
+	// The split settled as not a defect, and the disputed finding.
+	if want := []string{"1.2", "3.1"}; !slices.Equal(setAside, want) {
+		t.Errorf("set aside: %v, want %v", setAside, want)
+	}
+	if got := (Task{docWith(t, sampleTask)}).AutomatedReviews(); got != nil {
+		t.Errorf("a task without automated reviews: %v", got)
+	}
+}
+
+func TestCleanReadsTheSeverityHeld(t *testing.T) {
+	for severity, clean := range map[string]bool{
+		"must fix": false, "should fix": false, "pre-existing: should fix": false,
+		"split: held at must fix, Codex refutes": false, "flipped: should fix, was withdrawn in review 1": false,
+		"should fix (lowered from must fix: the pass still runs)": false, "should fix — lowered from must fix: it's rare": false,
+		"nitpick": true, "split: held at nitpick, Claude reviewer refutes": true, "fix later": true,
+	} {
+		r := AutomatedReview{ClaudeReported: true, Findings: []Finding{{severity, "fixed in abc1234"}}}
+		if r.Clean() != clean {
+			t.Errorf("a fix at %q: Clean = %v, want %v", severity, r.Clean(), clean)
+		}
+	}
+	other := Finding{"nitpick", "acted on at nitpick: fixed in abc1234"}
+	if other.Outcome() != OutcomeOther {
+		t.Errorf("an outcome in no known form: %q", other.Outcome())
 	}
 }
 
@@ -344,11 +426,67 @@ func TestFeedbackRounds(t *testing.T) {
 	}
 }
 
+func TestReviewComments(t *testing.T) {
+	// Round 2 has one conversation comment, with a CI line quoted in it.
+	if n := (Task{docWith(t, ciTask)}).ReviewComments(); n != 1 {
+		t.Errorf("ReviewComments = %d, want 1", n)
+	}
+	// A review summary, an inline comment and a conversation comment, each
+	// with a quote; the CI line and the request for a review aren't comments.
+	round := "## Review rounds\n### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test\n\n" +
+		"**Review summaries**\n- [x] review 7 (changes_requested)\n  > - [ ] comment 8 — [link](u8)\n\n" +
+		"**Inline comments**\n- [ ] `a.go:3` — comment 9 (in thread 4) — [link](u9)\n  > why?\n\n" +
+		"**Conversation comments**\n- [x] comment 10 — [link](u10)\n  > ok\n\n" +
+		"- [ ] Automated review requested (comment 11)\n\n## Log\n"
+	if n := (Task{docWith(t, round)}).ReviewComments(); n != 3 {
+		t.Errorf("ReviewComments = %d, want 3", n)
+	}
+}
+
 func TestLog(t *testing.T) {
 	d := docWith(t, "---\nid: 1\n---\n## Log")
 	d.Log("did a thing")
 	if !regexp.MustCompile(`\n## Log\n- \d{4}-\d\d-\d\d \d\d:\d\d — did a thing\n$`).MatchString(contents(t, d)) {
 		t.Errorf("Log:\n%q", contents(t, d))
+	}
+}
+
+func TestSetStatusLogsTheChange(t *testing.T) {
+	task := Task{docWith(t, sampleTask)}
+	if err := task.SetStatus(PROpen); err != nil {
+		t.Fatal(err)
+	}
+	if task.Status() != PROpen {
+		t.Errorf("Status = %s after SetStatus(pr-open)", task.Status())
+	}
+	if !strings.HasSuffix(contents(t, task.Doc), " — status → pr-open\n") {
+		t.Errorf("SetStatus didn't log the change:\n%s", contents(t, task.Doc))
+	}
+}
+
+func TestLogEntries(t *testing.T) {
+	d := docWith(t, "---\nid: 1\n---\n## Log\n<!-- - 2026-11-01 08:00 — a comment -->\n"+
+		"- 2026-11-01 09:00 — created\n- 2026-11-01 09:05 — a message\n  that goes on\n- not dated — skipped\n"+
+		"- 2026-11-02 10:30 — status → pr-open\n- 2026-11-02 10:31 — status → nonsense\n")
+	var got []string
+	var statuses []Status
+	for _, e := range d.LogEntries() {
+		got = append(got, e.at.Format(logTime)+" "+e.msg)
+		if s, ok := e.status(); ok {
+			statuses = append(statuses, s)
+		}
+	}
+	want := []string{"2026-11-01 09:00 created", "2026-11-01 09:05 a message", "2026-11-02 10:30 status → pr-open", "2026-11-02 10:31 status → nonsense"}
+	if !slices.Equal(got, want) {
+		t.Errorf("LogEntries = %q\nwant %q", got, want)
+	}
+	if !slices.Equal(statuses, []Status{PROpen}) {
+		t.Errorf("statuses = %q, want only pr-open", statuses)
+	}
+	// Log writes what LogEntries reads.
+	d.Log("did a thing")
+	if es := d.LogEntries(); es[len(es)-1].msg != "did a thing" || time.Since(es[len(es)-1].at) > 2*time.Minute {
+		t.Errorf("the entry Log wrote reads back as %+v", es[len(es)-1])
 	}
 }
 

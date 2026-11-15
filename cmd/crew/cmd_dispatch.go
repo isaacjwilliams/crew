@@ -118,7 +118,7 @@ func cmdDispatch(c *Crew, args []string) error {
 		return err
 	}
 	l.record(t.Doc)
-	t.Set("status", string(Working))
+	t.SetStatus(Working)
 	t.Touch()
 	t.Log(fmt.Sprintf("dispatched: worker %s (session %s) in %s on %s", l.job, orUnknown(l.session), wt, branch))
 	c.commit("dispatch " + p.Name + "/" + t.ID())

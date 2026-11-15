@@ -107,7 +107,7 @@ func cmdSync(c *Crew, args []string) error {
 				changed = true
 			}
 			if info.State == "MERGED" && st != Merged {
-				t.Set("status", string(Merged))
+				t.SetStatus(Merged)
 				t.Touch()
 				t.Log("PR merged")
 				changed = true
