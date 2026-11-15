@@ -108,9 +108,12 @@ type logEntry struct {
 func (d Doc) LogEntries() []logEntry {
 	var entries []logEntry
 	for _, l := range strings.Split(d.Section("## Log"), "\n") {
-		stamp, msg, ok := strings.Cut(strings.TrimPrefix(l, "- "), " — ")
-		at, err := time.ParseInLocation(logTime, stamp, time.Local)
-		if ok && err == nil && strings.HasPrefix(l, "- ") {
+		item, ok := strings.CutPrefix(l, "- ")
+		if !ok {
+			continue
+		}
+		stamp, msg, ok := strings.Cut(item, " — ")
+		if at, err := time.ParseInLocation(logTime, stamp, time.Local); ok && err == nil {
 			entries = append(entries, logEntry{at, msg})
 		}
 	}
@@ -118,6 +121,7 @@ func (d Doc) LogEntries() []logEntry {
 }
 
 // status is the status the entry changed the task to, when SetStatus wrote it.
+// A message that only starts like one, with no status after it, isn't one.
 func (e logEntry) status() (Status, bool) {
 	s, ok := strings.CutPrefix(e.msg, statusLogged)
 	return Status(s), ok && slices.Contains(taskStatuses, Status(s))
@@ -468,39 +472,41 @@ type AutomatedReview struct {
 // "- Outcome:" lines in the record.
 type Finding struct{ severity, outcome string }
 
-// AutomatedReviews is the reviews under ## Automated reviews, oldest first. A
-// review's "- Reviewers:" line says "Claude reviewer (failed: …)" when that
-// reviewer didn't report; one that failed only in a round reported first.
+// AutomatedReviews is the reviews under ## Automated reviews, oldest first, in
+// the record's format (pr-review's SKILL.md step 8, and LEDGER.md). A review's
+// "- Reviewers:" line says "Claude reviewer (failed: …)" when that reviewer
+// didn't report; one that failed only in a round reported first.
 func (t Task) AutomatedReviews() []AutomatedReview {
 	var reviews []AutomatedReview
+	var r *AutomatedReview // the review the line is in
+	var f *Finding         // the finding the line is in
 	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
-		if strings.HasPrefix(l, "### Automated review ") {
+		reviewers, isReviewers := strings.CutPrefix(l, "- Reviewers: ")
+		severity, isSeverity := strings.CutPrefix(l, "- Agreed severity:")
+		outcome, isOutcome := strings.CutPrefix(l, "- Outcome:")
+		switch {
+		case strings.HasPrefix(l, "### Automated review "):
 			reviews = append(reviews, AutomatedReview{ClaudeReported: true})
-			continue
-		}
-		if len(reviews) == 0 {
-			continue
-		}
-		r := &reviews[len(reviews)-1]
-		if reviewers, ok := strings.CutPrefix(l, "- Reviewers: "); ok {
+			r, f = &reviews[len(reviews)-1], nil
+		case r == nil:
+		case isReviewers:
 			r.ClaudeReported = !strings.Contains(reviewers, "Claude reviewer (failed:")
-		} else if strings.HasPrefix(l, "#### ") {
+		case strings.HasPrefix(l, "#### "):
 			r.Findings = append(r.Findings, Finding{})
-		} else if len(r.Findings) > 0 {
-			f := &r.Findings[len(r.Findings)-1]
-			if sev, ok := strings.CutPrefix(l, "- Agreed severity:"); ok {
-				f.severity = strings.TrimSpace(sev)
-			} else if out, ok := strings.CutPrefix(l, "- Outcome:"); ok {
-				f.outcome = strings.TrimSpace(out)
-			}
+			f = &r.Findings[len(r.Findings)-1]
+		case f == nil:
+		case isSeverity:
+			f.severity = strings.TrimSpace(severity)
+		case isOutcome:
+			f.outcome = strings.TrimSpace(outcome)
 		}
 	}
 	return reviews
 }
 
-// Clean is implementer.md's rule for a review that ends a pass: the worker
-// fixed nothing at must fix or should fix for it, and the Claude reviewer
-// reported.
+// Clean is the rule for a review that ends a pass, as implementer.md's
+// "Workflow: automated review" step 3 states it: the worker fixed nothing at
+// must fix or should fix for it, and the Claude reviewer reported.
 func (r AutomatedReview) Clean() bool {
 	for _, f := range r.Findings {
 		if held := f.heldAt(); f.Outcome() == OutcomeFixed && (held == "must fix" || held == "should fix") {
@@ -532,8 +538,8 @@ const (
 	OutcomeWithdrawn   Outcome = "withdrawn"         // withdrawn in round <n>
 	OutcomeNotADefect  Outcome = "not a defect"      // not a defect: <evidence>
 	OutcomeLeftForUser Outcome = "left for the user" // left for the user[: <reason>]
-	OutcomeOpen        Outcome = "open"              // nothing yet
-	OutcomeOther       Outcome = "other"             // a form crew doesn't know
+	OutcomeOpen        Outcome = "open"              // nothing yet (not a prefix)
+	OutcomeOther       Outcome = "other"             // a form crew doesn't know (not a prefix)
 )
 
 func (f Finding) Outcome() Outcome {

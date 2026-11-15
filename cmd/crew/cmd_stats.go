@@ -71,7 +71,42 @@ type taskStats struct {
 	reviews    int // automated reviews
 	cleanAfter int // the reviews it took to come back clean, or 0 if none did
 
-	fixed, setAside, leftForUser int // the reviews' findings, by what the worker did
+	// The reviews' findings the user would ask about: those fixed, those the
+	// worker judged not a defect, and those left for the user (a disputed
+	// finding is both of the last two). Proposals, recorded nitpicks and
+	// withdrawn findings aren't reported.
+	fixed, setAside, leftForUser int
+}
+
+// add adds o's counts and waits to s's.
+func (s *taskStats) add(o taskStats) {
+	s.rounds += o.rounds
+	s.comments += o.comments
+	s.prWait += o.prWait
+	s.questionWait += o.questionWait
+	s.reviews += o.reviews
+	s.fixed += o.fixed
+	s.setAside += o.setAside
+	s.leftForUser += o.leftForUser
+}
+
+// cells is the task's row after its ID, under statsHeadings. clean is the
+// "clean after" cell.
+func (s taskStats) cells(clean string) []string {
+	return []string{strconv.Itoa(s.rounds), strconv.Itoa(s.comments), roughly(s.prWait), roughly(s.questionWait),
+		strconv.Itoa(s.reviews), clean, strconv.Itoa(s.fixed), strconv.Itoa(s.setAside), strconv.Itoa(s.leftForUser)}
+}
+
+// cleanAfterText is the "clean after" cell: the number of reviews, "never",
+// or "-" for a task with no automated review.
+func (s taskStats) cleanAfterText() string {
+	switch {
+	case s.cleanAfter > 0:
+		return strconv.Itoa(s.cleanAfter)
+	case s.reviews > 0:
+		return "never"
+	}
+	return "-"
 }
 
 // statsOf measures a task from its file.
@@ -87,7 +122,8 @@ func statsOf(t Task) taskStats {
 	asked := changedTo(NeedsInput)
 	if t.Goal() != "" {
 		// The goal lead answers most of its tasks' questions itself. Only those
-		// it leaves for the user wait on them.
+		// it leaves for the user wait on them, and for each it logs a "For the
+		// user: …" line (goal-lead.md).
 		asked = func(e logEntry) bool { return strings.HasPrefix(e.msg, "For the user:") }
 	}
 	s.questionWait = waited(log, asked)
@@ -114,7 +150,9 @@ func statsOf(t Task) taskStats {
 }
 
 // mergedAt is when the task's Log says it merged, the last time if it says so
-// more than once.
+// more than once, or zero if it never does: such a task isn't reported. crew
+// sync logs "PR merged" after the status line; before Task.SetStatus it logged
+// only that, so this reads it as changesStatus does, and until the same date.
 func mergedAt(log []logEntry) time.Time {
 	var at time.Time
 	for _, e := range log {
@@ -192,7 +230,8 @@ func printStats(project string, since time.Time, stats []taskStats) {
 	}
 	var top, bottom []string
 	for _, h := range statsHeadings {
-		top, bottom = append(top, h[0]), append(bottom, h[1])
+		top = append(top, h[0])
+		bottom = append(bottom, h[1])
 	}
 	row("", top...)
 	row("task", bottom...)
@@ -200,28 +239,13 @@ func printStats(project string, since time.Time, stats []taskStats) {
 	var sum taskStats
 	var prWaits, questionWaits []time.Duration
 	for _, s := range stats {
-		clean := "-"
-		if s.reviews > 0 {
-			clean = "never"
-		}
-		if s.cleanAfter > 0 {
-			clean = strconv.Itoa(s.cleanAfter)
-		}
-		row(s.task.ID(), strconv.Itoa(s.rounds), strconv.Itoa(s.comments), roughly(s.prWait), roughly(s.questionWait),
-			strconv.Itoa(s.reviews), clean, strconv.Itoa(s.fixed), strconv.Itoa(s.setAside), strconv.Itoa(s.leftForUser))
-		sum.rounds += s.rounds
-		sum.comments += s.comments
-		sum.prWait += s.prWait
-		sum.questionWait += s.questionWait
-		sum.reviews += s.reviews
-		sum.fixed += s.fixed
-		sum.setAside += s.setAside
-		sum.leftForUser += s.leftForUser
-		prWaits, questionWaits = append(prWaits, s.prWait), append(questionWaits, s.questionWait)
+		row(s.task.ID(), s.cells(s.cleanAfterText())...)
+		sum.add(s)
+		prWaits = append(prWaits, s.prWait)
+		questionWaits = append(questionWaits, s.questionWait)
 	}
 	fmt.Println()
-	row("total", strconv.Itoa(sum.rounds), strconv.Itoa(sum.comments), roughly(sum.prWait), roughly(sum.questionWait),
-		strconv.Itoa(sum.reviews), "", strconv.Itoa(sum.fixed), strconv.Itoa(sum.setAside), strconv.Itoa(sum.leftForUser))
+	row("total", sum.cells("")...)
 	row("median", "", "", roughly(median(prWaits)), roughly(median(questionWaits)), "", "", "", "", "")
 }
 
