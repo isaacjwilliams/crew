@@ -225,7 +225,7 @@ func cmdHandOver(c *Crew, args []string) error {
 	// The branch on origin may have commits from elsewhere, a suggestion applied
 	// on GitHub say, that raiseRisk has to see.
 	if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		warn("git fetch failed; checking SENSITIVE_PATHS against the refs as last fetched")
+		return fail("couldn't check SENSITIVE_PATHS: git fetch origin failed in %s", p.Repo())
 	}
 	// Check under the lock: crew sync may be marking the task merged, or the
 	// lead abandoning it, at the same moment.

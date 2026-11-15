@@ -269,6 +269,10 @@ out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == working ]]'
 sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
+git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
+git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
+check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == working ]]'
 check "hand-over hands a high-risk task over once its security review is under Evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
