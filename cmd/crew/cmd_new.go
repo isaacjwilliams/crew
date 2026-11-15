@@ -119,10 +119,7 @@ func (c *Crew) newTask(args []string, show bool) (Task, error) {
 	}); err != nil {
 		return Task{}, err
 	}
-	msg := "created"
-	if kind != KindBuild {
-		msg += " as a " + string(kind)
-	}
+	msg := "created as a " + string(kind)
 	if linked.Path != "" {
 		t.Set(rules.link, linked.ID())
 		msg += ", " + rules.link + " " + linked.ID()
