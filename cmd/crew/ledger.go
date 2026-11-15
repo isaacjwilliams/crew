@@ -556,6 +556,10 @@ func (t Task) Kind() Kind {
 	return KindBuild
 }
 
+// Fixes is the ID of the merged task a fix mends, "unknown" for a fix that
+// can't be traced, or nothing for a task of another kind.
+func (t Task) Fixes() string { return t.Get("fixes") }
+
 // rules are what the task's kind asks, or an error for a kind crew doesn't know.
 func (t Task) rules() (kindRules, error) {
 	r, ok := t.Kind().rules()
@@ -645,11 +649,15 @@ func (t Task) NewestReview() int {
 }
 
 // An automated review in the task's record: its number and when it was
-// recorded, from its heading, whether the Claude reviewer reported, and each
-// finding.
+// recorded, from its heading, the commits it reviewed, whether the Claude
+// reviewer reported, and each finding.
 type AutomatedReview struct {
-	Number         int
-	At             time.Time
+	Number int
+	At     time.Time
+	// Fork is the fork point of the PR it reviewed, and Head the commit its range
+	// ends at, so Fork..Head is the whole PR as it was then. Both are empty when
+	// the review has no Range line crew can read.
+	Fork, Head     string
 	ClaudeReported bool
 	Findings       []Finding
 }
@@ -667,6 +675,7 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 	var r *AutomatedReview // the review the line is in
 	var f *Finding         // the finding the line is in
 	for _, l := range strings.Split(t.Section("## Automated reviews"), "\n") {
+		rng, isRange := strings.CutPrefix(l, "- Range: ")
 		reviewers, isReviewers := strings.CutPrefix(l, "- Reviewers: ")
 		severity, isSeverity := strings.CutPrefix(l, "- Agreed severity:")
 		outcome, isOutcome := strings.CutPrefix(l, "- Outcome:")
@@ -677,6 +686,8 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 			reviews = append(reviews, AutomatedReview{Number: n, At: at, ClaudeReported: true})
 			r, f = &reviews[len(reviews)-1], nil
 		case r == nil:
+		case isRange:
+			r.Fork, r.Head = reviewedRange(rng)
 		case isReviewers:
 			r.ClaudeReported = !strings.Contains(reviewers, "Claude reviewer (failed:")
 		case strings.HasPrefix(l, "#### "):
@@ -690,6 +701,27 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 		}
 	}
 	return reviews
+}
+
+// reviewedRange reads the rest of a review's Range line: the fork point of the
+// PR it reviewed, and the head its range ends at. A review that read only the
+// commits since an earlier one starts its range there and names its fork point
+// at the end, "`<from>..<head>`, 2 commits on `b` since review 1 (fork point
+// `<fork>`)"; one that read the whole PR starts its range at the fork point,
+// and older records don't name it again. Both are empty for a line that has no
+// range in backticks.
+func reviewedRange(line string) (fork, head string) {
+	_, rest, _ := strings.Cut(line, "`")
+	rng, _, _ := strings.Cut(rest, "`")
+	from, head, ok := strings.Cut(rng, "..")
+	if !ok || from == "" || head == "" {
+		return "", ""
+	}
+	if _, named, ok := strings.Cut(line, "(fork point `"); ok {
+		fork, _, _ = strings.Cut(named, "`")
+		return fork, head
+	}
+	return from, head
 }
 
 // numberedHeading reads what follows "### Round " or "### Automated review " in
@@ -934,27 +966,42 @@ func (t Task) FeedbackRounds() int {
 }
 
 // A review round: its number, when crew recorded it, and the user's comments
-// in it, each by its checklist item: "review 7 (changes_requested)",
-// "comment 10 — [link](u10)" or "`a.go:3` — comment 9 — [link](u9)". The item
-// names the comment; the round quotes it on the lines below.
+// in it.
 type ReviewRound struct {
 	Number   int
 	At       time.Time
-	Comments []string
+	Comments []RoundComment
 }
+
+// A comment of the user's in a review round: its checklist item, "review 7
+// (changes_requested)", "comment 10 — [link](u10)" or "`a.go:3` — comment 9 —
+// [link](u9)", which names it, and its text, which the round quotes on the
+// lines below the item.
+type RoundComment struct{ Item, Text string }
 
 // ReviewRounds is the task's review rounds, oldest first, as reviewRound.add
 // writes them. Red CI and requests for another automated review aren't
 // comments, so a round of only those has none.
 func (t Task) ReviewRounds() []ReviewRound {
 	var rounds []ReviewRound
+	var cm *RoundComment // the comment whose quote the line may continue
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		quote, isQuote := strings.CutPrefix(l, "  >")
 		if rest, ok := strings.CutPrefix(l, "### Round "); ok {
 			n, at := numberedHeading(rest)
 			rounds = append(rounds, ReviewRound{Number: n, At: at})
+			cm = nil
 		} else if item, ok := checklistItem(l); ok && isComment(item) && len(rounds) > 0 {
 			r := &rounds[len(rounds)-1]
-			r.Comments = append(r.Comments, item)
+			r.Comments = append(r.Comments, RoundComment{Item: item})
+			cm = &r.Comments[len(r.Comments)-1]
+		} else if isQuote && cm != nil {
+			if cm.Text != "" {
+				cm.Text += "\n"
+			}
+			cm.Text += strings.TrimPrefix(quote, " ")
+		} else {
+			cm = nil
 		}
 	}
 	return rounds
@@ -981,7 +1028,7 @@ func (t Task) ReviewComments() int {
 // that round.
 type CommentAfterReview struct {
 	Round   int
-	Comment string // its checklist item in the round
+	Comment RoundComment
 	Review  AutomatedReview
 }
 
