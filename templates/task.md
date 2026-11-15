@@ -5,6 +5,8 @@ project: {{PROJECT}}
 status: draft
 kind: {{KIND}}
 informs:
+fixes:
+missed_by:
 base: {{BASE}}
 base_sha:
 restack_sent:

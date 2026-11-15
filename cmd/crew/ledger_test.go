@@ -323,7 +323,7 @@ func TestRiskLook(t *testing.T) {
 }
 
 func TestTaskKind(t *testing.T) {
-	for kind, want := range map[string]Kind{"": KindBuild, "build": KindBuild, "spike": KindSpike, "drill": "drill"} {
+	for kind, want := range map[string]Kind{"": KindBuild, "build": KindBuild, "spike": KindSpike, "fix": KindFix, "refine": KindRefine, "drill": "drill"} {
 		task := Task{docWith(t, "---\nkind: "+kind+"\n---\n## Log\n")}
 		if got := task.Kind(); got != want {
 			t.Errorf("kind %q: Kind() = %q, want %q", kind, got, want)
@@ -332,21 +332,40 @@ func TestTaskKind(t *testing.T) {
 			t.Errorf("kind %q: rules() error = %v", kind, err)
 		}
 	}
-	if got := kindNames(); got != "build or spike" {
+	if got := kindNames(); got != "build, spike, fix or refine" {
 		t.Errorf("kindNames() = %q", got)
 	}
 }
 
 // A spike asks less of its brief than a build, informs a draft, and ends done
-// rather than with a PR for the user.
+// rather than with a PR for the user. A fix is a build that also names the
+// merged task it fixes, or unknown, and the check that missed the defect. A
+// refine is a build by another name.
 func TestKindRules(t *testing.T) {
 	build, _ := KindBuild.rules()
 	spike, _ := KindSpike.rules()
-	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.informs != "" || build.handedOver != PROpen {
+	fix, _ := KindFix.rules()
+	refine, _ := KindRefine.rules()
+	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.keys != nil || build.link != "" || build.handedOver != PROpen {
 		t.Errorf("build's rules: %+v", build)
 	}
-	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.informs != Draft || spike.handedOver != Done {
+	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.keys != nil || spike.link != "informs" || spike.linkTo != Draft || spike.linkUnknown || spike.handedOver != Done {
 		t.Errorf("spike's rules: %+v", spike)
+	}
+	if !slices.Equal(fix.brief, build.brief) || !fix.pr || !slices.Equal(fix.keys, []string{"fixes", "missed_by"}) ||
+		fix.link != "fixes" || fix.linkTo != Merged || !fix.linkUnknown || fix.handedOver != PROpen {
+		t.Errorf("fix's rules: %+v", fix)
+	}
+	if !slices.Equal(refine.brief, build.brief) || !refine.pr || refine.keys != nil || refine.link != "" || refine.handedOver != PROpen {
+		t.Errorf("refine's rules: %+v", refine)
+	}
+}
+
+func TestOrList(t *testing.T) {
+	for want, items := range map[string][]string{"": nil, "low": {"low"}, "low or high": {"low", "high"}, "low, medium or high": {"low", "medium", "high"}} {
+		if got := orList(items); got != want {
+			t.Errorf("orList(%q) = %q, want %q", items, got, want)
+		}
 	}
 }
 
@@ -594,6 +613,23 @@ func TestRisksMatchLedgerDoc(t *testing.T) {
 	}
 	if !slices.Equal(documented, known) {
 		t.Errorf("risk tiers in LEDGER.md %q, in crew %q", documented, known)
+	}
+}
+
+// LEDGER.md lists exactly the checks a fix's missed_by can name, in order.
+func TestMissedByMatchesLedgerDoc(t *testing.T) {
+	b, err := os.ReadFile("../../LEDGER.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(b), "## Fixes\n")
+	rest, _, _ = strings.Cut(rest, "\n## ")
+	var documented []string
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z-]+)` \\|").FindAllStringSubmatch(rest, -1) {
+		documented = append(documented, m[1])
+	}
+	if !slices.Equal(documented, missedBy) {
+		t.Errorf("missed_by checks in LEDGER.md %q, in crew %q", documented, missedBy)
 	}
 }
 

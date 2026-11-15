@@ -52,17 +52,22 @@ Setup
                                    overrides
 
 Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
-  crew new "<title>" [--kind KIND] [--informs TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
+  crew new "<title>" [--kind KIND] [--informs TASK] [--fixes TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
                                    Create a draft task; prints its path. KIND is build
-                                   (the default) or spike, which tries a path and
-                                   reports instead of making a PR; --informs ties a
-                                   spike to the draft TASK whose question it answers.
+                                   (the default); fix, for a defect live in production;
+                                   refine, for any other change to existing work; or
+                                   spike, which tries a path and reports instead of
+                                   making a PR. --informs ties a spike to the draft
+                                   TASK whose question it answers; --fixes ties a fix
+                                   to the merged TASK that introduced the defect, or
+                                   unknown.
                                    NAME is the branch without BRANCH_PREFIX (default:
                                    from title). --on stacks it on TASK's unmerged
                                    branch; --goal makes it one of GOAL's tasks
   crew ready TASK                  Check the brief is complete for its kind (a build
-                                   needs a risk tier) with nothing left under Still to
-                                   learn, and mark it ready
+                                   needs a risk tier, and a fix fixes and missed_by)
+                                   with nothing left under Still to learn, and mark it
+                                   ready
   crew dispatch TASK [--force]     Create worktree + branch and start an implementer
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,

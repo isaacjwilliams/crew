@@ -1150,16 +1150,21 @@ check "ready refuses a task with open items under Still to learn, counting them 
   '[[ $(crew ready "$KD" 2>&1) == *"2 item(s) under Still to learn are open"*"crew new --kind spike --informs $KDI"* && $(crew get "$KD" status) == draft ]]'
 n=$(ls "$PD/tasks" | wc -l)
 check "new refuses a kind crew doesn't know, and --informs on a kind that takes none" \
-  '[[ $(crew new "Drill" --kind drill 2>&1) == *"--kind must be build or spike, not '"'"'drill'"'"'"* && $(crew new "Built" --informs "$KD" 2>&1) == *"a build task doesn'"'"'t take --informs"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+  '[[ $(crew new "Drill" --kind drill 2>&1) == *"--kind must be build, spike, fix or refine, not '"'"'drill'"'"'"* && $(crew new "Built" --informs "$KD" 2>&1) == *"a build task doesn'"'"'t take --informs"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 check "new refuses to stack a spike: its branch stays local" \
   '[[ $(crew new "Stacked spike" --kind spike --on "$KD" 2>&1) == *"a spike'"'"'s branch stays local, so it can'"'"'t be stacked"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 check "new --informs refuses a task that isn't a draft" \
-  '[[ $(crew new "Late spike" --kind spike --informs "$OR" 2>&1) == *"; --informs takes a draft task"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+  '[[ $(crew new "Late spike" --kind spike --informs "$OR" 2>&1) == *"informs must be a draft task in $(basename "$PD"); $(basename "$OR" .md) is '"'"'abandoned'"'"'"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
 KS=$(crew new "Try cursor paging" --kind spike --informs "$KD" --goal "$GF8"); KSI=$(basename "$KS" .md)
 KT=$(crew new "Try a full scan" --kind spike --informs "$KD" --goal "$GF8")
 check "new --kind spike --informs makes a spike tied to the draft, and logs it" \
   '[[ $(crew get "$KS" kind) == spike && $(crew get "$KS" informs) == "$KDI" && $(crew get "$KD" kind) == build && $(section "$KS" "## Log") == *" — created as a spike, informs $KDI, for goal $G8" ]]'
-check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build or spike, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
+check "set checks a spike's informs as new does, and records the draft's ID" \
+  '! crew set "$KS" informs "$OR" 2>/dev/null && crew set "$KS" informs "$(num "$KD")" && [[ $(crew get "$KS" informs) == "$KDI" ]]'
+KU=$(crew new "Try nothing" --kind spike --informs "$KD")
+check "set clears a spike's informs with an empty value" 'crew set "$KU" informs "" && [[ -z $(crew get "$KU" informs) ]]'
+crew set "$KU" status abandoned
+check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build, spike, fix or refine, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
 sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Plan$/a 1. Page through the API.' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
 check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Structure or risk" \
   'crew ready "$KS" >/dev/null && [[ $(crew get "$KS" status) == ready && -z $(crew get "$KS" risk) ]]'
@@ -1213,6 +1218,33 @@ check "status lists a draft outside a goal that has something to learn, rather t
 crew goal abandon "$GF8" >/dev/null 2>&1
 for f in "$KC" "$KD" "$KT" "$KO" "$KA"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
+
+# Fixes: a fix mends a defect live in production, and names the merged task that
+# introduced it and the check that missed it.
+FC=$(crew new "Invoice totals"); FCI=$(basename "$FC" .md); crew set "$FC" status merged
+n=$(ls "$PD/tasks" | wc -l)
+check "new refuses --fixes on a kind that takes none, and a task that isn't merged" \
+  '[[ $(crew new "Tidy totals" --kind refine --fixes "$FC" 2>&1) == *"a refine task doesn'"'"'t take --fixes"* && $(crew new "Early fix" --kind fix --fixes "$OR" 2>&1) == *"fixes must be a merged task in $(basename "$PD"), or unknown; $(basename "$OR" .md) is '"'"'abandoned'"'"'"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
+FX=$(crew new "Round invoice totals to the cent" --kind fix --fixes "$(num "$FC")"); FXI=$(basename "$FX" .md); fill "$FX"
+check "new --kind fix --fixes records the fixed task's ID, and logs it" \
+  '[[ $(crew get "$FX" kind) == fix && $(crew get "$FX" fixes) == "$FCI" && $(section "$FX" "## Log") == *" — created as a fix, fixes $FCI" ]]'
+check "ready refuses a fix that doesn't name the check that missed the defect" \
+  '[[ $(crew ready "$FX" 2>&1) == *"missed_by must be plan-review, tests, pre-pr-review, security-review, automated-review, ci or user-review: crew set $FXI missed_by <value>"* && $(crew get "$FX" status) == draft ]]'
+check "set refuses a missed_by that isn't one of the checks" \
+  '[[ $(crew set "$FX" missed_by bogus 2>&1) == *"missed_by must be plan-review, "*", not '"'"'bogus'"'"'"* && -z $(crew get "$FX" missed_by) ]]'
+crew set "$FX" missed_by tests
+check "ready accepts a fix that names the task it fixes and the check that missed it" 'crew ready "$FX" >/dev/null && [[ $(crew get "$FX" status) == ready ]]'
+FU=$(crew new "Fix the old export" --kind fix); FUI=$(basename "$FU" .md); fill "$FU"; crew set "$FU" missed_by ci
+check "ready refuses a fix that doesn't name the task it fixes" \
+  '[[ $(crew ready "$FU" 2>&1) == *"fixes must be a merged task in $(basename "$PD"), or unknown: crew set $FUI fixes <value>"* && $(crew get "$FU" status) == draft ]]'
+check "set refuses a fixes that isn't a merged task, and records the ID of one that is" \
+  '! crew set "$FU" fixes "$FXI" 2>/dev/null && [[ -z $(crew get "$FU" fixes) ]] && crew set "$FU" fixes "$(num "$FC")" && [[ $(crew get "$FU" fixes) == "$FCI" ]]'
+crew set "$FU" fixes unknown
+check "ready accepts a fix whose cause is unknown" 'crew ready "$FU" >/dev/null && [[ $(crew get "$FU" status) == ready && $(crew get "$FU" fixes) == unknown ]]'
+check "set takes fix and refine as kinds" 'crew set "$FU" kind refine && crew set "$FX" kind fix && [[ $(crew get "$FU" kind) == refine ]]'
+check "set clears a fix's fixes and missed_by with an empty value, and ready then refuses it" \
+  'crew set "$FX" status draft && crew set "$FX" fixes "" && crew set "$FX" missed_by "" && [[ -z $(crew get "$FX" fixes) && -z $(crew get "$FX" missed_by) && $(crew ready "$FX" 2>&1) == *"fixes must be a merged task in"* ]]'
+for f in "$FX" "$FU"; do crew set "$f" status abandoned; done
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
 PJ=$(basename "$PD")

@@ -520,6 +520,20 @@ crew status                             # 040's row: "2 to learn; 041 working, 0
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 - **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
 
+### Fixes: trace a defect to where it came from
+
+A **fix** is only for a defect live in production: released or deployed, and affecting users now. A bug in unreleased work, one found in review, or polish is a **refine**, which works just like a build. Keeping them apart means each fix marks a defect that got past every check, and its brief says which:
+
+```sh
+crew new "Round invoice totals to the cent" --kind fix --fixes 012   # 012 is the merged task that introduced it
+crew set 050 missed_by tests            # the check that should have caught it
+crew ready 050                          # refuses a fix without fixes and missed_by
+```
+
+- **`fixes`** is the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (the brief says why). The lead finds it from the code's history.
+- **`missed_by`** is one of `plan-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
+- **The worker proves the defect first**: it commits a test that reproduces it and fails, before the fix commit, which makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
+
 ## 6. The casual observer on its own
 
 Workers run it automatically before opening a PR. You can also use it anywhere:

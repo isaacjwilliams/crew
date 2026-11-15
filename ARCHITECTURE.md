@@ -173,14 +173,15 @@ The home's own files (code, config, templates) are never part of a ledger commit
 ```
 you ⇄ lead (a session in <home>/lead, for one project or every one; reads code in crew checkout <p>)
   lead: confirm goal → crew new "<title>" --branch <name> → investigate
+        → its kind: a fix only for a defect live in production, naming fixes and missed_by (see "Fixes")
         → what's still to learn, if anything: spikes (see "Spikes") → plan, with its risk tier → acceptance criteria
         → size estimate (Structure's Size: line); past MAX_PR_LINES or two concerns → split ("Splitting a task")
         → plan-reviewer subagent in the background (task file path only) → summary right away
         → review arrives → findings settled → Raise findings to you
         (each point written into the draft task file as it's agreed)
   you: "go"                             # if the review is still running, the lead dispatches once it's settled
-  lead: crew ready TASK                 # checks the sections its kind needs are non-empty (a build: Goal / Structure /
-                                        #   Plan / Acceptance criteria, and a risk tier), the criteria are '- ' items,
+  lead: crew ready TASK                 # checks the sections and keys its kind needs (a build: Goal / Structure / Plan /
+                                        #   Acceptance criteria, and a risk tier), the criteria are '- ' items,
                                         #   and nothing is open under Still to learn
         crew dispatch TASK
           ├─ lock; check status, depends_on (same project, must be merged or done), MAX_WORKERS, the goal's max_in_flight; unlock
@@ -257,11 +258,24 @@ crew tick: a done task's worktree and local branch → crew cleanup
 lead or goal lead: the spikes' answers side by side under the item → tick it → finish the plan
 ```
 
-- **What a kind asks is one table**, `kinds` in `ledger.go`: the sections `crew ready` needs, whether it makes a PR (`pr`: then it needs a risk tier and takes part in stacks), the status of the task it may inform (`crew new --informs`), and the check `crew hand-over` runs and the status it moves to. `crew new`, `crew ready` and `crew hand-over` ask the task's rules (`Task.rules`) and never a kind's name. A task without a `kind` is a build.
+- **What a kind asks is one table**, `kinds` in `ledger.go`: the sections `crew ready` needs, whether it makes a PR (`pr`: then it needs a risk tier and takes part in stacks), the other front-matter keys it needs set (a fix's `fixes` and `missed_by`), each checked as `crew set` checks it (`checkValue`), the link key `crew new` may set and the status the linked task must have (a spike's `informs`, a draft; a fix's `fixes`, a merged task or `unknown`), and the check `crew hand-over` runs and the status it moves to. `crew new`, `crew ready` and `crew hand-over` ask the task's rules (`Task.rules`) and never a kind's name. A task without a `kind` is a build.
 - **A spike leaves nothing in the shared repo.** Its worker never pushes, and opens no PR: the code is thrown away, and the report in the ledger is the record. So nothing needs cleaning up on origin, and `crew cleanup` deletes the local branch as it does a merged task's (`Status.Delivered`: merged or done). `crew hand-over` refuses a spike whose worktree has changes it didn't commit, since cleanup skips a dirty worktree. `crew sync` looks for no PR for a spike: one under its branch's name would be an old one, and could mark it merged. A spike takes no part in stacks: a restack has its worker push, and a task stacked on it would wait for a branch that never reaches origin. So `stackRefusal` refuses both ways up, wherever a stack is made: `crew new --on`, and `crew set` of a `base` or a `kind`. A plain `depends_on` a spike clears once it's done (`pendingDeps`).
 - **`done` always means the report is there**: only `crew hand-over` sets it, after `Task.Answer` finds the answer line, and `crew set` refuses it. So the goal lead is never told of a report that doesn't exist, and `report_sent` keeps it from being told twice.
 - **Spikes count toward `max_in_flight`** while they run. Not counting them would change what the cap is for (principle 5); they're short, and `MAX_WORKERS` counts them either way.
 - **The answers are put side by side by whoever owns the draft**, not by the spikes' workers: workers never edit other tasks, and weighing several answers is a judgment. Outside a goal, `crew status` shows the draft's open items and its spikes on its row.
+
+### Fixes
+A **fix** is a build for a defect live in production; any other correction is a **refine**, with a build's rules. The two keys a fix needs let a later count trace each fix to the task that caused it and to the check that missed it:
+
+```
+lead: crew new "<title>" --kind fix [--fixes TASK|unknown]   # refuses a TASK that isn't merged
+      crew set FIX fixes TASK|unknown; crew set FIX missed_by <check>   # one of missedBy in ledger.go
+      crew ready FIX        # a build's brief, plus fixes and missed_by
+worker: step 4: a failing test that reproduces the defect, committed before the fix → ## Evidence shows both runs
+```
+
+- **A short list, not free text, for `missed_by`**, so the misses can be counted. A new check joins the list when one exists.
+- **crew doesn't check the order of commits.** It can't tell a test from a fix in an arbitrary repo; the evidence of the two runs is what the user checks.
 
 ### Review feedback
 ```
@@ -760,7 +774,8 @@ Changing any of these means updating every side listed.
 | Evidence: criterion n is the nth top-level `- ` item of `## Acceptance criteria`, and its evidence a `### n.` entry under `## Evidence` with something under its heading | `templates/task.md`, `lead.md` intake step 6, implementer first run step 6 (and "Workflow: automated review" step 2 and review rounds step 6, which keep it true) → `crew ready` (each criterion a `- ` item), `Task.AcceptanceCriteria` and `Task.EvidenceGaps` (`crew hand-over`), the PR body's Evidence (`templates/pr-body.md`); `LEDGER.md`; checked in `tests/crew-e2e.sh` and `tests/guard.sh` |
 | Risk values `low medium high`, and the look each asks of the user (`Risk.Look`) | `ledger.go` → `crew set`, `crew ready`, `raiseRisk`, `crew status`; `lead.md` (the tier rule), `templates/pr-body.md` (the Risk line), `LEDGER.md` (checked by a Go test), `SETUP.md` ("Risk tiers") |
 | A high-risk task's `### Security review` entry under `## Evidence`, unnumbered so it's no criterion's | implementer first-run step 5 → `Task.SecurityReviewed` (`crew hand-over`, `crew status`); `templates/task.md` |
-| Kind values `build spike`, and what each asks: brief sections, whether it makes a PR, the status of the task it informs, hand-over check and status (`kinds`) | `ledger.go` → `crew new --kind`, `crew set`, `crew ready`, `crew hand-over`; `implementer.md` ("Workflow: spike"), `lead.md` (intake step 4), `goal-lead.md`, `LEDGER.md` (checked by a Go test), `SETUP.md` ("Spikes") |
+| Kind values `build spike fix refine`, and what each asks: brief sections, whether it makes a PR, keys (`fixes`, `missed_by`), link key (`informs`, `fixes`) and the linked task's status, hand-over check and status (`kinds`) | `ledger.go` → `crew new --kind`, `crew set`, `crew ready`, `crew hand-over`; `implementer.md` ("Workflow: spike", first-run step 4 for a fix), `lead.md` (intake steps 2 to 4), `goal-lead.md`, `LEDGER.md` (checked by a Go test), `SETUP.md` ("Spikes", "Fixes") |
+| A fix's `fixes` (a merged task's ID, or `unknown`) and `missed_by` (one of `missedBy`: `plan-review tests pre-pr-review security-review automated-review ci user-review`), read to trace fixes to their cause | `ledger.go` → `crew new --fixes`, `crew set`, `crew ready`; `lead.md` (intake step 3, checked in `tests/guard.sh`), `LEDGER.md` ("Fixes", checked by a Go test), `templates/task.md` |
 | A spike's `## Report` starts with `Answer: <one line>`, before `## Automated reviews` (or `## Log`) | implementer "Workflow: spike" → `Task.Answer` (`crew hand-over`, `crew goal followup`); `LEDGER.md` |
 | `report_sent: yes` once a goal's done spike's report has gone to the goal lead; written by `crew` only | `crew goal followup` → `goalHasInput`, `unsentReport`; `templates/task.md`, `LEDGER.md` |
 | "Findings the brief settled": structural points from the pre-PR review that the worker left alone because the brief decides them, listed in its Log entry and final report | implementer pre-PR review → lead's first report of the PR; checked in `tests/guard.sh` |
