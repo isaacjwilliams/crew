@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 const reviewEvalUsage = "crew review-eval [--project P] [--task T] [--limit N] [--rubric PATH]"
@@ -63,15 +65,12 @@ func cmdReviewEval(c *Crew, args []string) error {
 	if len(args) > 0 {
 		return usage(reviewEvalUsage)
 	}
-	var only Task
-	if task != "" {
-		var err error
-		if only, err = c.resolveTask(task); err != nil {
+	if task != "" && proj == "" {
+		t, err := c.resolveTask(task) // only to learn its project
+		if err != nil {
 			return err
 		}
-		if proj == "" {
-			proj = only.Project()
-		}
+		proj = t.Project()
 	}
 	proj, err := c.oneProject(proj)
 	if err != nil {
@@ -81,26 +80,42 @@ func cmdReviewEval(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
 
 	cases := evalCases(c.tasks(p.Name))
+	var selection []string // the flags that narrowed the run, for its report
 	if task != "" {
+		f, matches := resolveIn(task, c.files("tasks", p.Name))
+		if f == "" {
+			return ambiguousFail(task, matches, "--task '%s' doesn't match exactly one task in %s", task, p.Name)
+		}
 		var ofTask []evalCase
 		for _, ec := range cases {
-			if sameFile(ec.task.Path, only.Path) {
+			if sameFile(ec.task.Path, f) {
 				ofTask = append(ofTask, ec)
 			}
 		}
-		cases = ofTask
+		cases, selection = ofTask, append(selection, "--task "+Task{Doc{f}}.ID())
 	}
 	if limit > 0 && len(cases) > limit {
-		cases = cases[:limit]
+		cases, selection = cases[:limit], append(selection, "--limit "+strconv.Itoa(limit))
 	}
 	if len(cases) == 0 {
 		fmt.Printf("%s: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it\n", p.Name)
 		return nil
 	}
 
-	run, err := startEvalRun(c, p, rubric)
+	// One run of a project at a time: they'd move each other's checkout.
+	lock, err := flock(c.path(".crew-eval-"+p.Name+".lock"), 0)
+	if errors.Is(err, errLocked) {
+		return fail("a review eval of %s is running already", p.Name)
+	} else if err != nil {
+		return err
+	}
+	defer lock.Close()
+	run, err := startEvalRun(c, p, rubric, strings.Join(selection, " "))
 	if err != nil {
 		return err
 	}
@@ -141,7 +156,7 @@ func evalCases(tasks []Task) []evalCase {
 		for _, cm := range t.CommentsAfterReview() {
 			if cm.Review.Head != "" {
 				id := fmt.Sprintf("%s/round-%d/%s", t.ID(), cm.Round, caseCommentID(cm.Comment.Item))
-				cases = append(cases, evalCase{id, t, cm.Review, cm.Comment.Text})
+				cases = append(cases, evalCase{id, t, cm.Review, commentMiss(cm.Comment)})
 			}
 		}
 		if last, ok := lastReviewedRange(t); ok {
@@ -168,6 +183,16 @@ func caseCommentID(item string) string {
 	}
 	n, _, _ := strings.Cut(rest, " ")
 	return "comment-" + n
+}
+
+// commentMiss is a comment as the judge reads it: its text, after the place
+// it's about for an inline comment ("On `a.go:3`: why?"), since a short inline
+// comment means little without it.
+func commentMiss(cm RoundComment) string {
+	if where, _, ok := strings.Cut(cm.Item, " — comment "); ok && !strings.HasPrefix(cm.Item, "comment ") {
+		return "On " + where + ": " + cm.Text
+	}
+	return cm.Text
 }
 
 // lastReviewedRange is the task's newest automated review with a range crew
@@ -200,7 +225,20 @@ func evalBriefing(t Task, r AutomatedReview, root string, count int, commits str
 		"- The working tree is clean, so only the commits are in scope.",
 		root, r.Fork, count, r.Fork, t.Base(), r.Head)
 	verify := "The repo's AGENTS.md (or CLAUDE.md), at the review root, names the test, lint and run commands."
+	stated := append(userWordsBefore(t, r), "### Commits\n\n"+demoteHeadings(commits))
 
+	var b strings.Builder
+	b.WriteString("Code review\n")
+	for i, body := range []string{scope, verify, "None recorded.", strings.Join(stated, "\n\n")} {
+		fmt.Fprintf(&b, "\n%s\n\n%s\n", briefingHeadings[i], body)
+	}
+	return b.String()
+}
+
+// userWordsBefore is what the user had said on the task when review r ran,
+// as the briefing's subsections: their request (the Goal's quote), their
+// decisions dated before r's day, and their comments in rounds before r.
+func userWordsBefore(t Task, r AutomatedReview) []string {
 	var stated []string
 	if request := quotedLines(t.Section("## Goal")); request != "" {
 		stated = append(stated, "### The user's request\n\n"+request)
@@ -222,14 +260,7 @@ func evalBriefing(t Task, r AutomatedReview, root string, count int, commits str
 	if len(rounds) > 0 {
 		stated = append(stated, "### The user's review comments\n\n"+strings.Join(rounds, "\n\n"))
 	}
-	stated = append(stated, "### Commits\n\n"+demoteHeadings(commits))
-
-	var b strings.Builder
-	b.WriteString("Code review\n")
-	for i, body := range []string{scope, verify, "None recorded.", strings.Join(stated, "\n\n")} {
-		fmt.Fprintf(&b, "\n%s\n\n%s\n", briefingHeadings[i], body)
-	}
-	return b.String()
+	return stated
 }
 
 // quotedLines is the lines of text that are a quote, "> …".
@@ -284,6 +315,9 @@ type evalSetup struct {
 	rubric, rubricHash     string
 	reviewer, reviewerHash string
 	claude                 string
+	// selection is the flags that narrowed the run to some cases, "--task 042
+	// --limit 2" say, or "" for a full run.
+	selection string
 }
 
 // shortHash is the start of the SHA-256 of the file's content, or "missing".
@@ -310,7 +344,7 @@ type evalRun struct {
 
 // startEvalRun gets a run over p ready: it notes what the run tests with, and
 // makes its directory and checkout.
-func startEvalRun(c *Crew, p *Project, rubric string) (*evalRun, error) {
+func startEvalRun(c *Crew, p *Project, rubric, selection string) (*evalRun, error) {
 	now := time.Now()
 	reviewer := filepath.Join(installedAgents(), "reviewer.md")
 	version := "unknown"
@@ -321,7 +355,7 @@ func startEvalRun(c *Crew, p *Project, rubric string) (*evalRun, error) {
 		c:        c,
 		p:        p,
 		started:  now,
-		tested:   evalSetup{rubric, shortHash(rubric), reviewer, shortHash(reviewer), version},
+		tested:   evalSetup{rubric, shortHash(rubric), reviewer, shortHash(reviewer), version, selection},
 		checkout: filepath.Join(p.WorkRoot(), p.Name, "_eval"),
 		logs:     c.path("logs", "review-eval-"+p.Name+"-"+now.Format("20060102-150405")),
 	}
@@ -332,19 +366,14 @@ func startEvalRun(c *Crew, p *Project, rubric string) (*evalRun, error) {
 }
 
 // record writes the run's report into the project's review-eval directory,
-// compared with the newest report there, and commits it.
+// compared with the newest full run's there, and commits it.
 func (e *evalRun) record(results []evalResult) error {
 	dir := e.c.path("projects", e.p.Name, "review-eval")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	comparison := ""
-	if prev, ok := latestEvalReport(dir); ok {
-		b, err := os.ReadFile(prev)
-		if err != nil {
-			return err
-		}
-		setup, verdicts := parseEvalReport(string(b))
+	if prev, setup, verdicts, ok := lastFullEval(dir); ok {
 		comparison = compareEvals(filepath.Base(prev), setup, verdicts, e.tested, results)
 	}
 	file := filepath.Join(dir, e.started.Format("2006-01-02-150405")+".md")
@@ -393,6 +422,11 @@ func (e *evalRun) all(cases []evalCase) []evalResult {
 	var results []evalResult
 	for i, ec := range cases {
 		fmt.Printf("%s: case %d of %d, %s: ", e.p.Name, i+1, len(cases), ec.id)
+		if e.p.Paused() { // since the run started: crew upgrade may be replacing the reviewer
+			fmt.Println(verdictNotRun)
+			results = append(results, evalResult{ec, verdictNotRun, "the project was paused"})
+			continue
+		}
 		key := fmt.Sprintf("%s-review-%d", ec.task.ID(), ec.review.Number)
 		rv, done := reviews[key]
 		if !done {
@@ -459,26 +493,34 @@ func (e *evalRun) checkOut(t Task, head string) error {
 }
 
 // notAFinding is what the judge counts as not a review finding: the kinds of
-// comment that agents/misses.md says aren't a miss, in its words. Its last
-// kind, a point the review already raised, needs the review's record, which
-// the judge doesn't see.
+// comment that agents/misses.md says aren't a miss, in its words. The judge
+// tells the last two from the user's words before the review. misses.md's
+// last kind, a point the review already raised, needs the review's record,
+// which the judge doesn't see.
 var notAFinding = []string{
 	"a question, or praise",
 	"a change of mind: the user asking for something other than what they approved",
 	"something the brief or the user's decisions settled, such as a structure the brief chose",
 }
 
-// judgePrompt asks whether report raised miss.
-func judgePrompt(miss, report string) string {
+// judgePrompt asks whether report raised miss. said is what the user had said
+// on the task before the review, which tells a change of mind or a settled
+// point from a miss.
+func judgePrompt(miss string, said []string, report string) string {
+	if len(said) == 0 {
+		said = []string{"Nothing recorded."}
+	}
 	return "You judge one case of a review eval. A code reviewer reviewed a pull request; its report is below. " +
 		"After that review, the user found the miss below on the same pull request.\n\n" +
 		"Did the report raise the miss? It did when one of its findings is about the same problem, in any words and at any severity. " +
 		"A finding that only touches the same code doesn't count.\n\n" +
 		"Answer on the first line with exactly one of: found, missed, not a review finding. " +
-		"The miss is not a review finding when it is " + strings.Join(notAFinding, "; or ") + ".\n\n" +
+		"The miss is not a review finding when it is " + strings.Join(notAFinding, "; or ") + ". " +
+		"What the user had asked for and decided before the review is below the miss.\n\n" +
 		"On the next line, quote the finding that raised it, word for word: its title line is enough. " +
 		"Write none if no finding did.\n\n" +
-		"## The miss\n\n" + miss + "\n\n## The report\n\n" + report + "\n"
+		"## The miss\n\n" + miss + "\n\n## What the user had said before the review\n\n" + strings.Join(said, "\n\n") +
+		"\n\n## The report\n\n" + report + "\n"
 }
 
 // judge asks a fresh session whether the report raised the case's miss.
@@ -486,7 +528,7 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	out := filepath.Join(e.logs, strings.ReplaceAll(ec.id, "/", "-")+".judge.md")
 	// --tools takes a list: the flag after it ends the list, so the prompt
 	// isn't taken for a tool.
-	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, report))
+	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, userWordsBefore(ec.task, ec.review), report))
 	cmd.Dir = os.TempDir() // away from any repo's CLAUDE.md
 	answer, err := printSession(cmd, out, "the judge")
 	if err != nil {
@@ -529,7 +571,7 @@ func leadingVerdict(line string) (verdict, string, bool) {
 			continue
 		}
 		rest := line[len(v):]
-		if rest == "" || !unicode.IsLetter(rune(rest[0])) && !unicode.IsDigit(rune(rest[0])) {
+		if next, _ := utf8.DecodeRuneInString(rest); rest == "" || !unicode.IsLetter(next) && !unicode.IsDigit(next) {
 			return v, rest, true
 		}
 	}
@@ -573,6 +615,7 @@ func evalReport(project string, at time.Time, tested evalSetup, logs string, res
 	fmt.Fprintf(&b, "- Rubric: `%s` (%s)\n", tested.rubric, tested.rubricHash)
 	fmt.Fprintf(&b, "- Reviewer: `%s` (%s)\n", tested.reviewer, tested.reviewerHash)
 	fmt.Fprintf(&b, "- Claude Code: %s\n", tested.claude)
+	fmt.Fprintf(&b, "- Cases: %s\n", cmp.Or(tested.selection, "all"))
 	fmt.Fprintf(&b, "- Briefings, reviews and judgements: `%s`\n\n", logs)
 	b.WriteString(evalTotals(results) + "\n")
 	if comparison != "" {
@@ -625,15 +668,23 @@ func firstLine(text string, n int) string {
 	return ""
 }
 
-// latestEvalReport is the newest report in dir. Their names are their times,
-// so the newest sorts last.
-func latestEvalReport(dir string) (string, bool) {
+// lastFullEval is the newest report in dir of a run over every case, with what
+// it tested and its verdicts. A run narrowed by --task or --limit, a trial,
+// would compare a full run with a few of its cases. Reports are named for
+// their times, so the newest sorts last.
+func lastFullEval(dir string) (string, evalSetup, map[string]verdict, bool) {
 	reports, _ := filepath.Glob(filepath.Join(dir, "*.md"))
 	slices.Sort(reports)
-	if len(reports) == 0 {
-		return "", false
+	for i := len(reports) - 1; i >= 0; i-- {
+		b, err := os.ReadFile(reports[i])
+		if err != nil {
+			continue
+		}
+		if setup, verdicts := parseEvalReport(string(b)); setup.selection == "" {
+			return reports[i], setup, verdicts, true
+		}
 	}
-	return reports[len(reports)-1], true
+	return "", evalSetup{}, nil, false
 }
 
 // parseEvalReport reads back what evalReport wrote: what the run tested with,
@@ -652,6 +703,8 @@ func parseEvalReport(text string) (evalSetup, map[string]verdict) {
 			s.reviewerHash = hash(rest)
 		} else if rest, ok := strings.CutPrefix(l, "- Claude Code: "); ok {
 			s.claude = rest
+		} else if rest, ok := strings.CutPrefix(l, "- Cases: "); ok && rest != "all" {
+			s.selection = rest
 		} else if rest, ok := strings.CutPrefix(l, "- `"); ok {
 			id, rest, _ := strings.Cut(rest, "` **")
 			v, _, ok := strings.Cut(rest, "**")
@@ -663,7 +716,7 @@ func parseEvalReport(text string) (evalSetup, map[string]verdict) {
 	return s, verdicts
 }
 
-// compareEvals compares this run's verdicts with the last run's, in prevFile,
+// compareEvals compares this run's verdicts with the last full run's, in prevFile,
 // on the cases both judged, and says what changed in what they tested with.
 // Totals alone wouldn't do: the test set grows as tasks merge.
 func compareEvals(prevFile string, prev evalSetup, prevVerdicts map[string]verdict, now evalSetup, results []evalResult) string {
@@ -690,7 +743,7 @@ func compareEvals(prevFile string, prev evalSetup, prevVerdicts map[string]verdi
 		}
 		return fmt.Sprintf("%s changed (%s → %s)", what, before, after)
 	}
-	return fmt.Sprintf("Compared with the last run, `%s`: %d now found, %d now missed, of %d shared case(s); %d new case(s). Since then: %s; %s; %s.",
+	return fmt.Sprintf("Compared with the last full run, `%s`: %d now found, %d now missed, of %d shared case(s); %d new case(s). Since then: %s; %s; %s.",
 		prevFile, nowFound, nowMissed, shared, added,
 		changed("the rubric", prev.rubricHash, now.rubricHash),
 		changed("the reviewer's prompt", prev.reviewerHash, now.reviewerHash),

@@ -147,7 +147,7 @@ A proposal from the misses agent may target a file outside the project: your `~/
 
 `crew review-eval` writes `review-eval/<YYYY-MM-DD-HHMMSS>.md` in the project's directory, one per run, and commits it. Nothing else reads or writes there. Its test set isn't stored: each run finds the cases in the task files again, from the user's comments in rounds after an automated review and from fix tasks' `fixes`.
 
-A report starts with `- Rubric:`, `- Reviewer:` and `- Claude Code:` lines naming what the run tested with (a path and a short hash of the file, or the version), then the totals and, from the second run on, a comparison with the newest earlier report. Under `## Cases`, a line per case: ``- `<task>/round-<n>/comment-<id>` **found** — `<fork>..<head>` — <the miss> — <the finding the judge matched>``. The verdict is `found`, `missed`, `not a review finding` or `not run`. The next run reads these lines back to compare, so keep their shape if you edit a report by hand.
+A report starts with `- Rubric:`, `- Reviewer:` and `- Claude Code:` lines naming what the run tested with (a path and a short hash of the file, or the version), and `- Cases:`, `all` or the `--task`/`--limit` that narrowed the run. Then the totals and, once there's an earlier full run, a comparison with the newest one. Under `## Cases`, a line per case: ``- `<task>/round-<n>/comment-<id>` **found** — `<fork>..<head>` — <the miss> — <the finding the judge matched>``. The verdict is `found`, `missed`, `not a review finding` or `not run`. The next run reads these lines back to compare, so keep their shape if you edit a report by hand.
 
 ## Project memory
 

@@ -53,7 +53,7 @@ func TestEvalCases(t *testing.T) {
 	}
 	want := []string{
 		"010-merged/round-3/review-7 f1..h1: Two things.",
-		"010-merged/round-3/comment-9 f1..h1: why a second reader?",
+		"010-merged/round-3/comment-9 f1..h1: On `a.go:3`: why a second reader?",
 		"010-merged/round-4/comment-12 f1..h2: name it for the domain",
 		"010-merged/fix-011-fix f1..h2: Fix the race\n\n> it raced",
 	}
@@ -114,6 +114,7 @@ func TestParseJudgement(t *testing.T) {
 		"found\n#### 2. [should fix] A second reader of rounds — `a.go:3`": {"found", "#### 2. [should fix] A second reader of rounds — `a.go:3`"},
 		"**Found.**\n\n> #### 1. [nitpick] Name — `b.go:1`\n":              {"found", "#### 1. [nitpick] Name — `b.go:1`"},
 		"found: #### 1. [nitpick] Name":                                    {"found", "#### 1. [nitpick] Name"},
+		"found—#### 1. [nitpick] Name":                                     {"found", "#### 1. [nitpick] Name"},
 		"Missed\nnone":                                                     {"missed", ""},
 		"missed":                                                           {"missed", ""},
 		"not a review finding\nNone.":                                      {"not a review finding", ""},
@@ -159,7 +160,7 @@ func TestEvalReportAndComparison(t *testing.T) {
 	report := evalReport("webapp", at, tested, "/h/logs/x", before, "")
 	for _, line := range []string{
 		"# Review eval of webapp, 2026-11-15 14:30\n",
-		"- Rubric: `/h/rubric.md` (aaaa1111)\n- Reviewer: `/a/reviewer.md` (bbbb2222)\n- Claude Code: 2.1.290\n",
+		"- Rubric: `/h/rubric.md` (aaaa1111)\n- Reviewer: `/a/reviewer.md` (bbbb2222)\n- Claude Code: 2.1.290\n- Cases: all\n",
 		"Found 1 of 3 misses. Not run: 1.\n",
 		"- `1/round-1/comment-6` **found** — `f1f1f1f..h1h1h1h` — 1/round-1/comment-6's miss — #### 1. [nitpick] x\n",
 		"- `1/fix-2` **missed** — `f1f1f1f..h1h1h1h` — 1/fix-2's miss\n",
@@ -182,9 +183,46 @@ func TestEvalReportAndComparison(t *testing.T) {
 	}
 	now := tested
 	now.rubricHash = "cccc3333"
-	want := "Compared with the last run, `2026-11-15-143000.md`: 1 now found, 1 now missed, of 3 shared case(s); 1 new case(s). " +
+	want := "Compared with the last full run, `2026-11-15-143000.md`: 1 now found, 1 now missed, of 3 shared case(s); 1 new case(s). " +
 		"Since then: the rubric changed (aaaa1111 → cccc3333); the reviewer's prompt is the same; Claude Code is the same."
 	if got := compareEvals("2026-11-15-143000.md", prev, verdicts, now, after); got != want {
 		t.Errorf("compareEvals =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A run narrowed by --task or --limit is a trial: the next run compares with
+// the last run over every case instead.
+func TestLastFullEvalSkipsTrials(t *testing.T) {
+	dir := t.TempDir()
+	at, _ := time.ParseInLocation(logTime, "2026-11-15 14:30", time.Local)
+	results := []evalResult{{evalCase{id: "1/fix-2"}, verdictFound, "x"}}
+	full := evalSetup{rubricHash: "aaaa1111", reviewerHash: "bbbb2222", claude: "2.1.290"}
+	trial := full
+	trial.selection = "--limit 1"
+	for name, setup := range map[string]evalSetup{"2026-11-14-090000.md": full, "2026-11-15-100000.md": trial} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(evalReport("webapp", at, setup, "/l", results, "")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file, setup, verdicts, ok := lastFullEval(dir)
+	if !ok || filepath.Base(file) != "2026-11-14-090000.md" || setup.selection != "" || verdicts["1/fix-2"] != verdictFound {
+		t.Errorf("lastFullEval = %s, %+v, %v, %v", file, setup, verdicts, ok)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "2026-11-15-100000.md")); !strings.Contains(string(b), "- Cases: --limit 1\n") {
+		t.Errorf("a trial's report doesn't say how it was narrowed:\n%s", b)
+	}
+	if _, _, _, ok := lastFullEval(t.TempDir()); ok {
+		t.Error("lastFullEval found a report in an empty directory")
+	}
+}
+
+// The judge gets what the user had said before the review, to tell a change
+// of mind or a settled point from a miss.
+func TestJudgePromptHasTheUsersEarlierWords(t *testing.T) {
+	got := judgePrompt("On `a.go:3`: why?", []string{"### The user's request\n\n> Make search fast."}, "#### 1. [nitpick] x")
+	for _, in := range []string{"## The miss\n\nOn `a.go:3`: why?\n", "## What the user had said before the review\n\n### The user's request\n\n> Make search fast.\n", "## The report\n\n#### 1. [nitpick] x"} {
+		if !strings.Contains(got, in) {
+			t.Errorf("judge prompt lacks %q:\n%s", in, got)
+		}
 	}
 }
