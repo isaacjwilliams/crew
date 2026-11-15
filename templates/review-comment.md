@@ -31,7 +31,7 @@
        only the commits since review 2." after a single review, naming the review on its Range line)
      - some of each: "Reviews 1 and 3 read the whole PR, and the others only the commits since the
        last finished review." (name the reviews that read the whole PR)
-     The line after that says how the last review ended:
+     The line after that says how the last review ended. When more than one fits, the first wins:
      - clean: "The last came back clean." ("It came back clean." after a single review)
      - it didn't converge (the limit ran out with fixes made for the last review): "Review didn't settle
        after <N> reviews, so this PR isn't ready yet. Proposed instead:", then the proposed pieces,
