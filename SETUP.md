@@ -14,6 +14,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │                    ▼
            │      implementer workers   (background sessions, one per task,
            │                    │         each in ~/agent-work/<project>/<task>)
+           │                    │  ├─ tests that pin old behaviour first, a /simplify pass once checks pass
            │                    │  ├─ casual-observer pass before the PR
            │                    │  ├─ evidence for each criterion, push branch, open draft PR
            │                    ▼  └─ automated review of the PR, fixes, a summary comment
