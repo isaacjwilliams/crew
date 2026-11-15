@@ -317,7 +317,8 @@ var risks = []Risk{RiskLow, RiskMedium, RiskHigh}
 func (r Risk) Valid() bool { return slices.Contains(risks, r) }
 
 // Look is what the tier asks of the user before they merge. A task without a
-// tier, dispatched before tiers existed, gets the safe look: the diff.
+// tier, one marked ready before crew ready asked for one say, gets the safe
+// look: the diff.
 func (r Risk) Look() string {
 	switch r {
 	case RiskLow:

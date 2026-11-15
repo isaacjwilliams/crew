@@ -388,7 +388,7 @@ When a task's branch changes a file that matches one, crew raises its tier to `h
   to review: #41 low, #38 medium, #35 high
 ```
 
-Clear the ones that need only the evidence first, which also frees whatever is stacked on them. A task from before tiers existed shows `no risk tier: read the diff` and comes last.
+Clear the ones that need only the evidence first, which also frees whatever is stacked on them. A task marked ready before tiers existed shows `no risk tier: read the diff` and comes last.
 
 ### Automated review, before yours
 
