@@ -67,12 +67,14 @@ A task's `kind` says what it makes, and so what `crew ready` asks of its brief a
 
 | kind | makes | its brief needs | `crew hand-over` checks, then sets |
 |---|---|---|---|
-| `build` | a PR | Goal, Structure, Plan, Acceptance criteria, and a `risk` | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
-| `spike` | a report, from a path tried on a branch nobody merges | Goal, Plan (what to try) and Acceptance criteria (what would answer the question); no `risk` | `## Report` starts with `Answer: <one line>`, and the worktree has nothing uncommitted; `done` |
+| `build` | a PR | Goal (the user's words, then the objective), Acceptance criteria (the gates that show it's met), Size (the lead's estimate), nothing under Structure, Plan or Constraints and conventions, and a `risk` | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
+| `spike` | a report, from a path tried on a branch nobody merges | Goal, Plan (what to try) and Acceptance criteria (what would answer the question); no Size and no `risk` | `## Report` starts with `Answer: <one line>`, and the worktree has nothing uncommitted; `done` |
 | `fix` | a PR that mends a defect live in production | a build's, and `fixes` and `missed_by` (see Fixes) | a build's; `pr-open` |
 | `refine` | a PR that changes existing work in any other way | a build's | a build's; `pr-open` |
 
-A **spike** answers a question a draft's plan rests on. The draft lists those questions under `## Still to learn`, one `- [ ]` item each, and `crew ready` refuses it while any is unchecked. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. So a spike takes no part in stacks: it can't be stacked, and nothing can stack on it; `crew new --on` and `crew set` of a `base` or `kind` refuse either. A task that `depends_on` a spike can be dispatched once the spike is done. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the plan, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft writes the spikes' answers side by side under the item, ticks it, and finishes the plan.
+A build's brief says what done looks like and leaves how to the worker. Structure, Plan and Constraints and conventions are where briefs once held the design: `crew ready` refuses a build's brief with anything under them, and `crew dispatch` refuses a task readied before then, from `crew tick` too. SETUP.md's "Rewriting briefs that still have a plan" has the prompt that has a lead rewrite them.
+
+A **spike** answers a question a draft's objective or gates rest on. The draft lists those questions under `## Still to learn`, one `- [ ]` item each, and `crew ready` refuses it while any is unchecked. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. So a spike takes no part in stacks: it can't be stacked, and nothing can stack on it; `crew new --on` and `crew set` of a `base` or `kind` refuse either. A task that `depends_on` a spike can be dispatched once the spike is done. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the brief, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft writes the spikes' answers side by side under the item, ticks it, and finishes the brief.
 
 ## Fixes
 
@@ -99,13 +101,13 @@ Its worker commits a test that reproduces the defect, and fails on the code as i
 
 ## Risk tiers
 
-A task's `risk` says what kind of look its PR needs from you before you merge it. The lead sets it at intake, from what the plan touches, and `crew ready` refuses a task without one.
+A task's `risk` says what kind of look its PR needs from you before you merge it. The lead sets it at intake, from what meeting the objective will touch, and `crew ready` refuses a task without one.
 
 | risk | look | when the lead sets it |
 |---|---|---|
-| `low` | approve from the evidence | the plan adds no structure: docs, copy, tests, a fix inside existing code |
-| `medium` | read the diff | the plan adds or changes structure |
-| `high` | read the diff; security review ran | the plan touches a sensitive path, or does something irreversible: a migration, a public API, a new dependency, a change to a design principle |
+| `low` | approve from the evidence | the change adds no structure: docs, copy, tests, a fix inside existing code |
+| `medium` | read the diff | the change adds or changes structure |
+| `high` | read the diff; security review ran | the change touches a sensitive path, or does something irreversible: a migration, a public API, a new dependency, a change to a design principle |
 
 A project lists its sensitive paths in `SENSITIVE_PATHS`, in its `project.env`: git pathspecs, such as `db/migrate` or `:(glob)app/**/auth*`, space-separated, without quotes of their own. When a task's branch changes a file that matches one, crew raises its `risk` to `high` and logs `risk → high: touches <file>`: at `crew hand-over`, and at every `crew sync` while the task is in flight, so a commit after the hand-over raises it too. Both fetch first and look at the branch both here and on origin. Crew never lowers a tier, and `crew hand-over` refuses when it can't check, for a pathspec git rejects, say. A high-risk worker runs `/security-review` before it hands over and records what came of it as a `### Security review` entry under `## Evidence`; `crew hand-over` refuses a high-risk task without one. `crew status` says each open PR's look, `high: no security review yet` for a task raised after its hand-over, and `no risk tier: read the diff` for one marked ready before tiers existed, and lists the project's open PRs on one line, cheapest look first.
 

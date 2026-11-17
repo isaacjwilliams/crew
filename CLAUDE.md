@@ -6,14 +6,14 @@ Read `ARCHITECTURE.md` before any structural change. It has the design principle
 
 ## What crew is for
 
-crew is built around its user's review queue: they never face more PRs than they chose to, and each one implements a plan they approved.
+crew is built around its user's review queue: they never face more PRs than they chose to, and each one meets an objective they approved.
 
 **A change that weakens any of the [design principles](ARCHITECTURE.md#design-principles) in `ARCHITECTURE.md` needs the user's say first. Raise it before writing the code.**
 
 The README's pitch rests on these principles in particular:
 
 - review capacity caps the work (5);
-- the plan is approved before code (4);
+- the objective is approved before code (4);
 - only the user merges (6);
 - nothing coordination-related touches the shared repo (1);
 - a plain-text ledger in a private repo (2);

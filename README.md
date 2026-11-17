@@ -1,18 +1,18 @@
 # crew
 
-crew runs a team of Claude Code agents on your GitHub repos, built around your review queue. You never face more PRs than you chose to, and each one implements a plan you approved.
+crew runs a team of Claude Code agents on your GitHub repos, built around your review queue. You never face more PRs than you chose to, and each one meets an objective you approved.
 
 ## How it works
 
-You talk to a **lead**, at a terminal or from the Claude app on your phone. It reads the code, asks what it needs to know, and writes a plan. A plan reviewer reads the plan cold, without your conversation. You say go. A **worker** builds it in its own git worktree and opens a draft PR. When you review the PR, your comments go back to that same worker.
+You talk to a **lead**, at a terminal or from the Claude app on your phone. It reads the code, asks what it needs to know, and writes a brief: the objective, the gates that will show it's met, and the facts a worker needs. A plan reviewer reads the brief cold, without your conversation. You say go. A **worker** works out how to meet the objective, builds it in its own git worktree and opens a draft PR. When you review the PR, your comments go back to that same worker.
 
 ## What's different
 
 - **Your review capacity caps the work.** The lead dispatches a task only when you say go. When you hand the crew a goal to work through without you, the goal's `max_in_flight` caps how many of its tasks are out at once, counting every one dispatched and not yet merged, open PRs included.
-- **You approve the plan before any code is written.** The plan says where the new code lives and which alternative lost. Inside a goal, a goal lead approves plans in your place and parks the decisions that should be yours. You can also tell the lead to just do small, clear tasks.
+- **You approve the objective before any code is written**, and the gates that will show it's met. How to build it is the worker's call, held to your project's rules and reviewed before you see the PR. Inside a goal, a goal lead approves briefs in your place and parks the decisions that should be yours. You can also tell the lead to just do small, clear tasks.
 - **Agents never merge.** Only you do. Each agent's instructions say exactly what it may do on GitHub, and settings rules catch the obvious slips, like `gh pr merge`. Branch protection, where you can turn it on, is the backstop.
 - **The shared repo sees only task branches and their PRs**, plus comments and reactions on those PRs, all under your GitHub account. No labels, no committed config, no files in the working tree. [SETUP.md](SETUP.md) has the full list, under "What your collaborators see".
-- **The ledger is plain Markdown in a private repo of yours.** Every task, plan, decision and review round is a file you can read and edit. crew commits and pushes it as it changes, so another machine can take over where this one left off.
+- **The ledger is plain Markdown in a private repo of yours.** Every task, brief, decision and review round is a file you can read and edit. crew commits and pushes it as it changes, so another machine can take over where this one left off.
 - **Several leads at once.** Each lead is a planning conversation, and they share the ledger, so each one sees what the others wrote down.
 - **Ordinary words, used in their ordinary sense**: lead, worker, task, goal, proposal. A few terms are crew's own, like the ledger and the gardener.
 - **Small.** One Go binary on the standard library, eight agent files, three short `sh` scripts and plain text. No database, no tmux. Timers run plain `crew` commands to keep work moving, not agents supervising agents, so a crew with nothing to do starts no agents. The two scheduled agents run once a week, and only when there's something for them: the gardener when your default branch has new commits, and the misses agent when you commented on a merged PR after its automated review.

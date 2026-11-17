@@ -254,13 +254,24 @@ A lead session is named `lead`, or `lead-<project>` for one project. If one is a
 A typical exchange:
 
 > **you:** Saved searches should remember the filter panel state.
-> **lead:** *(greps and reads the search module)* Filters live in `FilterPanel` local state and never reach `SearchQuery`. Proposal: add an optional `filters` field to `SearchQuery`, persist it in the existing `saved_searches.query` JSON column (no migration), and hydrate `FilterPanel` from it. One question: should the old saved searches without filters open with the panel cleared or with defaults?
+> **lead:** *(greps and reads the search module)* Filters live in `FilterPanel` local state and never reach `SearchQuery`, which saved searches store as JSON. Objective: a saved search reopens with the filters it was saved with. Gates: one saved with filters set reopens with exactly those; one saved before the change still opens. One question: should those older ones open with the panel cleared or with defaults?
 > **you:** Defaults. Go.
 > **lead:** Brief written as `007-saved-search-filters` and dispatched as worker `3f9c21aa`. It'll appear in agent view with a PR link once the draft is up.
 
 The lead writes the brief in `~/crew/projects/<project>/tasks/007-saved-search-filters.md`. You can read or edit it any time; it's the contract the worker works from.
 
-For anything bigger than this example, the lead shows you a summary before you say go. Its Goal quotes how you described the problem, and its structure line says where the new code lives and which alternative lost. While you read it, the plan-reviewer agent reads the brief cold, with the code but without the conversation. When it finishes, the lead tells you what it raised and how each point was settled. If you say go before then, the lead dispatches once the review is in, unless it raises something for you to decide. The brief's structure ends with an estimate of the PR's size. The lead splits a plan past `MAX_PR_LINES`, or one holding two concerns, into smaller tasks before it shows you the summary, and the plan reviewer checks the estimate against the code: a plan it finds too big comes back as a finding with a proposed split. The worker checks the real size again before it opens a PR. Check these hardest: workers and reviewers follow the brief and won't reopen its design. When a reviewer does question that design, the worker leaves the code alone and lists the point under "Findings the brief settled", and the lead passes it on with the PR.
+For anything bigger than this example, the lead shows you a summary before you say go. Its Goal quotes how you described the problem, then states the objective: one outcome a single task can reach. Then come the gates that will show it's met, the facts a worker would most likely miss, and an estimate of the PR's size. A gate measures the outcome ("p95 under 50ms"), never a way to it ("results are cached"). The brief says nothing about how to build it: that's the worker's call, held to your project's rules (`AGENTS.md`, your `~/.claude/CLAUDE.md`) and checked by automated review before you see the PR. While you read it, the plan-reviewer agent reads the brief cold, with the code but without the conversation. When it finishes, the lead tells you what it raised and how each point was settled. If you say go before then, the lead dispatches once the review is in, unless it raises something for you to decide. The lead splits a task past `MAX_PR_LINES`, or one holding two concerns, into smaller tasks before it shows you the summary, and the plan reviewer checks the estimate against the code: a task it finds too big comes back as a finding with a proposed split. The worker checks the real size again before it opens a PR. Check these hardest: workers and reviewers follow the brief and won't reopen its design. When a reviewer does question that design, the worker leaves the code alone and lists the point under "Findings the brief settled", and the lead passes it on with the PR.
+
+### Rewriting briefs that still have a plan
+
+Briefs once said how to build the change, under Structure, Plan and Constraints and conventions. Now they don't, so `crew ready` refuses a brief with anything under those sections, and `crew dispatch` refuses a task that was marked ready with one, whether you or `crew tick` runs it. A spike keeps its Plan. To bring your unfinished briefs over, start a new `lead` (not `lead -c`, which keeps the old instructions) and send it this:
+
+> Briefs now set an objective and the gates that show it's met, and leave the design to the worker. Rewrite every unfinished brief that still says how, so `crew ready` takes it again:
+>
+> 1. Find them: every task in every project that is draft or ready, isn't a spike, and has anything under `## Structure`, `## Plan` or `## Constraints and conventions`.
+> 2. Set each ready one back to draft first (`crew set <task> status draft`), so nothing dispatches it half rewritten.
+> 3. Rewrite each to the brief standard in your `lead.md`. Keep the Goal's quote, and restate the objective under it. Turn what each old section was for into a gate under Acceptance criteria (something that must hold, such as "started runs never move"), a fact under Context (where code lives, a trap, a decision of mine) or a line under Out of scope (something not to touch). Drop what only said how: the structure, the steps, names for new code, conventions the project's rules already state. Rewrite any acceptance criterion that only one design could pass as what that design was for. Move the size estimate from Structure's `Size:` line to a `## Size` section after Acceptance criteria, as `About <n> lines: <areas>`. Then delete the Structure, Plan and Constraints and conventions sections.
+> 4. Show me each brief's before and after: the old sections beside the new objective, gates, facts and size. Mark nothing ready until I've said go for it, then run `crew ready` on each one I approve.
 
 ### Watch the workers
 
@@ -398,13 +409,13 @@ Each PR is short and has the same shape, so you can tell at a glance whether to 
 
 ### Risk tiers: what look each PR needs
 
-Every task has a risk tier, which says how closely you need to look at its PR. The lead sets it at intake, from what the plan touches, and names it in the plan it shows you:
+Every task has a risk tier, which says how closely you need to look at its PR. The lead sets it at intake, from what meeting the objective will touch, and names it in the summary it shows you:
 
 | Tier | The look it needs | When |
 |---|---|---|
-| `low` | approve from the evidence | the plan adds no structure: docs, copy, tests, a fix inside existing code |
-| `medium` | read the diff | the plan adds or changes structure |
-| `high` | read the diff; security review ran | the plan touches a sensitive path, or does something irreversible: a migration, a public API, a new dependency, a change to a design principle |
+| `low` | approve from the evidence | the change adds no structure: docs, copy, tests, a fix inside existing code |
+| `medium` | read the diff | the change adds or changes structure |
+| `high` | read the diff; security review ran | the change touches a sensitive path, or does something irreversible: a migration, a public API, a new dependency, a change to a design principle |
 
 A high-risk task's worker also runs Claude Code's `/security-review` before handing the PR over, and records what it found beside the rest of its evidence. Each PR's Risk section opens with its tier and look.
 
@@ -529,17 +540,17 @@ crew status              # a stack is listed bottom first, each task under its p
 
 ### Spikes: try a path before planning on it
 
-Some plans rest on something nobody has checked: whether an API pages, whether a query is fast enough, which of two designs fits the code. Rather than guess, the lead lists each question under the draft's `## Still to learn`, and `crew ready` refuses the draft until every item is ticked. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, and writes a report in its task file that starts with `Answer:`. It opens no PR, so there's nothing for you to review.
+Some objectives rest on something nobody has checked: whether an API pages, whether a query can be fast enough at all. Rather than guess, the lead lists each question under the draft's `## Still to learn`, and `crew ready` refuses the draft until every item is ticked. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, and writes a report in its task file that starts with `Answer:`. It opens no PR, so there's nothing for you to review.
 
 ```sh
 crew new "Try cursor paging" --kind spike --informs 040   # 040 is the draft whose question it answers
 crew ready 041 && crew dispatch 041     # a spike's brief needs Goal, Plan (what to try, a time box)
-                                        #   and Acceptance criteria (what would answer it); no Structure or risk
+                                        #   and Acceptance criteria (what would answer it); no Size or risk
 crew status                             # 040's row: "2 to learn; 041 working, 042 draft"
 ```
 
 - **The lead asks you first**, as for any task, but runs no plan review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
-- **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the plan from them.
+- **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the brief from them.
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 - **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
 
@@ -655,7 +666,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI or a conflict don't count |
 | `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
-| `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a plan at intake, and a worker asks whether to split its branch, before it opens a PR or when its automated review doesn't settle; `0` sets no limit for any of them |
+| `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a task at intake, and a worker asks whether to split its branch, before it opens a PR or when its automated review doesn't settle; `0` sets no limit for any of them |
 | `CODEX_REVIEW` | `no` | `yes` adds Codex to automated review, beside the reviewer agent (see [Codex in automated review](#codex-in-automated-review)) |
 | `CODEX_MODEL` | `gpt-6-astra` | The model Codex reviews with |
 | `CODEX_MODEL_EFFORT` | `xhigh` | Codex's reasoning effort (`model_reasoning_effort`) |

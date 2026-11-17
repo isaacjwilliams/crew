@@ -26,7 +26,7 @@ and, from the PR's second review on, the same earlier reviews, and nothing else.
 | Send | Never send |
 |---|---|
 | The primary sources step 3 names, verbatim | Your summary of what the change does |
-| The fork point, the range and the review root | The brief's Context, Structure or Plan: an assistant-written plan the user approved |
+| The fork point, the range and the review root | The brief past the user's quoted words: its objective, Context and gates, which the lead wrote and the user approved |
 | Test, lint and run commands | Justification for a trade-off you chose |
 | The user's decisions, the lines marked `(user)` | Which findings you expect, or a defence in advance |
 | The user's review comments, as the task's review rounds quote them | Your reading of the user's intent |
@@ -34,7 +34,7 @@ and, from the PR's second review on, the same earlier reviews, and nothing else.
 
 Verbatim means verbatim. Quote; don't condense.
 
-An approval is not intent. The user's "yes" to a brief adopts the plan as an action; it doesn't adopt its diagnosis,
+An approval is not intent. The user's "yes" to a brief adopts its objective as the work to do; it doesn't adopt its diagnosis,
 its rationale or the trade-offs it accepted. Importing the brief would hand the reviewers your side's reasoning under
 the name of the user's intent, and their comparison of derived and stated intent would then test the code
 against its own justification.
@@ -134,7 +134,7 @@ Only these, verbatim, each as a `###` subsection:
 A PR body or commit message often has headings of its own. Turn each `#` or `##` heading in them into a `####`
 heading, so nothing after `## Stated intent` starts a new section. That's the only change you make to them.
 
-Nothing else from the task file goes in: not its title, Context, Structure, Plan or Log, and nothing from its review
+Nothing else from the task file goes in: not its title, the objective, Context, Acceptance criteria or Log, and nothing from its review
 rounds but the user's comments. If you catch yourself explaining, delete the sentence.
 
 Stated intent comes last, and the headings are spelled exactly so, because a reviewer has to read the code before it
