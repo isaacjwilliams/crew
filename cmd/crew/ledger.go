@@ -9,8 +9,11 @@ package main
 
 import (
 	"fmt"
+	"iter"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -129,10 +132,14 @@ func (e logEntry) status() (Status, bool) {
 }
 
 // Section is a section's text, without HTML comments and blank lines.
-func (d Doc) Section(heading string) string {
+func (d Doc) Section(heading string) string { return section(d.lines(), heading) }
+
+// section is the text of the section of lines under heading, without HTML
+// comments and blank lines.
+func section(lines []string, heading string) string {
 	var out []string
 	on, inComment := false, false
-	for _, l := range d.lines() {
+	for _, l := range lines {
 		if !on {
 			on = l == heading
 			continue
@@ -381,8 +388,10 @@ type kindRules struct {
 	linkTo      Status
 	linkUnknown bool
 	// handOver is what crew hand-over checks (handOverPR, handOverReport, in
-	// cmd_new.go), and handedOver the status it moves the task to.
-	handOver   func(*Crew, Task) error
+	// cmd_new.go): it reads what the checks need from outside the ledger, before
+	// crew takes the lock, and returns the checks to make with the lock held.
+	// handedOver is the status it moves the task to.
+	handOver   func(*Crew, Task) (func() error, error)
 	handedOver Status
 }
 
@@ -859,24 +868,89 @@ func (t Task) AcceptanceCriteria() []string {
 	return criteria
 }
 
-// EvidenceGaps is the numbers of the acceptance criteria that have no evidence
-// yet. The evidence for criterion n is a "### n." entry under ## Evidence
-// (evidenceEntries). It counts the entries and doesn't judge them.
-func (t Task) EvidenceGaps() []int {
-	recorded := map[int]bool{}
-	for _, h := range t.evidenceEntries() {
-		num, _, _ := strings.Cut(strings.TrimPrefix(h, "### "), ".")
-		if n, err := strconv.Atoi(num); err == nil {
-			recorded[n] = true
+// Evidence is what one place the user reads, the task's ## Evidence or its PR
+// body's, shows for each acceptance criterion, by its number: the commit the
+// item names as the one it ran on, or "" when it names none.
+type Evidence map[int]string
+
+// evidenceCommit finds the commit an evidence item names, as "(on <sha>)".
+var evidenceCommit = regexp.MustCompile(`\(on ([0-9a-f]{7,40})\)`)
+
+// add records the item that starts with line, "<n>. …", for criterion n, and
+// the commit named by the first "(on <sha>)" after its number.
+func (e Evidence) add(line string) {
+	num, rest, _ := strings.Cut(line, ".")
+	if n, err := strconv.Atoi(num); err == nil && n > 0 {
+		e[n] = ""
+		if m := evidenceCommit.FindStringSubmatch(rest); m != nil {
+			e[n] = m[1]
 		}
 	}
+}
+
+// Within is the items for the first n criteria: one numbered past them is no
+// criterion's evidence. It's nil when e is.
+func (e Evidence) Within(n int) Evidence {
+	w := maps.Clone(e)
+	maps.DeleteFunc(w, func(i int, _ string) bool { return i > n })
+	return w
+}
+
+// Gaps is the numbers of the first n criteria that have no item.
+func (e Evidence) Gaps(n int) []int {
 	var gaps []int
-	for i := range t.AcceptanceCriteria() {
-		if !recorded[i+1] {
-			gaps = append(gaps, i+1)
+	for i := 1; i <= n; i++ {
+		if _, ok := e[i]; !ok {
+			gaps = append(gaps, i)
 		}
 	}
 	return gaps
+}
+
+// Unnamed is the numbers of the criteria whose item names no commit, in order.
+func (e Evidence) Unnamed() []int {
+	var unnamed []int
+	for _, n := range slices.Sorted(maps.Keys(e)) {
+		if e[n] == "" {
+			unnamed = append(unnamed, n)
+		}
+	}
+	return unnamed
+}
+
+// Naming is the items that name one of the commits marked true, as
+// "<n> (on <sha>)", in order, or "" when there are none.
+func (e Evidence) Naming(commits map[string]bool) string {
+	var items []string
+	for _, n := range slices.Sorted(maps.Keys(e)) {
+		if commits[e[n]] {
+			items = append(items, fmt.Sprintf("%d (on %s)", n, e[n]))
+		}
+	}
+	return strings.Join(items, ", ")
+}
+
+// Evidence is the task's evidence: for criterion n, a "### n. …" entry under
+// ## Evidence (evidenceEntries), whose heading names the commit it ran on.
+func (t Task) Evidence() Evidence {
+	e := Evidence{}
+	for _, h := range t.evidenceEntries() {
+		e.add(strings.TrimPrefix(h, "### "))
+	}
+	return e
+}
+
+// PREvidence is the evidence in a PR's body: for criterion n, a top-level
+// "n. …" item under its ## Evidence that names the commit it ran on, as
+// templates/pr-body.md has them.
+func PREvidence(body string) Evidence {
+	e := Evidence{}
+	for l, fenced := range markdownLines(section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")) {
+		if !fenced {
+			e.add(l)
+		}
+	}
+	return e
 }
 
 // evidenceEntries is the heading of each entry under ## Evidence that has
@@ -885,15 +959,8 @@ func (t Task) EvidenceGaps() []int {
 func (t Task) evidenceEntries() []string {
 	var entries []string
 	heading, filled := "", false
-	fence := "" // the fence the line is inside, or "" outside one
-	for _, l := range strings.Split(t.Section("## Evidence"), "\n") {
-		inFence := fence != ""
-		if !inFence {
-			fence = fenceOpening(l)
-		} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
-			fence = ""
-		}
-		if strings.HasPrefix(l, "### ") && !inFence {
+	for l, fenced := range markdownLines(t.Section("## Evidence")) {
+		if strings.HasPrefix(l, "### ") && !fenced {
 			if filled {
 				entries = append(entries, heading)
 			}
@@ -906,6 +973,26 @@ func (t Task) evidenceEntries() []string {
 		entries = append(entries, heading)
 	}
 	return entries
+}
+
+// markdownLines yields each line of text, and whether it's inside a fenced
+// block: after the line that opens one, up to and including the line that
+// closes it.
+func markdownLines(text string) iter.Seq2[string, bool] {
+	return func(yield func(string, bool) bool) {
+		fence := "" // the fence the line is inside, or "" outside one
+		for _, l := range strings.Split(text, "\n") {
+			inFence := fence != ""
+			if !inFence {
+				fence = fenceOpening(l)
+			} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+				fence = ""
+			}
+			if !yield(l, inFence) {
+				return
+			}
+		}
+	}
 }
 
 // fenceOpening is the run of three or more backticks or tildes that opens a
@@ -927,7 +1014,7 @@ const securityReview = "### Security review"
 
 // SecurityReviewed: ## Evidence has a securityReview entry with something under
 // it, which a high-risk task needs before its hand-over. The entry isn't
-// numbered, so EvidenceGaps doesn't count it as a criterion's.
+// numbered, so it's no criterion's evidence.
 func (t Task) SecurityReviewed() bool {
 	return slices.Contains(t.evidenceEntries(), securityReview)
 }

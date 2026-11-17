@@ -378,7 +378,7 @@ func startEvalRun(c *Crew, p *Project, rubric, selection string) (*evalRun, erro
 	now := time.Now()
 	reviewer := filepath.Join(installedAgents(), "reviewer.md")
 	version := "unknown"
-	if v, ok := claudeVersion(); ok && v != "" {
+	if v, ok := toolVersion("claude"); ok && v != "" {
 		version = v
 	}
 	e := &evalRun{

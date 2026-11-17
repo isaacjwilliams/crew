@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -291,17 +292,11 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
-	// A PR's branch on origin may have commits from elsewhere, a suggestion
-	// applied on GitHub say, that raiseRisk has to see. Fetch before taking the
-	// lock, so a slow network doesn't hold up other crew commands.
-	if rules.pr {
-		p, err := c.loadProject(t.Project())
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(p.Settings["SENSITIVE_PATHS"]) != "" && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-			return fail("couldn't check SENSITIVE_PATHS: git fetch origin failed in %s", p.Repo())
-		}
+	// Read what the checks need from outside the ledger (git, GitHub) first, so
+	// a slow network doesn't hold up other crew commands; check it under the lock.
+	check, err := rules.handOver(c, t)
+	if err != nil {
+		return err
 	}
 	// Check under the lock: crew sync may be marking the task merged, or the
 	// lead abandoning it, at the same moment.
@@ -311,7 +306,7 @@ func cmdHandOver(c *Crew, args []string) error {
 	if st := t.Status(); !st.InFlight() || st == PROpen {
 		return fail("task is '%s': only a task in flight, and not in pr-open, can be handed over", st)
 	}
-	if err := rules.handOver(c, t); err != nil {
+	if err := check(); err != nil {
 		return err
 	}
 	t.SetStatus(rules.handedOver)
@@ -322,55 +317,150 @@ func cmdHandOver(c *Crew, args []string) error {
 	return nil
 }
 
-// handOverPR checks a build is ready for the user: its PR has evidence for every
-// acceptance criterion, and a security review if it's high risk, which a branch
-// that touches a sensitive path makes it. Call it with the lock held.
-func handOverPR(c *Crew, t Task) error {
-	if t.PR() == "" && t.Get("pr_mode") != "none" { // with pr_mode none, the worker opens no PR
-		return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
-	}
-	criteria := t.AcceptanceCriteria()
-	if len(criteria) == 0 {
-		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
-	}
-	if gaps := t.EvidenceGaps(); len(gaps) > 0 {
-		nums := make([]string, len(gaps))
-		for i, n := range gaps {
-			nums[i] = strconv.Itoa(n)
-		}
-		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. …' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
-			strings.Join(nums, ", "), len(criteria))
-	}
+// handOverPR checks a build is ready for the user: the evidence they read, in
+// the task and the PR body, shows every acceptance criterion holding on the
+// code they would merge (checkEvidence), and a high-risk task has a security
+// review, which a branch that touches a sensitive path needs. It reads the
+// branch and the PR body first, before crew hand-over takes the lock, so a slow
+// network doesn't hold up other crew commands.
+func handOverPR(c *Crew, t Task) (func() error, error) {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// A raise stands even when the hand-over is refused below: the branch touches
-	// a sensitive path whatever happens next.
-	raised, err := raiseRisk(t, p)
+	// The PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that the evidence and raiseRisk have to see.
+	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
+	}
+	var pr Evidence // nil without a PR: with pr_mode none, the worker opens none
+	if t.PR() != "" {
+		body, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "body", "--jq", ".body")
+		if err != nil {
+			return nil, fail("couldn't read the PR body: gh pr view %s failed", t.PR())
+		}
+		pr = PREvidence(string(body))
+	}
+	return func() error {
+		if t.PR() == "" && t.Get("pr_mode") != "none" {
+			return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
+		}
+		if err := checkEvidence(t, p.Repo(), pr); err != nil {
+			return err
+		}
+		// A raise stands even when the hand-over is refused below: the branch
+		// touches a sensitive path whatever happens next.
+		raised, err := raiseRisk(t, p)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if raised != "" {
+			fmt.Println(raised)
+			c.commit("raise risk " + t.ID())
+		}
+		if t.AwaitsSecurityReview() {
+			return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
+		}
+		return nil
+	}, nil
+}
+
+// checkEvidence refuses evidence that can't reach the user: an acceptance
+// criterion with no item in the task's ## Evidence or in the PR body (pr, nil
+// without a PR), an item that doesn't name the commit it ran on, or one that
+// ran on other work than the branch has now. A restack or a merge of the base
+// that git made on its own keeps evidence current (branchWork.unchangedSince).
+func checkEvidence(t Task, repo string, pr Evidence) error {
+	n := len(t.AcceptanceCriteria())
+	if n == 0 {
+		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
+	}
+	task := t.Evidence().Within(n)
+	pr = pr.Within(n)
+	if gaps := task.Gaps(n); len(gaps) > 0 {
+		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. … (on <sha>)' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
+			numberList(gaps), n)
+	}
+	if unnamed := task.Unnamed(); len(unnamed) > 0 {
+		return fail("evidence for acceptance criteria %s doesn't name the commit it ran on: end each entry's heading with '(on <sha>)'", numberList(unnamed))
+	}
+	if pr != nil {
+		if gaps := pr.Gaps(n); len(gaps) > 0 {
+			return fail("the PR body's Evidence has no item for acceptance criteria %s of %d: add a '<n>. … (on <sha>)' item for each, as templates/pr-body.md has them, with gh pr edit",
+				numberList(gaps), n)
+		}
+		if unnamed := pr.Unnamed(); len(unnamed) > 0 {
+			return fail("the PR body's Evidence for acceptance criteria %s doesn't name the commit it ran on: put '(on <sha>)' after each item's criterion, with gh pr edit", numberList(unnamed))
+		}
+	}
+	work, err := ownWork(t, repo)
 	if err != nil {
-		return fail("%v", err)
+		return fail("couldn't check the evidence: %v", err)
 	}
-	if raised != "" {
-		fmt.Println(raised)
-		c.commit("raise risk " + t.ID())
+	// A commit the evidence names is stale when its work isn't the branch's at
+	// either tip: the user may merge either one. When the branch here has the
+	// work and only origin lacks it, a push is all that's missing.
+	stale := map[string]bool{}
+	staleHere := false
+	for _, e := range []Evidence{task, pr} {
+		for _, sha := range e {
+			if _, checked := stale[sha]; checked {
+				continue
+			}
+			then, err := workIn(t, repo, sha)
+			if err != nil {
+				return fail("couldn't check the evidence: %v", err)
+			}
+			stale[sha] = false
+			for _, w := range work {
+				unchanged, err := w.unchangedSince(repo, then)
+				if err != nil {
+					return fail("couldn't check the evidence: %v", err)
+				}
+				if !unchanged {
+					stale[sha] = true
+					staleHere = staleHere || w.here()
+				}
+			}
+		}
 	}
-	if t.AwaitsSecurityReview() {
-		return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
+	var places []string
+	if items := task.Naming(stale); items != "" {
+		places = append(places, "## Evidence: "+items)
+	}
+	if items := pr.Naming(stale); items != "" {
+		places = append(places, "the PR body: "+items)
+	}
+	if len(places) > 0 && !staleHere && slices.ContainsFunc(work, branchWork.here) {
+		return fail("evidence ran on work the branch on origin doesn't have yet, in %s. Push the branch, then hand over again", strings.Join(places, "; "))
+	}
+	if len(places) > 0 {
+		return fail("evidence ran on other work than the branch has now, here and on origin, in %s. Push the branch, run the evidence again, and record it with the commit it ran on", strings.Join(places, "; "))
 	}
 	return nil
 }
 
+// numberList is the numbers ns, comma-separated.
+func numberList(ns []int) string {
+	s := make([]string, len(ns))
+	for i, n := range ns {
+		s[i] = strconv.Itoa(n)
+	}
+	return strings.Join(s, ", ")
+}
+
 // handOverReport checks a spike's report is in, so whoever reads it next finds
 // an answer, and that its worktree is clean, so crew cleanup can remove it.
-func handOverReport(_ *Crew, t Task) error {
-	if t.Answer() == "" {
-		return fail("## Report must start with a line 'Answer: <the answer, in a line>'; write the report, then hand over again")
-	}
-	if wt := t.Worktree(); wt != "" && isDir(wt) {
-		if out, _ := git(wt, "status", "--porcelain"); out != "" {
-			return fail("%s has changes that aren't committed: commit or delete them, so it can be cleaned up, then hand over again", wt)
+func handOverReport(_ *Crew, t Task) (func() error, error) {
+	return func() error {
+		if t.Answer() == "" {
+			return fail("## Report must start with a line 'Answer: <the answer, in a line>'; write the report, then hand over again")
 		}
-	}
-	return nil
+		if wt := t.Worktree(); wt != "" && isDir(wt) {
+			if out, _ := git(wt, "status", "--porcelain"); out != "" {
+				return fail("%s has changes that aren't committed: commit or delete them, so it can be cleaned up, then hand over again", wt)
+			}
+		}
+		return nil
+	}, nil
 }

@@ -90,10 +90,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    now if the worker is idle, else by crew tick
   crew hand-over TASK              Hand a build's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
-                                   under ## Evidence, and a high-risk task a security
-                                   review; a branch that touches SENSITIVE_PATHS makes
-                                   it high risk. Mark a spike done once its ## Report
-                                   starts with "Answer:" (used by workers)
+                                   under ## Evidence and in the PR body, from a commit
+                                   that holds the branch's own work as it is now, and
+                                   a high-risk task a security review; a branch that
+                                   touches SENSITIVE_PATHS makes it high risk. Mark a
+                                   spike done once its ## Report starts with "Answer:"
+                                   (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...
