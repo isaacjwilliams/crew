@@ -310,7 +310,8 @@ you review on GitHub → tell the lead (or run it yourself):
                          # a copy anyway (session ID changed) → warn, record the copy's job and session
                          # if resume fails, or its job ends `failed` → fresh worker with a "pick up this task" prompt
                          # a new round's prompt says whether to reply on the PR (REPLY_TO_THREADS)
-                         # records last_round_sent; status → addressing-feedback
+                         # records last_round_sent; status → addressing-feedback, or working for a note alone
+                         #   (a note leaves an addressing-feedback task as it is: the worker is still in its round)
   crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
                          # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
                          # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)
