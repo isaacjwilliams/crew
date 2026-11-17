@@ -240,7 +240,7 @@ func evalBriefing(t Task, r AutomatedReview, root string, count int, commits str
 // decisions dated before r's day, and their comments in rounds before r.
 func userWordsBefore(t Task, r AutomatedReview) []string {
 	var stated []string
-	if request := quotedLines(t.Section("## Goal")); request != "" {
+	if request, _ := splitQuote(t.Section("## Goal")); request != "" {
 		stated = append(stated, "### The user's request\n\n"+request)
 	}
 	if decisions := userDecisionsBefore(t, r.At); len(decisions) > 0 {
@@ -264,17 +264,22 @@ func userWordsBefore(t Task, r AutomatedReview) []string {
 }
 
 // briefSections are the parts of a task's brief that can settle a point, as
-// agents/misses.md reads a brief, besides the Goal and the decisions.
-var briefSections = []string{"Structure", "Plan", "Constraints and conventions", "Out of scope"}
+// agents/misses.md reads a brief, besides the Goal and the decisions. A brief
+// readied before briefs stopped saying how may also have Structure, Plan and
+// Constraints and conventions.
+var briefSections = []string{"Context", "Acceptance criteria", "Structure", "Plan", "Constraints and conventions", "Out of scope"}
 
 // briefBefore is what the judge needs to tell a miss from a point the brief
-// settled or a change of mind: the brief's sections, then the user's words
-// before review r. A brief is written before the work starts, so the task
-// file's is the one r had. The reviewer's briefing leaves these sections out,
-// as the pr-review skill's does: they're the plan's reasoning, not the user's
-// intent.
+// settled or a change of mind: the objective, the brief's sections, then the
+// user's words before review r. A brief is written before the work starts, so
+// the task file's is the one r had. The reviewer's briefing leaves all but the
+// user's words out, as the pr-review skill's does: they're the lead's, not the
+// user's.
 func briefBefore(t Task, r AutomatedReview) []string {
 	var brief []string
+	if _, objective := splitQuote(t.Section("## Goal")); objective != "" {
+		brief = append(brief, "### Objective\n\n"+objective)
+	}
 	for _, name := range briefSections {
 		if text := strings.TrimSpace(t.Section("## " + name)); text != "" {
 			brief = append(brief, "### "+name+"\n\n"+text)
@@ -283,15 +288,18 @@ func briefBefore(t Task, r AutomatedReview) []string {
 	return append(brief, userWordsBefore(t, r)...)
 }
 
-// quotedLines is the lines of text that are a quote, "> …".
-func quotedLines(text string) string {
-	var quote []string
+// splitQuote splits text into its lines that are a quote, "> …", and the rest,
+// trimmed: a Goal's user's words and the objective the lead wrote under them.
+func splitQuote(text string) (quote, rest string) {
+	var quoted, other []string
 	for _, l := range strings.Split(text, "\n") {
 		if strings.HasPrefix(l, ">") {
-			quote = append(quote, l)
+			quoted = append(quoted, l)
+		} else {
+			other = append(other, l)
 		}
 	}
-	return strings.Join(quote, "\n")
+	return strings.Join(quoted, "\n"), strings.TrimSpace(strings.Join(other, "\n"))
 }
 
 // userDecisionsBefore is the task's decisions that are the user's own, the
