@@ -399,7 +399,11 @@ func cmdNudge(c *Crew, args []string) error {
 	}
 	sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}")
 	if err != nil {
-		return fail("%s's branch %s isn't in %s", t.ID(), t.Branch(), p.Repo())
+		// Making the worktree below brings back a branch only origin has, at this commit.
+		sha, err = git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+t.Branch()+"^{commit}")
+	}
+	if err != nil {
+		return fail("%s's branch %s is neither in %s nor on origin", t.ID(), t.Branch(), p.Repo())
 	}
 	head := shortSHA(sha)
 	if t.NudgedLastAt(head) {
