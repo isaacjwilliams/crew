@@ -475,6 +475,36 @@ rm -rf "$HOME/gh-last-body" "$HOME/gh-summaries"
 check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew review-summary 2 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 : >"$HOME/summary.md"
 check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
+
+# crew evidence: a task's screenshots go to its project's evidence repo, one folder per task.
+# The repo is named the way it is on GitHub, and git takes that URL to a bare repo here.
+T1=$(basename "$F1" .md); T2=$(basename "$F2" .md); EV=$SB/evidence.git
+printf 'PNG' >"$SB/shot.png"; echo "what I ran" >"$SB/notes.txt"
+out=$(crew evidence 1 "$SB/shot.png" 2>&1); st=$?
+check "without EVIDENCE_REPO, crew evidence refuses, naming the setting, and makes no clone" \
+  '((st == 1)) && [[ $out == *"set EVIDENCE_REPO in its project.env"* && ! -e $HOME/agent-work/$P/_evidence ]]'
+git init -q --bare "$EV" && git clone -q "$EV" "$SB/evidence-seed" 2>/dev/null
+(cd "$SB/evidence-seed" && echo "# Evidence" >README.md && git add -A && git commit -qm init && git push -q origin main)
+git config --global url."$EV".insteadOf git@github.com:owner/name.git
+echo 'EVIDENCE_REPO="git@github.com:owner/name.git"' >>"$PE"
+out=$(crew evidence 1 "$SB/shot.png" "$SB/missing.png" 2>&1); st=$?
+check "crew evidence refuses a file that isn't there, and publishes nothing" '((st == 1)) && [[ $out == *"$SB/missing.png isn'"'"'t a file"* && $(git --git-dir="$EV" rev-list --count main) == 1 ]]'
+out=$(crew evidence 1 "$SB/shot.png" "$SB/notes.txt"); st=$?; sha=$(git --git-dir="$EV" rev-parse main)
+check "crew evidence commits the files under the task's folder on the evidence repo's default branch, in one commit, and pushes it" \
+  '((st == 0)) && [[ $(git --git-dir="$EV" rev-list --count main) == 2 && $(git --git-dir="$EV" log -1 --format=%s main) == "$T1: shot.png, notes.txt" &&
+    $(git --git-dir="$EV" show --format= --name-only main | sort | paste -sd " ") == "$T1/notes.txt $T1/shot.png" ]]'
+want="![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)"$'\n'"[notes.txt](https://github.com/owner/name/blob/$sha/$T1/notes.txt)"
+check "and prints a Markdown line for each, pinned to that commit: an image shown inline, another file linked" '[[ $out == "$want" ]]'
+out=$(crew evidence 1 "$SB/shot.png")
+check "publishing the same file again makes no commit, and links to the commit that has it" \
+  '[[ $(git --git-dir="$EV" rev-list --count main) == 2 && $out == "![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)" ]]'
+printf 'A' >"$SB/a.png"; printf 'B' >"$SB/b.png"
+crew evidence 1 "$SB/a.png" >"$SB/ev1.out" 2>&1 & one=$!; crew evidence 2 "$SB/b.png" >"$SB/ev2.out" 2>&1 & two=$!; wait "$one" "$two"
+sha1=$(sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$SB/ev1.out"); sha2=$(sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$SB/ev2.out")
+check "two tasks' crew evidence started at once both land on the default branch, and each prints its own commit" \
+  '[[ $(git --git-dir="$EV" rev-list --count main) == 4 && $sha1 != "$sha2" ]] &&
+   git --git-dir="$EV" merge-base --is-ancestor "$sha1" main && git --git-dir="$EV" merge-base --is-ancestor "$sha2" main &&
+   [[ $(git --git-dir="$EV" show --format= --name-only "$sha1") == "$T1/a.png" && $(git --git-dir="$EV" show --format= --name-only "$sha2") == "$T2/b.png" ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
 check "react doesn't depend on REPLY_TO_THREADS" 'crew react 1 eyes 111 >/dev/null'
