@@ -127,40 +127,22 @@ func (idx Branches) restackReason(t Task, repo string) string {
 	return p.ID() + " moved"
 }
 
-// raiseRisk makes a task high risk when its branch changes a file that matches
-// one of the project's SENSITIVE_PATHS (git pathspecs), and logs the first such
-// file. It never lowers a tier. It looks at the branch here and on origin, as last
-// fetched, since either may have commits the other lacks: each one's changes since
-// it left origin/<base>. It starts at base_sha instead when a rebased parent left
-// the merge base behind the parent's work (as noteBaseSHA does), or when a merged
-// parent's branch is gone from origin (as crew observe does). It returns the line
-// it logged, or nothing, and an error when it couldn't look. Call it with the lock
-// held.
+// raiseRisk makes a task high risk when its own work (ownWork) changes a file
+// that matches one of the project's SENSITIVE_PATHS (git pathspecs), and logs
+// the first such file. It never lowers a tier. It returns the line it logged, or
+// nothing, and an error when it couldn't look. Call it with the lock held.
 func raiseRisk(t Task, p *Project) (string, error) {
 	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
 	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
 		return "", nil
 	}
-	repo, base := p.Repo(), "refs/remotes/origin/"+t.Base()
+	work, err := ownWork(t, p.Repo())
+	if err != nil {
+		return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: %w", err)
+	}
 	var touched []string
-	looked := false
-	for _, tip := range []string{"refs/heads/" + t.Branch(), "refs/remotes/origin/" + t.Branch()} {
-		if !gitOK(repo, "show-ref", "--verify", "--quiet", tip) {
-			continue
-		}
-		since, err := git(repo, "merge-base", base, tip)
-		bs := t.Get("base_sha")
-		if bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, tip) &&
-			(err != nil || !gitOK(repo, "merge-base", "--is-ancestor", bs, since)) {
-			since, err = bs, nil
-		}
-		if err != nil {
-			if !gitOK(repo, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
-				return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: origin/%s is gone, and base_sha doesn't say where %s starts", t.Base(), t.Branch())
-			}
-			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: %s has no merge base with origin/%s", t.Branch(), t.Base())
-		}
-		out, err := git(repo, append([]string{"diff", "-z", "--name-only", since, tip, "--"}, pathspecs...)...)
+	for _, w := range work {
+		out, err := git(p.Repo(), append([]string{"diff", "-z", "--name-only", w.since, w.tip, "--"}, pathspecs...)...)
 		if err != nil {
 			return "", fmt.Errorf("couldn't check SENSITIVE_PATHS (%s): git diff failed; is each one a pathspec?", strings.Join(pathspecs, " "))
 		}
@@ -169,10 +151,6 @@ func raiseRisk(t Task, p *Project) (string, error) {
 				touched = append(touched, f)
 			}
 		}
-		looked = true
-	}
-	if !looked {
-		return "", fmt.Errorf("couldn't check SENSITIVE_PATHS: branch %s isn't here or on origin", t.Branch())
 	}
 	if len(touched) == 0 {
 		return "", nil
@@ -186,6 +164,42 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	t.Touch()
 	t.Log(line)
 	return line, nil
+}
+
+// branchWork is a task's own work at one tip of its branch: the commits after
+// since, up to tip.
+type branchWork struct{ since, tip string }
+
+// ownWork is a task's own work at each tip of its branch: here and on origin, as
+// last fetched, since either may have commits the other lacks. Each starts where
+// its tip left origin/<base>, or at base_sha instead when a rebased parent left
+// the merge base behind the parent's work (as noteBaseSHA does), or when a merged
+// parent's branch is gone from origin (as crew observe does).
+func ownWork(t Task, repo string) ([]branchWork, error) {
+	base := "refs/remotes/origin/" + t.Base()
+	var work []branchWork
+	for _, tip := range []string{"refs/heads/" + t.Branch(), "refs/remotes/origin/" + t.Branch()} {
+		if !gitOK(repo, "show-ref", "--verify", "--quiet", tip) {
+			continue
+		}
+		since, err := git(repo, "merge-base", base, tip)
+		bs := t.Get("base_sha")
+		if bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, tip) &&
+			(err != nil || !gitOK(repo, "merge-base", "--is-ancestor", bs, since)) {
+			since, err = bs, nil
+		}
+		if err != nil {
+			if !gitOK(repo, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
+				return nil, fmt.Errorf("origin/%s is gone, and base_sha doesn't say where %s starts", t.Base(), t.Branch())
+			}
+			return nil, fmt.Errorf("%s has no merge base with origin/%s", t.Branch(), t.Base())
+		}
+		work = append(work, branchWork{since, tip})
+	}
+	if len(work) == 0 {
+		return nil, fmt.Errorf("branch %s isn't here or on origin", t.Branch())
+	}
+	return work, nil
 }
 
 // retargetReason says why a task's open PR has to be pointed at another branch,
