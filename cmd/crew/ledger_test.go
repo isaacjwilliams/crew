@@ -895,6 +895,32 @@ func TestProposalTaskContext(t *testing.T) {
 	}
 }
 
+func TestProposalCheckSetKeepsAnAcceptedProposalOnItsTask(t *testing.T) {
+	for _, c := range []struct {
+		status, task, key, value string
+		refused                  bool
+	}{
+		{"accepted", "047-a", "task", "048-b", true},
+		{"accepted", "047-a", "task", "", true},
+		{"accepted", "047-a", "status", "open", true},
+		{"accepted", "047-a", "task", "047-a", false},
+		{"accepted", "047-a", "status", "accepted", false},
+		{"accepted", "047-a", "size", "S", false},
+		{"accepted", "", "status", "open", false},
+		{"open", "047-a", "task", "048-b", false},
+		{"open", "", "status", "accepted", false},
+	} {
+		pr := Proposal{docWith(t, "---\nstatus: "+c.status+"\ntask: "+c.task+"\n---\n## Log\n")}
+		err := pr.CheckSet(c.key, c.value)
+		if (err != nil) != c.refused {
+			t.Errorf("CheckSet(%s, %q) on a proposal %s for task %q = %v, want refused %v", c.key, c.value, c.status, c.task, err, c.refused)
+		}
+		if err != nil && !strings.Contains(err.Error(), "accepted for task 047-a,") {
+			t.Errorf("the refusal doesn't name the task: %v", err)
+		}
+	}
+}
+
 func TestMemorySuggestion(t *testing.T) {
 	day := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	for why, want := range map[string]string{

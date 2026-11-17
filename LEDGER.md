@@ -143,6 +143,8 @@ A proposal is an idea worth keeping that isn't ready to be a task, in `proposals
 
 Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `misses`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (the task that took up its work: set by `crew promote`, or by the worker that wrote it, on closing it), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener and the misses agent fill them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
 
+An accepted proposal with a `task` stays with that task: `crew set` won't change or clear its `task`, or move it out of `accepted`, and says to raise it with the lead. That guards against mistakes, not deliberate edits: `crew` can't tell a lead from a worker, so it isn't a lock. When the link is wrong, the lead fixes it on purpose by editing the proposal's front matter by hand. A proposal with no `task` takes any status.
+
 A proposal from the misses agent may target a file outside the project: your `~/.claude/CLAUDE.md`, or crew's review rubric (`.claude/skills/pr-review/rubric.md` in crew's repo). Its Proposal section then starts `Target: <file>. A change for you to make, not a task in this project.` You make the change by hand, and the lead sets the proposal `accepted`.
 
 ## Review eval

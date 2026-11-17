@@ -588,8 +588,9 @@ func (t Task) Answer() string {
 	return strings.TrimSpace(answer)
 }
 
-// statusLogged begins the Log line of every change to a task's status:
-// "status → pr-open", say. crew stats reads the waits on the user from them.
+// statusLogged begins the Log line of every change to a task's or a proposal's
+// status: "status → pr-open", say. crew stats reads a task's waits on the user
+// from them.
 const statusLogged = "status → "
 
 // recordedForTheUser ends the Log line crew feedback and crew ci-fix write when
@@ -1092,6 +1093,26 @@ func (g Goal) Project() string    { return g.Get("project") }
 func (g Goal) LeadJob() string    { return g.Get("lead_job") }
 
 type Proposal struct{ Doc }
+
+// SetStatus writes the proposal's status and logs the change, as a task's does.
+func (p Proposal) SetStatus(s string) error {
+	if err := p.Set("status", s); err != nil {
+		return err
+	}
+	return p.Log(statusLogged + s)
+}
+
+// CheckSet refuses a crew set that would take an accepted proposal away from
+// the task that took up its work: a new or empty task, or another status. It
+// guards against mistakes: a lead who means it edits the front matter by hand.
+func (p Proposal) CheckSet(key, value string) error {
+	task := p.Get("task")
+	linked := p.Get("status") == "accepted" && task != ""
+	if !linked || (key != "task" && key != "status") || value == p.Get(key) {
+		return nil
+	}
+	return fail("proposal %s is accepted for task %s, which took up its work, so crew set won't change its %s. Leave it as it is, and raise it with the lead.", p.ID(), task, key)
+}
 
 // Author is who wrote the proposal, from its source, as a sentence names them.
 // It's empty for a proposal without a source.

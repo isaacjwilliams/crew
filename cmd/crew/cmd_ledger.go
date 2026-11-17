@@ -161,20 +161,28 @@ func cmdGet(c *Crew, args []string) error {
 	return nil
 }
 
-// crew set TASK KEY VALUE...
+// crew set TASK KEY VALUE...: TASK can also be a proposal's file.
 func cmdSet(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew set TASK KEY VALUE")
 	}
-	t, err := c.resolveTask(args[0])
+	f, err := c.resolve("tasks", args[0])
 	if err != nil {
 		return err
 	}
 	if len(args) < 2 || args[1] == "" {
 		return fail("key required")
 	}
-	// Trimmed once, so the checks below see what Lookup will read back.
+	// Trimmed once, so the checks see what Lookup will read back.
 	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
+	if isProposal(f) {
+		return c.setProposal(Proposal{Doc{f}}, key, value)
+	}
+	return c.setTask(Task{Doc{f}}, key, value)
+}
+
+func (c *Crew) setTask(t Task, key, value string) error {
+	var err error
 	// An empty value clears the key. crew ready refuses a task whose kind needs
 	// one it cleared.
 	if value != "" {
@@ -205,6 +213,27 @@ func cmdSet(c *Crew, args []string) error {
 	}
 	t.Touch()
 	c.commit("set " + t.ID() + " " + key)
+	return nil
+}
+
+func (c *Crew) setProposal(p Proposal, key, value string) error {
+	if err := p.CheckSet(key, value); err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	var err error
+	if key == "status" {
+		err = p.SetStatus(value)
+	} else {
+		err = p.Set(key, value)
+	}
+	if err != nil {
+		return err
+	}
+	p.Touch()
+	c.commit("set " + p.ID() + " " + key)
 	return nil
 }
 

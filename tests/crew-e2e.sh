@@ -1342,6 +1342,19 @@ check "a worker closes its own proposal: links its task, accepts it and logs it"
    [[ $(crew get "$WP" status) == accepted && $(crew get "$WP" task) == 007-contestant-type-on-update && $(section "$WP" "## Log") == *"status → accepted""$NL"*"Done in 007"* ]]'
 TP=$(crew propose "Ask why in the rubric" --project "$PJ" --source misses)
 check "a proposal with no task, such as a Target: one, can be set accepted" 'crew set "$TP" status accepted && [[ $(crew get "$TP" status) == accepted && -z $(crew get "$TP" task) ]]'
+# An accepted proposal keeps the task it became: crew set won't move it, and says why.
+set_refused() {  # proposal key value: crew set refuses, names the proposal's task, and changes nothing
+  local sum head err
+  sum=$(cksum <"$1") head=$(git -C "$L" rev-parse HEAD)
+  ! err=$(crew set "$1" "$2" "$3" 2>&1) &&
+    [[ $err == *"accepted for task $(crew get "$1" task), which took up its work"*"Leave it as it is, and raise it with the lead."* &&
+       $(cksum <"$1") == "$sum" && $(git -C "$L" rev-parse HEAD) == "$head" ]]
+}
+check "set refuses to move a promoted proposal to another task, and changes nothing" 'set_refused "$SP" task 007-contestant-type-on-update'
+check "set refuses to clear an accepted proposal's task" 'set_refused "$SP" task ""'
+check "set refuses to change an accepted proposal's status while a task is linked" 'set_refused "$SP" status open'
+check "set runs no task checks on a proposal: status done gets the proposal's refusal, not crew hand-over" \
+  'set_refused "$SP" status done && [[ $(crew set "$SP" status done 2>&1) != *"hand-over"* ]]'
 
 # Project scope: a command works on --project, else CREW_PROJECT (which `lead` and
 # crew's own sessions set), else the current directory's repo, else every project.
