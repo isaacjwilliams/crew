@@ -890,12 +890,12 @@ stall13() {  # status [state pid [status]]: task 13 in that status, its worker i
 stall13 working; n=$(resumes); h=$(head13)
 out=$(crew tick 2>/dev/null)
 check "tick nudges a working task whose worker is done, once, with the stalled note, and logs the nudge last with the branch's head" \
-  '[[ $out == "013-tick-routing: its worker'"'"'s turn ended mid-task; nudged it" && $(resumes) == $((n + 1)) && $(last_launch) == *"Your last turn ended while this task'"'"'s status is still working."*"Then carry on from your last step."* && $(tail -1 "$F13") == *" — nudged: turn ended mid-task at $h" && $(crew get 13 status) == working ]]'
+  '[[ $out == "013-tick-routing: its worker'"'"'s turn ended mid-task; nudged it" && $(resumes) == $((n + 1)) && $(last_launch) == *"Your last turn ended while this task'"'"'s status still says you'"'"'re working on it."*"Then carry on from your last step."* && $(tail -1 "$F13") == *" — nudged: turn ended mid-task at $h" && $(crew get 13 status) == working ]]'
 setstate "done" null
 out=$(crew tick 2>/dev/null)
 check "a second stall with no commit and no Log line since the nudge resumes nothing, asks the lead once, and the same tick marks the task waiting on you" \
   '[[ $out == $'"'"'013-tick-routing: stalled again after a nudge, for you\n013-tick-routing: waiting on you (1 open question(s))'"'"' && $(resumes) == $((n + 1)) && $(asked13) == 1 && $(crew get 13 status) == needs-input ]] &&
-   section "$F13" "## Open questions" | grep -qxF -- "- [ ] The worker'"'"'s turn ended twice with the task still working, and nothing changed after the nudge (branch still at $h). See its last output with claude logs $(crew get 13 worker_job)."'
+   section "$F13" "## Open questions" | grep -qxF -- "- [ ] The worker'"'"'s turn ended twice with the task still in progress, and nothing changed after the nudge (branch still at $h). See its last output with claude logs $(crew get 13 worker_job)."'
 out=$(crew tick 2>/dev/null)
 check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13) == 1 && $(crew get 13 status) == needs-input ]]'
 sum=$(cksum <"$F13"); out=$(crew nudge 13); code=$?

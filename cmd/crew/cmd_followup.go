@@ -341,7 +341,7 @@ const stallAfter = 15 * time.Minute
 // stalledNote is what crew nudge tells a worker whose turn ended mid-task. The
 // stall seen most is a worker that ended its turn to wait on a background
 // sub-agent: the result arrives, but no new turn starts.
-const stalledNote = "Your last turn ended while this task's status is still working. If you're waiting on an answer, record it under Open questions and set your status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
+const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set your status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
 
 // stalled: the task is working or addressing-feedback with no open question,
 // and its worker a (nil when claude agents doesn't list it) is done or blocked,
@@ -412,7 +412,7 @@ func cmdNudge(c *Crew, args []string) error {
 	}
 	head := shortSHA(sha)
 	if t.NudgedLastAt(head) {
-		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] The worker's turn ended twice with the task still working, and nothing changed after the nudge (branch still at %s). See its last output with claude logs %s.\n", head, job))
+		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] The worker's turn ended twice with the task still in progress, and nothing changed after the nudge (branch still at %s). See its last output with claude logs %s.\n", head, job))
 		t.Log(fmt.Sprintf("nudge: stalled again at %s; for the lead", head))
 		t.Touch()
 		c.commit("nudge " + p.Name + "/" + t.ID())
