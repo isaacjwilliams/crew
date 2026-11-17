@@ -124,7 +124,7 @@ func publishEvidence(remote, clone, dir string, files, names []string) (string, 
 
 // pushEvidence pushes the clone's commit to the default branch. When origin has
 // moved on (another machine or person published), it rebases onto it and tries
-// again, five times at most, as pushLedger does: each task has a folder of its
+// again, up to five tries in all, like pushLedger. Each task has a folder of its
 // own, so the rebase can't conflict.
 func pushEvidence(clone, branch string) error {
 	for range 5 {
