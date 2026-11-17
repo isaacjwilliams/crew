@@ -422,7 +422,7 @@ A worker publishes its screenshots, and any other file a reviewer should open, w
 [query-plan.txt](https://github.com/your-org/pr_evidence/blob/<commit>/012-saved-search-filters/query-plan.txt)
 ```
 
-An image shows on the PR, for anyone who can read the evidence repo; another file is a link. Each link names the commit, so publishing a file again under the same name doesn't change what an earlier PR shows. crew keeps its clone of the repo in `~/agent-work/<project>/_evidence` and never deletes or rewrites anything there, so links in merged PRs keep working. Without `EVIDENCE_REPO`, workers describe their screenshots in the PR instead.
+An image shows on the PR, for anyone who can read the evidence repo; another file is a link. Each link names the commit, so publishing a file again under the same name doesn't change what an earlier PR shows. crew keeps its clone of the repo in `~/agent-work/<project>/_evidence`, and never deletes or rewrites anything in the repo, so links in merged PRs keep working. Without `EVIDENCE_REPO`, workers describe their screenshots in the PR instead.
 
 ### Risk tiers: what look each PR needs
 
