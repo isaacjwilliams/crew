@@ -66,4 +66,4 @@
 - [<severity>] <the finding, in a line> — <the size of its fix, in a few words>
 
 **Left for you**
-- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / its fix would break a gate or a project rule, named in a few words / only a deploy window would close it, and what that costs in a few words / too big a fix for this PR, and its size in a few words / reviews disagreed about it / still open from an earlier review>
+- <the finding, in a line> — <why it's left: disputed, with the evidence in a few words / couldn't be settled / its fix would break a gate, go out of scope or go against a project rule, and which, in a few words / only a deploy window would close it, and what that costs in a few words / too big a fix for this PR, and its size in a few words / reviews disagreed about it / still open from an earlier review>

@@ -6,7 +6,7 @@
 
      - A stacked PR starts with "Stacked on #<parent PR>." on a line of its own.
      - The objective, in a sentence: the outcome this PR reaches, from the task's Goal, and why it
-       matters. Not what changed: the diff shows that, and the evidence shows it works.
+       matters.
      - Risk: first the task's tier and the look it asks for, as one of "Low risk: approve from the
        evidence", "Medium risk: read the diff" or "High risk: read the diff; security review ran".
        Then what could break, for whom, and how far it reaches. When it's small, say so in a line.
