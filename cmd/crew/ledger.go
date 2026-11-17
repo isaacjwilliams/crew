@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"iter"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -900,13 +901,24 @@ func (e Evidence) Gaps(n int) []int {
 // Unnamed is the numbers of the criteria whose item names no commit, in order.
 func (e Evidence) Unnamed() []int {
 	var unnamed []int
-	for n, sha := range e {
-		if sha == "" {
+	for _, n := range slices.Sorted(maps.Keys(e)) {
+		if e[n] == "" {
 			unnamed = append(unnamed, n)
 		}
 	}
-	slices.Sort(unnamed)
 	return unnamed
+}
+
+// Naming is the items that name one of the commits marked true, as
+// "<n> (on <sha>)", in order, or "" when there are none.
+func (e Evidence) Naming(commits map[string]bool) string {
+	var items []string
+	for _, n := range slices.Sorted(maps.Keys(e)) {
+		if commits[e[n]] {
+			items = append(items, fmt.Sprintf("%d (on %s)", n, e[n]))
+		}
+	}
+	return strings.Join(items, ", ")
 }
 
 // Evidence is the task's evidence: for criterion n, a "### n. …" entry under

@@ -5,9 +5,11 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -373,7 +375,10 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	if n == 0 {
 		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
 	}
+	// An item numbered past the criteria is no criterion's evidence.
+	beyond := func(i int, _ string) bool { return i > n }
 	task := t.Evidence()
+	maps.DeleteFunc(task, beyond)
 	if gaps := task.Gaps(n); len(gaps) > 0 {
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. … (on <sha>)' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			numberList(gaps), n)
@@ -382,6 +387,7 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 		return fail("evidence for acceptance criteria %s doesn't name the commit it ran on: end each entry's heading with '(on <sha>)'", numberList(unnamed))
 	}
 	if pr != nil {
+		maps.DeleteFunc(pr, beyond)
 		if gaps := pr.Gaps(n); len(gaps) > 0 {
 			return fail("the PR body's Evidence has no item for acceptance criteria %s of %d: add a '<n>. … (on <sha>)' item for each, as templates/pr-body.md has them, with gh pr edit",
 				numberList(gaps), n)
@@ -394,34 +400,28 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	if err != nil {
 		return fail("couldn't check the evidence: %v", err)
 	}
-	var stale []string
-	for _, place := range []struct {
-		name     string
-		evidence Evidence
-	}{{"## Evidence", task}, {"the PR body", pr}} {
-		var items []string
-		for i := 1; i <= n; i++ {
-			sha, ok := place.evidence[i]
-			if !ok { // without a PR, its body has no items
-				continue
-			}
-			for _, w := range work {
-				current, err := w.unchangedSince(repo, sha)
-				if err != nil {
-					return fail("couldn't check the evidence: %v", err)
-				}
-				if !current {
-					items = append(items, fmt.Sprintf("%d (on %s)", i, sha))
-					break
-				}
-			}
+	stale := map[string]bool{} // each commit the evidence names: whether the branch's own work changed since
+	for _, sha := range slices.Concat(slices.Collect(maps.Values(task)), slices.Collect(maps.Values(pr))) {
+		if _, seen := stale[sha]; seen {
+			continue
 		}
-		if len(items) > 0 {
-			stale = append(stale, place.name+": "+strings.Join(items, ", "))
+		for _, w := range work {
+			unchanged, err := w.unchangedSince(repo, sha)
+			if err != nil {
+				return fail("couldn't check the evidence: %v", err)
+			}
+			stale[sha] = stale[sha] || !unchanged
 		}
 	}
-	if len(stale) > 0 {
-		return fail("evidence ran before the branch's own work last changed, in %s. Run it again on the code as it is now, and record it with the commit it ran on", strings.Join(stale, "; "))
+	var places []string
+	if items := task.Naming(stale); items != "" {
+		places = append(places, "## Evidence: "+items)
+	}
+	if items := pr.Naming(stale); items != "" {
+		places = append(places, "the PR body: "+items)
+	}
+	if len(places) > 0 {
+		return fail("evidence ran before the branch's own work last changed, in %s. Run it again on the code as it is now, and record it with the commit it ran on", strings.Join(places, "; "))
 	}
 	return nil
 }
