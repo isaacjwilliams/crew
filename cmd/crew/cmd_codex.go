@@ -29,8 +29,8 @@ var codexReadOnly = []string{"-c", `sandbox_mode="read-only"`, "-c", `approval_p
 //
 // Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, in a new session
 // each time. Codex's final message goes to OUT_PREFIX.md and its events to
-// OUT_PREFIX.events.jsonl. It prints what the run cost, however it ended, and
-// exits with Codex's status, or 124 when Codex wrote no event for
+// OUT_PREFIX.events.jsonl. What the run cost, however it ended, goes to
+// OUT_PREFIX.cost and stdout. It exits with Codex's status, or 124 when Codex wrote no event for
 // codexStallLimit and was stopped.
 func cmdCodex(c *Crew, args []string) error {
 	if len(args) != 3 {
@@ -68,12 +68,10 @@ func cmdCodex(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	cost := runCost{took: time.Since(began), tokens: codexTokens(events)}
-	if m := settings["CODEX_MODEL"]; m != "" {
-		cost.models = []string{m}
-	}
-	if e := settings["CODEX_MODEL_EFFORT"]; e != "" {
-		cost.efforts = []string{e}
+	cost := runCost{took: time.Since(began), tokens: codexTokens(events),
+		models: []string{settings["CODEX_MODEL"]}, efforts: []string{settings["CODEX_MODEL_EFFORT"]}}
+	if err := os.WriteFile(out+".cost", []byte(cost.String()+"\n"), 0o644); err != nil {
+		return err
 	}
 	switch {
 	case stalled:
@@ -147,6 +145,10 @@ type codexUsage struct {
 
 func (u codexUsage) total() int { return u.Input + u.Output }
 
+func (u codexUsage) add(v codexUsage) codexUsage {
+	return codexUsage{u.Input + v.Input, u.CacheRead + v.CacheRead, u.Output + v.Output}
+}
+
 func (u codexUsage) String() string {
 	return fmt.Sprintf("%s input including %s cache read, %s output", thousands(u.Input), thousands(u.CacheRead), thousands(u.Output))
 }
@@ -156,7 +158,8 @@ func (u codexUsage) String() string {
 // it was stopped in reports none.
 func codexTokens(events string) tokenUsage {
 	b, _ := os.ReadFile(events)
-	var sum *codexUsage
+	var sum codexUsage
+	turns := 0
 	for _, line := range strings.Split(string(b), "\n") {
 		var e struct {
 			Type  string
@@ -165,17 +168,13 @@ func codexTokens(events string) tokenUsage {
 		if json.Unmarshal([]byte(line), &e) != nil || e.Type != "turn.completed" || e.Usage == nil {
 			continue
 		}
-		if sum == nil {
-			sum = &codexUsage{}
-		}
-		sum.Input += e.Usage.Input
-		sum.CacheRead += e.Usage.CacheRead
-		sum.Output += e.Usage.Output
+		sum = sum.add(*e.Usage)
+		turns++
 	}
-	if sum == nil {
+	if turns == 0 {
 		return nil
 	}
-	return *sum
+	return sum
 }
 
 // exitStatus is the status a finished command exited with, given what Wait

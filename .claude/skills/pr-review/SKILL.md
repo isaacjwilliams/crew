@@ -209,7 +209,8 @@ that found nothing.
 
 **What each run cost.** Once a reviewer has finished, however it finished, take its cost for the record (step 8),
 exactly as crew prints it: for the Claude reviewer, what `crew review-cost <agent id>` prints, with the agent ID its
-launch returned; for Codex, the `cost:` line `crew codex` printed last. Never work out a cost yourself, from a
+launch returned; for Codex, what `crew codex` wrote to `<out prefix>.cost`, such as
+`<briefing dir>/codex-answer-0.cost`. Never work out a cost yourself, from a
 transcript or a notice: if `crew review-cost` refuses, the cost is `not reported: <what it said>`.
 
 A reviewer that fails, stalls or returns no report hasn't reported. For Codex, exit status 124 means it wrote nothing
@@ -407,11 +408,10 @@ whose head it starts from, when it reads only the new commits. The `Earlier:` li
 it and you checked it: `new` for every finding of the PR's first review, and for one whose repeat mark you rejected,
 with your evidence on the Verdict line.
 
-The Cost lines are one for each run of a reviewer, the review's first and then each round's, in that order, including a
-run that failed or stalled.
+There's a Cost line for each run of a reviewer, a run that failed or stalled included: the review's, then each round's.
 
-Leave out the Codex lines and `Rounds:` when Codex didn't run, a Cost line for a round a reviewer didn't run in, and a
-`Round` line for each round that didn't address the finding. Report both derived intents verbatim and unmerged: two reviewers who read the same change and came away
+Leave out the Codex lines and `Rounds:` when Codex didn't run, and a `Round` line for each round that didn't address
+the finding. Report both derived intents verbatim and unmerged: two reviewers who read the same change and came away
 with different accounts of its purpose is evidence that the change doesn't communicate it. When they diverge, say how
 in a line under them.
 

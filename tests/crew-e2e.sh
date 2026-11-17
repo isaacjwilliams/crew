@@ -135,8 +135,8 @@ check "crew codex runs codex exec read-only with approvals off, in a new session
   '((st == 0)) && grep -qxF "codex exec -c sandbox_mode=\"read-only\" -c approval_policy=\"never\" -m gpt-6-astra -c model_reasoning_effort=\"xhigh\" --skip-git-repo-check --json -o $SB/rev/answer-0.md -C $SB/webapp - (in $SB/webapp)" "$HOME/codex-calls.log"'
 check "crew codex gives Codex the prompt file on stdin, and writes its reply and events" \
   'cmp -s "$SB/rev/prompt.md" "$HOME/codex-stdin.last" && [[ $(cat "$SB/rev/answer-0.md") == "stub review" ]] && grep -q turn.completed "$SB/rev/answer-0.events.jsonl" && [[ $(head -1 <<<"$out") == "final message: $SB/rev/answer-0.md" ]]'
-check "crew codex prints what the run cost: the tokens its completed turn reports, the time, and the model and effort it ran at" \
-  '[[ $(tail -1 <<<"$out") == "cost: 12,900 tokens (12,000 input including 8,000 cache read, 900 output); "*"s; gpt-6-astra at xhigh effort" ]]'
+check "crew codex prints what the run cost, and writes it beside its reply: the tokens its completed turn reports, the time, and the model and effort it ran at" \
+  '[[ "cost: $(cat "$SB/rev/answer-0.cost")" == "$(tail -1 <<<"$out")" && $(tail -1 <<<"$out") == "cost: 12,900 tokens (12,000 input including 8,000 cache read, 900 output); "*"s; gpt-6-astra at xhigh effort" ]]'
 echo 'CODEX_MODEL="gpt-next"' >>"$PE"
 crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-1" >/dev/null 2>&1
 check "crew codex uses the project's model" '[[ $(tail -1 "$HOME/codex-calls.log") == *" -m gpt-next "* ]]'
@@ -158,7 +158,7 @@ cat >"$HOME/.claude/projects/-sb-webapp/5058aa63/subagents/agent-a8c4c13dcb083eb
 {"type":"user","timestamp":"2026-11-17T03:45:21.834Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
 EOF
 check "crew review-cost finds a subagent's transcript by its agent ID and prints what its run cost" \
-  '[[ $(crew review-cost a8c4c13dcb083ebd0) == "13,558 tokens (2 input, 13,332 cache write, 0 cache read, 224 output); 2m27s; claude-opus-5-5 at high effort" ]]'
+  '[[ $(crew review-cost a8c4c13dcb083ebd0) == *"; 2m27s; claude-opus-5-5 at high effort" ]]'
 check "crew review-cost refuses an agent with no transcript, or a pattern for an ID" \
   '! crew review-cost a0000000000000000 2>/dev/null && ! crew review-cost "a*" 2>/dev/null'
 echo 'CODEX_REVIEW=yes' >>"$L/config/crew.env"

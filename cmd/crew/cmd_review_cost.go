@@ -71,6 +71,10 @@ type claudeUsage struct {
 
 func (u claudeUsage) total() int { return u.Input + u.CacheWrite + u.CacheRead + u.Output }
 
+func (u claudeUsage) add(v claudeUsage) claudeUsage {
+	return claudeUsage{u.Input + v.Input, u.CacheWrite + v.CacheWrite, u.CacheRead + v.CacheRead, u.Output + v.Output}
+}
+
 func (u claudeUsage) String() string {
 	return fmt.Sprintf("%s input, %s cache write, %s cache read, %s output",
 		thousands(u.Input), thousands(u.CacheWrite), thousands(u.CacheRead), thousands(u.Output))
@@ -158,10 +162,7 @@ func claudeRunCost(transcript []byte) (runCost, error) {
 	if len(usage) > 0 {
 		var sum claudeUsage
 		for _, u := range usage {
-			sum.Input += u.Input
-			sum.CacheWrite += u.CacheWrite
-			sum.CacheRead += u.CacheRead
-			sum.Output += u.Output
+			sum = sum.add(u)
 		}
 		cost.tokens = sum
 	}

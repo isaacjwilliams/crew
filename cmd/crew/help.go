@@ -111,8 +111,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew codex ROOT PROMPT_FILE OUT_PREFIX
                                    A read-only Codex review in ROOT: its reply in
                                    OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl,
-                                   and what it cost; exits 124 when Codex stalls
-                                   (used by pr-review)
+                                   what it cost in OUT_PREFIX.cost; exits 124 when
+                                   Codex stalls (used by pr-review)
   crew review-cost AGENT_ID        What the run of Claude subagent AGENT_ID cost:
                                    tokens, time, model and effort, from its
                                    transcript (used by pr-review)
