@@ -150,11 +150,7 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	}
 	// A task made ready before briefs left the design to the worker, --force or
 	// not, goes no further: crew tick dispatches a goal's ready tasks by itself.
-	rules, err := t.rules()
-	if err != nil {
-		return fail("%v", err)
-	}
-	if err := t.DesignInBrief(rules); err != nil {
+	if err := t.DesignInBrief(); err != nil {
 		return fail("%v", err)
 	}
 	idx := c.branches(p.Name)

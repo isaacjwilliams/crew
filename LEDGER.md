@@ -67,7 +67,7 @@ A task's `kind` says what it makes, and so what `crew ready` asks of its brief a
 
 | kind | makes | its brief needs | `crew hand-over` checks, then sets |
 |---|---|---|---|
-| `build` | a PR | Goal (the user's words, then the objective), Acceptance criteria (the gates that show it's met), Size (the lead's estimate), nothing under Structure, Plan or Constraints and conventions, and a `risk` | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
+| `build` | a PR | Goal (the user's words, then the objective), Acceptance criteria (the gates that show it's met), Size (the lead's estimate), and a `risk`; nothing under Structure, Plan or Constraints and conventions (below) | evidence for every acceptance criterion (and a security review if high risk); `pr-open` |
 | `spike` | a report, from a path tried on a branch nobody merges | Goal, Plan (what to try) and Acceptance criteria (what would answer the question); no Size and no `risk` | `## Report` starts with `Answer: <one line>`, and the worktree has nothing uncommitted; `done` |
 | `fix` | a PR that mends a defect live in production | a build's, and `fixes` and `missed_by` (see Fixes) | a build's; `pr-open` |
 | `refine` | a PR that changes existing work in any other way | a build's | a build's; `pr-open` |

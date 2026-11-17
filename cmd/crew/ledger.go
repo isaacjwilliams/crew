@@ -596,7 +596,11 @@ func (t Task) StillToLearn() int { return unchecked(t.Section("## Still to learn
 // DesignInBrief is an error when the brief still says how to meet its
 // objective, in a section its kind leaves empty: a brief written before briefs
 // set an objective and its gates. crew ready and crew dispatch both refuse it.
-func (t Task) DesignInBrief(r kindRules) error {
+func (t Task) DesignInBrief() error {
+	r, err := t.rules()
+	if err != nil {
+		return err
+	}
 	var filled []string
 	for _, h := range r.design {
 		if t.Section(h) != "" {

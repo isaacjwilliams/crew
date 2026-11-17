@@ -288,8 +288,8 @@ check "goal leads read code in their working directory, a checkout, not through 
 check "lead relays answers to a finished worker with crew followup, not SendMessage" \
   "grep -q 'Only if .crew followup. refuses' $A/lead.md"
 # --- a brief sets the objective and the gates that measure it; the design is the worker's
-check "the template's brief has the sections crew ready asks of a build, a Plan only for a spike, and none it refuses" \
-  "T=$C/../templates/task.md && grep -qx '## Size' \$T && ! grep -qx '## Structure' \$T && ! grep -qx '## Constraints and conventions' \$T && grep -A1 -x '## Plan' \$T | grep -q 'A spike.s only' && grep -qF 'var buildBrief = []string{\"## Goal\", \"## Acceptance criteria\", \"## Size\"}' <<<\"\$SRC\" && grep -qF 'var buildDesign = []string{\"## Structure\", \"## Plan\", \"## Constraints and conventions\"}' <<<\"\$SRC\""
+check "the template's brief has a Size, a Plan only for a spike, and no Structure or Constraints, as a Go test checks against crew ready's rules" \
+  "T=$C/../templates/task.md && grep -qx '## Size' \$T && ! grep -qx '## Structure' \$T && ! grep -qx '## Constraints and conventions' \$T && grep -A1 -x '## Plan' \$T | grep -q 'A spike.s only' && grep -q '^func TestTemplateHasTheBriefSections' $C/../cmd/crew/ledger_test.go"
 check "the lead shows the objective and its gates first, and its briefs say nothing about how" \
   "grep -q 'Lead with the objective and the gates: they.re what the user approves' $A/lead.md && section '### The brief standard' $A/lead.md | grep -q '^- Nothing about how: no structure, plan steps, names for new code' && ! grep -qi 'prescribe structure\\|Give structure its own line\\|alternative that lost' $A/lead.md $A/goal-lead.md $REPO_DIR/templates/task.md"
 check "crew's refusal of a brief with a plan names the SETUP.md section whose prompt rewrites one, which holds it" \

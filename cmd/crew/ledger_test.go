@@ -394,20 +394,40 @@ func TestKindRules(t *testing.T) {
 // A brief that says how to meet its objective is refused, naming every section
 // that says it; one whose design sections hold only the template's notes isn't.
 func TestDesignInBrief(t *testing.T) {
-	build, _ := KindBuild.rules()
-	spike, _ := KindSpike.rules()
-	notes := Task{docWith(t, "---\nid: 001-a\n---\n## Structure\n<!-- where the code lives -->\n\n## Plan\n\n## Size\nAbout 40 lines.\n")}
-	if err := notes.DesignInBrief(build); err != nil {
+	notes := Task{docWith(t, "---\nid: 001-a\nkind: build\n---\n## Structure\n<!-- where the code lives -->\n\n## Plan\n\n## Size\nAbout 40 lines.\n")}
+	if err := notes.DesignInBrief(); err != nil {
 		t.Errorf("template notes only: %v", err)
 	}
-	old := Task{docWith(t, "---\nid: 001-a\n---\n## Structure\nA cache package.\n\n## Plan\n1. Add it.\n\n## Constraints and conventions\nNo Redis.\n")}
-	err := old.DesignInBrief(build)
+	old := "---\nid: 001-a\nkind: %s\n---\n## Structure\nA cache package.\n\n## Plan\n1. Add it.\n\n## Constraints and conventions\nNo Redis.\n"
+	err := Task{docWith(t, fmt.Sprintf(old, "refine"))}.DesignInBrief()
 	if err == nil || !strings.Contains(err.Error(), "001-a's brief still says how to meet its objective, under Structure, Plan and Constraints and conventions") ||
 		!strings.Contains(err.Error(), "run crew ready 001-a") {
 		t.Errorf("old-shape brief: %v", err)
 	}
-	if err := old.DesignInBrief(spike); err != nil {
+	if err := (Task{docWith(t, fmt.Sprintf(old, "spike"))}).DesignInBrief(); err != nil {
 		t.Errorf("a spike's plan: %v", err)
+	}
+}
+
+// The task template has every section a kind's brief needs, and of those it
+// leaves empty only the Plan, which a spike's brief needs.
+func TestTemplateHasTheBriefSections(t *testing.T) {
+	b, err := os.ReadFile("../../templates/task.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headings := strings.Split(string(b), "\n")
+	for _, r := range kinds {
+		for _, h := range r.brief {
+			if !slices.Contains(headings, h) {
+				t.Errorf("%s's brief needs %s, which the template lacks", r.kind, h)
+			}
+		}
+		for _, h := range r.design {
+			if h != "## Plan" && slices.Contains(headings, h) {
+				t.Errorf("%s's brief leaves %s empty, yet the template has it", r.kind, h)
+			}
+		}
 	}
 }
 
