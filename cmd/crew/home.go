@@ -236,8 +236,8 @@ func slugFor(root string) string {
 // ownerAndRepo reads a GitHub repo's owner and name from a git remote URL, in
 // any of its forms: git@github.com:owner/repo.git, https://github.com/owner/repo,
 // ssh://git@github.com/owner/repo.
-func ownerAndRepo(url string) (owner, repo string) {
-	s := strings.TrimSuffix(strings.TrimSuffix(url, ".git"), "/")
+func ownerAndRepo(remote string) (owner, repo string) {
+	s := strings.TrimSuffix(strings.TrimSuffix(remote, ".git"), "/")
 	s = strings.ReplaceAll(s, ":", "/")
 	rest, repo := splitLast(s)
 	_, owner = splitLast(rest)

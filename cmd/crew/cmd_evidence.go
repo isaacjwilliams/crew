@@ -55,8 +55,9 @@ func cmdEvidence(c *Crew, args []string) error {
 		return err
 	}
 	defer lock.Close()
+	// Beside the project's worktrees and outside every one, so no worker writes to it.
 	clone := filepath.Join(p.WorkRoot(), p.Name, "_evidence")
-	sha, err := publishEvidence(remote, clone, t.ID(), files)
+	sha, err := publishEvidence(remote, clone, t.ID(), files, names)
 	if err != nil {
 		return err
 	}
@@ -65,6 +66,7 @@ func cmdEvidence(c *Crew, args []string) error {
 	for _, name := range names {
 		link := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s/%s", owner, repo, sha, t.ID(), url.PathEscape(name))
 		if isImage(name) {
+			// GitHub shows a blob page, not the image, unless asked for the raw file.
 			fmt.Printf("![%s](%s?raw=true)\n", name, link)
 		} else {
 			fmt.Printf("[%s](%s)\n", name, link)
@@ -74,16 +76,16 @@ func cmdEvidence(c *Crew, args []string) error {
 }
 
 // publishEvidence copies files into dir/ of the evidence repo's default branch,
-// in one commit, and pushes it. It returns the commit that has them, which is
+// each under its name in names, in one commit, and pushes it. It returns the commit that has them, which is
 // what links pin to. Its clone is cloned on first use, and never holds work of
 // its own: each publish starts from origin.
-func publishEvidence(remote, clone, dir string, files []string) (string, error) {
+func publishEvidence(remote, clone, dir string, files, names []string) (string, error) {
 	if !isDir(filepath.Join(clone, ".git")) {
 		os.MkdirAll(filepath.Dir(clone), 0o755)
 		if !gitTo(os.Stderr, ".", "clone", "-q", remote, clone) {
 			return "", fail("couldn't clone the evidence repo %s", remote)
 		}
-	} else if !gitTo(os.Stderr, clone, "fetch", "-q", "origin") {
+	} else if !gitOK(clone, "remote", "set-url", "origin", remote) || !gitTo(os.Stderr, clone, "fetch", "-q", "origin") {
 		return "", fail("couldn't fetch the evidence repo %s", remote)
 	}
 	branch := defaultBranch(clone)
@@ -96,19 +98,18 @@ func publishEvidence(remote, clone, dir string, files []string) (string, error) 
 	}
 
 	os.MkdirAll(filepath.Join(clone, dir), 0o755)
-	var names []string
-	for _, f := range files {
-		name := filepath.Base(f)
+	for i, f := range files {
 		data, err := os.ReadFile(f)
 		if err == nil {
-			err = os.WriteFile(filepath.Join(clone, dir, name), data, 0o644)
+			err = os.WriteFile(filepath.Join(clone, dir, names[i]), data, 0o644)
 		}
 		if err != nil {
 			return "", err
 		}
-		names = append(names, name)
 	}
-	gitOK(clone, "add", "--", dir)
+	if !gitOK(clone, "add", "--", dir) {
+		return "", fail("couldn't add the evidence in %s", clone)
+	}
 	// Files exactly like the ones there already need no commit: origin's has them.
 	if !gitOK(clone, "diff", "--cached", "--quiet") {
 		if !gitTo(os.Stderr, clone, "commit", "-qm", dir+": "+strings.Join(names, ", ")) {
@@ -123,7 +124,8 @@ func publishEvidence(remote, clone, dir string, files []string) (string, error) 
 
 // pushEvidence pushes the clone's commit to the default branch. When origin has
 // moved on (another machine or person published), it rebases onto it and tries
-// again: each task has a folder of its own, so the rebase can't conflict.
+// again, five times at most, as pushLedger does: each task has a folder of its
+// own, so the rebase can't conflict.
 func pushEvidence(clone, branch string) error {
 	for range 5 {
 		out, err := exec.Command("git", "-C", clone, "push", "-q", "origin", "HEAD:"+branch).CombinedOutput()
