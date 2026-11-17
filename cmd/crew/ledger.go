@@ -391,7 +391,8 @@ type kindRules struct {
 var buildBrief = []string{"## Goal", "## Acceptance criteria", "## Size"}
 
 // buildDesign is the sections a build's brief leaves empty, and a fix's and a
-// refine's. Briefs once said there how to meet the objective.
+// refine's: how to meet the objective is the worker's call. The template keeps
+// a Plan only because a spike's brief needs one.
 var buildDesign = []string{"## Structure", "## Plan", "## Constraints and conventions"}
 
 // kinds are the kinds of task, build first.
@@ -481,6 +482,7 @@ func orList[T ~string](items []T) string { return listJoin(items, " or ") }
 // andList lists items as a sentence does: "Structure, Plan and Constraints".
 func andList[T ~string](items []T) string { return listJoin(items, " and ") }
 
+// listJoin joins items with commas, and the last two with last (" or ", say).
 func listJoin[T ~string](items []T, last string) string {
 	s := make([]string, len(items))
 	for i, item := range items {
@@ -593,9 +595,8 @@ func (t Task) rules() (kindRules, error) {
 // rests on that nobody has checked yet. crew ready refuses until there are none.
 func (t Task) StillToLearn() int { return unchecked(t.Section("## Still to learn")) }
 
-// DesignInBrief is an error when the brief still says how to meet its
-// objective, in a section its kind leaves empty: a brief written before briefs
-// set an objective and its gates. crew ready and crew dispatch both refuse it.
+// DesignInBrief is an error when the brief says how to meet its objective, in
+// a section its kind leaves empty. crew ready and crew dispatch both refuse it.
 func (t Task) DesignInBrief() error {
 	r, err := t.rules()
 	if err != nil {
@@ -610,9 +611,8 @@ func (t Task) DesignInBrief() error {
 	if len(filled) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s's brief still says how to meet its objective, under %s, and that's the worker's call now. "+
-		"Turn what those sections were for into gates under Acceptance criteria or facts under Context, "+
-		"put the size estimate under Size, delete them, and run crew ready %s (SETUP.md, \"Rewriting briefs that still have a plan\")",
+	return fmt.Errorf("%s's brief still says how to meet its objective, under %s, and that's the worker's call. "+
+		"Rewrite it as SETUP.md's \"Rewriting briefs that still have a plan\" says, then run crew ready %s",
 		t.ID(), andList(filled), t.ID())
 }
 

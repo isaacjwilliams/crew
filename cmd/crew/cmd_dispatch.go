@@ -148,8 +148,9 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
 	}
-	// A task made ready before briefs left the design to the worker, --force or
-	// not, goes no further: crew tick dispatches a goal's ready tasks by itself.
+	// --force or not: a ready task's brief may say how to meet its objective,
+	// having been readied before crew ready refused that, or edited since, and
+	// crew tick dispatches a goal's ready tasks with nobody to catch it.
 	if err := t.DesignInBrief(); err != nil {
 		return fail("%v", err)
 	}

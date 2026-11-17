@@ -230,7 +230,7 @@ fill "$F1"; sed -i -e '/^About 10 lines\.$/d' -e 's/^risk: low$/risk:/' "$F1"
 check "ready refuses a brief without a size estimate" '[[ $(crew ready 1 2>&1) == *"fill in: Size"* ]]'
 sed -i -e '/^## Size$/a About 10 lines.' -e '/^## Plan$/a 1. Add a filters field.' -e '/^## Goal$/i ## Structure\nA field on SearchQuery.\n' "$F1"
 check "ready refuses a brief that still says how to meet its objective, naming each section and how to rewrite it" \
-  '[[ $(crew ready 1 2>&1) == *"001-saved-search-filters'"'"'s brief still says how to meet its objective, under Structure and Plan"*"run crew ready 001-saved-search-filters (SETUP.md"* && $(crew get 1 status) == draft ]]'
+  '[[ $(crew ready 1 2>&1) == *"001-saved-search-filters'"'"'s brief still says how to meet its objective, under Structure and Plan"*"Rewrite it as SETUP.md'"'"'s \"Rewriting briefs that still have a plan\" says, then run crew ready 001-saved-search-filters"* && $(crew get 1 status) == draft ]]'
 sed -i -e '/^1\. Add a filters field\.$/d' -e '/^## Structure$/,/^$/d' -e 's/^- z$/1. z/' "$F1"
 check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write each acceptance criterion as a '"'"'- '"'"' item"*"this line isn'"'"'t one: 1. z" ]]'
 sed -i -e 's/^1\. z$/- z/' -e '/^- z$/a \  in detail\nAlso: z holds.' "$F1"

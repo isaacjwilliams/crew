@@ -401,7 +401,7 @@ func TestDesignInBrief(t *testing.T) {
 	old := "---\nid: 001-a\nkind: %s\n---\n## Structure\nA cache package.\n\n## Plan\n1. Add it.\n\n## Constraints and conventions\nNo Redis.\n"
 	err := Task{docWith(t, fmt.Sprintf(old, "refine"))}.DesignInBrief()
 	if err == nil || !strings.Contains(err.Error(), "001-a's brief still says how to meet its objective, under Structure, Plan and Constraints and conventions") ||
-		!strings.Contains(err.Error(), "run crew ready 001-a") {
+		!strings.Contains(err.Error(), "then run crew ready 001-a") {
 		t.Errorf("old-shape brief: %v", err)
 	}
 	if err := (Task{docWith(t, fmt.Sprintf(old, "spike"))}).DesignInBrief(); err != nil {
@@ -424,7 +424,7 @@ func TestTemplateHasTheBriefSections(t *testing.T) {
 			}
 		}
 		for _, h := range r.design {
-			if h != "## Plan" && slices.Contains(headings, h) {
+			if h != "## Plan" && slices.Contains(headings, h) { // a spike's brief needs a Plan
 				t.Errorf("%s's brief leaves %s empty, yet the template has it", r.kind, h)
 			}
 		}

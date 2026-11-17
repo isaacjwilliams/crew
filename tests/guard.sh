@@ -293,7 +293,7 @@ check "the template's brief has a Size, a Plan only for a spike, and no Structur
 check "the lead shows the objective and its gates first, and its briefs say nothing about how" \
   "grep -q 'Lead with the objective and the gates: they.re what the user approves' $A/lead.md && section '### The brief standard' $A/lead.md | grep -q '^- Nothing about how: no structure, plan steps, names for new code' && ! grep -qi 'prescribe structure\\|Give structure its own line\\|alternative that lost' $A/lead.md $A/goal-lead.md $REPO_DIR/templates/task.md"
 check "crew's refusal of a brief with a plan names the SETUP.md section whose prompt rewrites one, which holds it" \
-  "grep -qF 'SETUP.md, \\\"Rewriting briefs that still have a plan\\\")' <<<\"\$SRC\" && section '### Rewriting briefs that still have a plan' $REPO_DIR/SETUP.md | grep -q '^> 1\\. Find them: every task in every project that is draft or ready, isn.t a spike'"
+  "grep -qF 'Rewriting briefs that still have a plan\\\" says, then run crew ready' <<<\"\$SRC\" && section '### Rewriting briefs that still have a plan' $REPO_DIR/SETUP.md | grep -q '^> 1\\. Find them: every task in every project that is draft or ready, isn.t a spike'"
 check "the goal lead sets each item's objective, gates and size itself" "grep -q 'Steps 5 to 7 are yours.\\*\\* Set the objective, its gates and the size to the brief standard' $A/goal-lead.md"
 check "the lead quotes the user's own words in the Goal" \
   "grep -q 'own description of the problem, quoted' $C/../templates/task.md && grep -q 'own description of the problem, quoted' $A/lead.md"
