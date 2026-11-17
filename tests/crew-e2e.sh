@@ -386,8 +386,8 @@ check "a merge of the base whose conflict the worker resolved makes the evidence
 record_evidence 1; hand_over 1
 # Evidence that ran on a commit origin doesn't have yet isn't what the user would merge.
 crew set 1 status addressing-feedback; commit_in "$WT" src/unpushed.ts; record_evidence 1; pr_body 1; E1=$(evidence_commit 1)
-check "hand-over refuses evidence that ran on a commit the branch on origin lacks" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
+check "hand-over refuses evidence that ran on a commit the branch on origin lacks, and says a push is all that's missing" \
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on work the branch on origin doesn'"'"'t have yet, in ## Evidence: 1 (on $E1)"*". Push the branch, then hand over again" && $(crew get 1 status) == addressing-feedback ]]'
 git -C "$WT" push -q origin HEAD; hand_over 1
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \

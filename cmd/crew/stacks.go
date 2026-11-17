@@ -170,6 +170,9 @@ func raiseRisk(t Task, p *Project) (string, error) {
 // changes since the commit where that work starts.
 type branchWork struct{ since, tip string }
 
+// here says whether the work is the branch's here, rather than on origin.
+func (w branchWork) here() bool { return strings.HasPrefix(w.tip, "refs/heads/") }
+
 // ownWork is a task's own work at each tip of its branch: here and on origin, as
 // last fetched, since either may have commits the other lacks.
 func ownWork(t Task, repo string) ([]branchWork, error) {
@@ -228,7 +231,7 @@ func (w branchWork) unchangedSince(repo string, then branchWork) (bool, error) {
 	out, err := git(repo, "merge-tree", "--write-tree", "--merge-base="+then.since, w.since, then.tip)
 	replayed, _, _ := strings.Cut(out, "\n")
 	if replayed == "" {
-		return false, fmt.Errorf("git merge-tree couldn't replay %s onto %s in %s", then.tip, w.since, repo)
+		return false, fmt.Errorf("git merge-tree couldn't replay %s onto %s in %s (crew needs git 2.40 or later)", then.tip, w.since, repo)
 	}
 	if err != nil {
 		return false, nil

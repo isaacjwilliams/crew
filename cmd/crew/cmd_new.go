@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -397,8 +398,10 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 		return fail("couldn't check the evidence: %v", err)
 	}
 	// A commit the evidence names is stale when its work isn't the branch's at
-	// either tip: the user may merge either one.
+	// either tip: the user may merge either one. When the branch here has the
+	// work and only origin lacks it, a push is all that's missing.
 	stale := map[string]bool{}
+	staleHere := false
 	for _, e := range []Evidence{task, pr} {
 		for _, sha := range e {
 			if _, checked := stale[sha]; checked {
@@ -414,7 +417,10 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 				if err != nil {
 					return fail("couldn't check the evidence: %v", err)
 				}
-				stale[sha] = stale[sha] || !unchanged
+				if !unchanged {
+					stale[sha] = true
+					staleHere = staleHere || w.here()
+				}
 			}
 		}
 	}
@@ -424,6 +430,9 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	}
 	if items := pr.Naming(stale); items != "" {
 		places = append(places, "the PR body: "+items)
+	}
+	if len(places) > 0 && !staleHere && slices.ContainsFunc(work, branchWork.here) {
+		return fail("evidence ran on work the branch on origin doesn't have yet, in %s. Push the branch, then hand over again", strings.Join(places, "; "))
 	}
 	if len(places) > 0 {
 		return fail("evidence ran on other work than the branch has now, here and on origin, in %s. Push the branch, run the evidence again, and record it with the commit it ran on", strings.Join(places, "; "))
