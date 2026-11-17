@@ -228,11 +228,19 @@ func slugFor(root string) string {
 	if err != nil || url == "" {
 		return slugify(filepath.Base(root))
 	}
+	owner, repo := ownerAndRepo(url)
+	return slugify(owner + "-" + repo)
+}
+
+// ownerAndRepo reads a GitHub repo's owner and name from a git remote URL, in
+// any of its forms: git@github.com:owner/repo.git, https://github.com/owner/repo,
+// ssh://git@github.com/owner/repo.
+func ownerAndRepo(url string) (owner, repo string) {
 	s := strings.TrimSuffix(strings.TrimSuffix(url, ".git"), "/")
 	s = strings.ReplaceAll(s, ":", "/")
 	rest, repo := splitLast(s)
-	_, owner := splitLast(rest)
-	return slugify(owner + "-" + repo)
+	_, owner = splitLast(rest)
+	return owner, repo
 }
 
 // splitLast splits s at its last slash: "a/b/c" is "a/b" and "c".
