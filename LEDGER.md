@@ -219,7 +219,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
 - each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the pass's summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary: review N -->`, N the newest review, so a second `crew review-summary` for the same review edits it instead of posting another.
 
-A pass that has run all its reviews, and still needed fixes for the last one, didn't converge. Its summary proposes smaller pieces instead, the PR isn't marked ready, and the worker asks under Open questions whether to split the branch into those pieces (`split as proposed`, `review it anyway` or `take it as it is`). A worker asks the same question before it opens a PR when its branch is past `MAX_PR_LINES`. The answer goes under Decisions, like any other.
+A pass that has run all its reviews, and still needed fixes for the last one, didn't converge. The PR isn't marked ready, and the worker asks under Open questions what to do, rather than review again on its own. When the branch is past `MAX_PR_LINES` or holds two concerns, its summary proposes smaller pieces, and it asks whether to split the branch into them (`split as proposed`, `review it anyway` or `take it as it is`); it asks that before it opens a PR, too, when its branch is past `MAX_PR_LINES`. Otherwise it asks only `review it anyway` or `take it as it is`. The answer goes under Decisions, like any other.
 
 ## Review rounds
 
