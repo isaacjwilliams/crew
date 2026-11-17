@@ -76,16 +76,20 @@ func cmdEvidence(c *Crew, args []string) error {
 }
 
 // publishEvidence copies files into dir/ of the evidence repo's default branch,
-// each under its name in names, in one commit, and pushes it. It returns the commit that has them, which is
-// what links pin to. Its clone is cloned on first use, and never holds work of
-// its own: each publish starts from origin.
+// each under its name in names, in one commit, and pushes it. It returns the
+// commit that has them, which is what links pin to. The clone never holds work
+// of its own: each publish starts from origin as it is now.
 func publishEvidence(remote, clone, dir string, files, names []string) (string, error) {
-	if !isDir(filepath.Join(clone, ".git")) {
+	if url, _ := git(clone, "remote", "get-url", "origin"); url != remote {
+		// No clone yet, or one of a repo EVIDENCE_REPO no longer names, whose
+		// branches must never reach this one: clone it afresh.
+		os.RemoveAll(clone)
 		os.MkdirAll(filepath.Dir(clone), 0o755)
 		if !gitTo(os.Stderr, ".", "clone", "-q", remote, clone) {
 			return "", fail("couldn't clone the evidence repo %s", remote)
 		}
-	} else if !gitOK(clone, "remote", "set-url", "origin", remote) || !gitTo(os.Stderr, clone, "fetch", "-q", "origin") {
+	} else if !gitTo(os.Stderr, clone, "fetch", "-q", "--prune", "origin") || !gitOK(clone, "remote", "set-head", "origin", "--auto") {
+		// set-head: the repo's default branch may have changed since the clone.
 		return "", fail("couldn't fetch the evidence repo %s", remote)
 	}
 	branch := defaultBranch(clone)

@@ -506,6 +506,20 @@ check "two tasks' crew evidence started at once both land on the default branch,
   '[[ $(git --git-dir="$EV" rev-list --count main) == 4 && $sha1 != "$sha2" ]] &&
    git --git-dir="$EV" merge-base --is-ancestor "$sha1" main && git --git-dir="$EV" merge-base --is-ancestor "$sha2" main &&
    [[ $(git --git-dir="$EV" show --format= --name-only "$sha1") == "$T1/a.png" && $(git --git-dir="$EV" show --format= --name-only "$sha2") == "$T2/b.png" ]]'
+# EVIDENCE_REPO moves to another repo, whose default branch is master: the old clone's branches must never reach it.
+EV2=$SB/evidence2.git
+git init -q --bare -b master "$EV2" && git clone -q "$EV2" "$SB/evidence2-seed" 2>/dev/null
+(cd "$SB/evidence2-seed" && echo '*.log' >.gitignore && git add -A && git commit -qm init && git push -q origin master)
+git config --global url."$EV2".insteadOf git@github.com:owner/other.git
+sed -i 's#^EVIDENCE_REPO=.*#EVIDENCE_REPO="git@github.com:owner/other.git"#' "$PE"
+out=$(crew evidence 1 "$SB/shot.png"); sha=$(git --git-dir="$EV2" rev-parse master)
+check "a new EVIDENCE_REPO gets a fresh clone: the files land on its own default branch, and nothing of the old repo reaches it" \
+  '[[ $(git --git-dir="$EV2" for-each-ref --format="%(refname)") == refs/heads/master && $(git --git-dir="$EV2" ls-tree -r --name-only master | paste -sd " ") == ".gitignore $T1/shot.png" &&
+    $out == "![shot.png](https://github.com/owner/other/blob/$sha/$T1/shot.png?raw=true)" ]]'
+git --git-dir="$EV2" branch trunk master && git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+crew evidence 1 "$SB/a.png" >/dev/null
+check "when the evidence repo's default branch changes, the next publish goes to the new one" \
+  '[[ $(git --git-dir="$EV2" log -1 --format=%s trunk) == "$T1: a.png" && $(git --git-dir="$EV2" rev-parse master) == "$sha" ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
 check "react doesn't depend on REPLY_TO_THREADS" 'crew react 1 eyes 111 >/dev/null'
