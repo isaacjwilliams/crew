@@ -500,7 +500,8 @@ check "publishing the same file again makes no commit, and links to the commit t
   '[[ $(git --git-dir="$EV" rev-list --count main) == 2 && $out == "![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)" ]]'
 printf 'A' >"$SB/a.png"; printf 'B' >"$SB/b.png"
 crew evidence 1 "$SB/a.png" >"$SB/ev1.out" 2>&1 & one=$!; crew evidence 2 "$SB/b.png" >"$SB/ev2.out" 2>&1 & two=$!; wait "$one" "$two"
-sha1=$(sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$SB/ev1.out"); sha2=$(sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$SB/ev2.out")
+sha_of() { sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$1"; }   # the commit a printed link names
+sha1=$(sha_of "$SB/ev1.out"); sha2=$(sha_of "$SB/ev2.out")
 check "two tasks' crew evidence started at once both land on the default branch, and each prints its own commit" \
   '[[ $(git --git-dir="$EV" rev-list --count main) == 4 && $sha1 != "$sha2" ]] &&
    git --git-dir="$EV" merge-base --is-ancestor "$sha1" main && git --git-dir="$EV" merge-base --is-ancestor "$sha2" main &&

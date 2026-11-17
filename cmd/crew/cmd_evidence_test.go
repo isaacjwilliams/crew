@@ -9,12 +9,10 @@ import (
 // Under its lock, crew evidence pushes right after it fetches, so only a
 // publisher crew doesn't know of moves origin in between: this test is that one.
 func TestPushEvidenceRebasesOntoOriginWhenItMoved(t *testing.T) {
-	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
-		t.Setenv(k, "t")
-	}
-	for _, k := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
-		t.Setenv(k, "t@t")
-	}
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
 	dir := t.TempDir()
 	origin, other, clone := filepath.Join(dir, "evidence.git"), filepath.Join(dir, "other"), filepath.Join(dir, "_evidence")
 	runIn(t, dir, "git", "init", "-q", "--bare", "-b", "main", origin)
@@ -27,7 +25,7 @@ func TestPushEvidenceRebasesOntoOriginWhenItMoved(t *testing.T) {
 	runIn(t, other, "git", "push", "-q", "origin", "main")
 	commitFile(t, clone, "001-a/a.png")
 
-	if err := pushEvidence(clone, "origin/main", "main"); err != nil {
+	if err := pushEvidence(clone, "main"); err != nil {
 		t.Fatalf("pushEvidence: %v", err)
 	}
 	if head, main := gitOut(t, clone, "rev-parse", "HEAD"), gitOut(t, origin, "rev-parse", "main"); head != main {

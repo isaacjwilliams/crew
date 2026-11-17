@@ -94,6 +94,7 @@ type Project struct {
 func (p *Project) Repo() string          { return p.Settings["REPO"] }
 func (p *Project) DefaultBranch() string { return p.Settings["DEFAULT_BRANCH"] }
 func (p *Project) WorkRoot() string      { return p.Settings["WORK_ROOT"] }
+func (p *Project) EvidenceRepo() string  { return p.Settings["EVIDENCE_REPO"] }
 
 // loadProject is a project that's cloned on this machine, with its settings.
 func (c *Crew) loadProject(name string) (*Project, error) {

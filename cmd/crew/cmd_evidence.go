@@ -38,11 +38,11 @@ func cmdEvidence(c *Crew, args []string) error {
 		}
 		names = append(names, name)
 	}
-	settings, err := c.projectSettings(t.Project())
+	p, err := c.ledgerProject(t.Project())
 	if err != nil {
 		return err
 	}
-	remote := settings["EVIDENCE_REPO"]
+	remote := p.EvidenceRepo()
 	if remote == "" {
 		return fail("%s has no evidence repo: set EVIDENCE_REPO in its project.env", t.Project())
 	}
@@ -55,7 +55,7 @@ func cmdEvidence(c *Crew, args []string) error {
 		return err
 	}
 	defer lock.Close()
-	clone := filepath.Join(settings["WORK_ROOT"], t.Project(), "_evidence")
+	clone := filepath.Join(p.WorkRoot(), p.Name, "_evidence")
 	sha, err := publishEvidence(remote, clone, t.ID(), files)
 	if err != nil {
 		return err
@@ -83,15 +83,14 @@ func publishEvidence(remote, clone, dir string, files []string) (string, error) 
 		if !gitTo(os.Stderr, ".", "clone", "-q", remote, clone) {
 			return "", fail("couldn't clone the evidence repo %s", remote)
 		}
-	}
-	if !gitTo(os.Stderr, clone, "fetch", "-q", "origin") {
+	} else if !gitTo(os.Stderr, clone, "fetch", "-q", "origin") {
 		return "", fail("couldn't fetch the evidence repo %s", remote)
 	}
-	origin, err := git(clone, "rev-parse", "--abbrev-ref", "origin/HEAD")
-	if err != nil {
-		return "", fail("the evidence repo %s has no default branch yet; push a first commit to it", remote)
+	branch := defaultBranch(clone)
+	origin := "origin/" + branch
+	if !gitOK(clone, "rev-parse", "-q", "--verify", origin) {
+		return "", fail("the evidence repo %s has no commit on %s yet; push a first commit to it", remote, branch)
 	}
-	branch := strings.TrimPrefix(origin, "origin/")
 	if !gitOK(clone, "reset", "-q", "--hard", origin) || !gitOK(clone, "clean", "-qfdx") {
 		return "", fail("couldn't reset %s to %s", clone, origin)
 	}
@@ -115,7 +114,7 @@ func publishEvidence(remote, clone, dir string, files []string) (string, error) 
 		if !gitTo(os.Stderr, clone, "commit", "-qm", dir+": "+strings.Join(names, ", ")) {
 			return "", fail("couldn't commit the evidence in %s", clone)
 		}
-		if err := pushEvidence(clone, origin, branch); err != nil {
+		if err := pushEvidence(clone, branch); err != nil {
 			return "", err
 		}
 	}
@@ -125,7 +124,7 @@ func publishEvidence(remote, clone, dir string, files []string) (string, error) 
 // pushEvidence pushes the clone's commit to the default branch. When origin has
 // moved on (another machine or person published), it rebases onto it and tries
 // again: each task has a folder of its own, so the rebase can't conflict.
-func pushEvidence(clone, origin, branch string) error {
+func pushEvidence(clone, branch string) error {
 	for range 5 {
 		out, err := exec.Command("git", "-C", clone, "push", "-q", "origin", "HEAD:"+branch).CombinedOutput()
 		if err == nil {
@@ -135,9 +134,9 @@ func pushEvidence(clone, origin, branch string) error {
 			fmt.Fprint(os.Stderr, string(out))
 			return fail("couldn't push the evidence from %s", clone)
 		}
-		if !gitTo(os.Stderr, clone, "fetch", "-q", "origin") || !gitTo(os.Stderr, clone, "rebase", "-q", origin) {
+		if !gitTo(os.Stderr, clone, "pull", "-q", "--rebase", "origin", branch) {
 			gitOK(clone, "rebase", "--abort")
-			return fail("couldn't rebase the evidence in %s onto %s", clone, origin)
+			return fail("couldn't rebase the evidence in %s onto origin's %s", clone, branch)
 		}
 	}
 	return fail("origin kept moving; couldn't push the evidence from %s", clone)
