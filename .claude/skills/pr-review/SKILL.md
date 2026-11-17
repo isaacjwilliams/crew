@@ -207,6 +207,11 @@ Wait for it to return, then for Codex if you launched it. Don't go on while eith
 turns a two-reviewer review into a one-reviewer review, and nothing downstream can tell that apart from a reviewer
 that found nothing.
 
+**What each run cost.** Once a reviewer has finished, however it finished, take its cost for the record (step 8),
+exactly as crew prints it: for the Claude reviewer, what `crew review-cost <agent id>` prints, with the agent ID its
+launch returned; for Codex, the `cost:` line `crew codex` printed last. Never work out a cost yourself, from a
+transcript or a notice: if `crew review-cost` refuses, the cost is `not reported: <what it said>`.
+
 A reviewer that fails, stalls or returns no report hasn't reported. For Codex, exit status 124 means it wrote nothing
 for 15 minutes and was stopped; any other non-zero status, or an empty report, is a failure. Note what happened for the
 record (step 8) and carry on with the reviewer that did report. Never invent what a review would have said. If neither
@@ -300,6 +305,8 @@ evidence`) and quote the reviewers verbatim, a finding's `Earlier:` mark include
 flat, as a fact with its citation: "`cmd/x.go:40` returns before the write when the file is missing". Never your
 reasons, what you meant, or why you built it that way: that's the interpretation the one rule keeps out.
 
+Take each run's cost once it has finished, as step 4 says.
+
 A reviewer that fails in a round leaves the rounds; note it for the record, keep what it said earlier, and stop: the
 rounds need both.
 
@@ -367,6 +374,11 @@ the ones first raised in a round. You don't decide what is real; your verdict is
 - Range: `<from sha>..<HEAD sha>`, <count> commits on `<branch>` since <`<base branch>` | review <N>> (fork point `<fork sha>`)
 - Reviewers: <Claude reviewer, or Claude reviewer and Codex>
 - Rounds: <how many ran> of <AUTO_REVIEW_REBUTTALS>
+- Cost:
+  - Claude reviewer: <its cost, from step 4>
+  - Codex: <its cost, from step 4>
+  - Round <n>, Claude reviewer: <its cost in that round>
+  - Round <n>, Codex: <its cost in that round>
 
 **Derived intent — Claude reviewer:** <verbatim>
 **Derived intent — Codex:** <verbatim>
@@ -395,8 +407,11 @@ whose head it starts from, when it reads only the new commits. The `Earlier:` li
 it and you checked it: `new` for every finding of the PR's first review, and for one whose repeat mark you rejected,
 with your evidence on the Verdict line.
 
-Leave out the Codex lines and `Rounds:` when Codex didn't run, and a `Round` line for each round that didn't address
-the finding. Report both derived intents verbatim and unmerged: two reviewers who read the same change and came away
+The Cost lines are one for each run of a reviewer, the review's first and then each round's, in that order, including a
+run that failed or stalled.
+
+Leave out the Codex lines and `Rounds:` when Codex didn't run, a Cost line for a round a reviewer didn't run in, and a
+`Round` line for each round that didn't address the finding. Report both derived intents verbatim and unmerged: two reviewers who read the same change and came away
 with different accounts of its purpose is evidence that the change doesn't communicate it. When they diverge, say how
 in a line under them.
 
