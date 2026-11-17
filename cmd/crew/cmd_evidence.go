@@ -80,7 +80,8 @@ func cmdEvidence(c *Crew, args []string) error {
 // commit that has them, which is what links pin to. The clone never holds work
 // of its own: each publish starts from origin as it is now.
 func publishEvidence(remote, clone, dir string, files, names []string) (string, error) {
-	if url, _ := git(clone, "remote", "get-url", "origin"); url != remote {
+	// The URL as written, as clone stored it: get-url would apply any insteadOf.
+	if url, _ := git(clone, "config", "--get", "remote.origin.url"); url != remote {
 		// No clone yet, or one of a repo EVIDENCE_REPO no longer names, whose
 		// branches must never reach this one: clone it afresh.
 		os.RemoveAll(clone)

@@ -495,7 +495,9 @@ check "crew evidence commits the files under the task's folder on the evidence r
     $(git --git-dir="$EV" show --format= --name-only main | sort | paste -sd " ") == "$T1/notes.txt $T1/shot.png" ]]'
 want="![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)"$'\n'"[notes.txt](https://github.com/owner/name/blob/$sha/$T1/notes.txt)"
 check "and prints a Markdown line for each, pinned to that commit: an image shown inline, another file linked" '[[ $out == "$want" ]]'
+touch "$HOME/agent-work/$P/_evidence/.git/kept"   # marks this clone, to tell it from a fresh one
 out=$(crew evidence 1 "$SB/shot.png")
+check "a second publish to the same EVIDENCE_REPO fetches into the clone it has, rather than cloning again" '[[ -e $HOME/agent-work/$P/_evidence/.git/kept ]]'
 check "publishing the same file again makes no commit, and links to the commit that has it" \
   '[[ $(git --git-dir="$EV" rev-list --count main) == 2 && $out == "![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)" ]]'
 printf 'A' >"$SB/a.png"; printf 'B' >"$SB/b.png"
