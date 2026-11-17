@@ -520,6 +520,10 @@ git --git-dir="$EV2" branch trunk master && git --git-dir="$EV2" symbolic-ref HE
 crew evidence 1 "$SB/a.png" >/dev/null
 check "when the evidence repo's default branch changes, the next publish goes to the new one" \
   '[[ $(git --git-dir="$EV2" log -1 --format=%s trunk) == "$T1: a.png" && $(git --git-dir="$EV2" rev-parse master) == "$sha" ]]'
+echo "build output" >"$SB/build.log"
+out=$(crew evidence 1 "$SB/notes.txt" "$SB/build.log"); sha=$(git --git-dir="$EV2" rev-parse trunk)
+check "a file the evidence repo ignores is published all the same, so every printed link names a committed file" \
+  '[[ $(git --git-dir="$EV2" show --format= --name-only trunk | sort | paste -sd " ") == "$T1/build.log $T1/notes.txt" && $out == *"[build.log](https://github.com/owner/other/blob/$sha/$T1/build.log)" ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
 check "react doesn't depend on REPLY_TO_THREADS" 'crew react 1 eyes 111 >/dev/null'

@@ -102,6 +102,7 @@ func publishEvidence(remote, clone, dir string, files, names []string) (string, 
 	}
 
 	os.MkdirAll(filepath.Join(clone, dir), 0o755)
+	paths := []string{"add", "-f", "--"}
 	for i, f := range files {
 		data, err := os.ReadFile(f)
 		if err == nil {
@@ -110,8 +111,11 @@ func publishEvidence(remote, clone, dir string, files, names []string) (string, 
 		if err != nil {
 			return "", err
 		}
+		paths = append(paths, dir+"/"+names[i])
 	}
-	if !gitOK(clone, "add", "--", dir) {
+	// Each file by name, and -f: git skips a file an ignore rule matches when
+	// it adds a folder, which would leave a link to a file never published.
+	if !gitOK(clone, paths...) {
 		return "", fail("couldn't add the evidence in %s", clone)
 	}
 	// Files exactly like the ones there already need no commit: origin's has them.
