@@ -338,7 +338,9 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 // spell doesn't count.
 const stallAfter = 15 * time.Minute
 
-// stalledNote is what crew nudge tells a worker whose turn ended mid-task.
+// stalledNote is what crew nudge tells a worker whose turn ended mid-task. The
+// stall seen most is a worker that ended its turn to wait on a background
+// sub-agent: the result arrives, but no new turn starts.
 const stalledNote = "Your last turn ended while this task's status is still working. If you're waiting on an answer, record it under Open questions and set your status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
 
 // stalled: the task is working or addressing-feedback with no open question,
@@ -347,10 +349,11 @@ const stalledNote = "Your last turn ended while this task's status is still work
 // have set needs-input, so this one stopped by mistake. ARCHITECTURE.md says
 // why the other states don't count.
 func stalled(t Task, a *Agent) bool {
-	if st := t.Status(); st != Working && st != AddressingFeedback || t.OpenQuestions() > 0 {
+	st := t.Status()
+	if onIt := st == Working || st == AddressingFeedback; !onIt || t.OpenQuestions() > 0 {
 		return false
 	}
-	if a == nil || a.busy() || a.State != "done" && a.State != "blocked" {
+	if turnOver := a != nil && !a.busy() && (a.State == "done" || a.State == "blocked"); !turnOver {
 		return false
 	}
 	quiet, ok := a.quietFor()
