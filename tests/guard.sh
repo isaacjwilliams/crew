@@ -314,6 +314,8 @@ check "the lead starts plan-reviewer on a finished brief with only its path, the
   "awk '/Spawn the .plan-reviewer. subagent with the task file.s path and nothing else/ && !r {r=NR} /Straight away, show the user a compact summary/ && !s {s=NR} END {exit !(r && s && r < s)}' $A/lead.md"
 check "plan-reviewer always runs in the background, and the lead dispatches only once its review is settled" \
   "grep -qx 'background: true' $A/plan-reviewer.md && grep -q 'Dispatch only on a go-ahead, after the plan review' $A/lead.md && grep -q 'say you.ll dispatch once it.s in' $A/lead.md"
+check "the lead runs the plan review on every brief but a spike's, low risk included" \
+  "grep -q 'Even then, run the plan review, whatever the risk tier' $A/lead.md && ! grep -q 'run the plan review unless' $A/lead.md"
 check "plan review findings reach the user" "grep -q 'tell the user each finding the reviewer marked Raise' $A/lead.md"
 check "worker-settings.json denies Agent(plan-reviewer) (plan review belongs to the lead)" \
   "jq -e >/dev/null '.permissions.deny | index(\"Agent(plan-reviewer)\")' $C/worker-settings.json"
