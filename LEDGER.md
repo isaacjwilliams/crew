@@ -215,7 +215,8 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
   - `recorded`: a nitpick outside the PR's lines, or a pre-existing nitpick;
   - `withdrawn in round <n>`;
   - `not a defect: <evidence>`: a split it set aside;
-  - `left for the user`: a finding it disputes or can't settle, or one the brief settled;
+  - `left for the user`: a finding it disputes or can't settle;
+  - `left for the user: its fix would break <the gate, the Out of scope item or the rule>`: a finding that's right, but whose fix would break one of the task's gates, reach into its Out of scope or go against a project rule;
   - `left for the user: pre-existing, <the fix's size>; proposal <file name>`: a defect that already failed the same way at the fork point;
   - `left for the user: verdict changed since review N`: a flipped finding;
   - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user, which the user hasn't decided since;
