@@ -603,7 +603,8 @@ const recordedForTheUser = "recorded under Open questions for the user"
 func (t Task) SetStatus(s Status) error { return t.setStatus(string(s)) }
 
 // setStatus writes the file's status and logs the change: a task's, or a
-// proposal's through crew set.
+// proposal's through crew set. It takes a string, since a proposal's statuses
+// aren't a task's.
 func (d Doc) setStatus(s string) error {
 	if err := d.Set("status", s); err != nil {
 		return err
@@ -1101,6 +1102,7 @@ type Proposal struct{ Doc }
 // CheckSet refuses a crew set that would take an accepted proposal away from
 // the task that took up its work: a new or empty task, or another status. It
 // guards against mistakes: a lead who means it edits the front matter by hand.
+// Any other key passes, and so does the value a key already has.
 func (p Proposal) CheckSet(key, value string) error {
 	if (key != "task" && key != "status") || value == p.Get(key) {
 		return nil

@@ -161,7 +161,9 @@ func cmdGet(c *Crew, args []string) error {
 	return nil
 }
 
-// crew set TASK KEY VALUE...: TASK can also be a proposal's file.
+// crew set TASK KEY VALUE...: TASK can also be a proposal's file, by its path,
+// since resolve finds a proposal by ID only when asked for proposals. Each kind
+// runs its own checks.
 func cmdSet(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew set TASK KEY VALUE")
@@ -217,7 +219,10 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 	if key == "status" && Status(value) == PROpen {
 		return "", fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
 	}
-	return value, c.checkStacks(t, key, value)
+	if err := c.checkStacks(t, key, value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 // checkStacks refuses a base or kind that would put a task in a stack its kind
