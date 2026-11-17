@@ -87,7 +87,7 @@ A fix's brief names where the defect came from, in two keys, and `crew ready` re
 
 | missed_by | the check |
 |---|---|
-| `plan-review` | the plan review before the task was marked ready |
+| `brief-review` | the brief review before the task was marked ready |
 | `tests` | the tests the task added or ran |
 | `pre-pr-review` | the casual observer's read before the PR opened |
 | `security-review` | `/security-review` on a high-risk task |
@@ -119,7 +119,7 @@ Front matter is flat `key: value`. Edit it with `crew set` rather than by hand w
 
 ## Goals
 
-A goal is a batch of items, listed in its file or on a tracker, that the user hands the crew to work through without them. `crew goal start` launches its **goal lead**, a background session that writes and plan-reviews a brief for every item and marks each one `ready`. `crew tick` dispatches those as `MAX_WORKERS` and the goal's `max_in_flight` allow, highest `priority` first, then by project and ID, across every running goal. Every task of the goal that's in flight counts toward `max_in_flight`, each task of a stack too. An item the goal lead shouldn't decide alone is **parked**: its task stays `draft`, with the question under Open questions for you.
+A goal is a batch of items, listed in its file or on a tracker, that the user hands the crew to work through without them. `crew goal start` launches its **goal lead**, a background session that writes a brief for every item, has it reviewed and marks it `ready`. `crew tick` dispatches those as `MAX_WORKERS` and the goal's `max_in_flight` allow, highest `priority` first, then by project and ID, across every running goal. Every task of the goal that's in flight counts toward `max_in_flight`, each task of a stack too. An item the goal lead shouldn't decide alone is **parked**: its task stays `draft`, with the question under Open questions for you.
 
 | status | meaning | set by |
 |---|---|---|

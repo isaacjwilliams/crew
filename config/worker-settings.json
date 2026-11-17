@@ -41,7 +41,7 @@
       "Agent(gardener)",
       "Agent(misses)",
       "Agent(goal-lead)",
-      "Agent(plan-reviewer)"
+      "Agent(brief-reviewer)"
     ]
   },
   "hooks": {

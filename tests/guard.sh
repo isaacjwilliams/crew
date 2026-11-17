@@ -225,9 +225,9 @@ check "Workflow: spike commits locally and never pushes, writes a report that st
 check "Workflow: spike opens no PR and runs no observer, automated review or evidence" \
   "! spike_workflow | grep -qE 'gh pr create|git push -u|casual-observer|/pr-review|crew review-summary' && spike_workflow | grep -q 'Tests, the observer, a PR, automated review and .## Evidence. are for builds, so skip them'"
 check "the lead lists what's still to learn and opens a spike for each approach, then puts the answers side by side" \
-  "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Set the objective\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'write their answers side by side under the item, tick it, and finish the brief from them' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no plan review' $A/lead.md"
+  "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Set the objective\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'write their answers side by side under the item, tick it, and finish the brief from them' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no brief review' $A/lead.md"
 check "the goal lead opens and readies spikes without parking, and hears when one reports" \
-  "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the plan review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a plan review' $A/lead.md"
+  "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the brief review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a brief review' $A/lead.md"
 check "crew tells the goal lead a spike reported in the words its workflow names" \
   "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
 # --- fixes: a defect live in production, proved by a failing test and traced to its cause
@@ -235,7 +235,7 @@ check "a fix's worker commits a failing test that reproduces the defect before t
   "awk '/^## Workflow: first run/ {w=1} w && /^4\\. / && !f {f=NR} w && /^   If your task is a fix .*prove the defect before you fix it/ && !x {x=NR} w && /^5\\. / && !p {p=NR} END {exit !(f && x && p && f < x && x < p)}' $A/implementer.md && grep -q 'Commit a test that reproduces the defect and fails on the code as it is, before the fix commit' $A/implementer.md && grep -q 'shows both runs: the test failing before the fix, and passing after' $A/implementer.md"
 check "a fix's failing test takes the place of pinning the defective behaviour, and pins of what must stay may come first" \
   "grep -q 'If you also pin behaviour that must stay the same, those passing tests may come first: the failing test takes the place of pinning the defective behaviour, and it still comes before the fix commit' $A/implementer.md"
-# The checks a fix's missed_by can name, as lead.md lists them: "`plan-review`, `tests`, … or `user-review`".
+# The checks a fix's missed_by can name, as lead.md lists them: "`brief-review`, `tests`, … or `user-review`".
 missed_by() { sed -n 's/^var missedBy = \[\]string{\(.*\)}$/\1/p' <<<"$SRC" | sed -e 's/"\([a-z-]*\)"/`\1`/g' -e 's/, \([^,]*\)$/ or \1/'; }
 check "the lead makes a fix only of a defect live in production, and anything else a refine or a build" \
   "grep -q 'A \\*\\*fix\\*\\* (.--kind fix.) is only for a defect live in production: released or deployed, and affecting users now' $A/lead.md && grep -q 'A defect in unreleased work, a bug found in review, or polish is a \\*\\*refine\\*\\*' $A/lead.md"
@@ -279,9 +279,9 @@ check "crew followup's prompt, not the worker, decides whether a review round ge
   "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in those rounds with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \
   "grep -q '~/.claude/CLAUDE.md. with their taste' $A/implementer.md && ! grep -q '^## Engineering standards' $A/implementer.md"
-check "plan-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C" \
-  "grep -q 'as it is on .origin/<base>.' $A/plan-reviewer.md && grep -q 'crew config REPO --project <project>' $A/plan-reviewer.md && grep -q 'git -C <repo> show origin/<base>:<path>' $A/plan-reviewer.md && grep -q 'git -C <repo> grep' $A/plan-reviewer.md && grep -q 'git -C <repo> fetch' $A/plan-reviewer.md && jq -e >/dev/null '.permissions.allow | index(\"Bash(crew *)\")' $LS"
-check "plan-reviewer reads the project's AGENTS.md at the task's base, since it doesn't load" "grep -q 'Start with the project.s AGENTS.md or CLAUDE.md at that ref' $A/plan-reviewer.md"
+check "brief-reviewer reads the code at the task's base in the project's repo, found with crew config, through git -C" \
+  "grep -q 'as it is on .origin/<base>.' $A/brief-reviewer.md && grep -q 'crew config REPO --project <project>' $A/brief-reviewer.md && grep -q 'git -C <repo> show origin/<base>:<path>' $A/brief-reviewer.md && grep -q 'git -C <repo> grep' $A/brief-reviewer.md && grep -q 'git -C <repo> fetch' $A/brief-reviewer.md && jq -e >/dev/null '.permissions.allow | index(\"Bash(crew *)\")' $LS"
+check "brief-reviewer reads the project's AGENTS.md at the task's base, since it doesn't load" "grep -q 'Start with the project.s AGENTS.md or CLAUDE.md at that ref' $A/brief-reviewer.md"
 check "the lead reads code in its crew checkout, after the project's AGENTS.md, which doesn't load for it" \
   "grep -q 'Run .crew checkout <p>. and read the project.s AGENTS.md' $A/lead.md && grep -q 'not for you: read it in your checkout' $A/lead.md"
 check "the lead names the project in every crew new, and asks when more than one fits" "grep -q 'Name the project in every .crew new.' $A/lead.md && grep -q 'more than one fits, ask' $A/lead.md"
@@ -309,18 +309,18 @@ check "the lead states gates as rules, not expressions" \
   "grep -q 'State each as the rule it checks' $A/lead.md"
 check "the lead flags the cost of stacking on an unreviewed PR" \
   "grep -q 'Stacking on an unreviewed PR' $A/lead.md"
-# --- plan review: an independent, read-only reader of the brief, run by the lead before the user approves
-check "plan-reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" \
-  "grep -qx 'tools: Read, Glob, Grep, Bash' $A/plan-reviewer.md"
-check "the lead starts plan-reviewer on a finished brief with only its path, then shows the summary without waiting" \
-  "awk '/Spawn the .plan-reviewer. subagent with the task file.s path and nothing else/ && !r {r=NR} /Straight away, show the user a compact summary/ && !s {s=NR} END {exit !(r && s && r < s)}' $A/lead.md"
-check "plan-reviewer always runs in the background, and the lead dispatches only once its review is settled" \
-  "grep -qx 'background: true' $A/plan-reviewer.md && grep -q 'Dispatch only on a go-ahead, after the plan review' $A/lead.md && grep -q 'say you.ll dispatch once it.s in' $A/lead.md"
-check "the lead runs the plan review on every brief but a spike's, low risk included" \
-  "grep -q 'Even then, run the plan review, whatever the risk tier' $A/lead.md && ! grep -q 'run the plan review unless' $A/lead.md"
-check "plan review findings reach the user" "grep -q 'tell the user each finding the reviewer marked Raise' $A/lead.md"
-check "worker-settings.json denies Agent(plan-reviewer) (plan review belongs to the lead)" \
-  "jq -e >/dev/null '.permissions.deny | index(\"Agent(plan-reviewer)\")' $C/worker-settings.json"
+# --- brief review: an independent, read-only reader of the brief, run by the lead before the user approves
+check "brief-reviewer is read-only (a tools allowlist without Edit, Write or NotebookEdit)" \
+  "grep -qx 'tools: Read, Glob, Grep, Bash' $A/brief-reviewer.md"
+check "the lead starts brief-reviewer on a finished brief with only its path, then shows the summary without waiting" \
+  "awk '/Spawn the .brief-reviewer. subagent with the task file.s path and nothing else/ && !r {r=NR} /Straight away, show the user a compact summary/ && !s {s=NR} END {exit !(r && s && r < s)}' $A/lead.md"
+check "brief-reviewer always runs in the background, and the lead dispatches only once its review is settled" \
+  "grep -qx 'background: true' $A/brief-reviewer.md && grep -q 'Dispatch only on a go-ahead, after the brief review' $A/lead.md && grep -q 'say you.ll dispatch once it.s in' $A/lead.md"
+check "the lead runs the brief review on every brief but a spike's, low risk included" \
+  "grep -q 'Even then, run the brief review, whatever the risk tier' $A/lead.md && ! grep -q 'run the brief review unless' $A/lead.md"
+check "brief review findings reach the user" "grep -q 'tell the user each finding the reviewer marked Raise' $A/lead.md"
+check "worker-settings.json denies Agent(brief-reviewer) (brief review belongs to the lead)" \
+  "jq -e >/dev/null '.permissions.deny | index(\"Agent(brief-reviewer)\")' $C/worker-settings.json"
 
 # --- automated review: the pr-review skill, which reaches workers through --add-dir <home>, and its read-only reviewer
 SK=$REPO_DIR/.claude/skills/pr-review
@@ -456,16 +456,16 @@ check "a brief's Size holds the lead's estimate in the form the brief standard, 
   "section '### The brief standard' $A/lead.md | grep -qF '**Size**: \`About <n> lines: <areas>\`' && grep -q '^7\\. \\*\\*Right-size it.*Write it under the brief.s Size as .About <n> lines: <areas>.' $A/lead.md && awk '/^## Size\$/ {s=1; next} s && /^## / {s=0} s && /About <n> lines: <areas>/ {ok=1} END {exit !ok}' $REPO_DIR/templates/task.md"
 check "intake step 7 splits a plan past MAX_PR_LINES or holding two concerns, as Splitting a task says, and no agent keeps another measure of too big" \
   "awk '/^7\\. \\*\\*Right-size it/ && /crew config MAX_PR_LINES --project <p>/ && /two concerns that would be reviewed for different things/ && /Splitting a task. says how/ {ok=1} END {exit !ok}' $A/lead.md && ! grep -q 'few hundred lines' $A/*.md && grep -q '^3\\. .*An item too big for one PR becomes a few tasks, as .Splitting a task. in .lead.md. says' $A/goal-lead.md"
-check "the plan reviewer asks the Size question, and raises a brief past MAX_PR_LINES or holding two concerns with a proposed split" \
-  "grep -q '^   - \\*\\*Size\\.\\*\\*.*crew config MAX_PR_LINES --project <project>.*Does it hold one concern, or two that would be reviewed for different things.*holding two concerns, is a Raise' $A/plan-reviewer.md && grep -q 'For a Size finding, the remedy is a proposed split: the pieces in order, the objective each meets, and which piece it builds on' $A/plan-reviewer.md"
-check "the plan reviewer judges the objective and the gates, and never proposes a design" \
-  "(for q in 'The objective' 'What each gate measures' 'A wrong result that passes' 'Reachable gates' 'Facts and traps'; do grep -q \"^   - \\*\\*\$q\\.\\*\\*\" $A/plan-reviewer.md || exit 1; done) && grep -q 'the remedy is a sharper measure of the objective' $A/plan-reviewer.md && grep -q 'a line for Out of scope when the user.s words rule that way out' $A/plan-reviewer.md && grep -q 'Raise means.*the objective or a gate goes against the project.s memory or the rules in CLAUDE.md or AGENTS.md' $A/plan-reviewer.md && grep -q '^- \\*\\*The design\\.\\*\\* Never propose a structure' $A/plan-reviewer.md"
-check "the lead settles plan-review findings in the brief, never with a gate on the method, and the goal lead follows it" \
+check "the brief reviewer asks the Size question, and raises a brief past MAX_PR_LINES or holding two concerns with a proposed split" \
+  "grep -q '^   - \\*\\*Size\\.\\*\\*.*crew config MAX_PR_LINES --project <project>.*Does it hold one concern, or two that would be reviewed for different things.*holding two concerns, is a Raise' $A/brief-reviewer.md && grep -q 'For a Size finding, the remedy is a proposed split: the pieces in order, the objective each meets, and which piece it builds on' $A/brief-reviewer.md"
+check "the brief reviewer judges the objective and the gates, and never proposes a design" \
+  "(for q in 'The objective' 'What each gate measures' 'A wrong result that passes' 'Reachable gates' 'Facts and traps'; do grep -q \"^   - \\*\\*\$q\\.\\*\\*\" $A/brief-reviewer.md || exit 1; done) && grep -q 'the remedy is a sharper measure of the objective' $A/brief-reviewer.md && grep -q 'a line for Out of scope when the user.s words rule that way out' $A/brief-reviewer.md && grep -q 'Raise means.*the objective or a gate goes against the project.s memory or the rules in CLAUDE.md or AGENTS.md' $A/brief-reviewer.md && grep -q '^- \\*\\*The design\\.\\*\\* Never propose a structure' $A/brief-reviewer.md"
+check "the lead settles brief-review findings in the brief, never with a gate on the method, and the goal lead follows it" \
   "section '## Intake: turning a request into a brief' $A/lead.md | grep -q '^   - When the review arrives, settle each finding: change the objective, a gate, Context, Out of scope or Size (splitting the task, when it.s too big), or keep the brief and know why. A finding never adds a gate on the method' && grep -q 'Settle each finding yourself, as step 8 says' $A/goal-lead.md"
-check "nothing describes the plan reviewer as a review of the brief's structure" \
-  "! grep -q \"review of a finished brief's structure\\|structural questions\\|structural problems\\|adds no new structure\" $A/plan-reviewer.md $A/lead.md $A/goal-lead.md $REPO_DIR/ARCHITECTURE.md $REPO_DIR/SETUP.md $REPO_DIR/README.md"
+check "nothing describes the brief reviewer as a review of the brief's structure" \
+  "! grep -q \"review of a finished brief's structure\\|structural questions\\|structural problems\\|adds no new structure\" $A/brief-reviewer.md $A/lead.md $A/goal-lead.md $REPO_DIR/ARCHITECTURE.md $REPO_DIR/SETUP.md $REPO_DIR/README.md"
 check "the goal lead settles a Size finding by splitting, or by a re-estimate it logs with evidence, and parks when unsure" \
-  "grep -q '^  - Settle a Size finding by splitting the task, as .Splitting a task. in .lead.md. says, unless the code the objective touches shows it.s one concern under .MAX_PR_LINES.: then correct the brief.s .Size:. line and log that evidence under .Plan review:.\\. When you can.t tell, park it (see .Park what isn.t yours to decide.)' $A/goal-lead.md"
+  "grep -q '^  - Settle a Size finding by splitting the task, as .Splitting a task. in .lead.md. says, unless the code the objective touches shows it.s one concern under .MAX_PR_LINES.: then correct the brief.s .Size:. line and log that evidence under .Brief review:.\\. When you can.t tell, park it (see .Park what isn.t yours to decide.)' $A/goal-lead.md"
 check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(\"Agent(reviewer)\") | not' $C/worker-settings.json"
 
 # --- the goal lead follows the lead's intake by reading those sections of the installed lead.md
@@ -485,7 +485,7 @@ for f in implementer:'--source worker:<task>' gardener:'--source gardener' goal-
   check "$a suggests project memory with crew remember ($src), and checks the suggestions first" \
     "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'memory-suggestions.md' $A/$a.md"
 done
-check "the plan reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/plan-reviewer.md"
+check "the brief reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/brief-reviewer.md"
 check "the casual observer knows nothing of project memory" "! grep -qi 'memory' $A/casual-observer.md"
 check "the lead copies an approved suggestion into memory.md unchanged and ticks it with the outcome" \
   "grep -q 'copy the text after the checkbox into .memory.md. unchanged' $A/lead.md && grep -q '→ kept' $A/lead.md && grep -q '→ declined: <reason>' $A/lead.md"

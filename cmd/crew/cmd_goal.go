@@ -1,9 +1,9 @@
 package main
 
 // A goal is a batch of items the user hands the crew to work through without
-// them. Its goal lead, a background session, writes and plan-reviews a brief for
-// each item and marks it ready, answers its workers' questions, and parks what it
-// shouldn't decide alone: a draft task with open questions for the user. crew
+// them. Its goal lead, a background session, writes a brief for each item, has
+// it reviewed and marks it ready, answers its workers' questions, and parks what
+// it shouldn't decide alone: a draft task with open questions for the user. crew
 // tick dispatches the ready tasks and resumes the goal lead when there's input
 // for it.
 
