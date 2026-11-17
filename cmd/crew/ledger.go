@@ -1019,9 +1019,9 @@ func (t Task) CIReported(head string) bool {
 	return false
 }
 
-// The Log line crew nudge writes when it resumes a worker whose turn ended mid-task,
-// with the short SHA of the branch's head then. It's the only record of a nudge:
-// NudgedLastAt reads it back.
+// The Log line crew nudge writes when it resumes a worker whose turn ended
+// mid-task, with the short SHA of the branch's head then: the only record of a
+// nudge.
 const nudgedAt = "nudged: turn ended mid-task at " // - <time> — nudged: turn ended mid-task at <sha>
 
 // NudgedLastAt: the Log's last line is a nudge at head, the branch's head commit.

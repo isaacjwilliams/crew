@@ -341,14 +341,11 @@ const stallAfter = 15 * time.Minute
 // stalledNote is what crew nudge tells a worker whose turn ended mid-task.
 const stalledNote = "Your last turn ended while this task's status is still working. If you're waiting on an answer, record it under Open questions and set your status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
 
-// stalled: the task says its worker is on it, with no question waiting on the
-// user, but the worker's turn is over and its transcript has been quiet for
-// stallAfter. a is the task's worker as claude agents lists it, or nil when it
-// isn't listed. A worker waiting on the user would have set needs-input, so it
-// has stopped by mistake: a background sub-agent it waited on finished, say,
-// and nothing started its next turn. Not a session working with its turn ended:
-// a background task of its own still runs, and a resume would end it. Not a
-// stopped one: someone stopped it on purpose.
+// stalled: the task is working or addressing-feedback with no open question,
+// and its worker a (nil when claude agents doesn't list it) is done or blocked,
+// with a transcript quiet for stallAfter. A worker waiting on the user would
+// have set needs-input, so this one stopped by mistake. ARCHITECTURE.md says
+// why the other states don't count.
 func stalled(t Task, a *Agent) bool {
 	if st := t.Status(); st != Working && st != AddressingFeedback || t.OpenQuestions() > 0 {
 		return false
