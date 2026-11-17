@@ -138,7 +138,7 @@ A proposal is an idea worth keeping that isn't ready to be a task, in `proposals
 |---|---|---|
 | `open` | kept, not acted on yet | `crew propose`, the gardener or the misses agent |
 | `deferred` | set aside for now; can still be promoted | you or the lead via `crew set` |
-| `accepted` | promoted, or done in a task; `task` names the task that took up its work. A `Target:` proposal (below) is never promoted: it's accepted once you've made its change, with a Log line saying so | `crew promote`, the worker that wrote it once a review round does its work, or the lead via `crew set` |
+| `accepted` | promoted, or done in a task; `task` names the task that took up its work. A `Target:` proposal (below) is never promoted: it's accepted once you've made its change, with a Log line saying so | `crew promote`, the worker that wrote it once a review round does its work (only from `open` or `deferred`), or the lead via `crew set` |
 | `rejected` | not wanted; the Log says why | you or the lead via `crew set` |
 
 Front-matter keys: `id`, `title`, `project`, `status`, `source` (who wrote it: `gardener`, `misses`, `user`, `lead` or `worker:<task id>`), `revisit_when` (optional: one line naming the condition that makes it worth acting on, such as "a second pricing rule beyond the tax rate varies by place"), `size` (S, M or L, when known), `task` (the task that took up its work: set by `crew promote`, or by the worker that wrote it, on closing it), `created`, `updated`. Sections: Friction observed, Evidence, Why it matters, Proposal, First step, Risks and coordination, Log. The gardener and the misses agent fill them all. For the others only Why it matters is needed, which is where `crew propose` puts its paragraph; the rest can stay empty.
