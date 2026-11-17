@@ -483,7 +483,7 @@ func kindNames() string {
 
 // missedBy are the checks a fix's missed_by can name, the one that should have
 // caught the defect, in the order work passes them.
-var missedBy = []string{"plan-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
+var missedBy = []string{"brief-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
 
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string { return listJoin(items, " or ") }

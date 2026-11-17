@@ -4,7 +4,7 @@ crew runs a team of Claude Code agents on your GitHub repos, built around your r
 
 ## How it works
 
-You talk to a **lead**, at a terminal or from the Claude app on your phone. It reads the code, asks what it needs to know, and writes a brief: the objective, the gates that will show it's met, and the facts a worker needs. A plan reviewer reads it cold, without your conversation, and checks that the gates measure the objective and that a wrong result couldn't pass them. You say go. A **worker** works out how to meet the objective, builds it in its own git worktree and opens a draft PR. When you review the PR, your comments go back to that same worker.
+You talk to a **lead**, at a terminal or from the Claude app on your phone. It reads the code, asks what it needs to know, and writes a brief: the objective, the gates that will show it's met, and the facts a worker needs. A brief reviewer reads it cold, without your conversation, and checks that the gates measure the objective and that a wrong result couldn't pass them. You say go. A **worker** works out how to meet the objective, builds it in its own git worktree and opens a draft PR. When you review the PR, your comments go back to that same worker.
 
 ## What's different
 

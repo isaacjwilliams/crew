@@ -7,7 +7,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 ```
           you ──── talk ────▶  lead  (a session in ~/crew/lead, for every project; on the phone: crew)
            │                    │  writes briefs, dispatches, routes feedback
-           │                    │  └─ plan-reviewer pass on each brief
+           │                    │  └─ brief-reviewer pass on each brief
            │                    ▼
            │           ~/crew   (your crew home: crew, config, and the ledger; pushed to your private repo)
            │                    │  crew dispatch / crew followup
@@ -69,7 +69,7 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 
 | Installed to | What |
 |---|---|
-| `~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
+| `~/.claude/agents/{lead,implementer,casual-observer,brief-reviewer,reviewer,gardener,misses,goal-lead}.md` | Agent profiles (user-level, so they're project-agnostic and not in any repo) |
 | `~/.local/bin/crew`, `~/.local/bin/lead` | Links to the home's `bin/crew` and `bin/lead`, so the two commands are on your `PATH` |
 | `~/.config/fish/completions/{crew,lead}.fish` | Tab completion in fish, including task IDs |
 | Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener and misses agent |
@@ -209,7 +209,7 @@ You don't have to wire anything. Claude Code 2.1.277 and later reads `AGENTS.md`
 | Agent | Where it runs, so where AGENTS.md comes from |
 |---|---|
 | lead | `~/crew/lead`, outside every repo: it reads `AGENTS.md` itself, in its `crew checkout` copy |
-| plan reviewer | a subagent of the lead: it reads `AGENTS.md` at the task's base through `git -C` |
+| brief reviewer | a subagent of the lead: it reads `AGENTS.md` at the task's base through `git -C` |
 | workers | their worktree, which contains the committed `AGENTS.md` |
 | casual observer | as a subagent, which loads the same project instructions |
 | gardener | a detached checkout of the default branch |
@@ -249,7 +249,7 @@ The lead runs in `~/crew/lead`, whose settings make the session the lead, so `cd
 
 A lead session is named `lead`, or `lead-<project>` for one project. If one is already running, Claude Code gives the new one a variant of that name.
 
-**Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles plan-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` counts across every lead and project, so raise it in `config/crew.env` if it holds back work you're ready to review.
+**Several at once.** At your desk, run a lead per thread of work, each in its own terminal tab: one investigating a bug while another shapes a brief and a third settles brief-review findings. They share the ledger, so each sees what the others recorded. Each lead rereads a task file before changing it, and leaves alone a draft you haven't named in its conversation, since another lead may be shaping it. `MAX_WORKERS` counts across every lead and project, so raise it in `config/crew.env` if it holds back work you're ready to review.
 
 A typical exchange:
 
@@ -260,7 +260,7 @@ A typical exchange:
 
 The lead writes the brief in `~/crew/projects/<project>/tasks/007-saved-search-filters.md`. You can read or edit it any time; it's the contract the worker works from.
 
-For anything bigger than this example, the lead shows you a summary before you say go. Its Goal quotes how you described the problem, then states the objective: one outcome a single task can reach. Then come the gates that will show it's met, the facts a worker would most likely miss, and an estimate of the PR's size. A gate measures the outcome ("p95 under 50ms"), never a way to it ("results are cached"). The brief says nothing about how to build it: that's the worker's call, held to your project's rules (`AGENTS.md`, your `~/.claude/CLAUDE.md`) and checked by automated review before you see the PR. While you read it, the plan-reviewer agent reads the brief cold, with the code but without the conversation. It checks that the objective is still your problem, that each gate measures it, that a wrong result couldn't pass them all, and what facts or traps a worker would need. It never proposes a design: when it finds a cheap wrong way to pass, its remedy is a sharper measure, not a gate on the method. When it finishes, the lead tells you what it raised and how each point was settled. If you say go before then, the lead dispatches once the review is in, unless it raises something for you to decide. The lead splits a task past `MAX_PR_LINES`, or one holding two concerns, into smaller tasks before it shows you the summary, and the plan reviewer checks the estimate against the code: a task it finds too big comes back as a finding with a proposed split. The worker checks the real size again before it opens a PR. Check the objective and its gates hardest: they're what the worker builds to. Since the design is the worker's, it judges review findings about the design like any other: it fixes the ones that are right, asks you about one whose fix would break a gate, go out of scope or go against a project rule, and lists the ones it declines, each with its reason, which the lead passes on with the PR.
+For anything bigger than this example, the lead shows you a summary before you say go. Its Goal quotes how you described the problem, then states the objective: one outcome a single task can reach. Then come the gates that will show it's met, the facts a worker would most likely miss, and an estimate of the PR's size. A gate measures the outcome ("p95 under 50ms"), never a way to it ("results are cached"). The brief says nothing about how to build it: that's the worker's call, held to your project's rules (`AGENTS.md`, your `~/.claude/CLAUDE.md`) and checked by automated review before you see the PR. While you read it, the brief-reviewer agent reads the brief cold, with the code but without the conversation. It checks that the objective is still your problem, that each gate measures it, that a wrong result couldn't pass them all, and what facts or traps a worker would need. It never proposes a design: when it finds a cheap wrong way to pass, its remedy is a sharper measure, not a gate on the method. When it finishes, the lead tells you what it raised and how each point was settled. If you say go before then, the lead dispatches once the review is in, unless it raises something for you to decide. The lead splits a task past `MAX_PR_LINES`, or one holding two concerns, into smaller tasks before it shows you the summary, and the brief reviewer checks the estimate against the code: a task it finds too big comes back as a finding with a proposed split. The worker checks the real size again before it opens a PR. Check the objective and its gates hardest: they're what the worker builds to. Since the design is the worker's, it judges review findings about the design like any other: it fixes the ones that are right, asks you about one whose fix would break a gate, go out of scope or go against a project rule, and lists the ones it declines, each with its reason, which the lead passes on with the PR.
 
 ### Rewriting briefs that still have a plan
 
@@ -321,12 +321,12 @@ For a batch of work you'd rather not plan item by item (a list, or a column on y
 > **lead:** *(writes the goal file, quoting you)* Goal `001-season-column`: every card in Season, nothing touching payments. Start it?
 > **you:** Go.
 
-The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does the lead's intake for every item on its own, in a background session named `crew-<project>-goal-<goal>`: a brief to the usual standard, a plan review, the findings settled, and `crew ready`. `crew tick` dispatches the ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow. You see the work as PRs, and review them as usual.
+The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does the lead's intake for every item on its own, in a background session named `crew-<project>-goal-<goal>`: a brief to the usual standard, a brief review, the findings settled, and `crew ready`. `crew tick` dispatches the ready tasks as `MAX_WORKERS` and the goal's `max_in_flight` allow. You see the work as PRs, and review them as usual.
 
 - **How far a goal runs ahead of you** is its `max_in_flight`: how many of its tasks may be dispatched and unmerged at once, each task of a stack included. Once it's reached, the goal's other ready tasks wait until one merges, so a goal that took a wrong turn has only a few PRs to undo. It's `GOAL_MAX_IN_FLIGHT` (3) unless you give the goal its own, when you start it ("at most 2 at a time") or later with `crew goal cap GOAL N`.
 - **Putting a task next** ("do the standings card next") is its `priority`, a whole number: higher goes first, and a task without one is 0. Ask the lead, which runs `crew set TASK priority N` with N above the other ready tasks'. `crew tick` dispatches the ready tasks of every running goal highest priority first, then by project and ID, so the next free worker goes to the task you put next. It doesn't get round a cap or a dependency: while its goal is at `max_in_flight`, or it waits on another task, the tasks after it go ahead. `crew status` shows a ready task's priority beside it when it isn't 0, and lists a running goal's ready tasks in the order they'll go.
 
-- **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a plan-review finding it can't settle. Each stays a draft task with its question under Open questions, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
+- **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a brief-review finding it can't settle. Each stays a draft task with its question under Open questions, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
 - **Workers' questions** go to the goal lead first. Ones it shouldn't answer reach you through the lead, like any worker question.
 - **Telling the goal lead something** ("pick up the cards added since", "use the new layout") is `crew goal note GOAL "…"`, usually through the lead. It reopens a finished goal too.
 - **Stopping a goal** is `crew goal abandon GOAL`. Its tasks stay as they are.
@@ -549,7 +549,7 @@ crew ready 041 && crew dispatch 041     # a spike's brief needs Goal, Plan (what
 crew status                             # 040's row: "2 to learn; 041 working, 042 draft"
 ```
 
-- **The lead asks you first**, as for any task, but runs no plan review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
+- **The lead asks you first**, as for any task, but runs no brief review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
 - **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which puts the spikes' answers side by side under the question, ticks it, and finishes the brief from them.
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 - **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
@@ -565,7 +565,7 @@ crew ready 050                          # refuses a fix without fixes and missed
 ```
 
 - **`fixes`** is the merged task whose change introduced the defect, or `unknown` when it predates the ledger or can't be traced (the brief says why). The lead finds it from the code's history.
-- **`missed_by`** is one of `plan-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
+- **`missed_by`** is one of `brief-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
 - **The worker proves the defect first**: it commits a test that reproduces it and fails, before the fix commit, which makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
 
 ## 6. The casual observer on its own
@@ -762,7 +762,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 ```sh
 crew host down                       # releases the lease and turns the services off; if it refuses
                                      # over unpushed work, push it, or use --force to drop it
-rm ~/.claude/agents/{lead,implementer,casual-observer,plan-reviewer,reviewer,gardener,misses,goal-lead}.md
+rm ~/.claude/agents/{lead,implementer,casual-observer,brief-reviewer,reviewer,gardener,misses,goal-lead}.md
 rm ~/.local/bin/{crew,lead} ~/.config/fish/completions/{crew,lead}.fish
 rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer} ~/.config/systemd/user/crew-lead.service
 rm ~/Library/LaunchAgents/crew-{tick,gardener,lead}.plist      # on a Mac, instead
