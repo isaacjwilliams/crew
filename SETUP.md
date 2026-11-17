@@ -590,7 +590,7 @@ tail ~/crew/logs/crew-gardener.log    # on a Mac
 
 If your `origin` uses SSH with a passphrase-protected key, the Linux timer won't have your ssh-agent. (A Mac's jobs run in your login session, so they should reach it; that's still to be checked live.) The gardener then warns and reviews your last-fetched `origin/<default>`. Either live with that, or use an HTTPS remote with `gh auth setup-git`.
 
-Proposals aren't only the gardener's. They hold any idea worth keeping that isn't ready to be a task, so it doesn't sit in `crew status` as a draft. Tell the lead "keep this for later: …" and it writes one down; workers do the same with the follow-ups they find. `crew proposals` shows who wrote each one and, when it's set, what would make it worth acting on. The lead mentions an open proposal when you start a task it touches.
+Proposals aren't only the gardener's. They hold any idea worth keeping that isn't ready to be a task, so it doesn't sit in `crew status` as a draft. Tell the lead "keep this for later: …" and it writes one down; workers do the same with the follow-ups they find. When you ask for one of those follow-ups in the worker's PR, it closes the proposal once the work is done. `crew proposals` shows who wrote each one and, when it's set, what would make it worth acting on. The lead mentions an open proposal when you start a task it touches.
 
 ```sh
 crew propose "Give each tax jurisdiction a PricingStrategy" --project isaac-webapp --source user \
