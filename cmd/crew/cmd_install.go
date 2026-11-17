@@ -104,7 +104,7 @@ func cmdInstall(c *Crew, args []string) error {
 		note("%s", installTools)
 		note("Claude Code: curl -fsSL https://claude.ai/install.sh | bash   (or 'claude update')")
 	}
-	if v, ok := claudeVersion(); ok {
+	if v, ok := toolVersion("claude"); ok {
 		if !versionAtLeast(v, minClaude) {
 			note("Claude Code %s is older than %s; run 'claude update' (AGENTS.md loading and agent view need it)", v, minClaude)
 		} else {
@@ -201,17 +201,20 @@ func cmdInstall(c *Crew, args []string) error {
 	return nil
 }
 
-// claudeVersion is what `claude --version` says, if claude is installed.
-func claudeVersion() (string, bool) {
-	if _, err := exec.LookPath("claude"); err != nil {
+// toolVersion is the version `<tool> --version` says, if tool is installed: the
+// first word that starts with a digit, as in "2.1.290 (Claude Code)" or
+// "git version 2.39.5 (Apple Git-154)".
+func toolVersion(tool string) (string, bool) {
+	if _, err := exec.LookPath(tool); err != nil {
 		return "", false
 	}
-	out, _ := exec.Command("claude", "--version").Output()
-	f := strings.Fields(string(out))
-	if len(f) == 0 {
-		return "", true
+	out, _ := exec.Command(tool, "--version").Output()
+	for _, f := range strings.Fields(string(out)) {
+		if f[0] >= '0' && f[0] <= '9' {
+			return f, true
+		}
 	}
-	return f[0], true
+	return "", true
 }
 
 // versionAtLeast compares dotted version numbers: 2.1.290 is at least 2.1.281.

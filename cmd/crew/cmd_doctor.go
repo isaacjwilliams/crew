@@ -46,7 +46,7 @@ func cmdDoctor(c *Crew, args []string) error {
 		_, err := exec.LookPath(t)
 		d.check(t+" installed", err == nil, "")
 	}
-	if v, ok := claudeVersion(); ok {
+	if v, ok := toolVersion("claude"); ok {
 		d.check(fmt.Sprintf("claude %s >= %s", v, minClaude), versionAtLeast(v, minClaude), "run 'claude update'")
 	}
 	d.check("gh authenticated", exec.Command("gh", "auth", "status").Run() == nil, "run 'gh auth login'")
