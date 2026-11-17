@@ -21,7 +21,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 
 ## On GitHub, you may do exactly this
 
-**These six things, and nothing else:**
+**These seven things, and nothing else:**
 
 1. **Push your task branch to `origin`**: `git push -u origin HEAD`, then `git push`.
 2. **Force-push your task branch with an explicit lease**, for example after rebasing it onto its base. Before you rewrite the branch, record where origin has it: `git rev-parse origin/<branch>`. Afterwards, push with that commit as the lease: `git push --force-with-lease=<branch>:<recorded sha> origin <branch>`. Run the push as a command on its own, with no `&&`, `;` or pipe: auto mode refuses a force-push that is chained to other commands or doesn't name the commit it expects. If the push is refused because origin moved, find out why before you try again. Never plain `--force` or `-f`, and never force-push any other branch.
@@ -29,6 +29,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
 4. **Edit your PR and answer its review comments**: `gh pr edit` (title, body, labels, and its base branch when a restack tells you to: `gh pr edit --base <branch>`), reply to the review comments on it with `crew reply`: inline threads, conversation comments and review summaries alike, and react to them with `crew react` as "Workflow: review rounds" says. Never reply or react with `gh` directly.
 5. **Post your PR's automated-review summary, and mark it ready after its first hand-over**: `crew review-summary <task> <file>`, one summary comment for each pass of automated review (a second call in the same pass edits it rather than posting another), and `gh pr ready <url>` on your own PR only after `crew hand-over` has succeeded, as first-run step 10 says.
 6. **Look into red CI on your PR, rerun its failed jobs once, and say what happened**, as "Workflow: review rounds" says: for GitHub Actions, read the logs with `gh run view`, rerun a run's failed jobs once with `gh run rerun --failed <run>` and watch it with `gh run watch`; for any other CI, only what the project's AGENTS.md or memory says, within the same limits. Never rerun a whole run, and never cancel one. Post one comment for each red build with `crew ci-summary <task> <sha> <file>`.
+7. **Publish evidence files for your own task to the project's evidence repo**: `crew evidence <task> <file>...`, when `crew config EVIDENCE_REPO` is set, as first-run steps 6 and 7 say. Nothing else in that repo: never clone it or push to it yourself.
 
 **Everything else is off limits, however helpful it looks:** merging, approving, closing or reopening a PR; pushing to the default branch or to any branch but your own; deleting branches; posting any comment that isn't a `crew reply`, the `crew review-summary` or a `crew ci-summary`; adding any reaction but a `crew react`; changing repository settings. Only the user merges. If a step seems to need any of these, stop and ask (see "When you're blocked").
 
@@ -71,12 +72,14 @@ A person reads your reports and PR replies, and apart from the crew they work al
    Re-run checks after fixes. Don't run the observer a second time unless you made substantial changes.
 
    **Security review**, when the task's `risk` is `high`, whatever `pre_pr_review` says: after the observer, run `/security-review` and act on its findings as on the observer's (fix what's right; record the rest, with your reason). Then add a `### Security review` entry under `## Evidence` in the task file: what it found and what you did about each finding. If a hand-over raises the tier to high, because the branch touches one of the project's sensitive paths, do this then, update the PR body's Risk section with `gh pr edit`, push, and hand over again.
-6. **Record the evidence, then push** anything not pushed yet. For each acceptance criterion, run what shows it holds, and write the command and its output under `## Evidence` in the task file, as its comment says: one `### <n>.` entry per top-level criterion, in order. Where only a look shows it, write what you saw and how (the page, the steps, the tool). A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try and why you can't. Then `git push`.
+6. **Record the evidence, then push** anything not pushed yet. For each acceptance criterion, run what shows it holds, and write the command and its output under `## Evidence` in the task file, as its comment says: one `### <n>.` entry per top-level criterion, in order. Where only a look shows it, write what you saw and how (the page, the steps, the tool). A criterion only the user can check, such as a live smoke test, gets an entry saying exactly what to try and why you can't.
+
+   Screenshots, and other files a reviewer should open, never go on your branch. Save them in a temp directory. When `crew config EVIDENCE_REPO` is set, publish them with `crew evidence <task> <file>...` and put each Markdown line it prints in the entry it shows. Otherwise, describe in the entry what each one shows. Then `git push`.
 7. **Open the PR** according to the task's `pr_mode`:
    - `draft` or `ready`: `gh pr create --draft --base <base> ...`. With `ready`, step 10 marks it ready after the hand-over, so the user never sees a ready PR that's still changing or hasn't passed the hand-over's checks.
    - `none`: skip this step, and say in your report that the branch is pushed.
 
-   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task: it opens with the objective, from the task's Goal, and its Evidence is built from `## Evidence`. Its Risk section opens with the task's tier and the look it asks for. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
+   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task: it opens with the objective, from the task's Goal, and its Evidence is built from `## Evidence`, keeping the lines `crew evidence` printed as they are: an image's shows it on the PR. Its Risk section opens with the task's tier and the look it asks for. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
 
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
