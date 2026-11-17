@@ -102,7 +102,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `templates/goal.md` | — | Goal file shape: front matter and sections |
 | `templates/review-comment.md` | — | The automated-review summary a worker fills in from its task's `## Automated reviews` and posts with `crew review-summary` |
 | `templates/ci-comment.md` | — | Why CI was red on a worker's PR and what it did, which the worker fills in for a round's `CI failed on` line and posts with `crew ci-summary` |
-| `templates/pr-body.md` | — | The body of a worker's PR: a short summary, Risk, How to revert, Evidence, and Notes for reviewers when there's something to note. The worker fills it in from its task; nothing parses it |
+| `templates/pr-body.md` | — | The body of a worker's PR: the objective in a sentence, Risk, How to revert, Evidence, and Notes for reviewers when there's something to note. The worker fills it in from its task; nothing parses it |
 | `templates/proposal.md` | — | Proposal file shape: front matter and sections. The gardener fills every section; `crew propose` only Why it matters |
 | `LEDGER.md` | — | Ledger conventions |
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |

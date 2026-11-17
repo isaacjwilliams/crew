@@ -76,7 +76,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
    - `draft` or `ready`: `gh pr create --draft --base <base> ...`. With `ready`, step 10 marks it ready after the hand-over, so the user never sees a ready PR that's still changing or hasn't passed the hand-over's checks.
    - `none`: skip this step, and say in your report that the branch is pushed.
 
-   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task, with its Evidence built from `## Evidence`. Its Risk section opens with the task's tier and the look it asks for. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
+   The PR body is `templates/pr-body.md`, in the crew home (`crew config CREW_HOME`), filled in from the task: it opens with the objective, from the task's Goal, and its Evidence is built from `## Evidence`. Its Risk section opens with the task's tier and the look it asks for. Write it to a temporary file and pass it with `--body-file`. It's for the user's human collaborators too: don't mention the ledger, task files, or agent machinery.
 
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
