@@ -43,7 +43,7 @@
        review): "Review didn't settle after <N> reviews, so this PR isn't ready yet." When the
        pass proposes a split, add "Proposed instead:", then the proposed pieces, one line each:
        what each smaller PR would cover. Call them "smaller PRs", never "tasks". Otherwise add
-       "The fixes made for the last haven't been reviewed again." ("for it" after a single review)
+       "The latest fixes haven't been reviewed again."
      - no reviewer reported in any review: "None could finish, so this PR hasn't had an automated review."
      - only Codex reported in it: "The Claude reviewer couldn't finish the last, so only Codex has seen the latest fixes."
      - no reviewer reported in it: "The last couldn't finish, so the latest fixes haven't been reviewed again." -->
