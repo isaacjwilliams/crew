@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -298,9 +299,50 @@ func TestEvidenceGaps(t *testing.T) {
 		{"lines under another heading belong to no entry", "## Evidence\n### 1. one\n### Notes\nok\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
 	} {
 		task := Task{docWith(t, criteria+c.evidence+"## Log\n")}
-		if gaps := task.EvidenceGaps(); !slices.Equal(gaps, c.gaps) {
-			t.Errorf("%s: EvidenceGaps = %v; want %v", c.name, gaps, c.gaps)
+		if gaps := task.Evidence().Gaps(3); !slices.Equal(gaps, c.gaps) {
+			t.Errorf("%s: Gaps = %v; want %v", c.name, gaps, c.gaps)
 		}
+	}
+}
+
+func TestEvidenceNamesItsCommit(t *testing.T) {
+	task := Task{docWith(t, criteria+"## Evidence\n### 1. one (on 0a1b2c3)\nok\n### 2. two\n```\nran (on 4d5e6f7)\n```\n"+
+		"### 3. three (on 89abcdef0123456789abcdef0123456789abcdef)\nok\n### Security review\nNo findings.\n\n## Log\n")}
+	want := Evidence{1: "0a1b2c3", 2: "", 3: "89abcdef0123456789abcdef0123456789abcdef"}
+	if got := task.Evidence(); !maps.Equal(got, want) {
+		t.Errorf("Evidence = %v, want %v", got, want)
+	}
+	if got := task.Evidence().Unnamed(); !slices.Equal(got, []int{2}) {
+		t.Errorf("Unnamed = %v, want [2]: only the heading names the commit", got)
+	}
+	for heading, want := range map[string]string{
+		"### 1. one (on 0a1b2c)":  "", // too short to be a commit
+		"### 1. one (on 0A1B2C3)": "", // git writes SHAs in lower case
+		"### 1. one on 0a1b2c3":   "",
+		"### 1. one (0a1b2c3)":    "",
+	} {
+		task := Task{docWith(t, criteria+"## Evidence\n"+heading+"\nok\n\n## Log\n")}
+		if got := task.Evidence()[1]; got != want {
+			t.Errorf("%q names %q, want %q", heading, got, want)
+		}
+	}
+}
+
+func TestPREvidence(t *testing.T) {
+	body := "Adds saved filters.\r\n\r\n## Risk\r\n\r\n1. not evidence (on 1111111)\r\n\r\n## Evidence\r\n\r\n" +
+		"1. one (on 0a1b2c3): `go test`\r\n   <details><summary>Output</summary>\r\n\r\n   ```\r\n   2. output (on 2222222)\r\n   ```\r\n\r\n   </details>\r\n\r\n" +
+		"```\r\n3. output too (on 3333333)\r\n```\r\n" +
+		"<!-- 3. in a comment (on 4444444) -->\r\n" +
+		"2. two, which names no commit: a look at the page\r\n\r\n## Notes for reviewers\r\n\r\n3. not evidence (on 5555555)\r\n"
+	want := Evidence{1: "0a1b2c3", 2: ""}
+	if got := PREvidence(body); !maps.Equal(got, want) {
+		t.Errorf("PREvidence = %v, want %v: only top-level items under ## Evidence, outside fences and comments, count", got, want)
+	}
+	if got := PREvidence(body).Gaps(3); !slices.Equal(got, []int{3}) {
+		t.Errorf("Gaps = %v, want [3]", got)
+	}
+	if got := PREvidence("No evidence section.").Gaps(2); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("Gaps without ## Evidence = %v, want [1 2]", got)
 	}
 }
 
@@ -319,7 +361,7 @@ func TestSecurityReviewed(t *testing.T) {
 		if got := task.SecurityReviewed(); got != want {
 			t.Errorf("SecurityReviewed with %q = %v, want %v", evidence, got, want)
 		}
-		if gaps := task.EvidenceGaps(); want && !slices.Equal(gaps, []int{2, 3}) {
+		if gaps := task.Evidence().Gaps(3); want && !slices.Equal(gaps, []int{2, 3}) {
 			t.Errorf("a security review counts as a criterion's evidence: gaps %v", gaps)
 		}
 	}

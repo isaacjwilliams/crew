@@ -47,17 +47,35 @@ last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
-# What a worker does to put its task in pr-open: evidence for each acceptance criterion,
-# the first time, then crew hand-over. A refusal fails the suite, since the checks after
-# it would run against a task that isn't pr-open.
-hand_over() {  # task
-  local f n i; f=$(crew path "$1")
-  if ! section "$f" "## Evidence" | grep -q '^### '; then
+# What a worker does before its hand-over: it records the evidence for each acceptance
+# criterion, on its branch as it is now, here or on origin. Recording it again names
+# the new commit.
+record_evidence() {  # task
+  local f b sha n i; f=$(crew path "$1"); b=$(crew get "$1" branch)
+  sha=$(git -C "$SB/webapp" rev-parse --short --verify -q "refs/heads/$b" || git -C "$SB/webapp" rev-parse --short --verify -q "refs/remotes/origin/$b")
+  if section "$f" "## Evidence" | grep -q '^### [0-9]'; then
+    sed -i -E -e "/^## Evidence\$/,/^## /s/^(### [0-9]+\..*) \(on [0-9a-f]+\)\$/\1/" -e "/^## Evidence\$/,/^## /s/^(### [0-9]+\..*)\$/\1 (on $sha)/" "$f"
+  else
     n=$(section "$f" "## Acceptance criteria" | grep -c '^- ')
     for ((i = n; i >= 1; i--)); do  # each lands just under the heading, so the last goes first
-      sed -i "/^## Evidence\$/a ### $i.\\nok" "$f"
+      sed -i "/^## Evidence\$/a ### $i. (on $sha)\\nok" "$f"
     done
   fi
+}
+# The PR body's Evidence, as the worker builds it from the task's: an item for each entry.
+pr_body() {  # task
+  local f pr; f=$(crew path "$1"); pr=$(crew get "$1" pr)
+  [[ -n $pr ]] || return 0
+  { printf 'The objective.\n\n## Evidence\n\n'; section "$f" "## Evidence" | sed -n -E 's/^### ([0-9]+\..*)$/\1: `ok`/p'; } >"$HOME/gh-pr-body-${pr##*/}"
+}
+# The commit a task's evidence for its first criterion names.
+evidence_commit() { sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p' "$(crew path "$1")"; }
+# What a worker does to put its task in pr-open: evidence for each acceptance criterion,
+# the first time, in the task and the PR body, then crew hand-over. A refusal fails the
+# suite, since the checks after it would run against a task that isn't pr-open.
+hand_over() {  # task
+  section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
+  pr_body "$1"
   crew hand-over "$1" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: hand_over %s refused at line %s\n' "$1" "${BASH_LINENO[0]}"; }
 }
 # The latest --settings sets CREW_PROJECT to project $1, CREW_HOME to the home, and
@@ -299,6 +317,24 @@ crew set 1 status needs-input
 # task high risk, at the hand-over and at every sync; high risk needs a security review.
 commit_in() { (cd "$1" && shift && for f in "$@"; do mkdir -p "$(dirname "$f")" && echo x >"$f"; done && git add -A && git commit -qm "change $*"); }
 commit_in "$WT" src/search.ts src/oauth.ts
+# The evidence the user reads names the commit it ran on, in the task and the PR body,
+# and that commit holds the branch's own work as it is now.
+check "hand-over refuses evidence that doesn't name the commit it ran on" \
+  '[[ $(crew hand-over 1 2>&1) == *"evidence for acceptance criteria 1, 2, 3 doesn'"'"'t name the commit it ran on: end each entry'"'"'s heading with '"'"'(on <sha>)'"'"'"* && $(crew get 1 status) == needs-input ]]'
+record_evidence 1; E1=$(git -C "$WT" rev-parse --short HEAD)
+printf '## Evidence\n\n1. z (on %s): `ok`\n3. z3 (on %s): `ok`\n' "$E1" "$E1" >"$HOME/gh-pr-body-12"
+check "hand-over refuses a PR body without evidence for every acceptance criterion, and names the missing ones" \
+  '[[ $(crew hand-over 1 2>&1) == *"the PR body'"'"'s Evidence has no item for acceptance criteria 2 of 3: add a '"'"'<n>. … (on <sha>)'"'"' item for each"* && $(crew get 1 status) == needs-input ]]'
+pr_body 1; sed -i "s/^2\.\(.*\) (on $E1)/2.\1/" "$HOME/gh-pr-body-12"
+check "hand-over refuses a PR body whose evidence doesn't name the commit it ran on" \
+  '[[ $(crew hand-over 1 2>&1) == *"the PR body'"'"'s Evidence for acceptance criteria 2 doesn'"'"'t name the commit it ran on"* && $(crew get 1 status) == needs-input ]]'
+pr_body 1; sed -i "s/(on $E1)/(on 0123abc)/" "$HOME/gh-pr-body-12"
+check "hand-over refuses evidence that names a commit it can't find" \
+  '[[ $(crew hand-over 1 2>&1) == *"couldn'"'"'t check the evidence: 0123abc isn'"'"'t a commit in "* && $(crew get 1 status) == needs-input ]]'
+pr_body 1; commit_in "$WT" src/filters.ts
+check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran before the branch'"'"'s own work last changed, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Run it again on the code as it is now"* && $(crew get 1 status) == needs-input ]]'
+record_evidence 1; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \
@@ -319,15 +355,15 @@ check "status shows a pr-open task raised after its hand-over as waiting on its 
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
 crew set 1 status addressing-feedback; crew set 1 risk medium
-commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb
+git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; record_evidence 1; pr_body 1
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
-sed -i '/^### 3. z$/i ### Security review\nNo findings.' "$F1"
+sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
-  '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
+  '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
 check "hand-over hands a high-risk task over once its security review is under Evidence" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
 returned=0
@@ -336,6 +372,18 @@ for st in needs-input working; do
 done
 check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
+# A merge of the base leaves the branch's own work as it was, so its evidence stays
+# current; a merge whose conflict the worker resolved changes it.
+main_moves() { (cd "$SB/webapp" && mkdir -p "$(dirname "$1")" && echo "from main" >"$1" && git add "$1" && git commit -qm "main: $1" && git push -q); }
+merge_main() { (cd "$WT" && git fetch -q origin && { git merge -q --no-edit origin/main >/dev/null 2>&1 || { echo resolved >src/search.ts && git commit -qam "Merge main"; }; } && git push -q origin HEAD); }
+E1=$(evidence_commit 1)
+main_moves docs/guide.md; merge_main; crew set 1 status addressing-feedback
+check "evidence stays current through a merge of the base, though it ran before the merge" \
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(git -C "$WT" rev-list --merges "$E1..HEAD") != "" ]]'
+main_moves src/search.ts; merge_main; crew set 1 status addressing-feedback
+check "a merge of the base whose conflict the worker resolved makes the evidence stale" \
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran before the branch'"'"'s own work last changed, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
+record_evidence 1; hand_over 1
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
@@ -640,6 +688,8 @@ setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
 (cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; hand_over 10
+check "evidence stays current through a restack, though the rebased branch no longer holds the commit it ran on" \
+  '[[ $(crew get 10 status) == pr-open ]] && ! git merge-base --is-ancestor "$(evidence_commit 10)" "$(tip season-admin)"'
 out=$(crew sync)
 check "sync sees the restack and moves base_sha to the parent's new tip" '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" ]]'
 setstate "done" null
@@ -676,6 +726,8 @@ crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
 check "after a merge, restack targets the default branch and has the worker retarget the PR" '[[ $(last_prompt) == *"git rebase --onto $M $T9b\`"* && $(last_prompt) == *"gh pr edit --base main"* && $(last_prompt) == *"crew set 010-season-admin base main"* ]]'
 check "crew leaves base alone until the worker has restacked" '[[ $(crew get 10 base) == agent/season-model ]]'
 (cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; hand_over 10
+check "and through a restack onto the default branch, after its parent was squashed into it" \
+  '[[ $(crew get 10 status) == pr-open ]] && ! git merge-base --is-ancestor "$(evidence_commit 10)" "$(tip season-admin)"'
 T10b=$(tip season-admin)
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"
 out=$(crew sync)
@@ -916,7 +968,7 @@ check "with nothing to rebase, tick sends a retarget alone, to a stacked task an
 p15=$(prompt_of 015-tick-child)
 check "a retarget note asks for gh pr edit --base and no rebase or push, and is recorded apart from restacks" \
   '[[ $p15 == *"Retarget (PR targets agent/tick-parent, not agent/tick-replacement)"*"\`gh pr edit --base agent/tick-replacement\`"* && $p15 != *"git rebase"* && $p15 != *"git push"* && $(crew get 15 retarget_sent) == agent/tick-replacement && $(crew get 15 restack_sent) == "$rs15" ]]'
-hand_over 14; hand_over 15; setstate "done" null
+record_evidence 14; hand_over 14; hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 2)) ]]'
 check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(resumes) == $((n + 2)) ]]'

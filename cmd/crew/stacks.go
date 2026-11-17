@@ -202,6 +202,36 @@ func ownWork(t Task, repo string) ([]branchWork, error) {
 	return work, nil
 }
 
+// unchangedSince: the branch's own work is as it was at commit sha, which may be
+// from before a restack or a merge of the base. Each of its commits has an
+// equivalent, the same change, at or before sha (git cherry), and each merge
+// since sha merged cleanly, so it changed none of the branch's own work.
+func (w branchWork) unchangedSince(repo, sha string) (bool, error) {
+	if !gitOK(repo, "rev-parse", "--verify", "--quiet", sha+"^{commit}") {
+		return false, fmt.Errorf("%s isn't a commit in %s", sha, repo)
+	}
+	out, err := git(repo, "cherry", sha, w.tip, w.since)
+	if err != nil {
+		return false, fmt.Errorf("git cherry %s %s %s failed in %s", sha, w.tip, w.since, repo)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "+") {
+			return false, nil
+		}
+	}
+	merges, _ := git(repo, "rev-list", "--merges", w.tip, "^"+w.since, "^"+sha)
+	for _, m := range strings.Fields(merges) {
+		// A conflicted merge-tree exits 1, and its first line is still the tree
+		// with the conflicts in it, which no resolution matches.
+		merged, _ := git(repo, "merge-tree", "--write-tree", m+"^1", m+"^2")
+		tree, _ := git(repo, "rev-parse", m+"^{tree}")
+		if first, _, _ := strings.Cut(merged, "\n"); first != tree {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // retargetReason says why a task's open PR has to be pointed at another branch,
 // or nothing: "PR targets <pr_base>, not <base>" when the base crew sync last read
 // from GitHub isn't the one the task belongs on now (effectiveBase), so a PR that
