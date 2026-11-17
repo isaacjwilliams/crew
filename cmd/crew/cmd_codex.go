@@ -4,12 +4,14 @@ package main
 // the only way crew runs Codex.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -27,8 +29,10 @@ var codexReadOnly = []string{"-c", `sandbox_mode="read-only"`, "-c", `approval_p
 //
 // Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, in a new session
 // each time. Codex's final message goes to OUT_PREFIX.md and its events to
-// OUT_PREFIX.events.jsonl. It exits with Codex's status, or 124 when Codex wrote
-// no event for codexStallLimit and was stopped.
+// OUT_PREFIX.events.jsonl. What the run cost, however it ended, goes to
+// OUT_PREFIX.cost, for pr-review to record, and to stdout. It exits with
+// Codex's status, or 124 when Codex wrote no event for codexStallLimit and was
+// stopped.
 func cmdCodex(c *Crew, args []string) error {
 	if len(args) != 3 {
 		return usage("crew codex ROOT PROMPT_FILE OUT_PREFIX")
@@ -60,9 +64,17 @@ func cmdCodex(c *Crew, args []string) error {
 	argv = append(argv, "-m", settings["CODEX_MODEL"], "-c", fmt.Sprintf("model_reasoning_effort=%q", settings["CODEX_MODEL_EFFORT"]),
 		"--skip-git-repo-check", "--json", "-o", out+".md", "-C", root, "-")
 	events := out + ".events.jsonl"
+	began := time.Now()
 	status, stalled, err := runCodex(argv, root, prompt, events)
 	if err != nil {
 		return err
+	}
+	cost := runCost{took: time.Since(began), tokens: codexTokens(events),
+		models: []string{settings["CODEX_MODEL"]}, efforts: []string{settings["CODEX_MODEL_EFFORT"]}}
+	// The review is Codex's report and status: a cost that can't be kept
+	// mustn't change them.
+	if err := os.WriteFile(out+".cost", []byte(cost.String()+"\n"), 0o644); err != nil {
+		warn("can't keep what the run cost: %v", err)
 	}
 	switch {
 	case stalled:
@@ -71,7 +83,7 @@ func cmdCodex(c *Crew, args []string) error {
 	case status != 0:
 		warn("codex exited with status %d; see %s", status, events)
 	}
-	fmt.Printf("final message: %s.md\n", out)
+	fmt.Printf("final message: %s.md\ncost: %s\n", out, cost)
 	if status != 0 {
 		return exitQuietly(status)
 	}
@@ -124,6 +136,48 @@ func runCodex(argv []string, root, prompt, events string) (status int, stalled b
 			return status, stalled, err
 		}
 	}
+}
+
+// codexUsage is the usage Codex reports for a turn. Its input includes the
+// tokens it read from cache.
+type codexUsage struct {
+	Input     int `json:"input_tokens"`
+	CacheRead int `json:"cached_input_tokens"`
+	Output    int `json:"output_tokens"`
+}
+
+func (u codexUsage) total() int { return u.Input + u.Output }
+
+func (u codexUsage) add(v codexUsage) codexUsage {
+	return codexUsage{u.Input + v.Input, u.CacheRead + v.CacheRead, u.Output + v.Output}
+}
+
+func (u codexUsage) String() string {
+	return fmt.Sprintf("%s input including %s cache read, %s output", thousands(u.Input), thousands(u.CacheRead), thousands(u.Output))
+}
+
+// codexTokens is the usage of every turn in a Codex events file, or nil when
+// none reported any. Codex reports usage only when a turn completes, so a run
+// it was stopped in reports none.
+func codexTokens(events string) tokenUsage {
+	b, _ := os.ReadFile(events)
+	var sum codexUsage
+	turns := 0
+	for _, line := range strings.Split(string(b), "\n") {
+		var e struct {
+			Type  string
+			Usage *codexUsage
+		}
+		if json.Unmarshal([]byte(line), &e) != nil || e.Type != "turn.completed" || e.Usage == nil {
+			continue
+		}
+		sum = sum.add(*e.Usage)
+		turns++
+	}
+	if turns == 0 {
+		return nil
+	}
+	return sum
 }
 
 // exitStatus is the status a finished command exited with, given what Wait

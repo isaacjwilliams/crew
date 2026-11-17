@@ -103,16 +103,22 @@ func (c *Crew) listAgents() (Agents, error) {
 	return as, nil
 }
 
-// turnEnded reads a session's transcript: Claude Code writes a turn_duration
-// entry when a turn ends, and a prompt or a reply once the next one starts. It's
-// false when there's no transcript to read.
-func turnEnded(session string) bool {
+// claudeTranscripts is where Claude Code keeps its sessions' transcripts, one
+// directory per working directory.
+func claudeTranscripts() string {
 	dir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".claude")
 	}
-	matches, _ := filepath.Glob(filepath.Join(dir, "projects", "*", session+".jsonl"))
+	return filepath.Join(dir, "projects")
+}
+
+// turnEnded reads a session's transcript: Claude Code writes a turn_duration
+// entry when a turn ends, and a prompt or a reply once the next one starts. It's
+// false when there's no transcript to read.
+func turnEnded(session string) bool {
+	matches, _ := filepath.Glob(filepath.Join(claudeTranscripts(), "*", session+".jsonl"))
 	if len(matches) == 0 {
 		return false
 	}

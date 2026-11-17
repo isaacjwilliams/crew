@@ -53,6 +53,7 @@ var commands = map[string]func(*Crew, []string) error{
 	"catch-up":       cmdCatchUp,
 	"ci-summary":     cmdCISummary,
 	"codex":          cmdCodex,
+	"review-cost":    cmdReviewCost,
 	"sync":           cmdSync,
 	"dispatch":       cmdDispatch,
 	"followup":       cmdFollowup,
