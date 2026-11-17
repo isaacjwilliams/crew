@@ -41,6 +41,10 @@ func installedAgents() string {
 
 const minClaude = "2.1.281"
 
+// minGit is the oldest git whose merge-tree takes --merge-base, which
+// crew hand-over checks evidence with.
+const minGit = "2.40"
+
 // linkedCommands are the home's bin/ commands crew install links into
 // ~/.local/bin, so a shell finds them. crew-guard is for hooks, not for PATH.
 var linkedCommands = []string{"crew", "lead"}
