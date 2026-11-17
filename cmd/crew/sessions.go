@@ -170,19 +170,25 @@ func (a Agent) busy() bool {
 // open: its process is running.
 func (a Agent) open() bool { return a.PID }
 
-// jobState says what a job is doing, for status lines: its state, and the
-// prompt it's waiting on, if any. Nothing for a job that isn't listed.
-func (as Agents) jobState(job string) string {
-	a := as.find(job)
+// stateText says what an agent is doing, for status lines: its state, and the
+// prompt it's waiting on, if any. Nothing for the zero Agent, a job that isn't
+// listed.
+func (a Agent) stateText() string {
 	switch {
-	case a == nil:
-		return ""
 	case a.TurnEnded:
 		return "idle, background task running"
 	case a.WaitingFor != "":
 		return a.State + " (" + a.WaitingFor + ")"
 	}
 	return a.State
+}
+
+// jobState is a job's stateText. Nothing for a job that isn't listed.
+func (as Agents) jobState(job string) string {
+	if a := as.find(job); a != nil {
+		return a.stateText()
+	}
+	return ""
 }
 
 // jobBusy: the job is listed, and busy.

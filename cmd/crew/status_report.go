@@ -1,10 +1,159 @@
 package main
 
+// What crew status shows, worked out into a report before anything is printed,
+// so every view of it (the plain text, cmd_status.go) groups the same tasks the
+// same way.
+
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
 )
+
+// statusReport is everything crew status shows.
+type statusReport struct {
+	ReadOnlyOn   string // the machine that runs the crew, when it isn't this one
+	Workers      slots  // the workers running across the crew against MAX_WORKERS
+	WorkersErr   error
+	NoneDispatch bool // every project has reached its MAX_WORKERS
+	Projects     []projectReport
+}
+
+// projectReport is one project. Every project has its Name and Waiting; the rest
+// is set only for a project built in full.
+type projectReport struct {
+	Name          string
+	Waiting       waitingOnUser
+	Full          bool
+	Paused        bool
+	Workers       slots // against this project's MAX_WORKERS
+	WorkersErr    error
+	Goals         []goalReport
+	Rows          []taskRow // the tasks outside a goal, folded drafts included
+	OpenProposals int
+	ToReview      []Task // the PRs waiting on the user, cheapest look first (toReview)
+}
+
+// waitingOnUser counts what waits on the user in a project: tasks with open
+// questions, PRs to review, and memory suggestions.
+type waitingOnUser struct {
+	Questions, PRs, MemorySuggestions int
+}
+
+// waitingOf is one task's share of what waits on the user. A finished task's
+// questions and PR wait on no one.
+func waitingOf(t Task) waitingOnUser {
+	var w waitingOnUser
+	if t.Status().Finished() {
+		return w
+	}
+	if t.OpenQuestions() > 0 {
+		w.Questions = 1
+	}
+	if t.Status() == PROpen {
+		w.PRs = 1
+	}
+	return w
+}
+
+// waitsOnUser: the task has an open question or a PR to review.
+func waitsOnUser(t Task) bool {
+	return waitingOf(t) != waitingOnUser{}
+}
+
+// String words what's waiting: "5 task(s) with open questions, 2 PR(s) to
+// review, 2 memory suggestion(s)". It's empty when nothing is.
+func (w waitingOnUser) String() string {
+	var parts []string
+	if w.Questions > 0 {
+		parts = append(parts, fmt.Sprintf("%d task(s) with open questions", w.Questions))
+	}
+	if w.PRs > 0 {
+		parts = append(parts, fmt.Sprintf("%d PR(s) to review", w.PRs))
+	}
+	if w.MemorySuggestions > 0 {
+		parts = append(parts, fmt.Sprintf("%d memory suggestion(s)", w.MemorySuggestions))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// goalReport is one goal and its tasks, in groups.
+type goalReport struct {
+	Goal          Goal
+	Lead          Agent // the goal lead, as claude agents lists it; zero when it isn't
+	Merged, Total int   // of the goal's tasks that make a PR
+	InFlight      slots // against the goal's max_in_flight
+	CapErr        error
+	Groups        []taskGroup // only the groups that have tasks, in groupKind order
+}
+
+// taskGroup is a goal's tasks that stand in the same place.
+type taskGroup struct {
+	Kind groupKind
+	Rows []taskRow
+}
+
+// groupKind is where a goal's tasks stand, one kind per group.
+type groupKind int
+
+const (
+	groupInFlight groupKind = iota
+	groupNext               // a running goal's ready tasks, numbered in dispatch order
+	groupReady              // the ready tasks of a goal that isn't running
+	groupWaiting            // ready tasks waiting on other tasks
+	groupParked             // drafts with open questions
+	groupPlanning           // the other drafts
+	groupFinished           // merged, done or abandoned, listed with --done
+)
+
+// taskRow is one task, with the tasks stacked on it.
+type taskRow struct {
+	Task   Task
+	Number int   // its place in a numbered group, 0 for none
+	Worker Agent // its worker, as claude agents lists it; zero when it isn't
+	Notes  []string
+	Kids   []taskRow // the tasks stacked on it
+	// Folded: a draft outside a goal that the plain text counts, with its whole
+	// stack, rather than lists (foldedDrafts).
+	Folded bool
+}
+
+// stackAsks: the task, or one stacked on it, has open questions.
+func (r taskRow) stackAsks() bool {
+	if r.Task.OpenQuestions() > 0 {
+		return true
+	}
+	return slices.ContainsFunc(r.Kids, taskRow.stackAsks)
+}
+
+// buildReport works out what crew status shows: the projects named in full in
+// full, and only what waits on the user in the others. The full projects come
+// first, in the order given, then the rest. doneToo adds finished goals and
+// tasks.
+func buildReport(c *Crew, full []string, doneToo bool) statusReport {
+	var r statusReport
+	if holder := c.holder(); holder != c.Host {
+		r.ReadOnlyOn = cmp.Or(holder, "no machine")
+	}
+	if len(full) == 0 {
+		return r
+	}
+	s := statusView{Crew: c, doneToo: doneToo}
+	s.agents = c.agents()
+	s.running = c.runningWorkers(s.agents)
+	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
+	r.NoneDispatch = s.noProjectDispatches()
+	for _, p := range full {
+		r.Projects = append(r.Projects, s.project(p))
+	}
+	for _, p := range c.projects("") {
+		if !slices.Contains(full, p) {
+			r.Projects = append(r.Projects, projectReport{Name: p, Waiting: s.waiting(p)})
+		}
+	}
+	return r
+}
 
 type statusView struct {
 	*Crew
@@ -55,6 +204,176 @@ func (s *statusView) settingsOf(project string) Settings {
 	return s.Settings
 }
 
+// waiting is what waits on the user in a project.
+func (s *statusView) waiting(project string) waitingOnUser {
+	w := waitingOnUser{MemorySuggestions: s.memorySuggestions(project)}
+	for _, t := range s.tasks(project) {
+		tw := waitingOf(t)
+		w.Questions += tw.Questions
+		w.PRs += tw.PRs
+	}
+	return w
+}
+
+// project works out one project in full: whether it's paused or full, its goals
+// and tasks, and what waits on the user.
+func (s *statusView) project(name string) projectReport {
+	r := projectReport{Name: name, Waiting: s.waiting(name), Full: true}
+	s.branches = s.Crew.branches(name)
+	s.repo, s.settings = "", s.settingsOf(name)
+	if p, err := s.loadProject(name); err == nil {
+		s.repo = p.Repo()
+	}
+	if p, err := s.ledgerProject(name); err == nil {
+		r.Paused = p.Paused()
+	}
+	// A project's own MAX_WORKERS may not be the crew's.
+	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
+	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
+	s.spikes = map[string][]Task{}
+	for _, t := range s.tasks(name) {
+		if d := t.Get("informs"); d != "" {
+			s.spikes[d] = append(s.spikes[d], t)
+		}
+	}
+	var goals []Goal
+	shownGoals := map[string]bool{}
+	for _, g := range s.goals(name) {
+		if s.shown(g.Get("status")) {
+			goals = append(goals, g)
+			shownGoals[g.ID()] = true
+		}
+	}
+	var roots []Task
+	goalRoots := map[string][]Task{}
+	for _, t := range s.tasks(name) {
+		if !s.shown(t.Get("status")) {
+			continue
+		}
+		if p, ok := s.branches.liveParent(t); ok && !p.Status().Finished() && !leavesStack(t, p) {
+			s.kids[p.Path] = append(s.kids[p.Path], t)
+		} else if g := t.Goal(); g != "" && shownGoals[g] {
+			goalRoots[g] = append(goalRoots[g], t)
+		} else {
+			roots = append(roots, t)
+		}
+	}
+	for _, g := range goals {
+		r.Goals = append(r.Goals, s.goal(g, goalRoots[g.ID()]))
+	}
+	for _, t := range roots {
+		row := s.row(t)
+		row.Folded = s.foldedDrafts(t) > 0
+		r.Rows = append(r.Rows, row)
+	}
+	for _, f := range s.files("proposals", name) {
+		if (Doc{f}).Get("status") == "open" {
+			r.OpenProposals++
+		}
+	}
+	r.ToReview = toReview(s.tasks(name))
+	return r
+}
+
+// toReview are the PRs waiting on the user, cheapest look first, so the ones
+// that need only the evidence can be cleared, and what's stacked on them freed,
+// before those that need the diff read.
+func toReview(tasks []Task) []Task {
+	var open []Task
+	for _, t := range tasks {
+		if t.Status() == PROpen {
+			open = append(open, t)
+		}
+	}
+	slices.SortStableFunc(open, func(a, b Task) int {
+		return cmp.Or(cmp.Compare(a.Risk().order(), b.Risk().order()), cmp.Compare(atoiOr0(a.PRNumber()), atoiOr0(b.PRNumber())))
+	})
+	return open
+}
+
+// goal works out one goal: its lead, how many of its tasks have merged, its
+// tasks in flight against its max_in_flight, and its tasks in groups.
+func (s *statusView) goal(g Goal, tasks []Task) goalReport {
+	r := goalReport{Goal: g, Lead: s.agent(g.LeadJob())}
+	for _, t := range s.goalTasks(g) {
+		if rules, err := t.rules(); err == nil && !rules.pr {
+			continue // a spike's PR is never merged
+		}
+		r.Total++
+		if t.Status() == Merged {
+			r.Merged++
+		}
+	}
+	r.InFlight, r.CapErr = s.goalCap(g)
+	r.Groups = s.goalGroups(g, tasks)
+	return r
+}
+
+// agent is a job as claude agents lists it, or the zero Agent when it isn't.
+func (s *statusView) agent(job string) Agent {
+	if a := s.agents.find(job); a != nil {
+		return *a
+	}
+	return Agent{}
+}
+
+// goalGroups puts a goal's tasks in groups, by where they stand: in flight; the
+// ready ones that can go, in the order crew tick dispatches them (numbered, for a
+// running goal); the ready ones waiting on other tasks; the drafts parked on
+// questions for the user; and the drafts still being planned.
+func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
+	byKind := map[groupKind][]Task{}
+	for _, t := range tasks {
+		var k groupKind
+		switch st := t.Status(); {
+		case st.InFlight():
+			k = groupInFlight
+		case st == Ready && s.waits(t):
+			k = groupWaiting
+		case st == Ready && g.Status() == GoalRunning:
+			k = groupNext
+		case st == Ready:
+			k = groupReady
+		case st == Draft && t.OpenQuestions() > 0:
+			k = groupParked
+		case st == Draft:
+			k = groupPlanning
+		default: // merged, done or abandoned, listed with --done
+			k = groupFinished
+		}
+		byKind[k] = append(byKind[k], t)
+	}
+	var groups []taskGroup
+	for k := groupInFlight; k <= groupFinished; k++ {
+		ts := byKind[k]
+		if len(ts) == 0 {
+			continue
+		}
+		if k == groupNext || k == groupReady || k == groupWaiting {
+			sortForDispatch(ts)
+		}
+		group := taskGroup{Kind: k}
+		for i, t := range ts {
+			row := s.row(t)
+			if k == groupNext {
+				row.Number = i + 1
+			}
+			group.Rows = append(group.Rows, row)
+		}
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+// row works out one task's row, then the rows of the tasks stacked on it.
+func (s *statusView) row(t Task) taskRow {
+	r := taskRow{Task: t, Worker: s.agent(t.WorkerJob()), Notes: s.notes(t)}
+	for _, k := range s.kids[t.Path] {
+		r.Kids = append(r.Kids, s.row(k))
+	}
+	return r
+}
+
 // lookNote says what look a PR waiting on the user needs: its tier and the
 // tier's look, or, for a high-risk task, that its security review is still to come.
 func lookNote(t Task) string {
@@ -88,14 +407,6 @@ func (s *statusView) foldedDrafts(t Task) int {
 		n += m
 	}
 	return n
-}
-
-// stackAsks: the task, or one stacked on it, has open questions.
-func (s *statusView) stackAsks(t Task) bool {
-	if t.OpenQuestions() > 0 {
-		return true
-	}
-	return slices.ContainsFunc(s.kids[t.Path], s.stackAsks)
 }
 
 // waitsOn are the tasks this one waits on, as crew dispatch sees them. A task's
@@ -221,6 +532,8 @@ func (s *statusView) learning(t Task) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+const afterNamed = 4 // how many tasks "after" names before it only counts them
 
 // after names the tasks a task waits on by number, or counts them when there are
 // more than a few. An abandoned one will never merge, so it's always named.
