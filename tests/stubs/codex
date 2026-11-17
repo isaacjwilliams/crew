@@ -4,7 +4,7 @@
 #   $HOME/codex-calls.log    every call's arguments, and the directory it ran in
 #   $HOME/codex-stdin.last   what the latest `exec` read on stdin (its prompt)
 #   $HOME/codex-signed-out   if present, `login status` fails, like a signed-out Codex
-#   $HOME/codex-fail         if present, `exec` exits 3 after writing its events
+#   $HOME/codex-fail         if present, `exec` exits 3 before its turn completes
 # `exec` prints Codex's events and writes "stub review" to its -o file. It records
 # LEAK CLAUDECODE if crew left that variable set.
 set -u
@@ -34,4 +34,4 @@ echo '{"type":"thread.started","thread_id":"0199a3b2-1c2d-7e3f-8a9b-0c1d2e3f4a5b
 echo '{"type":"turn.started"}'
 [[ -n $out ]] && echo "stub review" >"$out"
 if [[ -e $HOME/codex-fail ]]; then exit 3; fi
-echo '{"type":"turn.completed"}'
+echo '{"type":"turn.completed","usage":{"input_tokens":12000,"cached_input_tokens":8000,"output_tokens":900,"reasoning_output_tokens":300}}'

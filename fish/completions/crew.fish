@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix catch-up ci-summary codex status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix catch-up ci-summary codex review-cost status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
