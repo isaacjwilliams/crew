@@ -172,9 +172,10 @@ type branchWork struct{ since, tip string }
 
 // ownWork is a task's own work at each tip of its branch: here and on origin, as
 // last fetched, since either may have commits the other lacks. Each starts where
-// its tip left origin/<base>, or at base_sha instead when a rebased parent left
-// the merge base behind the parent's work (as noteBaseSHA does), or when a merged
-// parent's branch is gone from origin (as crew observe does).
+// its tip left origin/<base>. It starts at base_sha instead when a rebased
+// parent left that merge base behind the parent's work (noteBaseSHA records it
+// then), and when a merged parent's branch is gone from origin (crew observe
+// records it then).
 func ownWork(t Task, repo string) ([]branchWork, error) {
 	base := "refs/remotes/origin/" + t.Base()
 	var work []branchWork
@@ -219,17 +220,36 @@ func (w branchWork) unchangedSince(repo, sha string) (bool, error) {
 			return false, nil
 		}
 	}
-	merges, _ := git(repo, "rev-list", "--merges", w.tip, "^"+w.since, "^"+sha)
+	merges, err := git(repo, "rev-list", "--merges", w.tip, "^"+w.since, "^"+sha)
+	if err != nil {
+		return false, fmt.Errorf("git rev-list --merges %s failed in %s", w.tip, repo)
+	}
 	for _, m := range strings.Fields(merges) {
-		// A conflicted merge-tree exits 1, and its first line is still the tree
-		// with the conflicts in it, which no resolution matches.
-		merged, _ := git(repo, "merge-tree", "--write-tree", m+"^1", m+"^2")
-		tree, _ := git(repo, "rev-parse", m+"^{tree}")
-		if first, _, _ := strings.Cut(merged, "\n"); first != tree {
-			return false, nil
+		if clean, err := mergedAsGitWould(repo, m); !clean || err != nil {
+			return false, err
 		}
 	}
 	return true, nil
+}
+
+// mergedAsGitWould: merge commit m is the merge git makes of its parents on its
+// own, so it changed nothing but what it brought in. A merge whose conflicts
+// were resolved, or that was edited before it was committed, has a tree git
+// wouldn't make.
+func mergedAsGitWould(repo, m string) (bool, error) {
+	// git writes the tree it makes on the first line, with any conflicts in it,
+	// which no resolution matches; it exits 1 then. When it can't merge the
+	// parents at all, it exits 1 too, and writes nothing.
+	redone, _ := git(repo, "merge-tree", "--write-tree", m+"^1", m+"^2")
+	redoneTree, _, _ := strings.Cut(redone, "\n")
+	if redoneTree == "" {
+		return false, fmt.Errorf("git merge-tree couldn't redo merge %s in %s", m, repo)
+	}
+	tree, err := git(repo, "rev-parse", m+"^{tree}")
+	if err != nil {
+		return false, fmt.Errorf("git rev-parse %s^{tree} failed in %s", m, repo)
+	}
+	return redoneTree == tree, nil
 }
 
 // retargetReason says why a task's open PR has to be pointed at another branch,

@@ -5,11 +5,9 @@ package main
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -293,6 +291,8 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	// Read what the checks need from outside the ledger (git, GitHub) first, so
+	// a slow network doesn't hold up other crew commands; check it under the lock.
 	check, err := rules.handOver(c, t)
 	if err != nil {
 		return err
@@ -332,7 +332,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
 		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
 	}
-	var pr Evidence // with pr_mode none, the worker opens no PR
+	var pr Evidence // nil without a PR: with pr_mode none, the worker opens none
 	if t.PR() != "" {
 		body, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "body", "--jq", ".body")
 		if err != nil {
@@ -375,10 +375,8 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	if n == 0 {
 		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
 	}
-	// An item numbered past the criteria is no criterion's evidence.
-	beyond := func(i int, _ string) bool { return i > n }
-	task := t.Evidence()
-	maps.DeleteFunc(task, beyond)
+	task := t.Evidence().Within(n)
+	pr = pr.Within(n)
 	if gaps := task.Gaps(n); len(gaps) > 0 {
 		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. … (on <sha>)' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
 			numberList(gaps), n)
@@ -387,7 +385,6 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 		return fail("evidence for acceptance criteria %s doesn't name the commit it ran on: end each entry's heading with '(on <sha>)'", numberList(unnamed))
 	}
 	if pr != nil {
-		maps.DeleteFunc(pr, beyond)
 		if gaps := pr.Gaps(n); len(gaps) > 0 {
 			return fail("the PR body's Evidence has no item for acceptance criteria %s of %d: add a '<n>. … (on <sha>)' item for each, as templates/pr-body.md has them, with gh pr edit",
 				numberList(gaps), n)
@@ -400,17 +397,22 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	if err != nil {
 		return fail("couldn't check the evidence: %v", err)
 	}
-	stale := map[string]bool{} // each commit the evidence names: whether the branch's own work changed since
-	for _, sha := range slices.Concat(slices.Collect(maps.Values(task)), slices.Collect(maps.Values(pr))) {
-		if _, seen := stale[sha]; seen {
-			continue
-		}
-		for _, w := range work {
-			unchanged, err := w.unchangedSince(repo, sha)
-			if err != nil {
-				return fail("couldn't check the evidence: %v", err)
+	// A commit the evidence names is stale when the branch's own work has
+	// changed since, at either tip: the user may merge either one.
+	stale := map[string]bool{}
+	for _, e := range []Evidence{task, pr} {
+		for _, sha := range e {
+			if _, checked := stale[sha]; checked {
+				continue
 			}
-			stale[sha] = stale[sha] || !unchanged
+			stale[sha] = false
+			for _, w := range work {
+				unchanged, err := w.unchangedSince(repo, sha)
+				if err != nil {
+					return fail("couldn't check the evidence: %v", err)
+				}
+				stale[sha] = stale[sha] || !unchanged
+			}
 		}
 	}
 	var places []string

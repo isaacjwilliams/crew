@@ -876,7 +876,8 @@ type Evidence map[int]string
 // evidenceCommit finds the commit an evidence item names, as "(on <sha>)".
 var evidenceCommit = regexp.MustCompile(`\(on ([0-9a-f]{7,40})\)`)
 
-// add records the item that starts with line, "<n>. …", for criterion n.
+// add records the item that starts with line, "<n>. …", for criterion n, and
+// the commit named by the first "(on <sha>)" after its number.
 func (e Evidence) add(line string) {
 	num, rest, _ := strings.Cut(line, ".")
 	if n, err := strconv.Atoi(num); err == nil && n > 0 {
@@ -885,6 +886,14 @@ func (e Evidence) add(line string) {
 			e[n] = m[1]
 		}
 	}
+}
+
+// Within is the items for the first n criteria: one numbered past them is no
+// criterion's evidence. It's nil when e is.
+func (e Evidence) Within(n int) Evidence {
+	w := maps.Clone(e)
+	maps.DeleteFunc(w, func(i int, _ string) bool { return i > n })
+	return w
 }
 
 // Gaps is the numbers of the first n criteria that have no item.

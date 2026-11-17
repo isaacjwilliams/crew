@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -147,4 +148,58 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return out
+}
+
+func TestMergedAsGitWould(t *testing.T) {
+	repo := stackRepo(t)
+	gitc := func(args ...string) {
+		runIn(t, repo, "git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+	}
+	write := func(name, text string) {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitc("add", name)
+	}
+	write("shared", "from both\n")
+	gitc("commit", "-qm", "shared")
+	runIn(t, repo, "git", "checkout", "-qb", "base")
+	write("base", "from base\n")
+	gitc("commit", "-qm", "base")
+	runIn(t, repo, "git", "checkout", "-q", "main")
+	write("own", "own work\n")
+	gitc("commit", "-qm", "own")
+	gitc("merge", "-q", "--no-edit", "base")
+	clean := gitOut(t, repo, "rev-parse", "HEAD")
+	write("own", "edited in the merge\n")
+	gitc("commit", "-q", "--amend", "--no-edit")
+	edited := gitOut(t, repo, "rev-parse", "HEAD")
+	runIn(t, repo, "git", "checkout", "-q", "base")
+	write("shared", "base's\n")
+	gitc("commit", "-qm", "base changes shared")
+	runIn(t, repo, "git", "checkout", "-q", "main")
+	write("shared", "main's\n")
+	gitc("commit", "-qm", "main changes shared")
+	if err := exec.Command("git", "-C", repo, "merge", "-q", "base").Run(); err == nil {
+		t.Fatal("the merge should conflict")
+	}
+	write("shared", "resolved\n")
+	gitc("commit", "-q", "--no-edit")
+	resolved := gitOut(t, repo, "rev-parse", "HEAD")
+
+	for _, c := range []struct {
+		name, merge string
+		want        bool
+	}{
+		{"a merge git made on its own", clean, true},
+		{"a merge edited before it was committed", edited, false},
+		{"a merge whose conflict was resolved", resolved, false},
+	} {
+		if got, err := mergedAsGitWould(repo, c.merge); got != c.want || err != nil {
+			t.Errorf("%s: mergedAsGitWould = %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+	if got, err := mergedAsGitWould(repo, clean+"^1"); got || err == nil {
+		t.Errorf("a commit git can't redo as a merge: mergedAsGitWould = %v, %v; want an error", got, err)
+	}
 }
