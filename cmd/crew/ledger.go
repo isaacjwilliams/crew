@@ -1019,6 +1019,19 @@ func (t Task) CIReported(head string) bool {
 	return false
 }
 
+// The Log line crew nudge writes when it resumes a worker whose turn ended mid-task,
+// with the short SHA of the branch's head then. It's the only record of a nudge:
+// NudgedLastAt reads it back.
+const nudgedAt = "nudged: turn ended mid-task at " // - <time> — nudged: turn ended mid-task at <sha>
+
+// NudgedLastAt: the Log's last line is a nudge at head, the branch's head commit.
+// The worker was nudged, and nothing since has committed to its branch or written
+// to its Log.
+func (t Task) NudgedLastAt(head string) bool {
+	log := t.LogEntries()
+	return len(log) > 0 && log[len(log)-1].msg == nudgedAt+head
+}
+
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
 // round but those that only hold crew's own reports (crewReports), of red CI
 // or a conflict with the base. MAX_REVIEW_ROUNDS limits these.

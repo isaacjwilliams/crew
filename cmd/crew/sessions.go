@@ -114,15 +114,23 @@ func claudeTranscripts() string {
 	return filepath.Join(dir, "projects")
 }
 
+// transcript is the path of a session's transcript, or nothing when there's none.
+func transcript(session string) string {
+	if session == "" {
+		return ""
+	}
+	matches, _ := filepath.Glob(filepath.Join(claudeTranscripts(), "*", session+".jsonl"))
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
 // turnEnded reads a session's transcript: Claude Code writes a turn_duration
 // entry when a turn ends, and a prompt or a reply once the next one starts. It's
 // false when there's no transcript to read.
 func turnEnded(session string) bool {
-	matches, _ := filepath.Glob(filepath.Join(claudeTranscripts(), "*", session+".jsonl"))
-	if len(matches) == 0 {
-		return false
-	}
-	b, err := os.ReadFile(matches[0])
+	b, err := os.ReadFile(transcript(session))
 	if err != nil {
 		return false
 	}
@@ -165,6 +173,16 @@ func (as Agents) find(job string) *Agent {
 // counts as running only until its transcript says it ended.
 func (a Agent) busy() bool {
 	return (a.State == "working" && !a.TurnEnded) || a.Status == "waiting"
+}
+
+// quietFor is how long it has been since the session's transcript last changed,
+// and false when there's no transcript to read.
+func (a Agent) quietFor() (time.Duration, bool) {
+	info, err := os.Stat(transcript(a.SessionID))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
 }
 
 // open: its process is running.

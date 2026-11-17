@@ -1,12 +1,13 @@
 package main
 
 // Commands that act on a task's worker session: crew followup resumes it,
-// crew attach opens it in this terminal, and crew restack resumes it with a
-// rebase or a retarget to run.
+// crew attach opens it in this terminal, crew restack resumes it with a rebase or
+// a retarget to run, and crew nudge resumes it when its turn ended mid-task.
 
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 // crew followup TASK [--fresh] [--note TEXT]
@@ -328,5 +329,93 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		t.Set("retarget_sent", retargetTo)
 	}
 	c.commit("restack " + p.Name + "/" + t.ID())
+	return nil
+}
+
+// stallAfter is how long a worker's transcript must have been quiet before its
+// task counts as stalled. A session the user is talking to with crew attach ends
+// its turn after every reply, and a nudge would end the attach, so a short quiet
+// spell doesn't count.
+const stallAfter = 15 * time.Minute
+
+// stalledNote is what crew nudge tells a worker whose turn ended mid-task.
+const stalledNote = "Your last turn ended while this task's status is still working. If you're waiting on an answer, record it under Open questions and set your status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
+
+// stalled: the task says its worker is on it, with no question waiting on the
+// user, but the worker's turn is over and its transcript has been quiet for
+// stallAfter. a is the task's worker as claude agents lists it, or nil when it
+// isn't listed. A worker waiting on the user would have set needs-input, so it
+// has stopped by mistake: a background sub-agent it waited on finished, say,
+// and nothing started its next turn. Not a session working with its turn ended:
+// a background task of its own still runs, and a resume would end it. Not a
+// stopped one: someone stopped it on purpose.
+func stalled(t Task, a *Agent) bool {
+	if st := t.Status(); st != Working && st != AddressingFeedback || t.OpenQuestions() > 0 {
+		return false
+	}
+	if a == nil || a.busy() || a.State != "done" && a.State != "blocked" {
+		return false
+	}
+	quiet, ok := a.quietFor()
+	return ok && quiet >= stallAfter
+}
+
+// crew nudge TASK: resumes the worker of a stalled task (see stalled) with
+// stalledNote, and logs the nudge with the branch's head commit. When the task
+// stalls again with nothing done since, its Log still ends with that nudge at
+// the same head (NudgedLastAt), so instead of resuming the worker again it adds
+// an Open question for the lead, and crew tick's "waiting on you" rule makes the
+// task needs-input. Exits 3 when the task isn't stalled.
+func cmdNudge(c *Crew, args []string) error {
+	for _, tool := range []string{"git", "claude"} {
+		if err := need(tool); err != nil {
+			return err
+		}
+	}
+	if len(args) != 1 {
+		return usage("crew nudge TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	if !t.Dispatched() {
+		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
+	// Decided under the lock, so two runs can't both nudge, and the followup
+	// below checks the task's status and the pause again under it.
+	if err := c.lock(); err != nil {
+		return err
+	}
+	job := t.WorkerJob()
+	if !stalled(t, c.agents().find(job)) {
+		return nothingToDo("%s hasn't stalled", t.ID())
+	}
+	sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}")
+	if err != nil {
+		return fail("%s's branch %s isn't in %s", t.ID(), t.Branch(), p.Repo())
+	}
+	head := shortSHA(sha)
+	if t.NudgedLastAt(head) {
+		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] The worker's turn ended twice with the task still working, and nothing changed after the nudge (branch still at %s). See its last output with claude logs %s.\n", head, job))
+		t.Log(fmt.Sprintf("nudge: stalled again at %s; for the lead", head))
+		t.Touch()
+		c.commit("nudge " + p.Name + "/" + t.ID())
+		fmt.Printf("%s stalled again at %s after a nudge; recorded under Open questions\n", t.ID(), head)
+		return nil
+	}
+	if err := c.followup(t, false, stalledNote); err != nil {
+		return err
+	}
+	// Last, so that NudgedLastAt finds it until the worker commits or logs.
+	t.Log(nudgedAt + head)
+	c.commit("nudge " + p.Name + "/" + t.ID())
 	return nil
 }

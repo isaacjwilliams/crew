@@ -297,6 +297,7 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 - records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for. While a round waits, the tick says so;
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
+- nudges a worker whose turn ended while its task still says it's being worked on, once its transcript has been quiet for 15 minutes: a worker that waited on a background sub-agent can stop that way. If the next stall finds no new commit and no new Log line since the nudge, it asks you under Open questions instead, so a worker is never nudged in a loop;
 - restacks stacked tasks whose parent moved or merged, bottom-up, and has a task's worker retarget its PR when the PR targets a branch other than the task's base, never sending the same restack twice;
 - cleans up merged tasks and done spikes;
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
@@ -741,7 +742,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - worker-side updates from inside a worktree;
   - feedback rounds, which skip the worker's own replies and comments in unsubmitted reviews, and put collaborators' comments under Open questions instead;
   - requests for another pass of automated review: your `crew review` comment and `crew review`, each a line in a round, and one summary comment per pass;
-  - `crew tick`: recording a round while the worker is busy and sending it once it's free, with any rounds before it, including to a worker that asked you a question, marking a task waiting on you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
+  - `crew tick`: recording a round while the worker is busy and sending it once it's free, with any rounds before it, including to a worker that asked you a question, marking a task waiting on you, nudging a worker whose turn ended mid-task once and then asking you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
   - followup: refusing while a worker is busy, continuing one that ended its turn on a question, never resending an old round, resuming, and falling back to a fresh worker;
   - replies: to thread roots, quoting conversation comments and review summaries, and refusing comments from other PRs; sync, cleanup (ending a background process left running in the worktree, and only that), the gardener, and promoting proposals;
   - `WORKTREE_TOOL=worktrunk`: dispatch and cleanup through `wt`, stopping on unapproved hooks, the ledger unlocked while hooks run;
