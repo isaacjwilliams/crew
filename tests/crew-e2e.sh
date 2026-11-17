@@ -898,7 +898,7 @@ check "a second stall with no commit and no Log line since the nudge resumes not
    section "$F13" "## Open questions" | grep -qxF -- "- [ ] The worker'"'"'s turn ended twice with the task still working, and nothing changed after the nudge (branch still at $h). See its last output with claude logs $(crew get 13 worker_job)."'
 out=$(crew tick 2>/dev/null)
 check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13) == 1 && $(crew get 13 status) == needs-input ]]'
-out=$(crew nudge 13); code=$?; sum=$(cksum <"$F13")
+sum=$(cksum <"$F13"); out=$(crew nudge 13); code=$?
 check "crew nudge by hand on a task that isn't stalled exits 3 and changes nothing" '[[ $code == 3 && $out == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $(cksum <"$F13") == "$sum" && $(resumes) == $((n + 1)) ]]'
 stall13 working; crew tick >/dev/null 2>&1; crew log 13 "Pre-PR review: two findings fixed"; setstate "done" null
 out=$(crew tick 2>/dev/null)
