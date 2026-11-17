@@ -30,8 +30,9 @@ var codexReadOnly = []string{"-c", `sandbox_mode="read-only"`, "-c", `approval_p
 // Runs `codex exec` in ROOT with the prompt in PROMPT_FILE, in a new session
 // each time. Codex's final message goes to OUT_PREFIX.md and its events to
 // OUT_PREFIX.events.jsonl. What the run cost, however it ended, goes to
-// OUT_PREFIX.cost and stdout. It exits with Codex's status, or 124 when Codex wrote no event for
-// codexStallLimit and was stopped.
+// OUT_PREFIX.cost, for pr-review to record, and to stdout. It exits with
+// Codex's status, or 124 when Codex wrote no event for codexStallLimit and was
+// stopped.
 func cmdCodex(c *Crew, args []string) error {
 	if len(args) != 3 {
 		return usage("crew codex ROOT PROMPT_FILE OUT_PREFIX")

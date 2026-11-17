@@ -25,14 +25,15 @@ type runCost struct {
 	efforts []string
 }
 
-// tokenUsage is a run's tokens in its source's own counts. Sources count them
-// differently, so each says how many there were in all.
+// tokenUsage is a run's tokens in its source's own counts. Each source says how
+// many there were in all, because they count differently: Claude's counts
+// don't overlap, but Codex's input includes the tokens it read from cache.
 type tokenUsage interface {
 	total() int
 	String() string // the counts, in the source's own terms
 }
 
-// For example "460,666 tokens (24 input, 57,045 cache write, 392,958 cache
+// String is the line pr-review records, for example "460,666 tokens (24 input, 57,045 cache write, 392,958 cache
 // read, 10,639 output); 2m27s; claude-opus-5-5 at high effort".
 func (c runCost) String() string {
 	tokens := "tokens not reported"
@@ -85,6 +86,7 @@ func (u claudeUsage) String() string {
 // Prints what the run of the Claude subagent AGENT_ID cost, read from its
 // transcript.
 func cmdReviewCost(c *Crew, args []string) error {
+	// The agent ID goes into a glob pattern.
 	if len(args) != 1 || strings.ContainsAny(args[0], `/\*?[`) {
 		return usage("crew review-cost AGENT_ID")
 	}
@@ -110,7 +112,8 @@ func cmdReviewCost(c *Crew, args []string) error {
 // and the models and efforts its replies name.
 //
 // Claude Code writes a message's usage again with each of the message's
-// content blocks, so each message counts once, by its ID.
+// content blocks, so each message counts once, by its ID, with the usage
+// written last. A message without an ID counts on its own.
 func claudeRunCost(transcript []byte) (runCost, error) {
 	var cost runCost
 	usage := map[string]claudeUsage{}
@@ -152,8 +155,11 @@ func claudeRunCost(transcript []byte) (runCost, error) {
 		if e.Effort != "" && !slices.Contains(cost.efforts, e.Effort) {
 			cost.efforts = append(cost.efforts, e.Effort)
 		}
-		if e.Message.Usage != nil {
-			usage[e.Message.ID] = *e.Message.Usage
+		if id := e.Message.ID; e.Message.Usage != nil {
+			if id == "" {
+				id = fmt.Sprintf("line %d", n)
+			}
+			usage[id] = *e.Message.Usage
 		}
 	}
 	if err := lines.Err(); err != nil {

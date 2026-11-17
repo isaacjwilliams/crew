@@ -11,7 +11,8 @@ import (
 // reviewerTranscript is a Claude subagent's transcript, trimmed to the fields
 // claudeRunCost reads, in the shape Claude Code writes it: message 1's usage
 // once for each of its two content blocks, entries without a message, and a
-// <synthetic> reply of Claude Code's own.
+// <synthetic> reply of Claude Code's own; and two messages without an ID,
+// which count separately.
 const reviewerTranscript = `{"type":"user","timestamp":"2026-11-17T03:42:54.662Z","message":{"role":"user","content":"Review it."}}
 {"type":"attachment","timestamp":"2026-11-17T03:42:54.700Z","attachment":{"type":"environment"}}
 {"type":"api-request","request":{"output_config":{"effort":"high"}}}
@@ -19,6 +20,8 @@ const reviewerTranscript = `{"type":"user","timestamp":"2026-11-17T03:42:54.662Z
 {"type":"assistant","timestamp":"2026-11-17T03:42:57.997Z","effort":"high","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":13332,"cache_read_input_tokens":0,"output_tokens":224,"cache_creation":{"ephemeral_5m_input_tokens":13332}}}}
 {"type":"user","timestamp":"2026-11-17T03:42:58.100Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
 {"type":"assistant","timestamp":"2026-11-17T03:43:00.992Z","effort":"high","message":{"id":"msg_2","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":3827,"cache_read_input_tokens":13332,"output_tokens":296}}}
+{"type":"assistant","timestamp":"2026-11-17T03:43:00.995Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
+{"type":"assistant","timestamp":"2026-11-17T03:43:00.996Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
 {"type":"assistant","timestamp":"2026-11-17T03:43:01.000Z","message":{"id":"msg_3","model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
 {"type":"user","timestamp":"2026-11-17T03:45:21.834Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
 `
@@ -28,7 +31,7 @@ func TestClaudeRunCostCountsEachMessageOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "31,015 tokens (4 input, 17,159 cache write, 13,332 cache read, 520 output); 2m27s; claude-opus-5-5 at high effort"
+	want := "31,017 tokens (6 input, 17,159 cache write, 13,332 cache read, 520 output); 2m27s; claude-opus-5-5 at high effort"
 	if got := cost.String(); got != want {
 		t.Errorf("cost = %q\nwant %q", got, want)
 	}
@@ -45,8 +48,8 @@ func TestClaudeRunCostSaysWhatTheTranscriptDoesNotReport(t *testing.T) {
 	if got, want := cost.String(), "tokens not reported; 5s; model not reported, effort not reported"; got != want {
 		t.Errorf("cost = %q; want %q", got, want)
 	}
-	if _, err := claudeRunCost([]byte(reviewerTranscript + `{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "line 10") {
-		t.Errorf("a cut-off line gave %v; want an error naming line 10", err)
+	if _, err := claudeRunCost([]byte(reviewerTranscript + `{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "line 12") {
+		t.Errorf("a cut-off line gave %v; want an error naming line 12", err)
 	}
 }
 

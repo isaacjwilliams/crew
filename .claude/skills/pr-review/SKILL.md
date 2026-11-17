@@ -208,10 +208,13 @@ turns a two-reviewer review into a one-reviewer review, and nothing downstream c
 that found nothing.
 
 **What each run cost.** Once a reviewer has finished, however it finished, take its cost for the record (step 8),
-exactly as crew prints it: for the Claude reviewer, what `crew review-cost <agent id>` prints, with the agent ID its
-launch returned; for Codex, what `crew codex` wrote to `<out prefix>.cost`, such as
-`<briefing dir>/codex-answer-0.cost`. Never work out a cost yourself, from a
-transcript or a notice: if `crew review-cost` refuses, the cost is `not reported: <what it said>`.
+exactly as crew gives it:
+
+- the Claude reviewer: what `crew review-cost <agent id>` prints, with the agent ID its launch returned;
+- Codex: the line `crew codex` wrote to `<out prefix>.cost`, beside its `.md`.
+
+Never work out a cost yourself, from a transcript or a notice. When crew gives none (`crew review-cost` refuses, or
+there's no `.cost` file), the cost is `not reported: <why>`.
 
 A reviewer that fails, stalls or returns no report hasn't reported. For Codex, exit status 124 means it wrote nothing
 for 15 minutes and was stopped; any other non-zero status, or an empty report, is a failure. Note what happened for the
