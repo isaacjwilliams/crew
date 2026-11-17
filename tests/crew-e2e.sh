@@ -1399,7 +1399,6 @@ check "set refuses plan-review, the brief review's old name, and names brief-rev
   '[[ $(crew set "$FX" missed_by plan-review 2>&1) == *"missed_by must be brief-review, "*", not '"'"'plan-review'"'"'"* && -z $(crew get "$FX" missed_by) ]]'
 check "set takes brief-review, the review of the brief before the task was marked ready" \
   'crew set "$FX" missed_by brief-review && [[ $(crew get "$FX" missed_by) == brief-review ]]'
-crew set "$FX" missed_by tests
 check "ready accepts a fix that names the task it fixes and the check that missed it" 'crew ready "$FX" >/dev/null && [[ $(crew get "$FX" status) == ready ]]'
 FU=$(crew new "Fix the old export" --kind fix); FUI=$(basename "$FU" .md); fill "$FU"; crew set "$FU" missed_by ci
 check "ready refuses a fix that doesn't name the task it fixes" \

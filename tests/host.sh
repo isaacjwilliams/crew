@@ -8,8 +8,6 @@ isolate_home "$(new_sandbox host)/home"
 H=$HOME/crew; make_home "$H"
 out=$("$H/bin/crew" install --yes 2>&1)
 check "agents installed" '[[ -f $HOME/.claude/agents/lead.md && -f $HOME/.claude/agents/goal-lead.md && -f $HOME/.claude/agents/implementer.md && -f $HOME/.claude/agents/casual-observer.md && -f $HOME/.claude/agents/gardener.md && -f $HOME/.claude/agents/misses.md && -f $HOME/.claude/agents/brief-reviewer.md && -f $HOME/.claude/agents/reviewer.md ]]'
-check "workers are denied spawning the brief reviewer, by the name it's installed under" \
-  'name=$(sed -n "s/^name: //p" "$HOME/.claude/agents/brief-reviewer.md") && [[ $name == brief-reviewer ]] && jq -e --arg a "Agent($name)" ".permissions.deny | index(\$a)" "$H/config/worker-settings.json" >/dev/null'
 check "agents installed as the home's copies" 'cmp -s "$HOME/.claude/agents/lead.md" "$H/agents/lead.md"'
 check "crew and lead linked into ~/.local/bin" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" && $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" ]]'
 check "and the fish completions installed, and nothing else for fish" '[[ -f $HOME/.config/fish/completions/crew.fish && -f $HOME/.config/fish/completions/lead.fish && $(find "$HOME/.config/fish" -type f | wc -l) == 2 ]]'
@@ -73,19 +71,16 @@ lead_inode=$(stat -c %i "$HOME/.claude/agents/lead.md")
 echo '# new upstream' >>"$H/agents/lead.md"
 echo 'complete -c crew-extra' >"$H/fish/completions/crew-extra.fish"
 rm "$H/agents/gardener.md" "$H/systemd/crew-gardener.timer"
+# An install from before the plan reviewer was renamed the brief reviewer.
+echo '# old plan reviewer' >"$HOME/.claude/agents/plan-reviewer.md"
+printf 'agents\t%s\n' "$HOME/.claude/agents/plan-reviewer.md" >>"$HOME/.local/share/agent-crew/manifest"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 check "a changed agent is replaced by rename, not rewritten in place" '[[ $(stat -c %i "$HOME/.claude/agents/lead.md") != "$lead_inode" ]] && cmp -s "$H/agents/lead.md" "$HOME/.claude/agents/lead.md"'
 check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
 check "other agents are left alone" '[[ -f $HOME/.claude/agents/implementer.md ]]'
-# A home from before the brief reviewer was renamed from plan reviewer, then upgraded.
-sed 's/^name: brief-reviewer$/name: plan-reviewer/' "$H/agents/brief-reviewer.md" >"$H/agents/plan-reviewer.md"; rm "$H/agents/brief-reviewer.md"
-"$H/bin/crew" install --yes >/dev/null 2>&1
-check "a home from before the rename installs plan-reviewer" '[[ -f $HOME/.claude/agents/plan-reviewer.md && ! -e $HOME/.claude/agents/brief-reviewer.md ]]'
-git -C "$H" checkout -q -- agents/brief-reviewer.md; rm "$H/agents/plan-reviewer.md"
-"$H/bin/crew" install --yes >/dev/null 2>&1
-check "an upgrade past the rename installs brief-reviewer, removes plan-reviewer, and workers are denied the new name" \
+check "the renamed plan reviewer is removed, the brief reviewer installed, and workers denied it by the name it's installed under" \
   'name=$(sed -n "s/^name: //p" "$HOME/.claude/agents/brief-reviewer.md") && [[ $name == brief-reviewer && ! -e $HOME/.claude/agents/plan-reviewer.md ]] &&
   jq -e --arg a "Agent($name)" ".permissions.deny | index(\$a)" "$H/config/worker-settings.json" >/dev/null'
 # An install from before crew lead shipped the lead function and a conf.d snippet.
