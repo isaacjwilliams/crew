@@ -41,8 +41,9 @@ type waitingOnUser struct {
 	Questions, PRs, MemorySuggestions int
 }
 
-// waitingOf is one task's share of what waits on the user. A finished task's
-// questions and PR wait on no one.
+// waitingOf is one task's share of what waits on the user: 1 in Questions when
+// it has any open question, 1 in PRs when its PR is waiting, so a project's sum
+// counts tasks. A finished task's questions and PR wait on no one.
 func waitingOf(t Task) waitingOnUser {
 	var w waitingOnUser
 	if t.Status().Finished() {
@@ -155,8 +156,9 @@ func buildReport(c *Crew, full []string, doneToo bool) statusReport {
 	return r
 }
 
-// statusView builds a report: the crew-wide facts, and what it has worked out
-// for the project it's on.
+// statusView builds a report. The fields from branches on belong to the project
+// it's on: project sets them afresh for each one, and the methods that work out
+// rows, notes and caps read them.
 type statusView struct {
 	*Crew
 	doneToo  bool

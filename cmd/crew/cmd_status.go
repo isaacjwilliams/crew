@@ -60,7 +60,7 @@ func printReport(r statusReport) {
 			fmt.Println()
 			printProject(p)
 		} else if p.Waiting != (waitingOnUser{}) {
-			elsewhere = append(elsewhere, fmt.Sprintf("  %s: %s", p.Name, p.Waiting))
+			elsewhere = append(elsewhere, "  "+p.Name+": "+p.Waiting.String())
 		}
 	}
 	if len(elsewhere) > 0 {
