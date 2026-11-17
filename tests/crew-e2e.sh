@@ -919,6 +919,10 @@ stall13 working; git -C "$SB/webapp" worktree remove --force "$WT13"; n=$(resume
 out=$(crew tick 2>/dev/null)
 check "a stalled worker whose worktree is gone gets it back, made with the ledger unlocked, and is nudged" '[[ $out == "013-tick-routing: its worker'"'"'s turn ended mid-task; nudged it" && -d $WT13 && $(resumes) == $((n + 1)) ]] && grep -qx ledger-unlocked "$HOME/wt-hooks.log"'
 sed -i '/^WORKTREE_TOOL="worktrunk"$/d' "$PE"; rm "$HOME/wt-hook-cmd"
+git -C "$SB/webapp" worktree remove --force "$WT13"; setstate "done" null; n=$(resumes)
+out=$(crew tick 2>/dev/null)
+check "a second stall with nothing new asks, even when the worktree is gone again: making it would log a line" '[[ $out == *"013-tick-routing: stalled again after a nudge, for you"* && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
+git -C "$SB/webapp" worktree add -q "$WT13" agent/tick-routing
 # not_nudged WHY: after the setup before it, a tick resumes nothing and logs no nudge.
 not_nudged() {
   local n log; n=$(resumes); log=$(grep -c " — nudged: " "$F13")

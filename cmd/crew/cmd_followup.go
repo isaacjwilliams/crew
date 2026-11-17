@@ -389,20 +389,11 @@ func cmdNudge(c *Crew, args []string) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
-	job := t.WorkerJob()
-	if !stalled(t, c.agents().find(job)) {
-		return nothingToDo("%s hasn't stalled", t.ID())
-	}
-	// The worktree may not be on this machine. Making it can run worktree hooks
-	// for minutes, so it happens before the lock, and followup finds it in place.
-	if err := c.ensureWorktree(p, t); err != nil {
-		return err
-	}
-	// Decided again under the lock, so two runs can't both nudge. The followup
-	// below keeps the lock, and checks the task's status and the pause under it.
+	// Decided under the lock, so two runs can't both act.
 	if err := c.lock(); err != nil {
 		return err
 	}
+	job := t.WorkerJob()
 	if !stalled(t, c.agents().find(job)) {
 		return nothingToDo("%s hasn't stalled", t.ID())
 	}
@@ -418,6 +409,21 @@ func cmdNudge(c *Crew, args []string) error {
 		c.commit("nudge " + p.Name + "/" + t.ID())
 		fmt.Printf("%s stalled again at %s after a nudge; recorded under Open questions\n", t.ID(), head)
 		return nil
+	}
+	// The worktree may not be on this machine. Making it can run worktree hooks
+	// for minutes, so it happens without the lock, and followup then finds it in
+	// place. It may log a line, so it comes after NudgedLastAt has been read.
+	c.unlock()
+	if err := c.ensureWorktree(p, t); err != nil {
+		return err
+	}
+	// Checked again under the lock, which followup keeps: another run may have
+	// nudged the worker meanwhile.
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if !stalled(t, c.agents().find(job)) {
+		return nothingToDo("%s hasn't stalled", t.ID())
 	}
 	if err := c.followup(t, false, stalledNote); err != nil {
 		return err
