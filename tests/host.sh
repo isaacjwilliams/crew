@@ -80,9 +80,9 @@ check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
 check "other agents are left alone" '[[ -f $HOME/.claude/agents/implementer.md ]]'
-check "the renamed plan reviewer is removed, the brief reviewer installed, and workers denied it by the name it's installed under" \
-  'name=$(sed -n "s/^name: //p" "$HOME/.claude/agents/brief-reviewer.md") && [[ $name == brief-reviewer && ! -e $HOME/.claude/agents/plan-reviewer.md ]] &&
-  jq -e --arg a "Agent($name)" ".permissions.deny | index(\$a)" "$H/config/worker-settings.json" >/dev/null'
+check "the plan reviewer is replaced by the brief reviewer" '[[ ! -e $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/brief-reviewer.md ]]'
+check "workers are denied the brief reviewer by the name it's installed under" \
+  'name=$(sed -n "s/^name: //p" "$HOME/.claude/agents/brief-reviewer.md") && [[ $name == brief-reviewer ]] && jq -e --arg a "Agent($name)" ".permissions.deny | index(\$a)" "$H/config/worker-settings.json" >/dev/null'
 # An install from before crew lead shipped the lead function and a conf.d snippet.
 for f in conf.d/agent-crew.fish functions/lead.fish; do
   mkdir -p "$HOME/.config/fish/${f%/*}"; echo "# old $f" >"$HOME/.config/fish/$f"

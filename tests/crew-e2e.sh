@@ -1395,7 +1395,7 @@ check "ready refuses a fix that doesn't name the check that missed the defect" \
   '[[ $(crew ready "$FX" 2>&1) == *"missed_by must be brief-review, tests, pre-pr-review, security-review, automated-review, ci or user-review: crew set $FXI missed_by <value>"* && $(crew get "$FX" status) == draft ]]'
 check "set refuses a missed_by that isn't one of the checks" \
   '[[ $(crew set "$FX" missed_by bogus 2>&1) == *"missed_by must be brief-review, "*", not '"'"'bogus'"'"'"* && -z $(crew get "$FX" missed_by) ]]'
-check "set refuses plan-review, the brief review's old name, and names brief-review" \
+check "set refuses plan-review, the brief review's old name, with a list that names brief-review" \
   '[[ $(crew set "$FX" missed_by plan-review 2>&1) == *"missed_by must be brief-review, "*", not '"'"'plan-review'"'"'"* && -z $(crew get "$FX" missed_by) ]]'
 check "set takes brief-review, the review of the brief before the task was marked ready" \
   'crew set "$FX" missed_by brief-review && [[ $(crew get "$FX" missed_by) == brief-review ]]'

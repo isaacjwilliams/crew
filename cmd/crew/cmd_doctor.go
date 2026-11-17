@@ -55,6 +55,7 @@ func cmdDoctor(c *Crew, args []string) error {
 	d.check("gh authenticated", exec.Command("gh", "auth", "status").Run() == nil, "run 'gh auth login'")
 	d.check(fmt.Sprintf("crew's binary is version %s, as VERSION says", version), version == c.crewVersion(), "run crew install, or remove bin/release/ so bin/crew fetches the right one")
 	fmt.Println("Agents")
+	// The agents this home ships, found as crew install finds them.
 	agents, _ := filepath.Glob(c.path("agents", "*.md"))
 	for _, f := range agents {
 		d.check(strings.TrimSuffix(filepath.Base(f), ".md"), isFile(filepath.Join(installedAgents(), filepath.Base(f))), "run crew install")
