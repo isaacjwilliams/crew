@@ -142,6 +142,10 @@ func (c *Crew) resolve(kind, arg string) (string, error) {
 	return "", fail("no %s matches '%s'", strings.TrimSuffix(kind, "s"), arg)
 }
 
+// isProposal says whether f, a file resolve found, is a proposal's: it's in a
+// project's proposals directory.
+func isProposal(f string) bool { return filepath.Base(filepath.Dir(f)) == "proposals" }
+
 func (c *Crew) resolveTask(arg string) (Task, error) {
 	f, err := c.resolve("tasks", arg)
 	return Task{Doc{f}}, err

@@ -588,8 +588,9 @@ func (t Task) Answer() string {
 	return strings.TrimSpace(answer)
 }
 
-// statusLogged begins the Log line of every change to a task's status:
-// "status → pr-open", say. crew stats reads the waits on the user from them.
+// statusLogged begins the Log line of every change to a task's or a proposal's
+// status: "status → pr-open", say. crew stats reads a task's waits on the user
+// from them.
 const statusLogged = "status → "
 
 // recordedForTheUser ends the Log line crew feedback and crew ci-fix write when
@@ -598,12 +599,17 @@ const statusLogged = "status → "
 const recordedForTheUser = "recorded under Open questions for the user"
 
 // SetStatus writes the task's status and logs the change. Every change of a
-// task's status goes through here, so the Log has a line for each.
-func (t Task) SetStatus(s Status) error {
-	if err := t.Set("status", string(s)); err != nil {
+// task's status goes through setStatus, so the Log has a line for each.
+func (t Task) SetStatus(s Status) error { return t.setStatus(string(s)) }
+
+// setStatus writes the file's status and logs the change: a task's, or a
+// proposal's through crew set. It takes a string, since a proposal's statuses
+// aren't a task's.
+func (d Doc) setStatus(s string) error {
+	if err := d.Set("status", s); err != nil {
 		return err
 	}
-	return t.Log(statusLogged + string(s))
+	return d.Log(statusLogged + s)
 }
 
 // Priority orders crew tick's dispatch of a running goal's ready tasks: higher
@@ -1092,6 +1098,21 @@ func (g Goal) Project() string    { return g.Get("project") }
 func (g Goal) LeadJob() string    { return g.Get("lead_job") }
 
 type Proposal struct{ Doc }
+
+// CheckSet refuses a crew set that would take an accepted proposal away from
+// the task that took up its work: a new or empty task, or another status. It
+// guards against mistakes: a lead who means it edits the front matter by hand.
+// Any other key passes, and so does the value a key already has.
+func (p Proposal) CheckSet(key, value string) error {
+	if (key != "task" && key != "status") || value == p.Get(key) {
+		return nil
+	}
+	task := p.Get("task")
+	if p.Get("status") != "accepted" || task == "" {
+		return nil
+	}
+	return fail("proposal %s is accepted for task %s, which took up its work, so crew set won't change its %s. Leave it as it is, and raise it with the lead.", p.ID(), task, key)
+}
 
 // Author is who wrote the proposal, from its source, as a sentence names them.
 // It's empty for a proposal without a source.

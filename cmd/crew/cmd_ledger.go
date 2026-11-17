@@ -161,51 +161,68 @@ func cmdGet(c *Crew, args []string) error {
 	return nil
 }
 
-// crew set TASK KEY VALUE...
+// crew set TASK KEY VALUE...: TASK can also be a proposal's file, by its path,
+// since resolve finds a proposal by ID only when asked for proposals. Each kind
+// runs its own checks.
 func cmdSet(c *Crew, args []string) error {
 	if len(args) == 0 {
 		return usage("crew set TASK KEY VALUE")
 	}
-	t, err := c.resolveTask(args[0])
+	f, err := c.resolve("tasks", args[0])
 	if err != nil {
 		return err
 	}
 	if len(args) < 2 || args[1] == "" {
 		return fail("key required")
 	}
-	// Trimmed once, so the checks below see what Lookup will read back.
+	// Trimmed once, so the checks see what Lookup will read back.
 	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
-	// An empty value clears the key. crew ready refuses a task whose kind needs
-	// one it cleared.
-	if value != "" {
-		if value, err = c.checkValue(t.Project(), key, value); err != nil {
-			return err
-		}
+	d := Doc{f}
+	if isProposal(f) {
+		err = Proposal{d}.CheckSet(key, value)
+	} else {
+		value, err = c.checkTaskSet(Task{d}, key, value)
 	}
-	// done means a spike's report is in, which crew hand-over checks.
-	if key == "status" && Status(value) == Done {
-		return fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
-	}
-	if key == "status" && Status(value) == PROpen {
-		return fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
-	}
-	if err := c.checkStacks(t, key, value); err != nil {
+	if err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
 		return err
 	}
 	if key == "status" {
-		err = t.SetStatus(Status(value))
+		err = d.setStatus(value)
 	} else {
-		err = t.Set(key, value)
+		err = d.Set(key, value)
 	}
 	if err != nil {
 		return err
 	}
-	t.Touch()
-	c.commit("set " + t.ID() + " " + key)
+	d.Touch()
+	c.commit("set " + d.ID() + " " + key)
 	return nil
+}
+
+// checkTaskSet is the value crew set records for a task's key, or a refusal.
+func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
+	// An empty value clears the key. crew ready refuses a task whose kind needs
+	// one it cleared.
+	if value != "" {
+		var err error
+		if value, err = c.checkValue(t.Project(), key, value); err != nil {
+			return "", err
+		}
+	}
+	// done means a spike's report is in, which crew hand-over checks.
+	if key == "status" && Status(value) == Done {
+		return "", fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
+	}
+	if key == "status" && Status(value) == PROpen {
+		return "", fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
+	}
+	if err := c.checkStacks(t, key, value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 // checkStacks refuses a base or kind that would put a task in a stack its kind
