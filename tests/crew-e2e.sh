@@ -1337,6 +1337,11 @@ check "promote turns a short proposal into a draft task" '[[ $(crew get "$ST" st
 check "a short proposal's task names its source and keeps only the sections it has" '[[ $(section "$ST" "## Context") == *"written by the user."*"Revisit when: a second pricing rule"*"Why it matters:""$NL""Tax, currency and receipts vary by place."* && $(section "$ST" "## Context") != *"Proposal:"* && $(section "$ST" "## Context") != *"First step:"* ]]'
 out=$(crew proposals --project "$PJ"); all_out=$(crew proposals --any-status --project "$PJ")
 check "proposals lists the open ones, and --any-status the rest too" '[[ $out != *"$(basename "$SP" .md)"* && $all_out == *"$(basename "$SP" .md)"*" accepted "* ]]'
+check "a worker closes its own proposal: links its task, accepts it and logs it" \
+  'crew set "$WP" task 007-contestant-type-on-update && crew set "$WP" status accepted && crew log "$WP" "Done in 007 (#7, abc1234)" &&
+   [[ $(crew get "$WP" status) == accepted && $(crew get "$WP" task) == 007-contestant-type-on-update && $(section "$WP" "## Log") == *"status → accepted""$NL"*"Done in 007"* ]]'
+TP=$(crew propose "Ask why in the rubric" --project "$PJ" --source misses)
+check "a proposal with no task, such as a Target: one, can be set accepted" 'crew set "$TP" status accepted && [[ $(crew get "$TP" status) == accepted && -z $(crew get "$TP" task) ]]'
 
 # Project scope: a command works on --project, else CREW_PROJECT (which `lead` and
 # crew's own sessions set), else the current directory's repo, else every project.
