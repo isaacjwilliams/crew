@@ -333,7 +333,7 @@ check "hand-over refuses evidence that names a commit it can't find" \
   '[[ $(crew hand-over 1 2>&1) == *"couldn'"'"'t check the evidence: 0123abc isn'"'"'t a commit in "* && $(crew get 1 status) == needs-input ]]'
 pr_body 1; commit_in "$WT" src/filters.ts
 check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran before the branch'"'"'s own work last changed, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Run it again on the code as it is now"* && $(crew get 1 status) == needs-input ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
 record_evidence 1; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
@@ -355,7 +355,7 @@ check "status shows a pr-open task raised after its hand-over as waiting on its 
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
 crew set 1 status addressing-feedback; crew set 1 risk medium
-git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; record_evidence 1; pr_body 1
+git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; git -C "$WT" push -q origin HEAD; record_evidence 1; pr_body 1
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
@@ -382,8 +382,13 @@ check "evidence stays current through a merge of the base, though it ran before 
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(git -C "$WT" rev-list --merges "$E1..HEAD") != "" ]]'
 main_moves src/search.ts; merge_main; crew set 1 status addressing-feedback
 check "a merge of the base whose conflict the worker resolved makes the evidence stale" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran before the branch'"'"'s own work last changed, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
 record_evidence 1; hand_over 1
+# Evidence that ran on a commit origin doesn't have yet isn't what the user would merge.
+crew set 1 status addressing-feedback; commit_in "$WT" src/unpushed.ts; record_evidence 1; pr_body 1; E1=$(evidence_commit 1)
+check "hand-over refuses evidence that ran on a commit the branch on origin lacks" \
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
+git -C "$WT" push -q origin HEAD; hand_over 1
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
@@ -691,7 +696,8 @@ check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [
 check "evidence stays current through a restack, though the rebased branch no longer holds the commit it ran on" \
   '[[ $(crew get 10 status) == pr-open ]] && ! git merge-base --is-ancestor "$(evidence_commit 10)" "$(tip season-admin)"'
 out=$(crew sync)
-check "sync sees the restack and moves base_sha to the parent's new tip" '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" ]]'
+check "sync sees the restack, moves base_sha to the parent's new tip and keeps the cut it moved from" \
+  '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" && $(crew get 10 earlier_base_shas) == "$T9" ]]'
 setstate "done" null
 check "restack has nothing to do for a task that's up to date" '[[ $(crew restack 10) == *"nothing to restack"* ]]'
 check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'

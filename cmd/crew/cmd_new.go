@@ -367,9 +367,8 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 // checkEvidence refuses evidence that can't reach the user: an acceptance
 // criterion with no item in the task's ## Evidence or in the PR body (pr, nil
 // without a PR), an item that doesn't name the commit it ran on, or one that
-// ran before the branch's own work last changed. A restack or a merge of the
-// base that leaves the branch's own work as it was keeps evidence current
-// (branchWork.unchangedSince).
+// ran on other work than the branch has now. A restack or a merge of the base
+// that git made on its own keeps evidence current (branchWork.unchangedSince).
 func checkEvidence(t Task, repo string, pr Evidence) error {
 	n := len(t.AcceptanceCriteria())
 	if n == 0 {
@@ -397,17 +396,21 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	if err != nil {
 		return fail("couldn't check the evidence: %v", err)
 	}
-	// A commit the evidence names is stale when the branch's own work has
-	// changed since, at either tip: the user may merge either one.
+	// A commit the evidence names is stale when its work isn't the branch's at
+	// either tip: the user may merge either one.
 	stale := map[string]bool{}
 	for _, e := range []Evidence{task, pr} {
 		for _, sha := range e {
 			if _, checked := stale[sha]; checked {
 				continue
 			}
+			then, err := workIn(t, repo, sha)
+			if err != nil {
+				return fail("couldn't check the evidence: %v", err)
+			}
 			stale[sha] = false
 			for _, w := range work {
-				unchanged, err := w.unchangedSince(repo, sha)
+				unchanged, err := w.unchangedSince(repo, then)
 				if err != nil {
 					return fail("couldn't check the evidence: %v", err)
 				}
@@ -423,7 +426,7 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 		places = append(places, "the PR body: "+items)
 	}
 	if len(places) > 0 {
-		return fail("evidence ran before the branch's own work last changed, in %s. Run it again on the code as it is now, and record it with the commit it ran on", strings.Join(places, "; "))
+		return fail("evidence ran on other work than the branch has now, here and on origin, in %s. Push the branch, run the evidence again, and record it with the commit it ran on", strings.Join(places, "; "))
 	}
 	return nil
 }

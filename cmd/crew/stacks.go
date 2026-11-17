@@ -166,36 +166,23 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	return line, nil
 }
 
-// branchWork is a task's own work at one tip of its branch: the commits after
-// since, up to tip.
+// branchWork is a task's own work in one commit of its branch, tip: what tip
+// changes since the commit where that work starts.
 type branchWork struct{ since, tip string }
 
 // ownWork is a task's own work at each tip of its branch: here and on origin, as
-// last fetched, since either may have commits the other lacks. Each starts where
-// its tip left origin/<base>. It starts at base_sha instead when a rebased
-// parent left that merge base behind the parent's work (noteBaseSHA records it
-// then), and when a merged parent's branch is gone from origin (crew observe
-// records it then).
+// last fetched, since either may have commits the other lacks.
 func ownWork(t Task, repo string) ([]branchWork, error) {
-	base := "refs/remotes/origin/" + t.Base()
 	var work []branchWork
 	for _, tip := range []string{"refs/heads/" + t.Branch(), "refs/remotes/origin/" + t.Branch()} {
 		if !gitOK(repo, "show-ref", "--verify", "--quiet", tip) {
 			continue
 		}
-		since, err := git(repo, "merge-base", base, tip)
-		bs := t.Get("base_sha")
-		if bs != "" && gitOK(repo, "merge-base", "--is-ancestor", bs, tip) &&
-			(err != nil || !gitOK(repo, "merge-base", "--is-ancestor", bs, since)) {
-			since, err = bs, nil
-		}
+		w, err := workIn(t, repo, tip)
 		if err != nil {
-			if !gitOK(repo, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
-				return nil, fmt.Errorf("origin/%s is gone, and base_sha doesn't say where %s starts", t.Base(), t.Branch())
-			}
-			return nil, fmt.Errorf("%s has no merge base with origin/%s", t.Branch(), t.Base())
+			return nil, err
 		}
-		work = append(work, branchWork{since, tip})
+		work = append(work, w)
 	}
 	if len(work) == 0 {
 		return nil, fmt.Errorf("branch %s isn't here or on origin", t.Branch())
@@ -203,53 +190,54 @@ func ownWork(t Task, repo string) ([]branchWork, error) {
 	return work, nil
 }
 
-// unchangedSince: the branch's own work is as it was at commit sha, which may be
-// from before a restack or a merge of the base. Each of its commits has an
-// equivalent, the same change, at or before sha (git cherry), and each merge
-// since sha merged cleanly, so it changed none of the branch's own work.
-func (w branchWork) unchangedSince(repo, sha string) (bool, error) {
-	if !gitOK(repo, "rev-parse", "--verify", "--quiet", sha+"^{commit}") {
-		return false, fmt.Errorf("%s isn't a commit in %s", sha, repo)
+// workIn is the task's own work in commit c, which may be from before a restack:
+// it starts where c left origin/<base>, or at the newest cut c contains when
+// that's later. The cuts are base_sha and the earlier_base_shas it moved from:
+// a rebased parent, or a merged one whose branch is gone, leaves the merge base
+// behind the parent's work.
+func workIn(t Task, repo, c string) (branchWork, error) {
+	if !gitOK(repo, "rev-parse", "--verify", "--quiet", c+"^{commit}") {
+		return branchWork{}, fmt.Errorf("%s isn't a commit in %s", c, repo)
 	}
-	out, err := git(repo, "cherry", sha, w.tip, w.since)
+	base := "refs/remotes/origin/" + t.Base()
+	since, err := git(repo, "merge-base", base, c)
 	if err != nil {
-		return false, fmt.Errorf("git cherry %s %s %s failed in %s", sha, w.tip, w.since, repo)
+		since = ""
 	}
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(l, "+") {
-			return false, nil
+	for _, cut := range strings.Fields(t.Get("base_sha") + " " + t.Get("earlier_base_shas")) {
+		if gitOK(repo, "merge-base", "--is-ancestor", cut, c) &&
+			(since == "" || !gitOK(repo, "merge-base", "--is-ancestor", cut, since)) {
+			since = cut
 		}
 	}
-	merges, err := git(repo, "rev-list", "--merges", w.tip, "^"+w.since, "^"+sha)
-	if err != nil {
-		return false, fmt.Errorf("git rev-list --merges %s failed in %s", w.tip, repo)
-	}
-	for _, m := range strings.Fields(merges) {
-		if clean, err := mergedAsGitWould(repo, m); !clean || err != nil {
-			return false, err
+	if since == "" {
+		if !gitOK(repo, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
+			return branchWork{}, fmt.Errorf("origin/%s is gone, and no base_sha says where %s starts", t.Base(), c)
 		}
+		return branchWork{}, fmt.Errorf("%s has no merge base with origin/%s", c, t.Base())
 	}
-	return true, nil
+	return branchWork{since, c}, nil
 }
 
-// mergedAsGitWould: merge commit m is the merge git makes of its parents on its
-// own, so it changed nothing but what it brought in. A merge whose conflicts
-// were resolved, or that was edited before it was committed, has a tree git
-// wouldn't make.
-func mergedAsGitWould(repo, m string) (bool, error) {
-	// git writes the tree it makes on the first line, with any conflicts in it,
-	// which no resolution matches; it exits 1 then. When it can't merge the
-	// parents at all, it exits 1 too, and writes nothing.
-	redone, _ := git(repo, "merge-tree", "--write-tree", m+"^1", m+"^2")
-	redoneTree, _, _ := strings.Cut(redone, "\n")
-	if redoneTree == "" {
-		return false, fmt.Errorf("git merge-tree couldn't redo merge %s in %s", m, repo)
+// unchangedSince: w is the work that was, unchanged. Replayed onto where w
+// starts, then's work gives exactly w's tree, so a restack or a merge of the
+// base that git made on its own keeps it, and any other change doesn't.
+func (w branchWork) unchangedSince(repo string, then branchWork) (bool, error) {
+	// git writes the tree on the first line, and exits 1 when the replay
+	// conflicts. With nothing on that line, it couldn't replay at all.
+	out, err := git(repo, "merge-tree", "--write-tree", "--merge-base="+then.since, w.since, then.tip)
+	replayed, _, _ := strings.Cut(out, "\n")
+	if replayed == "" {
+		return false, fmt.Errorf("git merge-tree couldn't replay %s onto %s in %s", then.tip, w.since, repo)
 	}
-	tree, err := git(repo, "rev-parse", m+"^{tree}")
 	if err != nil {
-		return false, fmt.Errorf("git rev-parse %s^{tree} failed in %s", m, repo)
+		return false, nil
 	}
-	return redoneTree == tree, nil
+	tree, err := git(repo, "rev-parse", w.tip+"^{tree}")
+	if err != nil {
+		return false, fmt.Errorf("git rev-parse %s^{tree} failed in %s", w.tip, repo)
+	}
+	return replayed == tree, nil
 }
 
 // retargetReason says why a task's open PR has to be pointed at another branch,
@@ -309,8 +297,10 @@ func (idx Branches) parentNeedsRestack(t Task, repo string) bool {
 // task's own branch contains: where `git rebase --onto` has to cut. Once the
 // parent is squash-merged or rebased, the merge base of the two branches falls
 // back to a commit before the parent's work, so the recorded one is kept for as
-// long as the task's branch still contains it. It reports whether it changed
-// base_sha. Call it with the lock held.
+// long as the task's branch still contains it. The one it moves from goes to the
+// front of earlier_base_shas, so evidence from before the move can still be
+// checked (workIn). It reports whether it changed base_sha. Call it with the
+// lock held.
 func noteBaseSHA(t, parent Task, repo string) bool {
 	old, branch := t.Get("base_sha"), "refs/heads/"+t.Branch()
 	mb, err := git(repo, "merge-base", "refs/remotes/origin/"+parent.Branch(), branch)
@@ -321,6 +311,9 @@ func noteBaseSHA(t, parent Task, repo string) bool {
 		return false
 	}
 	t.Set("base_sha", mb)
+	if old != "" {
+		t.Set("earlier_base_shas", strings.TrimSpace(old+" "+t.Get("earlier_base_shas")))
+	}
 	return true
 }
 

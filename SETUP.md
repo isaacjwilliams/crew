@@ -36,7 +36,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
 ## 1. Requirements
 
 - **Linux** on x86_64 or aarch64, or **macOS 13 Ventura or later** on Apple silicon or Intel (Claude Code needs 13; crew's own binary runs on 12). Linux is the reference; see [On a Mac](#on-a-mac) for what differs there.
-- **Packages:** on CachyOS, `sudo pacman -S --needed git github-cli curl`; on a Mac, with [Homebrew](https://brew.sh), `brew install git gh` (macOS comes with curl). crew needs git 2.38 or later (`git --version`). Any shell will do. If you use fish, crew installs tab completion for it.
+- **Packages:** on CachyOS, `sudo pacman -S --needed git github-cli curl`; on a Mac, with [Homebrew](https://brew.sh), `brew install git gh` (macOS comes with curl). crew needs git 2.40 or later (`git --version`). Any shell will do. If you use fish, crew installs tab completion for it.
 - **No Go.** `crew` is one binary, which `~/crew/bin/crew` downloads from the release for your home's version the first time it runs, into `~/crew/bin/release/`.
 - **Claude Code 2.1.281 or later**: run `claude update`. The crew relies on background sessions (agent view), automatic `AGENTS.md` loading, and `--permission-prompts`.
 - **GitHub CLI signed in**: run `gh auth login`. Workers push and open PRs as you.

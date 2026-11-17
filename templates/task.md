@@ -9,6 +9,7 @@ fixes:
 missed_by:
 base: {{BASE}}
 base_sha:
+earlier_base_shas:
 restack_sent:
 retarget_sent:
 branch: {{BRANCH}}
@@ -90,8 +91,8 @@ updated: {{NOW}}
      why you couldn't. Indent any output line that starts with "## ", or it ends this section. A
      high-risk task also has a "### Security review" entry: what /security-review found and what
      you did about it. `crew hand-over` refuses until every criterion has an entry, and a
-     high-risk task this one, and refuses an entry that ran before the branch's own work last
-     changed. -->
+     high-risk task this one, and refuses an entry that ran on other work than the branch has
+     now. -->
 
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker
