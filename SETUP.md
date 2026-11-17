@@ -485,7 +485,7 @@ A task gets `MAX_CI_FIXES` of these rounds (2 by default). After that, red CI on
 
 ### Conflicts with the base
 
-As you merge PRs, another open PR that touches the same files can stop merging cleanly: GitHub shows it as conflicting. Once a worker has handed its PR to you (`pr-open`), `crew tick` notices and sends the worker a review round of its own saying so, once for each commit of the base branch. You don't have to ask. The worker merges the base branch into its own, resolves the conflicts, runs the checks and pushes. It doesn't rebase or force-push, so the commits you may have reviewed stay as they were, and the merge commit shows how it was resolved. It posts no comment. If a conflict means the plan no longer fits, the worker asks you.
+As you merge PRs, another open PR that touches the same files can stop merging cleanly: GitHub shows it as conflicting. Once a worker has handed its PR to you (`pr-open`), `crew tick` notices and sends the worker a review round of its own saying so, once for each commit of the base branch. You don't have to ask. The worker merges the base branch into its own, resolves the conflicts, runs the checks and pushes. It doesn't rebase or force-push, so the commits you may have reviewed stay as they were, and the merge commit shows how it was resolved. It posts no comment. If a conflict means the objective or a gate no longer fits, the worker asks you.
 
 Before the hand-over, a conflict is the worker's own business: it rebases onto the base when it conflicts. A stacked task's conflicts are handled by a restack instead (see "Stacked tasks"). Rounds that only report a conflict don't count toward `MAX_REVIEW_ROUNDS`.
 
