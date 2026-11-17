@@ -229,6 +229,10 @@ func cmdReady(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	// Before the sections it misses, which an old brief's rewrite fills in.
+	if err := t.DesignInBrief(); err != nil {
+		return fail("%v", err)
+	}
 	var missing []string
 	for _, h := range rules.brief {
 		if t.Section(h) == "" {

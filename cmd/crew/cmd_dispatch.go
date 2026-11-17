@@ -135,7 +135,8 @@ func orUnknown(s string) string {
 	return s
 }
 
-// dispatchChecks refuses a dispatch the user hasn't readied, or one stacked on an
+// dispatchChecks refuses a dispatch the user hasn't readied, one whose brief
+// says how to meet its objective (with --force too), or one stacked on an
 // abandoned task, and holds back (notYet) one for a paused project, one whose
 // dependencies haven't merged, or one that would go over MAX_WORKERS or its
 // goal's max_in_flight. The caps are counted only once the dependencies have
@@ -147,6 +148,12 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	}
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
+	}
+	// --force or not: a ready task's brief may say how to meet its objective,
+	// having been readied before crew ready refused that, or edited since, and
+	// crew tick dispatches a goal's ready tasks with nobody to catch it.
+	if err := t.DesignInBrief(); err != nil {
+		return fail("%v", err)
 	}
 	idx := c.branches(p.Name)
 	if parent, ok := idx.abandonedParent(t); ok {

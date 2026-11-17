@@ -64,11 +64,15 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    NAME is the branch without BRANCH_PREFIX (default:
                                    from title). --on stacks it on TASK's unmerged
                                    branch; --goal makes it one of GOAL's tasks
-  crew ready TASK                  Check the brief is complete for its kind (a build
-                                   needs a risk tier, and a fix fixes and missed_by)
-                                   with nothing left under Still to learn, and mark it
-                                   ready
-  crew dispatch TASK [--force]     Create worktree + branch and start an implementer
+  crew ready TASK                  Check the brief is complete for its kind, with
+                                   nothing left under Still to learn, and mark it
+                                   ready. A build needs a Goal, Acceptance criteria,
+                                   a Size and a risk tier, and nothing under
+                                   Structure, Plan or Constraints and conventions. A
+                                   fix also needs fixes and missed_by
+  crew dispatch TASK [--force]     Create worktree + branch and start an implementer.
+                                   --force dispatches a task that isn't ready; a
+                                   brief with a plan is refused either way
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
                                    collaborators' under Open questions for you

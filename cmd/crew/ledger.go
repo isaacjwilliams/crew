@@ -359,10 +359,13 @@ const (
 // never the kind's name.
 type kindRules struct {
 	kind Kind
-	// brief is the sections crew ready needs filled in, and keys the front-matter
-	// keys it needs set besides a risk tier, each to a value crew set takes.
-	brief []string
-	keys  []string
+	// brief is the sections crew ready needs filled in, and design the ones it
+	// needs empty, since how to meet the objective is the worker's call. keys are
+	// the front-matter keys it needs set besides a risk tier, each to a value
+	// crew set takes.
+	brief  []string
+	design []string
+	keys   []string
 	// pr: the kind makes a PR, so its branch is pushed for the user to review,
 	// and it needs a risk tier (the look its PR needs). Only such a kind takes
 	// part in stacks: a restack has its worker push, and a task stacked on
@@ -383,14 +386,21 @@ type kindRules struct {
 	handedOver Status
 }
 
-// buildBrief is the sections a build's brief needs, and a fix's and a refine's.
-var buildBrief = []string{"## Goal", "## Structure", "## Plan", "## Acceptance criteria"}
+// buildBrief is the sections a build's brief needs, and a fix's and a refine's:
+// the objective, the gates that show it's met, and the lead's size estimate.
+var buildBrief = []string{"## Goal", "## Acceptance criteria", "## Size"}
+
+// buildDesign is the sections a build's brief leaves empty, and a fix's and a
+// refine's: how to meet the objective is the worker's call. The template keeps
+// a Plan only because a spike's brief needs one.
+var buildDesign = []string{"## Structure", "## Plan", "## Constraints and conventions"}
 
 // kinds are the kinds of task, build first.
 var kinds = []kindRules{
 	{
 		kind:       KindBuild,
 		brief:      buildBrief,
+		design:     buildDesign,
 		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
@@ -408,6 +418,7 @@ var kinds = []kindRules{
 		// the task it fixes, so fixes is one of its keys as well as its link.
 		kind:        KindFix,
 		brief:       buildBrief,
+		design:      buildDesign,
 		pr:          true,
 		keys:        []string{"fixes", "missed_by"},
 		link:        "fixes",
@@ -419,6 +430,7 @@ var kinds = []kindRules{
 	{
 		kind:       KindRefine,
 		brief:      buildBrief,
+		design:     buildDesign,
 		pr:         true,
 		handOver:   handOverPR,
 		handedOver: PROpen,
@@ -465,7 +477,13 @@ func kindNames() string {
 var missedBy = []string{"plan-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
 
 // orList lists items as a sentence does: "low, medium or high".
-func orList[T ~string](items []T) string {
+func orList[T ~string](items []T) string { return listJoin(items, " or ") }
+
+// andList lists items as a sentence does: "Structure, Plan and Constraints".
+func andList[T ~string](items []T) string { return listJoin(items, " and ") }
+
+// listJoin joins items with commas, and the last two with last (" or ", say).
+func listJoin[T ~string](items []T, last string) string {
 	s := make([]string, len(items))
 	for i, item := range items {
 		s[i] = string(item)
@@ -473,7 +491,7 @@ func orList[T ~string](items []T) string {
 	if len(s) < 2 {
 		return strings.Join(s, "")
 	}
-	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
+	return strings.Join(s[:len(s)-1], ", ") + last + s[len(s)-1]
 }
 
 // A task's risk tier: what kind of look its PR needs from the user. The lead
@@ -576,6 +594,27 @@ func (t Task) rules() (kindRules, error) {
 // StillToLearn counts the unchecked items under Still to learn: what the plan
 // rests on that nobody has checked yet. crew ready refuses until there are none.
 func (t Task) StillToLearn() int { return unchecked(t.Section("## Still to learn")) }
+
+// DesignInBrief is an error when the brief says how to meet its objective, in
+// a section its kind leaves empty. crew ready and crew dispatch both refuse it.
+func (t Task) DesignInBrief() error {
+	r, err := t.rules()
+	if err != nil {
+		return err
+	}
+	var filled []string
+	for _, h := range r.design {
+		if t.Section(h) != "" {
+			filled = append(filled, strings.TrimPrefix(h, "## "))
+		}
+	}
+	if len(filled) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s's brief still says how to meet its objective, under %s, and that's the worker's call. "+
+		"Rewrite it as SETUP.md's \"Rewriting briefs that still have a plan\" says, then run crew ready %s",
+		t.ID(), andList(filled), t.ID())
+}
 
 // Answer is a spike's answer: the first line of its ## Report, after "Answer:",
 // or nothing when the report doesn't start with one.
@@ -1133,7 +1172,7 @@ func (p Proposal) TaskContext() string {
 	if a := p.Author(); a != "" {
 		fmt.Fprintf(&b, ", written by %s", a)
 	}
-	b.WriteString(". Run normal intake: confirm the plan with the user.\n")
+	b.WriteString(". Run normal intake: confirm the objective and its gates with the user.\n")
 	if r := p.Get("revisit_when"); r != "" {
 		fmt.Fprintf(&b, "\nRevisit when: %s\n", r)
 	}

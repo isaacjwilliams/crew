@@ -40,37 +40,37 @@ updated: {{NOW}}
 # {{TITLE}}
 
 ## Goal
-<!-- The user's own description of the problem, quoted. Then one or two sentences: the outcome and
-     why it matters. -->
+<!-- The user's own description of the problem, quoted. Then the objective: one outcome a single
+     task can reach, in a sentence or two, and why it matters. Nothing about how to reach it: the
+     design is the worker's, within the project's rules. -->
 
 ## Context
-<!-- What the worker needs that isn't obvious from the code: background, prior decisions, links. -->
+<!-- Facts the worker needs that aren't obvious from the code: where the relevant code lives now,
+     traps, the user's decisions, links. Facts, not instructions. -->
 
 ## Still to learn
-<!-- What the plan rests on that nobody has checked yet, one unchecked item each ("- [ ] …").
-     A spike can answer one: crew new --kind spike --informs <this task>. When its answers are
-     in, write them side by side under the item and tick it. crew ready refuses while any is open. -->
-
-## Structure
-<!-- Where the new code lives (modules, classes, routes, components), whether it extends what exists
-     or starts something new, the main alternative, and why it lost. If a preparatory refactor would
-     make this simpler, name it here even if you decided against it. A change that adds no new code
-     paths says so in one line. End with "Size: about <n> lines, <areas>" (added plus removed). -->
+<!-- What the objective or its gates rest on that nobody has checked yet, one unchecked item each
+     ("- [ ] …"). A spike can answer one: crew new --kind spike --informs <this task>. When its
+     answers are in, write them side by side under the item and tick it. crew ready refuses while
+     any is open. -->
 
 ## Plan
-<!-- The agreed approach, as numbered steps. Name the files and functions to touch. -->
-
-## Constraints and conventions
-<!-- Anything beyond AGENTS.md that applies: patterns to follow, things not to touch. -->
+<!-- A spike's only: what to try, and a time box. Any other brief leaves it empty, and crew ready
+     refuses one that doesn't. -->
 
 ## Acceptance criteria
-<!-- Checkable statements, including how to verify (tests to add or run, manual checks). When the goal
-     is about how code is organised, at least one checks the code's shape, not only its behaviour.
-     One "- " item each, any detail indented under it: the worker records evidence for each one,
-     by its number. -->
+<!-- The gates: checkable statements that show the objective is met, each with how to check it.
+     A gate measures the outcome, never a way to reach it. When the objective is about how code
+     is organised, the shape is the outcome, so a gate checks it. One "- " item each, any detail
+     indented under it: the worker records evidence for each one, by its number. -->
+
+## Size
+<!-- "About <n> lines: <areas>": your estimate of the lines the PR will add plus remove, tests
+     and docs included, and the areas it spans. A spike needs none. -->
 
 ## Out of scope
-<!-- Tempting adjacent work the worker must NOT do. Follow-up ideas go in the Log. -->
+<!-- Tempting adjacent work the worker must NOT do, and anything the user rules out (a migration,
+     a new dependency). Follow-up ideas go in the Log. -->
 
 ## Open questions
 <!-- Questions waiting on the user, one unchecked item each ("- [ ] …"): a worker's when it is

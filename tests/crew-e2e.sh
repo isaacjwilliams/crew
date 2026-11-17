@@ -45,7 +45,7 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
-fill() { sed -i -e '/^## Goal$/a x' -e '/^## Structure$/a s' -e '/^## Plan$/a 1. y' -e '/^## Acceptance criteria$/a - z' -e 's/^risk:$/risk: low/' "$1"; }
+fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does to put its task in pr-open: evidence for each acceptance criterion,
 # the first time, then crew hand-over. A refusal fails the suite, since the checks after
@@ -226,9 +226,12 @@ check "malformed hook JSON exits 0" 'echo "{not json" | crew commit --hook && cr
 check "same title gets a unique branch" '[[ $(crew get 1 branch) != "$(crew get 2 branch)" ]]'
 check "non-ascii title falls back to task-N" '[[ $(basename "$F3") == 003-task-3.md && $(crew get 3 branch) == agent/task-3 ]]'
 check "ready refuses an empty brief" '! crew ready 1 2>/dev/null'
-fill "$F1"; sed -i -e '/^s$/d' -e 's/^risk: low$/risk:/' "$F1"
-check "ready refuses a brief without a structure" '[[ $(crew ready 1 2>&1) == *"fill in: Structure"* ]]'
-sed -i -e '/^## Structure$/a s' -e 's/^- z$/1. z/' "$F1"
+fill "$F1"; sed -i -e '/^About 10 lines\.$/d' -e 's/^risk: low$/risk:/' "$F1"
+check "ready refuses a brief without a size estimate" '[[ $(crew ready 1 2>&1) == *"fill in: Size"* ]]'
+sed -i -e '/^## Size$/a About 10 lines.' -e '/^## Plan$/a 1. Add a filters field.' -e '/^## Goal$/i ## Structure\nA field on SearchQuery.\n' "$F1"
+check "ready refuses a brief that still says how to meet its objective, naming each section and how to rewrite it" \
+  '[[ $(crew ready 1 2>&1) == *"001-saved-search-filters'"'"'s brief still says how to meet its objective, under Structure and Plan"*"Rewrite it as SETUP.md'"'"'s \"Rewriting briefs that still have a plan\" says, then run crew ready 001-saved-search-filters"* && $(crew get 1 status) == draft ]]'
+sed -i -e '/^1\. Add a filters field\.$/d' -e '/^## Structure$/,/^$/d' -e 's/^- z$/1. z/' "$F1"
 check "ready refuses acceptance criteria that aren't '- ' items" '[[ $(crew ready 1 2>&1) == *"write each acceptance criterion as a '"'"'- '"'"' item"*"this line isn'"'"'t one: 1. z" ]]'
 sed -i -e 's/^1\. z$/- z/' -e '/^- z$/a \  in detail\nAlso: z holds.' "$F1"
 check "ready refuses a criterion beside the '- ' items, and takes detail indented under one" '[[ $(crew ready 1 2>&1) == *"this line isn'"'"'t one: Also: z holds." ]]'
@@ -237,7 +240,12 @@ check "ready refuses a task without a risk tier, and says how to set one" \
   '[[ $(crew ready 1 2>&1) == *"set its risk: crew set 001-saved-search-filters risk low|medium|high"* && $(crew get 1 status) == draft ]]'
 check "set refuses a risk that isn't low, medium or high" \
   '[[ $(crew set 1 risk bogus 2>&1) == *"risk must be low, medium or high, not '"'"'bogus'"'"'"* && -z $(crew get 1 risk) ]]'
-crew set 1 risk low; crew ready 1 >/dev/null
+crew set 1 risk low
+check "ready accepts a brief with a Goal, Acceptance criteria and a Size, and no Structure or Plan" 'crew ready 1 >/dev/null && [[ $(crew get 1 status) == ready ]]'
+sed -i '/^## Plan$/a 1. Add a filters field.' "$F1"
+check "dispatch refuses a ready task whose brief still says how to meet its objective, --force or not" \
+  '[[ $(crew dispatch 1 2>&1) == *"brief still says how to meet its objective, under Plan"* && $(crew dispatch 1 --force 2>&1) == *"under Plan"* && $(crew get 1 status) == ready && -z $(crew get 1 worker_job) ]]'
+sed -i '/^1\. Add a filters field\.$/d' "$F1"
 check "find: no match exits non-zero" '! crew find nomatch 2>/dev/null'
 check "find: ambiguous exits non-zero" '! crew find saved 2>/dev/null'
 check "dispatch starts a worker" 'CREW_LEAD_FINGERPRINT=0123456789ab crew dispatch 1 >/dev/null'
@@ -1037,6 +1045,11 @@ echo "MAX_WORKERS=0" >>"$L/config/crew.env"
 out=$(crew tick 2>&1)
 check "a goal task held back by a cap waits without a word" '[[ $out != *"$T1"* && $(crew get "$GT1" status) == ready ]]'
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
+sed -i '/^## Plan$/a 1. Style the header.' "$GT1"
+out=$(crew tick 2>&1)
+check "tick dispatches no goal task whose brief still says how to meet its objective, and says why as dispatch does" \
+  '[[ $out == *"$T1: dispatch failed:"*"brief still says how to meet its objective, under Plan"* && $(crew get "$GT1" status) == ready && -z $(crew get "$GT1" worker_job) ]]'
+sed -i '/^1\. Style the header\.$/d' "$GT1"
 out=$(crew tick 2>&1)
 check "tick dispatches a running goal's ready task, and no other ready task" '[[ $out == *"$T1: dispatched for goal $G"* && $(crew get "$GT1" status) == working && $(crew get "$NG" status) == ready ]]'
 GS=$(crew new "Season header styles" --goal "$GF" --on "$GT1"); fill "$GS"; crew ready "$GS" >/dev/null
@@ -1255,8 +1268,10 @@ KU=$(crew new "Try nothing" --kind spike --informs "$KD")
 check "set clears a spike's informs with an empty value" 'crew set "$KU" informs "" && [[ -z $(crew get "$KU" informs) ]]'
 crew set "$KU" status abandoned
 check "set refuses a kind crew doesn't know" '[[ $(crew set "$KS" kind drill 2>&1) == *"kind must be build, spike, fix or refine, not '"'"'drill'"'"'"* && $(crew get "$KS" kind) == spike ]]'
-sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Plan$/a 1. Page through the API.' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
-check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Structure or risk" \
+sed -i -e '/^## Goal$/a Does the API page by cursor?' -e '/^## Acceptance criteria$/a - A page of results by cursor, or the error that says why not.' "$KS"
+check "ready refuses a spike without a plan" '[[ $(crew ready "$KS" 2>&1) == *"fill in: Plan"* ]]'
+sed -i '/^## Plan$/a 1. Page through the API.' "$KS"
+check "ready accepts a spike with Goal, Plan and Acceptance criteria, and no Size or risk" \
   'crew ready "$KS" >/dev/null && [[ $(crew get "$KS" status) == ready && -z $(crew get "$KS" risk) ]]'
 crew dispatch "$KS" >/dev/null; KWT=$(crew get "$KS" worktree); KB=$(crew get "$KS" branch)
 n=$(ls "$PD/tasks" | wc -l)

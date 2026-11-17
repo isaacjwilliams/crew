@@ -254,3 +254,24 @@ func TestJudgePromptHasTheBrief(t *testing.T) {
 		}
 	}
 }
+
+// A brief that says nothing about how settles points in its objective, its
+// Context and its gates, so the judge gets those.
+func TestJudgePromptHasTheObjectiveAndGates(t *testing.T) {
+	task := taskIn(t, t.TempDir(), "022-a", "---\nbase: main\n---\n"+
+		"## Goal\n> Make search fast.\n\nObjective: search answers in under 50ms.\n\n"+
+		"## Context\n- The user decided results may be a minute stale.\n\n"+
+		"## Acceptance criteria\n- p95 under 50ms on the seed data.\n\n"+
+		"## Size\nAbout 200 lines: search.\n\n"+
+		"## Log\n")
+	at, _ := time.ParseInLocation(logTime, "2026-11-10 12:00", time.Local)
+	got := judgePrompt("On `a.go:3`: why?", briefBefore(task, AutomatedReview{Number: 1, At: at}), "#### 1. [nitpick] x")
+	want := "## The brief, and what the user had said before the review\n\n" +
+		"### Objective\n\nObjective: search answers in under 50ms.\n\n" +
+		"### Context\n\n- The user decided results may be a minute stale.\n\n" +
+		"### Acceptance criteria\n\n- p95 under 50ms on the seed data.\n\n" +
+		"### The user's request\n\n> Make search fast.\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("judge prompt lacks %q:\n%s", want, got)
+	}
+}
