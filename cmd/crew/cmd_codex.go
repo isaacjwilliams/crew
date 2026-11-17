@@ -71,8 +71,10 @@ func cmdCodex(c *Crew, args []string) error {
 	}
 	cost := runCost{took: time.Since(began), tokens: codexTokens(events),
 		models: []string{settings["CODEX_MODEL"]}, efforts: []string{settings["CODEX_MODEL_EFFORT"]}}
+	// The review is Codex's report and status: a cost that can't be kept
+	// mustn't change them.
 	if err := os.WriteFile(out+".cost", []byte(cost.String()+"\n"), 0o644); err != nil {
-		return err
+		warn("can't keep what the run cost: %v", err)
 	}
 	switch {
 	case stalled:

@@ -148,6 +148,10 @@ check "crew codex passes on a failing codex's status" '((st == 3)) && [[ $out ==
 check "a Codex run that ends before its turn completes still reports its time, and says its tokens weren't reported" \
   '[[ $out == *"cost: tokens not reported; "*"s; gpt-6-astra at xhigh effort"* ]]'
 rm "$HOME/codex-fail"
+mkdir -p "$SB/rev/answer-3.cost"
+out=$(crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-3" 2>&1); st=$?
+check "a cost crew codex can't write leaves Codex's report and status as they were, with a warning" \
+  '((st == 0)) && [[ $(cat "$SB/rev/answer-3.md") == "stub review" && $out == *"can'"'"'t keep what the run cost"* && $out == *"final message: $SB/rev/answer-3.md"* ]]'
 check "CLAUDECODE never reaches codex" '! grep -q LEAK "$HOME/codex-calls.log"'
 # crew review-cost: what a Claude reviewer's run cost, from its transcript.
 mkdir -p "$HOME/.claude/projects/-sb-webapp/5058aa63/subagents"
