@@ -115,7 +115,7 @@ type taskRow struct {
 	Notes  []string
 	Kids   []taskRow // the tasks stacked on it
 	// Folded: a draft outside a goal that the plain text counts, with its whole
-	// stack, rather than lists (foldedDrafts).
+	// stack, rather than lists (folds).
 	Folded bool
 }
 
@@ -155,6 +155,8 @@ func buildReport(c *Crew, full []string, doneToo bool) statusReport {
 	return r
 }
 
+// statusView builds a report: the crew-wide facts, and what it has worked out
+// for the project it's on.
 type statusView struct {
 	*Crew
 	doneToo  bool
@@ -231,7 +233,8 @@ func (s *statusView) project(name string) projectReport {
 	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
 	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
 	s.spikes = map[string][]Task{}
-	for _, t := range s.tasks(name) {
+	tasks := s.tasks(name)
+	for _, t := range tasks {
 		if d := t.Get("informs"); d != "" {
 			s.spikes[d] = append(s.spikes[d], t)
 		}
@@ -246,7 +249,7 @@ func (s *statusView) project(name string) projectReport {
 	}
 	var roots []Task
 	goalRoots := map[string][]Task{}
-	for _, t := range s.tasks(name) {
+	for _, t := range tasks {
 		if !s.shown(t.Get("status")) {
 			continue
 		}
@@ -263,7 +266,7 @@ func (s *statusView) project(name string) projectReport {
 	}
 	for _, t := range roots {
 		row := s.row(t)
-		row.Folded = s.foldedDrafts(t) > 0
+		row.Folded = s.folds(t)
 		r.Rows = append(r.Rows, row)
 	}
 	for _, f := range s.files("proposals", name) {
@@ -271,7 +274,7 @@ func (s *statusView) project(name string) projectReport {
 			r.OpenProposals++
 		}
 	}
-	r.ToReview = toReview(s.tasks(name))
+	r.ToReview = toReview(tasks)
 	return r
 }
 
@@ -391,22 +394,19 @@ func leavesStack(t, parent Task) bool {
 	return t.Status() == Ready && parent.Status().InFlight()
 }
 
-// foldedDrafts counts a draft outside a goal, with the drafts stacked on it, when
-// none of them has an open question or anything still to learn: they're counted
-// in one line, not listed. It's 0 for a task that's listed.
-func (s *statusView) foldedDrafts(t Task) int {
+// folds: a draft outside a goal, and every draft stacked on it, has no open
+// question and nothing still to learn, so the plain text counts the stack in one
+// line rather than listing it.
+func (s *statusView) folds(t Task) bool {
 	if t.Status() != Draft || t.OpenQuestions() > 0 || s.learning(t) != "" {
-		return 0
+		return false
 	}
-	n := 1
 	for _, k := range s.kids[t.Path] {
-		m := s.foldedDrafts(k)
-		if m == 0 {
-			return 0
+		if !s.folds(k) {
+			return false
 		}
-		n += m
 	}
-	return n
+	return true
 }
 
 // waitsOn are the tasks this one waits on, as crew dispatch sees them. A task's
