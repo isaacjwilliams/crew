@@ -364,27 +364,50 @@ func TestTaskKind(t *testing.T) {
 	}
 }
 
-// A spike asks less of its brief than a build, informs a draft, and ends done
-// rather than with a PR for the user. A fix is a build that also names the
-// merged task it fixes, or unknown, and the check that missed the defect. A
-// refine is a build by another name.
+// A build's brief sets an objective, its gates and a size, and leaves the design
+// to the worker. A spike's brief has a plan, what to try, but no size; it
+// informs a draft, and ends done rather than with a PR for the user. A fix is a
+// build that also names the merged task it fixes, or unknown, and the check that
+// missed the defect. A refine is a build by another name.
 func TestKindRules(t *testing.T) {
 	build, _ := KindBuild.rules()
 	spike, _ := KindSpike.rules()
 	fix, _ := KindFix.rules()
 	refine, _ := KindRefine.rules()
-	if !slices.Contains(build.brief, "## Structure") || !build.pr || build.keys != nil || build.link != "" || build.handedOver != PROpen {
+	if !slices.Contains(build.brief, "## Size") || !slices.Contains(build.design, "## Plan") || !slices.Contains(build.design, "## Structure") ||
+		!build.pr || build.keys != nil || build.link != "" || build.handedOver != PROpen {
 		t.Errorf("build's rules: %+v", build)
 	}
-	if slices.Contains(spike.brief, "## Structure") || spike.pr || spike.keys != nil || spike.link != "informs" || spike.linkTo != Draft || spike.linkUnknown || spike.handedOver != Done {
+	if !slices.Contains(spike.brief, "## Plan") || slices.Contains(spike.brief, "## Size") || spike.design != nil ||
+		spike.pr || spike.keys != nil || spike.link != "informs" || spike.linkTo != Draft || spike.linkUnknown || spike.handedOver != Done {
 		t.Errorf("spike's rules: %+v", spike)
 	}
-	if !slices.Equal(fix.brief, build.brief) || !fix.pr || !slices.Equal(fix.keys, []string{"fixes", "missed_by"}) ||
+	if !slices.Equal(fix.brief, build.brief) || !slices.Equal(fix.design, build.design) || !fix.pr || !slices.Equal(fix.keys, []string{"fixes", "missed_by"}) ||
 		fix.link != "fixes" || fix.linkTo != Merged || !fix.linkUnknown || fix.handedOver != PROpen {
 		t.Errorf("fix's rules: %+v", fix)
 	}
-	if !slices.Equal(refine.brief, build.brief) || !refine.pr || refine.keys != nil || refine.link != "" || refine.handedOver != PROpen {
+	if !slices.Equal(refine.brief, build.brief) || !slices.Equal(refine.design, build.design) || !refine.pr || refine.keys != nil || refine.link != "" || refine.handedOver != PROpen {
 		t.Errorf("refine's rules: %+v", refine)
+	}
+}
+
+// A brief that says how to meet its objective is refused, naming every section
+// that says it; one whose design sections hold only the template's notes isn't.
+func TestDesignInBrief(t *testing.T) {
+	build, _ := KindBuild.rules()
+	spike, _ := KindSpike.rules()
+	notes := Task{docWith(t, "---\nid: 001-a\n---\n## Structure\n<!-- where the code lives -->\n\n## Plan\n\n## Size\nAbout 40 lines.\n")}
+	if err := notes.DesignInBrief(build); err != nil {
+		t.Errorf("template notes only: %v", err)
+	}
+	old := Task{docWith(t, "---\nid: 001-a\n---\n## Structure\nA cache package.\n\n## Plan\n1. Add it.\n\n## Constraints and conventions\nNo Redis.\n")}
+	err := old.DesignInBrief(build)
+	if err == nil || !strings.Contains(err.Error(), "001-a's brief still says how to meet its objective, under Structure, Plan and Constraints and conventions") ||
+		!strings.Contains(err.Error(), "run crew ready 001-a") {
+		t.Errorf("old-shape brief: %v", err)
+	}
+	if err := old.DesignInBrief(spike); err != nil {
+		t.Errorf("a spike's plan: %v", err)
 	}
 }
 
@@ -392,6 +415,9 @@ func TestOrList(t *testing.T) {
 	for want, items := range map[string][]string{"": nil, "low": {"low"}, "low or high": {"low", "high"}, "low, medium or high": {"low", "medium", "high"}} {
 		if got := orList(items); got != want {
 			t.Errorf("orList(%q) = %q, want %q", items, got, want)
+		}
+		if got, want := andList(items), strings.Replace(want, " or ", " and ", 1); got != want {
+			t.Errorf("andList(%q) = %q, want %q", items, got, want)
 		}
 	}
 }
@@ -880,7 +906,7 @@ func TestProposalAuthor(t *testing.T) {
 func TestProposalTaskContext(t *testing.T) {
 	short := Proposal{docWith(t, "---\nsource: user\nrevisit_when: a second rule varies by place\n---\n# T\n\n"+
 		"## Evidence\n<!-- bullets -->\n\n## Why it matters\nRules vary by place.\n\n## Proposal\n<!-- target -->\n\n## First step\n\n## Log\n")}
-	want := "From proposal `001-a.md` (" + short.Path + "), written by the user. Run normal intake: confirm the plan with the user.\n" +
+	want := "From proposal `001-a.md` (" + short.Path + "), written by the user. Run normal intake: confirm the objective and its gates with the user.\n" +
 		"\nRevisit when: a second rule varies by place\n" +
 		"\nWhy it matters:\nRules vary by place.\n"
 	if got := short.TaskContext(); got != want {
@@ -888,7 +914,7 @@ func TestProposalTaskContext(t *testing.T) {
 	}
 
 	full := Proposal{docWith(t, "---\nid: 1\n---\n# T\n\n## Why it matters\nw\n\n## Proposal\np\n\n## First step\nf\n\n## Log\n")}
-	want = "From proposal `001-a.md` (" + full.Path + "). Run normal intake: confirm the plan with the user.\n" +
+	want = "From proposal `001-a.md` (" + full.Path + "). Run normal intake: confirm the objective and its gates with the user.\n" +
 		"\nWhy it matters:\nw\n\nProposal:\np\n\nFirst step:\nf\n"
 	if got := full.TaskContext(); got != want {
 		t.Errorf("a proposal without a source:\n%s\nwant:\n%s", got, want)

@@ -148,6 +148,15 @@ func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
 	if st := t.Status(); st != Ready && !force {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
 	}
+	// A task made ready before briefs left the design to the worker, --force or
+	// not, goes no further: crew tick dispatches a goal's ready tasks by itself.
+	rules, err := t.rules()
+	if err != nil {
+		return fail("%v", err)
+	}
+	if err := t.DesignInBrief(rules); err != nil {
+		return fail("%v", err)
+	}
 	idx := c.branches(p.Name)
 	if parent, ok := idx.abandonedParent(t); ok {
 		return fail("%s is stacked on %s, which is abandoned; give it another base with 'crew set %s base <branch>'", t.ID(), parent.ID(), t.ID())
