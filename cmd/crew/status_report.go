@@ -150,7 +150,7 @@ func buildReport(c *Crew, full []string, doneToo bool) statusReport {
 	}
 	for _, p := range c.projects("") {
 		if !slices.Contains(full, p) {
-			r.Projects = append(r.Projects, projectReport{Name: p, Waiting: s.waiting(p)})
+			r.Projects = append(r.Projects, projectReport{Name: p, Waiting: s.waiting(p, s.tasks(p))})
 		}
 	}
 	return r
@@ -208,10 +208,10 @@ func (s *statusView) settingsOf(project string) Settings {
 	return s.Settings
 }
 
-// waiting is what waits on the user in a project.
-func (s *statusView) waiting(project string) waitingOnUser {
+// waiting is what waits on the user in a project, from its tasks.
+func (s *statusView) waiting(project string, tasks []Task) waitingOnUser {
 	w := waitingOnUser{MemorySuggestions: s.memorySuggestions(project)}
-	for _, t := range s.tasks(project) {
+	for _, t := range tasks {
 		tw := waitingOf(t)
 		w.Questions += tw.Questions
 		w.PRs += tw.PRs
@@ -222,7 +222,8 @@ func (s *statusView) waiting(project string) waitingOnUser {
 // project works out one project in full: whether it's paused or full, its goals
 // and tasks, and what waits on the user.
 func (s *statusView) project(name string) projectReport {
-	r := projectReport{Name: name, Waiting: s.waiting(name), Full: true}
+	tasks := s.tasks(name)
+	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), Full: true}
 	s.branches = s.Crew.branches(name)
 	s.repo, s.settings = "", s.settingsOf(name)
 	if p, err := s.loadProject(name); err == nil {
@@ -235,7 +236,6 @@ func (s *statusView) project(name string) projectReport {
 	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
 	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
 	s.spikes = map[string][]Task{}
-	tasks := s.tasks(name)
 	for _, t := range tasks {
 		if d := t.Get("informs"); d != "" {
 			s.spikes[d] = append(s.spikes[d], t)
