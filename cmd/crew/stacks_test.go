@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -147,4 +148,165 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return out
+}
+
+// gitRepo drives a stackRepo the way a worker does, committing as a test user.
+type gitRepo struct {
+	t    *testing.T
+	repo string
+}
+
+func (g gitRepo) git(args ...string) string {
+	g.t.Helper()
+	return gitOut(g.t, g.repo, append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+}
+
+// commit writes the files named, each with its text, and commits them all.
+func (g gitRepo) commit(msg string, files ...string) string {
+	g.t.Helper()
+	g.write(files...)
+	g.git("commit", "-q", "--allow-empty", "-m", msg)
+	return g.git("rev-parse", "HEAD")
+}
+
+// amend writes the files named, each with its text, into the last commit.
+func (g gitRepo) amend(files ...string) string {
+	g.t.Helper()
+	g.write(files...)
+	g.git("commit", "-q", "--amend", "--no-edit")
+	return g.git("rev-parse", "HEAD")
+}
+
+func (g gitRepo) write(files ...string) {
+	g.t.Helper()
+	for i := 0; i < len(files); i += 2 {
+		if err := os.WriteFile(filepath.Join(g.repo, files[i]), []byte(files[i+1]), 0o644); err != nil {
+			g.t.Fatal(err)
+		}
+		g.git("add", files[i])
+	}
+}
+
+// merge merges rev into a new branch from the commit at. It resolves a conflict
+// with resolve, git arguments, then commits whatever is in the work tree.
+func (g gitRepo) merge(name, at, rev string, resolve ...string) string {
+	g.t.Helper()
+	g.git("checkout", "-q", "-b", name, at)
+	if err := exec.Command("git", "-C", g.repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", rev).Run(); err != nil {
+		if len(resolve) == 0 {
+			g.t.Fatalf("merging %s into %s: %v", rev, name, err)
+		}
+		g.git(resolve...)
+		g.git("add", "-A")
+		g.git("commit", "-q", "--no-edit")
+	}
+	return g.git("rev-parse", "HEAD")
+}
+
+// Evidence is current when the branch's own work, replayed onto where the branch
+// starts now, gives exactly the branch's tree: a restack or a merge of the base
+// that git made on its own keeps it, and nothing else does.
+func TestUnchangedSince(t *testing.T) {
+	g := gitRepo{t, stackRepo(t)}
+	start := g.commit("start", "shared", "one\ntwo\nthree\nfour\n", "gone", "base's\n")
+	g.git("checkout", "-q", "-b", "agent/t")
+	first := g.commit("own work", "own", "own work\n", "shared", "one\ntwo\nTHREE\nfour\n")
+	g.git("rm", "-q", "gone")
+	evidence := g.commit("delete gone")
+	g.git("checkout", "-q", "main")
+	baseFile := g.commit("main adds a file", "base", "from main\n")
+	nearby := g.commit("main changes a line near the branch's", "shared", "ONE\ntwo\nthree\nfour\n")
+	modified := g.commit("main changes the file the branch deletes", "gone", "main's\n")
+	sameLine := g.commit("main changes the branch's line", "shared", "ONE\ntwo\nthree!\nfour\n")
+	g.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+	clean := g.merge("clean", evidence, baseFile)
+	g.merge("edited", evidence, baseFile)
+	edited := g.amend("own", "edited in the merge\n")
+	resolved := g.merge("resolved", evidence, sameLine, "checkout", "--ours", "shared")
+	keptBase := g.merge("kept-base", evidence, modified, "checkout", "--theirs", "gone")
+	g.git("checkout", "-q", "-b", "restacked", evidence)
+	g.git("rebase", "-q", nearby)
+	restacked := g.git("rev-parse", "HEAD")
+	g.git("checkout", "-q", "-b", "whitespace", evidence)
+	whitespace := g.amend("own", "own  work\n")
+	g.git("checkout", "-q", "-b", "more", evidence)
+	more := g.commit("more own work", "own", "more\n")
+
+	task := stackTask(t, t.TempDir(), "001-t", "base: main", "branch: agent/t", "base_sha: "+start)
+	then, err := workIn(task, g.repo, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, tip string
+		want      bool
+	}{
+		{"the commit the evidence ran on", evidence, true},
+		{"a merge of the base git made on its own", clean, true},
+		{"a restack onto a base that changed a nearby line", restacked, true},
+		{"a merge edited before it was committed", edited, false},
+		{"a merge whose conflict was resolved", resolved, false},
+		{"a merge that kept the base's copy of a file the branch deletes", keptBase, false},
+		{"an amend that only changes whitespace", whitespace, false},
+		{"a commit added since", more, false},
+		{"a commit dropped since", first, false},
+	} {
+		w, err := workIn(task, g.repo, c.tip)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got, err := w.unchangedSince(g.repo, then); got != c.want || err != nil {
+			t.Errorf("%s: unchangedSince = %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+	if _, err := workIn(task, g.repo, "0123abc"); err == nil || !strings.Contains(err.Error(), "0123abc isn't a commit in") {
+		t.Errorf("a commit that isn't there: workIn error = %v", err)
+	}
+}
+
+// A parent rebased with changes of its own leaves the child's evidence on its
+// old cut. noteBaseSHA keeps that cut, so the evidence still checks out once
+// the child is restacked.
+func TestEvidenceFromBeforeAParentWasRebased(t *testing.T) {
+	g := gitRepo{t, stackRepo(t)}
+	g.git("checkout", "-q", "-b", "agent/parent")
+	oldParent := g.commit("parent's work", "parent", "first draft\n")
+	g.git("update-ref", "refs/remotes/origin/agent/parent", "HEAD")
+	g.git("checkout", "-q", "-b", "agent/child")
+	evidence := g.commit("child's work", "child", "child\n")
+	dir := t.TempDir()
+	parent := stackTask(t, dir, "001-parent", "base: main", "branch: agent/parent")
+	child := stackTask(t, dir, "002-child", "base: agent/parent", "branch: agent/child", "base_sha: "+oldParent)
+
+	// Review changes the parent's work, and the parent is rebased onto a newer main.
+	g.git("checkout", "-q", "main")
+	g.commit("main moves", "base", "from main\n")
+	g.git("update-ref", "refs/remotes/origin/main", "HEAD")
+	g.git("checkout", "-q", "-b", "rebased-parent")
+	newParent := g.commit("parent's work", "parent", "reviewed\n")
+	g.git("update-ref", "refs/remotes/origin/agent/parent", "HEAD")
+	g.git("checkout", "-q", "agent/child")
+	g.git("rebase", "-q", "--onto", newParent, oldParent)
+
+	if !noteBaseSHA(child, parent, g.repo) {
+		t.Fatal("noteBaseSHA didn't move base_sha after the restack")
+	}
+	if got := child.Get("earlier_base_shas"); got != oldParent {
+		t.Fatalf("earlier_base_shas = %q, want the cut it moved from, %s", got, oldParent)
+	}
+	then, err := workIn(child, g.repo, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if then.since != oldParent {
+		t.Errorf("the evidence's work starts at %s, want the old cut %s", then.since, oldParent)
+	}
+	now, err := workIn(child, g.repo, "refs/heads/agent/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := now.unchangedSince(g.repo, then); !got || err != nil {
+		t.Errorf("a restack onto a reworked parent: unchangedSince = %v, %v; want true", got, err)
+	}
 }
