@@ -135,7 +135,8 @@ func orUnknown(s string) string {
 	return s
 }
 
-// dispatchChecks refuses a dispatch the user hasn't readied, or one stacked on an
+// dispatchChecks refuses a dispatch the user hasn't readied, one whose brief
+// says how to meet its objective (with --force too), or one stacked on an
 // abandoned task, and holds back (notYet) one for a paused project, one whose
 // dependencies haven't merged, or one that would go over MAX_WORKERS or its
 // goal's max_in_flight. The caps are counted only once the dependencies have
