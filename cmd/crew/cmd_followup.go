@@ -389,12 +389,20 @@ func cmdNudge(c *Crew, args []string) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
-	// Decided under the lock, so two runs can't both nudge, and the followup
-	// below checks the task's status and the pause again under it.
+	job := t.WorkerJob()
+	if !stalled(t, c.agents().find(job)) {
+		return nothingToDo("%s hasn't stalled", t.ID())
+	}
+	// The worktree may not be on this machine. Making it can run worktree hooks
+	// for minutes, so it happens before the lock, and followup finds it in place.
+	if err := c.ensureWorktree(p, t); err != nil {
+		return err
+	}
+	// Decided again under the lock, so two runs can't both nudge. The followup
+	// below keeps the lock, and checks the task's status and the pause under it.
 	if err := c.lock(); err != nil {
 		return err
 	}
-	job := t.WorkerJob()
 	if !stalled(t, c.agents().find(job)) {
 		return nothingToDo("%s hasn't stalled", t.ID())
 	}

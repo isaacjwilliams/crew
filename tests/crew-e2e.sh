@@ -911,6 +911,14 @@ out=$(crew tick 2>/dev/null)
 check "tick nudges an addressing-feedback task whose worker ended its turn blocked, and leaves it addressing-feedback" '[[ $out == "013-tick-routing: its worker'"'"'s turn ended mid-task; nudged it" && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
 setstate "done" null; crew followup 13 --note "Use the euro." >/dev/null 2>&1
 check "a lead's note to a worker in a review round leaves it addressing-feedback" '[[ $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback ]]'
+# A stalled worker whose worktree isn't here: crew nudge makes it again before it locks the
+# ledger, since worktree hooks can take minutes.
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PE"; : >"$HOME/wt-hooks.log"
+echo 'flock -n "$CREW_HOME/.crew.lock" true && echo ledger-unlocked' >"$HOME/wt-hook-cmd"
+stall13 working; git -C "$SB/webapp" worktree remove --force "$WT13"; n=$(resumes)
+out=$(crew tick 2>/dev/null)
+check "a stalled worker whose worktree is gone gets it back, made with the ledger unlocked, and is nudged" '[[ $out == "013-tick-routing: its worker'"'"'s turn ended mid-task; nudged it" && -d $WT13 && $(resumes) == $((n + 1)) ]] && grep -qx ledger-unlocked "$HOME/wt-hooks.log"'
+sed -i '/^WORKTREE_TOOL="worktrunk"$/d' "$PE"; rm "$HOME/wt-hook-cmd"
 # not_nudged WHY: after the setup before it, a tick resumes nothing and logs no nudge.
 not_nudged() {
   local n log; n=$(resumes); log=$(grep -c " — nudged: " "$F13")
