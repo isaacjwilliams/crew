@@ -531,6 +531,14 @@ out=$(crew evidence 1 "$SB/b.png" 2>&1); st=$?
 git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
 check "when crew can't find the evidence repo's default branch, it publishes nothing, rather than to the branch it knew" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t find the default branch of the evidence repo"* && $(git --git-dir="$EV2" rev-parse trunk) == "$sha" && $(git --git-dir="$EV2" for-each-ref refs/heads | wc -l) == 2 ]]'
+# The same on a fresh clone, of a repo with a main crew could guess at.
+git --git-dir="$EV2" branch main trunk && git --git-dir="$EV2" symbolic-ref HEAD refs/heads/gone
+rm -rf "$HOME/agent-work/$P/_evidence"
+out=$(crew evidence 1 "$SB/b.png" 2>&1); st=$?
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+check "a fresh clone of an evidence repo whose default branch crew can't find publishes nothing either, not even to main" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t find the default branch of the evidence repo"* && $(git --git-dir="$EV2" rev-parse main) == "$sha" ]]'
+git --git-dir="$EV2" branch -q -D main
 git init -q --bare "$SB/evidence3.git" && git config --global url."$SB/evidence3.git".insteadOf git@github.com:owner/empty.git
 sed -i 's#^EVIDENCE_REPO=.*#EVIDENCE_REPO="git@github.com:owner/empty.git"#' "$PE"
 crew evidence 1 "$SB/shot.png" >/dev/null 2>&1; out=$(crew evidence 1 "$SB/shot.png" 2>&1); st=$?
