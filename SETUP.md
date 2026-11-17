@@ -655,7 +655,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI or a conflict don't count |
 | `MAX_CI_FIXES` | 2 | How many times a worker is sent red CI on its PR to fix; past it, the task waits on you. `0` turns CI handling off |
 | `AUTO_REVIEWS` | 3 | Most automated reviews a worker runs on its PR before it's yours; `0` turns automated review off. Often set per project |
-| `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a plan at intake, and a worker asks whether to split its branch before it opens a PR; `0` sets no limit for either |
+| `MAX_PR_LINES` | 1000 | Lines added plus removed past which the lead splits a plan at intake, and a worker asks whether to split its branch, before it opens a PR or when its automated review doesn't settle; `0` sets no limit for any of them |
 | `CODEX_REVIEW` | `no` | `yes` adds Codex to automated review, beside the reviewer agent (see [Codex in automated review](#codex-in-automated-review)) |
 | `CODEX_MODEL` | `gpt-6-astra` | The model Codex reviews with |
 | `CODEX_MODEL_EFFORT` | `xhigh` | Codex's reasoning effort (`model_reasoning_effort`) |
