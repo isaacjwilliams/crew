@@ -526,6 +526,11 @@ echo "build output" >"$SB/build.log"
 out=$(crew evidence 1 "$SB/notes.txt" "$SB/build.log"); sha=$(git --git-dir="$EV2" rev-parse trunk)
 check "a file the evidence repo ignores is published all the same, so every printed link names a committed file" \
   '[[ $(git --git-dir="$EV2" show --format= --name-only trunk | sort | paste -sd " ") == "$T1/build.log $T1/notes.txt" && $out == *"[build.log](https://github.com/owner/other/blob/$sha/$T1/build.log)" ]]'
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/gone   # a default branch the clone can't find
+out=$(crew evidence 1 "$SB/b.png" 2>&1); st=$?
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+check "when crew can't find the evidence repo's default branch, it publishes nothing, rather than to the branch it knew" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t find the default branch of the evidence repo"* && $(git --git-dir="$EV2" rev-parse trunk) == "$sha" && $(git --git-dir="$EV2" for-each-ref refs/heads | wc -l) == 2 ]]'
 git init -q --bare "$SB/evidence3.git" && git config --global url."$SB/evidence3.git".insteadOf git@github.com:owner/empty.git
 sed -i 's#^EVIDENCE_REPO=.*#EVIDENCE_REPO="git@github.com:owner/empty.git"#' "$PE"
 crew evidence 1 "$SB/shot.png" >/dev/null 2>&1; out=$(crew evidence 1 "$SB/shot.png" 2>&1); st=$?
