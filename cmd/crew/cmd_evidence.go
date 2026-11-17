@@ -89,9 +89,12 @@ func publishEvidence(remote, clone, dir string, files, names []string) (string, 
 		if !gitTo(os.Stderr, ".", "clone", "-q", remote, clone) {
 			return "", fail("couldn't clone the evidence repo %s", remote)
 		}
-	} else if !gitTo(os.Stderr, clone, "fetch", "-q", "--prune", "origin") || !gitOK(clone, "remote", "set-head", "origin", "--auto") {
-		// set-head: the repo's default branch may have changed since the clone.
+	} else if !gitTo(os.Stderr, clone, "fetch", "-q", "--prune", "origin") {
 		return "", fail("couldn't fetch the evidence repo %s", remote)
+	} else {
+		// The repo's default branch may have changed since the clone. An empty
+		// repo has none to read, which the check below reports.
+		gitOK(clone, "remote", "set-head", "origin", "--auto")
 	}
 	branch := defaultBranch(clone)
 	origin := "origin/" + branch
