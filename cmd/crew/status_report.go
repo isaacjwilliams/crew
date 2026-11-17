@@ -21,11 +21,11 @@ type statusReport struct {
 }
 
 // projectReport is one project. Every project has its Name and Waiting; the rest
-// is set only for a project built in full.
+// is set only for a project in scope, which status shows in full.
 type projectReport struct {
 	Name          string
 	Waiting       waitingOnUser
-	Full          bool
+	InScope       bool
 	Paused        bool
 	Workers       slots // against this project's MAX_WORKERS
 	WorkersErr    error
@@ -128,16 +128,16 @@ func (r taskRow) stackAsks() bool {
 	return slices.ContainsFunc(r.Kids, taskRow.stackAsks)
 }
 
-// buildReport works out what crew status shows: the projects named in full in
-// full, and only what waits on the user in the others. The full projects come
+// buildReport works out what crew status shows: the projects in scope in full,
+// and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
 // tasks.
-func buildReport(c *Crew, full []string, doneToo bool) statusReport {
+func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
 	}
-	if len(full) == 0 {
+	if len(inScope) == 0 {
 		return r
 	}
 	s := statusView{Crew: c, doneToo: doneToo}
@@ -145,11 +145,11 @@ func buildReport(c *Crew, full []string, doneToo bool) statusReport {
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
 	r.NoneDispatch = s.noProjectDispatches()
-	for _, p := range full {
+	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
 	}
 	for _, p := range c.projects("") {
-		if !slices.Contains(full, p) {
+		if !slices.Contains(inScope, p) {
 			r.Projects = append(r.Projects, projectReport{Name: p, Waiting: s.waiting(p, s.tasks(p))})
 		}
 	}
@@ -219,11 +219,11 @@ func (s *statusView) waiting(project string, tasks []Task) waitingOnUser {
 	return w
 }
 
-// project works out one project in full: whether it's paused or full, its goals
+// project works out one project in scope: whether it's paused or full, its goals
 // and tasks, and what waits on the user.
 func (s *statusView) project(name string) projectReport {
 	tasks := s.tasks(name)
-	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), Full: true}
+	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), InScope: true}
 	s.branches = s.Crew.branches(name)
 	s.repo, s.settings = "", s.settingsOf(name)
 	if p, err := s.loadProject(name); err == nil {

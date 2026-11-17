@@ -125,7 +125,7 @@ func rowIDs(rows []taskRow) []string {
 func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
 	r := buildReport(statusLedger(t), []string{"p"}, false)
 	p := r.Projects[0]
-	if p.Name != "p" || !p.Full || len(p.Goals) != 1 {
+	if p.Name != "p" || !p.InScope || len(p.Goals) != 1 {
 		t.Fatalf("project p = %+v", p)
 	}
 	g := p.Goals[0]
@@ -181,8 +181,8 @@ func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
 		t.Fatalf("projects = %+v, want p then q", r.Projects)
 	}
 	q := r.Projects[1]
-	if q.Full || q.Rows != nil || q.Goals != nil || q.ToReview != nil {
-		t.Errorf("q, not built in full = %+v", q)
+	if q.InScope || q.Rows != nil || q.Goals != nil || q.ToReview != nil {
+		t.Errorf("q, out of scope = %+v", q)
 	}
 	if want := (waitingOnUser{Questions: 1, PRs: 1, MemorySuggestions: 1}); q.Waiting != want {
 		t.Errorf("q waiting = %+v, want %+v", q.Waiting, want)

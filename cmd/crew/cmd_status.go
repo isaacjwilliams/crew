@@ -39,7 +39,7 @@ func cmdStatus(c *Crew, args []string) error {
 	return nil
 }
 
-// printReport prints a status report as plain text: the projects built in full,
+// printReport prints a status report as plain text: the projects in scope,
 // then the others that have something waiting on the user.
 func printReport(r statusReport) {
 	if r.ReadOnlyOn != "" {
@@ -56,7 +56,7 @@ func printReport(r statusReport) {
 	fmt.Println(header)
 	var elsewhere []string
 	for _, p := range r.Projects {
-		if p.Full {
+		if p.InScope {
 			fmt.Println()
 			printProject(p)
 		} else if p.Waiting != (waitingOnUser{}) {
