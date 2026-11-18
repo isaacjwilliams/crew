@@ -53,24 +53,29 @@ func (t Task) ReviewRuns() []ReviewRun {
 
 // reviewRecord is a review step's record, a Log message that starts
 // "<step>: <raised> raised, <taken> taken", as LEDGER.md's Log section gives it.
+// It takes any step name, so a repo's own review agent needs no listing here.
 var reviewRecord = regexp.MustCompile(`^([^:]+): (\d+) raised, (\d+) taken\b`)
 
 // The records from before steps stated their counts, in the forms the ledger
-// holds. They're kept because the ledger keeps them: a report over past tasks
-// should count those runs, as runs of unknown value rather than runs that took
-// nothing. A brief review was a "Plan review" before 053 renamed it, and an
-// observer's result often sat inside another entry.
+// holds. A report over past tasks should count those runs, as runs of unknown
+// value rather than runs that took nothing. They can go once no report reads
+// tasks logged before 2026-11-18, when the counted records began.
 var oldRecords = []struct {
 	step string
 	re   *regexp.Regexp
 }{
+	// "Plan review: 3 of 4 taken.", "Brief review (2nd): …". A brief review was
+	// called a plan review at first. "Plan review skipped: …" isn't a run.
 	{stepBriefReview, regexp.MustCompile(`^(Plan|Brief) review( \d+| \([^)]*\))?:`)},
+	// "Exhale: folded a repeated line."
 	{stepExhale, regexp.MustCompile(`^Exhale:`)},
+	// "PR #24 opened. Pre-PR review: took 1 …": the observer's result often sat
+	// inside another entry, so this one matches anywhere in the line.
 	{stepPrePRReview, regexp.MustCompile(`Pre-PR review|casual-observer declined`)},
 }
 
-// oldAgentRuns is a repo review agent's runs in the old form: "test-review x3"
-// is three runs of test-review.
+// oldAgentRuns is a repo review agent's runs in the old form, its name and how
+// many times it ran: "test-review x3" is three runs of test-review.
 var oldAgentRuns = regexp.MustCompile(`\b([a-z]+(?:-[a-z]+)+) x(\d+)\b`)
 
 // reviewRunsIn is the runs a Log entry records: one, when it's a review
