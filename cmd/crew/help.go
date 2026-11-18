@@ -114,6 +114,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on
                                    commit SHA, which the task reports, or edit the
                                    one there (used by workers)
+  crew evidence TASK FILE...       Publish screenshots and other files to the task's
+                                   folder in the project's EVIDENCE_REPO, in one
+                                   commit, and print a Markdown link to each, pinned
+                                   to that commit, for the PR (used by workers)
   crew codex ROOT PROMPT_FILE OUT_PREFIX
                                    A read-only Codex review in ROOT: its reply in
                                    OUT_PREFIX.md, events in OUT_PREFIX.events.jsonl,

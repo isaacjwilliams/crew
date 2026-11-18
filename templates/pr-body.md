@@ -16,6 +16,8 @@
        The criterion in a line, the commit it ran on as "(on <sha>)", as the task's entry has it,
        and the command that shows it, then its output in a <details> block. Where only a look
        shows it, say what you saw and how; where only a person can check it, what to try.
+       A published screenshot or file goes in the item it shows, as the
+       Markdown line printed when it was published; never give a path on someone's disk.
      - Notes for reviewers: only for a trade-off or an open question. Leave it out otherwise. -->
 <The objective, in a sentence.>
 

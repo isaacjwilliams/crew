@@ -94,6 +94,7 @@ type Project struct {
 func (p *Project) Repo() string          { return p.Settings["REPO"] }
 func (p *Project) DefaultBranch() string { return p.Settings["DEFAULT_BRANCH"] }
 func (p *Project) WorkRoot() string      { return p.Settings["WORK_ROOT"] }
+func (p *Project) EvidenceRepo() string  { return p.Settings["EVIDENCE_REPO"] }
 
 // loadProject is a project that's cloned on this machine, with its settings.
 func (c *Crew) loadProject(name string) (*Project, error) {
@@ -228,11 +229,19 @@ func slugFor(root string) string {
 	if err != nil || url == "" {
 		return slugify(filepath.Base(root))
 	}
-	s := strings.TrimSuffix(strings.TrimSuffix(url, ".git"), "/")
+	owner, repo := ownerAndRepo(url)
+	return slugify(owner + "-" + repo)
+}
+
+// ownerAndRepo reads a GitHub repo's owner and name from a git remote URL, in
+// any of its forms: git@github.com:owner/repo.git, https://github.com/owner/repo,
+// ssh://git@github.com/owner/repo.
+func ownerAndRepo(remote string) (owner, repo string) {
+	s := strings.TrimSuffix(strings.TrimSuffix(remote, ".git"), "/")
 	s = strings.ReplaceAll(s, ":", "/")
 	rest, repo := splitLast(s)
-	_, owner := splitLast(rest)
-	return slugify(owner + "-" + repo)
+	_, owner = splitLast(rest)
+	return owner, repo
 }
 
 // splitLast splits s at its last slash: "a/b/c" is "a/b" and "c".

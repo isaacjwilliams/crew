@@ -528,6 +528,75 @@ rm -rf "$HOME/gh-last-body" "$HOME/gh-summaries"
 check "review-summary refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew review-summary 2 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
 : >"$HOME/summary.md"
 check "review-summary refuses an empty file" '! crew review-summary 1 "$HOME/summary.md" 2>/dev/null && [[ ! -e $HOME/gh-last-body ]]'
+
+# crew evidence: a task's screenshots go to its project's evidence repo, one folder per task.
+# The repo is named the way it is on GitHub, and git takes that URL to a bare repo here.
+T1=$(basename "$F1" .md); T2=$(basename "$F2" .md); EV=$SB/evidence.git
+printf 'PNG' >"$SB/shot.png"; echo "what I ran" >"$SB/notes.txt"
+out=$(crew evidence 1 "$SB/shot.png" 2>&1); st=$?
+check "without EVIDENCE_REPO, crew evidence refuses, naming the setting, and makes no clone" \
+  '((st == 1)) && [[ $out == *"set EVIDENCE_REPO in its project.env"* && ! -e $HOME/agent-work/$P/_evidence ]]'
+git init -q --bare "$EV" && git clone -q "$EV" "$SB/evidence-seed" 2>/dev/null
+(cd "$SB/evidence-seed" && echo "# Evidence" >README.md && git add -A && git commit -qm init && git push -q origin main)
+git config --global url."$EV".insteadOf git@github.com:owner/name.git
+echo 'EVIDENCE_REPO="git@github.com:owner/name.git"' >>"$PE"
+out=$(crew evidence 1 "$SB/shot.png" "$SB/missing.png" 2>&1); st=$?
+check "crew evidence refuses a file that isn't there, and publishes nothing" '((st == 1)) && [[ $out == *"$SB/missing.png isn'"'"'t a file"* && $(git --git-dir="$EV" rev-list --count main) == 1 ]]'
+out=$(crew evidence 1 "$SB/shot.png" "$SB/notes.txt"); st=$?; sha=$(git --git-dir="$EV" rev-parse main)
+check "crew evidence commits the files under the task's folder on the evidence repo's default branch, in one commit, and pushes it" \
+  '((st == 0)) && [[ $(git --git-dir="$EV" rev-list --count main) == 2 && $(git --git-dir="$EV" log -1 --format=%s main) == "$T1: shot.png, notes.txt" &&
+    $(git --git-dir="$EV" show --format= --name-only main | sort | paste -sd " ") == "$T1/notes.txt $T1/shot.png" ]]'
+want="![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)"$'\n'"[notes.txt](https://github.com/owner/name/blob/$sha/$T1/notes.txt)"
+check "and prints a Markdown line for each, pinned to that commit: an image shown inline, another file linked" '[[ $out == "$want" ]]'
+touch "$HOME/agent-work/$P/_evidence/.git/kept"   # marks this clone, to tell it from a fresh one
+out=$(crew evidence 1 "$SB/shot.png")
+check "a second publish to the same EVIDENCE_REPO fetches into the clone it has, rather than cloning again" '[[ -e $HOME/agent-work/$P/_evidence/.git/kept ]]'
+check "publishing the same file again makes no commit, and links to the commit that has it" \
+  '[[ $(git --git-dir="$EV" rev-list --count main) == 2 && $out == "![shot.png](https://github.com/owner/name/blob/$sha/$T1/shot.png?raw=true)" ]]'
+printf 'A' >"$SB/a.png"; printf 'B' >"$SB/b.png"
+crew evidence 1 "$SB/a.png" >"$SB/ev1.out" 2>&1 & one=$!; crew evidence 2 "$SB/b.png" >"$SB/ev2.out" 2>&1 & two=$!; wait "$one" "$two"
+sha_of() { sed -E 's#.*/blob/([0-9a-f]+)/.*#\1#' "$1"; }   # the commit a printed link names
+sha1=$(sha_of "$SB/ev1.out"); sha2=$(sha_of "$SB/ev2.out")
+check "two tasks' crew evidence started at once both land on the default branch, and each prints its own commit" \
+  '[[ $(git --git-dir="$EV" rev-list --count main) == 4 && $sha1 != "$sha2" ]] &&
+   git --git-dir="$EV" merge-base --is-ancestor "$sha1" main && git --git-dir="$EV" merge-base --is-ancestor "$sha2" main &&
+   [[ $(git --git-dir="$EV" show --format= --name-only "$sha1") == "$T1/a.png" && $(git --git-dir="$EV" show --format= --name-only "$sha2") == "$T2/b.png" ]]'
+# EVIDENCE_REPO moves to another repo, whose default branch is master: the old clone's branches must never reach it.
+EV2=$SB/evidence2.git
+git init -q --bare -b master "$EV2" && git clone -q "$EV2" "$SB/evidence2-seed" 2>/dev/null
+(cd "$SB/evidence2-seed" && echo '*.log' >.gitignore && git add -A && git commit -qm init && git push -q origin master)
+git config --global url."$EV2".insteadOf git@github.com:owner/other.git
+sed -i 's#^EVIDENCE_REPO=.*#EVIDENCE_REPO="git@github.com:owner/other.git"#' "$PE"
+out=$(crew evidence 1 "$SB/shot.png"); sha=$(git --git-dir="$EV2" rev-parse master)
+check "a new EVIDENCE_REPO gets a fresh clone: the files land on its own default branch, and nothing of the old repo reaches it" \
+  '[[ $(git --git-dir="$EV2" for-each-ref --format="%(refname)") == refs/heads/master && $(git --git-dir="$EV2" ls-tree -r --name-only master | paste -sd " ") == ".gitignore $T1/shot.png" &&
+    $out == "![shot.png](https://github.com/owner/other/blob/$sha/$T1/shot.png?raw=true)" ]]'
+git --git-dir="$EV2" branch trunk master && git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+crew evidence 1 "$SB/a.png" >/dev/null
+check "when the evidence repo's default branch changes, the next publish goes to the new one" \
+  '[[ $(git --git-dir="$EV2" log -1 --format=%s trunk) == "$T1: a.png" && $(git --git-dir="$EV2" rev-parse master) == "$sha" ]]'
+echo "build output" >"$SB/build.log"
+out=$(crew evidence 1 "$SB/notes.txt" "$SB/build.log"); sha=$(git --git-dir="$EV2" rev-parse trunk)
+check "a file the evidence repo ignores is published all the same, so every printed link names a committed file" \
+  '[[ $(git --git-dir="$EV2" show --format= --name-only trunk | sort | paste -sd " ") == "$T1/build.log $T1/notes.txt" && $out == *"[build.log](https://github.com/owner/other/blob/$sha/$T1/build.log)" ]]'
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/gone   # a default branch the clone can't find
+out=$(crew evidence 1 "$SB/b.png" 2>&1); st=$?
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+check "when crew can't find the evidence repo's default branch, it publishes nothing, rather than to the branch it knew" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t find the default branch of the evidence repo"* && $(git --git-dir="$EV2" rev-parse trunk) == "$sha" && $(git --git-dir="$EV2" for-each-ref refs/heads | wc -l) == 2 ]]'
+# The same on a fresh clone, of a repo with a main crew could guess at.
+git --git-dir="$EV2" branch main trunk && git --git-dir="$EV2" symbolic-ref HEAD refs/heads/gone
+rm -rf "$HOME/agent-work/$P/_evidence"
+out=$(crew evidence 1 "$SB/b.png" 2>&1); st=$?
+git --git-dir="$EV2" symbolic-ref HEAD refs/heads/trunk
+check "a fresh clone of an evidence repo whose default branch crew can't find publishes nothing either, not even to main" \
+  '((st == 1)) && [[ $out == *"couldn'"'"'t find the default branch of the evidence repo"* && $(git --git-dir="$EV2" rev-parse main) == "$sha" ]]'
+git --git-dir="$EV2" branch -q -D main
+git init -q --bare "$SB/evidence3.git" && git config --global url."$SB/evidence3.git".insteadOf git@github.com:owner/empty.git
+sed -i 's#^EVIDENCE_REPO=.*#EVIDENCE_REPO="git@github.com:owner/empty.git"#' "$PE"
+crew evidence 1 "$SB/shot.png" >/dev/null 2>&1; out=$(crew evidence 1 "$SB/shot.png" 2>&1); st=$?
+check "an evidence repo with no commits yet is refused, asking for a first commit, once crew has a clone of it too" \
+  '((st == 1)) && [[ $out == *"has no commit on main yet; push a first commit to it" ]]'
 echo 'REPLY_TO_THREADS="no"' >>"$(ls -d "$L"/projects/*)/project.env"
 check "per-project REPLY_TO_THREADS is honoured" '! crew reply 1 111 x 2>/dev/null'
 check "react doesn't depend on REPLY_TO_THREADS" 'crew react 1 eyes 111 >/dev/null'

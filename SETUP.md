@@ -407,6 +407,23 @@ Each PR is short and has the same shape, so you can tell at a glance whether to 
 
 **Evidence** shows that the change meets the objective, rather than saying so: for each gate (acceptance criterion), the command the worker ran and its output, or, where only a look would show it, what it saw and how. A check only you can make, a live smoke test say, is listed with what to try. Each item names the commit it ran on, and the worker records the same entries in the task file, under `## Evidence`. The worker can't hand the PR over to you (`pr-open`) until every criterion has an entry and a PR item, each from a commit that holds the branch's own work as it is now: `crew hand-over` checks where the evidence ran, though it doesn't judge what it shows. So after any fix, the worker runs all of it again. A restack, or a merge of the base without conflicts, leaves the branch's own work as it was, and its evidence stands. It's the only way into `pr-open` (`crew set` refuses it), so the same checks run each time the PR comes back to you, after a review round or a restack.
 
+### Screenshots in PRs
+
+A screenshot never goes on the task branch, where it would sit in your repo's history. Give a project an evidence repo instead: a GitHub repo of its own (private is fine), with at least one commit on its default branch, that the people who review the project's PRs can read. Then name it in `projects/<project>/project.env`, as a remote URL this machine can push to:
+
+```bash
+EVIDENCE_REPO="git@github.com:your-org/pr_evidence.git"
+```
+
+A worker publishes its screenshots, and any other file a reviewer should open, with `crew evidence <task> <file>...`. crew commits them under a folder named for the task on the repo's default branch, pushes, and prints a Markdown line for each, which the worker puts in the PR's Evidence:
+
+```
+![search-filters.png](https://github.com/your-org/pr_evidence/blob/<commit>/012-saved-search-filters/search-filters.png?raw=true)
+[query-plan.txt](https://github.com/your-org/pr_evidence/blob/<commit>/012-saved-search-filters/query-plan.txt)
+```
+
+An image shows on the PR, for anyone who can read the evidence repo; another file is a link. Each link names the commit, so publishing a file again under the same name doesn't change what an earlier PR shows. crew keeps its clone of the repo in `~/agent-work/<project>/_evidence`, and never deletes or rewrites anything in the repo, so links in merged PRs keep working. Without `EVIDENCE_REPO`, workers describe their screenshots in the PR instead.
+
 ### Risk tiers: what look each PR needs
 
 Every task has a risk tier, which says how closely you need to look at its PR. The lead sets it at intake, from what meeting the objective will touch, and names it in the summary it shows you:
@@ -637,7 +654,7 @@ The crew enforces **where agents edit files** mechanically. For shell commands i
 | Only you change a project's MCP servers | `crew-guard` blocks every agent's Edit/Write of a project's `mcp.json` and `mcp.local.json`, the lead's included: every lead starts those servers without asking |
 | Only the lead writes a project's memory, when you approve | `crew-guard` blocks workers' and the gardener's Edit/Write of `memory.md`; they suggest with `crew remember`. A goal lead shares the lead's guard role, so for it this is an instruction |
 | The lead only edits the ledger | `crew-guard` on Edit/Write, for the lead and its subagents. Its shell commands run in auto mode (`LEAD_PERMISSION_MODE`) |
-| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post an automated-review summary on each for every pass of automated review, and mark it ready after its first hand-over | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
+| On GitHub, workers only push their own branch (`--force-with-lease` allowed, with the commit it expects named), open PRs, edit them, post an automated-review summary on each for every pass of automated review, mark it ready after its first hand-over, and publish evidence files for their own task to the project's evidence repo with `crew evidence` | The implementer's instructions, in a bold "On GitHub, you may do exactly this" section. `deny` rules in `config/worker-settings.json` catch `gh pr merge/close/review` and `git push --force`/`-f` |
 | Codex only reads when it reviews | `crew codex` runs Codex every time with the read-only sandbox and approvals off, fixed in code. A `deny` rule in `config/worker-settings.json` catches workers running `codex` directly |
 | Nobody but you merges, approves, or closes PRs | Agent instructions and those `deny` rules. Branch protection, if you can turn it on, makes it impossible |
 | Goal leads only edit the ledger, and never dispatch | `crew-guard` on Edit/Write, as for the lead. Their dispatches go through `crew tick`, which runs `crew dispatch` |
@@ -672,6 +689,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `CODEX_MODEL_EFFORT` | `xhigh` | Codex's reasoning effort (`model_reasoning_effort`) |
 | `AUTO_REVIEW_REBUTTALS` | 2 | Rounds between Codex and the reviewer agent in each review: `0`, `1` or `2`. With 1, a refutation made in round 1 can't be answered: round 1 is when each first sees the other's findings, so the answer would come in round 2 |
 | `SENSITIVE_PATHS` | empty | Git pathspecs, space-separated: a task whose branch changes a matching file becomes high risk (see [Risk tiers](#risk-tiers-what-look-each-pr-needs)). Set per project |
+| `EVIDENCE_REPO` | empty | A GitHub repo, as a git remote URL like `REMOTE`, that workers publish screenshots and other evidence to, to show them in their PRs (see [Screenshots in PRs](#screenshots-in-prs)). Set per project |
 | `WORKTREE_COPY` | empty | Gitignored files copied into each new worktree |
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
@@ -744,6 +762,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - `crew tick`: recording a round while the worker is busy and sending it once it's free, with any rounds before it, including to a worker that asked you a question, marking a task waiting on you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
   - followup: refusing while a worker is busy, continuing one that ended its turn on a question, never resending an old round, resuming, and falling back to a fresh worker;
   - replies: to thread roots, quoting conversation comments and review summaries, and refusing comments from other PRs; sync, cleanup (ending a background process left running in the worktree, and only that), the gardener, and promoting proposals;
+  - `crew evidence`: refusing without `EVIDENCE_REPO`, publishing a task's files in one commit under its folder and printing links pinned to it, and two tasks publishing at once;
   - `WORKTREE_TOOL=worktrunk`: dispatch and cleanup through `wt`, stopping on unapproved hooks, the ledger unlocked while hooks run;
   - project memory: suggestions written and counted in `crew status`, the memory printed with its header, and the SessionStart hook's output for each kind of session, and its exit 0 whatever it's given;
   - per-project worker settings: merged in, and unable to override a shipped value or drop a `deny` rule;
@@ -755,7 +774,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 - Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, a stray file where a link goes, new and dropped files, the fish files an older install shipped, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `lead`, run in bash through its link: its project scope, and the MCP servers it syncs, then switches off for one project; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, its confirmation, the pause it makes and lifts, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
 - The fish completions were checked with fish 3.7.
 
-**Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (what the lead loads, project memory reaching sessions through the SessionStart hook, a real failover, everything on a Mac: the shell suites run only on Linux), the settings crew passes to a live `--bg` worker, goal lead or gardener reaching it (they're a JSON string to `--settings`, with the session's project in their `env`), a project's `mcp.json` servers reaching live workers and leads (the MCP entries under "Assumptions to re-check"), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.
+**Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (what the lead loads, project memory reaching sessions through the SessionStart hook, a real failover, everything on a Mac: the shell suites run only on Linux), the settings crew passes to a live `--bg` worker, goal lead or gardener reaching it (they're a JSON string to `--settings`, with the session's project in their `env`), a project's `mcp.json` servers reaching live workers and leads (the MCP entries under "Assumptions to re-check"), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, an image from a private evidence repo showing on a PR, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.
 
 ## 12. Uninstall
 
