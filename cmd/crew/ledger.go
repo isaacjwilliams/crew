@@ -485,6 +485,10 @@ func kindNames() string {
 // caught the defect, in the order work passes them.
 var missedBy = []string{"brief-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
 
+// models are the models a task's worker can run on, by Claude Code's aliases. A
+// task without one runs on the session's default.
+var models = []string{"opus", "sonnet", "haiku"}
+
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string { return listJoin(items, " or ") }
 
@@ -574,6 +578,7 @@ func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
+func (t Task) Model() string     { return t.Get("model") }
 
 // Kind is the task's kind. A task without one, made before kinds, is a build.
 func (t Task) Kind() Kind {

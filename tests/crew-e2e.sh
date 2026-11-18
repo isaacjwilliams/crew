@@ -45,6 +45,12 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
+# runs_on TASK MODEL: the latest launch runs the task's worker on MODEL: crew started it
+# with --model MODEL, or resumed in place, passing no flags, a session it started so.
+runs_on() {
+  local launch; launch=$(last_launch)
+  [[ $launch == *" --model $2 "* || ($launch == "claude --resume $(crew get "$1" worker_session) --bg "* && $(crew get "$1" worker_model) == "$2") ]]
+}
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
@@ -480,6 +486,29 @@ check "a worker started before crew recorded fingerprints starts fresh on its ne
   '[[ $out == *"(fresh: its instructions or settings changed)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]] && ! resumed'
 check "a fresh start takes the session it replaces out of agent view" \
   'grep -qx "claude rm $job" "$HOME/claude-calls.log" && [[ -z $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .id" "$HOME/agents.json") && $(crew get 1 worker_job) != "$job" ]]'
+# A task's model: a fresh worker runs on it, and a resume keeps the model its session
+# started with, so a change of model starts the worker fresh at its next followup.
+check "no launch so far, for a task without a model, passes --model" '! grep -q -- "--model" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_model) ]] && ! grep -q "^worker_model:" "$F1"'
+check "set refuses a model that isn't opus, sonnet or haiku, naming them" \
+  '[[ $(crew set 1 model gpt-5 2>&1) == *"model must be opus, sonnet or haiku, not '"'"'gpt-5'"'"'"* && -z $(crew get 1 model) ]]'
+fp=$(crew get 1 worker_fingerprint); crew set 1 model sonnet; out=$(followup1 "now on sonnet")
+check "a followup after the task's model changes starts the worker fresh on it, says so, and records the model but no new fingerprint" \
+  '[[ $out == *"(fresh: its model changed from the default to sonnet)"* && $(last_launch) == *" --model sonnet You are picking up task"* && $(crew get 1 worker_model) == sonnet && $(crew get 1 worker_fingerprint) == "$fp" && $(tail -1 "$F1") == *"followup (fresh: its model changed from the default to sonnet): worker "* ]]'
+out=$(followup1 "still on sonnet")
+check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
+out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
+check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
+crew set 1 model haiku; echo "# changed" >>"$L/agents/implementer.md"; install_agents; out=$(followup1 "both changed")
+check "a followup after the model and the instructions both change says both" \
+  '[[ $out == *"(fresh: its model changed from sonnet to haiku, and its instructions or settings changed)"* && $(last_launch) == *" --model haiku "* && $(crew get 1 worker_model) == haiku ]]'
+git -C "$L" checkout -q -- agents; install_agents; crew set 1 model ""; out=$(followup1 "back to the default")
+check "a followup after the model is cleared starts the worker fresh on the default, without --model" \
+  '[[ $out == *"(fresh: its model changed from haiku to the default, and its instructions or settings changed)"* && $(last_launch) != *--model* && -z $(crew get 1 worker_model) ]]'
+row1() { crew status | grep "^  001-saved-search-filters "; }
+check "status shows no model on the row of a task that sets none" '[[ $(row1) != *model* ]]'
+crew set 1 model sonnet
+check "status shows the model on the row of a task that sets one" '[[ $(row1) == *"  model sonnet"* ]]'
+crew set 1 model ""
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'
 setstate blocked null
 check "a worker that ended its turn on a question doesn't count as running" '[[ $(crew status) == *"workers running: 0/"* ]]'
@@ -772,7 +801,7 @@ check "restack has nothing to do for a task that's up to date" '[[ $(crew restac
 check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'
 
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
-crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
+crew set 11 model sonnet; crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
 work "$WT11" picker.txt; crew set 11 pr https://github.com/isaac/webapp/pull/23; hand_over 11
 check "status nests a three-deep stack in order" '[[ $(crew status | grep -A2 "^  009-season-model " | tail -1) == "    └ 011-season-picker "* ]]'
 # The user squash-merges 9, and GitHub deletes its branch.
@@ -812,6 +841,7 @@ sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
+check "a restack goes to a sonnet task's worker on Sonnet" 'runs_on 11 sonnet'
 (cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
@@ -828,13 +858,16 @@ crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
 resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13 >/dev/null
-crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
+crew set 13 model sonnet; crew dispatch 13 >/dev/null
+check "dispatch starts a sonnet task's worker on Sonnet" '[[ $(last_launch) == *" --model sonnet "* && $(crew get 13 worker_model) == sonnet ]]'
+crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
 check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
+check "a review round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 hand_over 13; setstate working 4242
 out=$(crew tick)
 check "a task with open questions isn't marked waiting on the user while its worker is busy" '[[ -z $out && $(crew get 13 status) == pr-open ]]'
@@ -907,6 +940,7 @@ check "red CI while another check on the head is still running is left alone" '[
 ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED build:CANCELLED
 out=$(crew tick 2>/dev/null)
 check "once every check has finished, a tick records the red CI as a round and sends it to the idle worker" '[[ $out == $'"'"'013-tick-routing: CI round 9 recorded: red on aaaa111\n013-tick-routing: round 9 sent to its worker'"'"' && $(round "$F13" 9) == "- [ ] CI failed on aaaa111: test" && $(crew get 13 last_round_sent) == 9 && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+check "a CI round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "a second tick on the same red head records nothing" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(resumes) == $((n + 1)) ]]'
@@ -976,6 +1010,7 @@ check "a task abandoned while crew catch-up reads GitHub is sent nothing" '[[ $o
 rm "$HOME/gh-pr-view-hook"; crew set 13 status working; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "once the PR is handed over, a tick records the conflict with main's tip on origin as a round of its own, and sends it to the idle worker" '[[ $out == *"013-tick-routing: catch-up round $((r + 1)) recorded: conflicts with main"* && $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(round "$F13" $((r + 1))) == "- [ ] Conflicts with main at $B1" && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+check "a catch-up round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'

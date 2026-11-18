@@ -272,6 +272,9 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	case "missed_by":
 		ok = slices.Contains(missedBy, value)
 		takes = orList(missedBy)
+	case "model":
+		ok = slices.Contains(models, value)
+		takes = orList(models)
 	default:
 		if r, ok := linkRules(key); ok {
 			return c.resolveLink(proj, r, value)
