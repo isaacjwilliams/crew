@@ -412,6 +412,12 @@ check "resume passes the recorded session" 'grep -q -- "--resume $(crew get 1 wo
 check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in those rounds with .crew reply."'
 setstate "done" null
 check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults" && [[ $(crew get 1 status) == working ]]'
+moved=0
+for st in needs-input pr-open; do
+  sed -i "s/^status: .*/status: $st/" "$F1"; setstate "done" null
+  crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]] && moved=$((moved + 1))
+done
+check "note-only followup moves a task waiting on an answer or on review back to working" '((moved == 2))'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 rm -f "$HOME/fail-resume"
