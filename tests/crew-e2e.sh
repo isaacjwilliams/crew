@@ -2029,7 +2029,7 @@ check "a judge weighs each case's miss, with an inline comment's place and the u
 check "the report gives each case's verdict and range, the totals and what was tested, and is committed" \
   '[[ $(grep -c "^- \`095-eval-one/" "$EV") == 3 ]] && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **found** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — #### 1. [should fix] A stub finding" "$EV" &&
    grep -qF -- "- \`095-eval-one/round-2/comment-6\` **missed** — \`${EF:0:7}..${EH:0:7}\` — On \`a.go:1\`: why is a.go here?" "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **missed**" "$EV" && grep -qx "Found 1 of 3 misses." "$EV" &&
-   grep -qF -- "- Rubric: \`$L/.claude/skills/pr-review/rubric.md\` (" "$EV" && grep -qF -- "- Reviewer: \`$HOME/.claude/agents/reviewer.md\` (" "$EV" && grep -qx -- "- Claude Code: 2.1.290" "$EV" && grep -qx -- "- Cases: all" "$EV" &&
+   grep -qF -- "- Rubric: \`$L/.claude/skills/pr-review/rubric.md\` (" "$EV" && grep -qF -- "- Reviewer: \`$HOME/.claude/agents/reviewer.md\` (" "$EV" && grep -qx -- "- Claude Code: 2.1.296" "$EV" && grep -qx -- "- Cases: all" "$EV" &&
    [[ $out == *"Found 1 of 3 misses. Report: $EV"* && $(git -C "$L" log -1 --format=%s) == "review eval $PJ (3 cases)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
 # A second run, against another rubric, finds the other comment instead.
 mv "$EV" "$PD/review-eval/2026-11-14-090000.md" && crew commit "an earlier eval" >/dev/null

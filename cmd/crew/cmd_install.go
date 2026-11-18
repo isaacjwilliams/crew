@@ -39,7 +39,10 @@ func installedAgents() string {
 	return filepath.Join(home, ".claude", "agents")
 }
 
-const minClaude = "2.1.281"
+// minClaude is the oldest Claude Code crew runs on. Before 2.1.293, the haiku a
+// task can choose is Haiku 4.5, which can't run in auto mode, so a Haiku worker
+// would stop for every command its settings don't allow.
+const minClaude = "2.1.293"
 
 // minGit is the oldest git whose merge-tree takes --merge-base, which
 // crew hand-over checks evidence with.
@@ -110,7 +113,7 @@ func cmdInstall(c *Crew, args []string) error {
 	}
 	if v, ok := toolVersion("claude"); ok {
 		if !versionAtLeast(v, minClaude) {
-			note("Claude Code %s is older than %s; run 'claude update' (AGENTS.md loading and agent view need it)", v, minClaude)
+			note("Claude Code %s is older than %s; run 'claude update' (AGENTS.md loading, agent view and Haiku workers need it)", v, minClaude)
 		} else {
 			note("Claude Code %s", v)
 		}
