@@ -496,7 +496,7 @@ check "a fresh start takes the session it replaces out of agent view" \
   'grep -qx "claude rm $job" "$HOME/claude-calls.log" && [[ -z $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .id" "$HOME/agents.json") && $(crew get 1 worker_job) != "$job" ]]'
 # A task's model: a fresh worker runs on it, and a resume keeps the model its session
 # started with, so a change of model starts the worker fresh at its next followup.
-check "no launch so far, for a task without a model, passes --model" '! grep -q -- "--model" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_model) ]] && ! grep -q "^worker_model:" "$F1"'
+check "no launch so far, for a task without a model, passes --model" '! grep -q -- "--model" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_model) ]]'
 check "set refuses a model that isn't opus, sonnet or haiku, naming them" \
   '[[ $(crew set 1 model gpt-5 2>&1) == *"model must be opus, sonnet or haiku, not '"'"'gpt-5'"'"'"* && -z $(crew get 1 model) ]]'
 fp=$(crew get 1 worker_fingerprint); crew set 1 model sonnet; out=$(followup1 "now on sonnet")
