@@ -580,32 +580,31 @@ func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 func (t Task) Model() string     { return t.Get("model") }
 
-// The values of a task's auto_review. "no" turns its automated review off.
-// "yes" asks for at least one review, and crew hand-over checks there is one. A
-// task without auto_review gets the project's AUTO_REVIEWS.
-const (
-	autoReviewOn  = "yes"
-	autoReviewOff = "no"
-)
+// autoReviewOff, as a task's auto_review, turns its automated review off, while
+// the task isn't high risk: a high-risk PR is always reviewed.
+const autoReviewOff = "no"
+
+// AutomatedReviewOff: the lead turned the task's automated review off, and the
+// task isn't high risk.
+func (t Task) AutomatedReviewOff() bool {
+	return t.Get("auto_review") == autoReviewOff && t.Risk() != RiskHigh
+}
 
 // AutoReviews is how many automated reviews a pass on the task may run, given
 // the project's AUTO_REVIEWS.
 func (t Task) AutoReviews(project string) string {
-	switch t.Get("auto_review") {
-	case autoReviewOff:
+	if t.AutomatedReviewOff() {
 		return "0"
-	case autoReviewOn:
-		if n, err := strconv.Atoi(project); err != nil || n < 1 {
-			return "1"
-		}
 	}
 	return project
 }
 
-// AwaitsAutomatedReview: the task asks for automated review and records none
-// yet, though it has a PR to review.
-func (t Task) AwaitsAutomatedReview() bool {
-	return t.Get("auto_review") == autoReviewOn && t.PR() != "" && t.NewestReview() == 0
+// AwaitsAutomatedReview: the task's automated review was off when its worker
+// opened the PR, and is back on now the task is high risk, but no review is
+// recorded yet.
+func (t Task) AwaitsAutomatedReview(project string) bool {
+	return t.Get("auto_review") == autoReviewOff && t.Risk() == RiskHigh && atoiOr0(project) > 0 &&
+		t.PR() != "" && t.NewestReview() == 0
 }
 
 // Kind is the task's kind. A task without one, made before kinds, is a build.

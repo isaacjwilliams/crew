@@ -159,6 +159,32 @@ func TestNewestReview(t *testing.T) {
 	}
 }
 
+// A task's auto_review turns its automated review off only while it isn't high
+// risk, and hand-over waits for the review a raise turned back on.
+func TestAutomatedReviewOffUntilHighRisk(t *testing.T) {
+	reviewed := "## Automated reviews\n### Automated review 1\n\n## Log\n"
+	for _, c := range []struct {
+		front, body, project string
+		reviews              string
+		awaits               bool
+	}{
+		{"risk: high\npr: u", "## Log\n", "3", "3", false},
+		{"auto_review: no\nrisk: medium\npr: u", "## Log\n", "3", "0", false},
+		{"auto_review: no\nrisk: high", "## Log\n", "3", "3", false},
+		{"auto_review: no\nrisk: high\npr: u", "## Log\n", "3", "3", true},
+		{"auto_review: no\nrisk: high\npr: u", reviewed, "3", "3", false},
+		{"auto_review: no\nrisk: high\npr: u", "## Log\n", "0", "0", false},
+	} {
+		task := Task{docWith(t, "---\n"+c.front+"\n---\n"+c.body)}
+		if got := task.AutoReviews(c.project); got != c.reviews {
+			t.Errorf("%q with AUTO_REVIEWS=%s: AutoReviews = %s, want %s", c.front, c.project, got, c.reviews)
+		}
+		if got := task.AwaitsAutomatedReview(c.project); got != c.awaits {
+			t.Errorf("%q, %q with AUTO_REVIEWS=%s: AwaitsAutomatedReview = %v", c.front, c.body, c.project, got)
+		}
+	}
+}
+
 // Four automated reviews over two passes: the first needs fixes, the second
 // fixes only a nitpick, but its Claude reviewer didn't report, the third is
 // clean though Codex failed, and the fourth, in a later pass, has no findings.

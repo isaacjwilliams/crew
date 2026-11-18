@@ -52,6 +52,7 @@ runs_on() {
   [[ $launch == *" --model $2 "* || ($launch == "claude --resume $(crew get "$1" worker_session) --bg "* && $(crew get "$1" worker_model) == "$2") ]]
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
+review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
 # criterion, on its branch as it is now, here or on origin. Recording it again names
@@ -366,7 +367,7 @@ out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 check "a raise at the hand-over turns the task's automated review back on, and logs why" \
-  '[[ $out == *"automated review back on"* && $(crew get 1 auto_review) == yes && $(section "$F1" "## Log" | grep -c " — automated review back on: high risk") == 1 ]]'
+  '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
 sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
@@ -374,8 +375,8 @@ check "hand-over refuses when it can't fetch, since origin may have commits it h
   '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses a task whose automated review was turned back on until a review is recorded" \
-  '((st == 1)) && [[ $out == *"automated review is on for this task (auto_review: yes) but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
-sed -i '/^## Automated reviews$/a ### Automated review 1 — 2026-11-18 10:00\n- Reviewers: Claude reviewer\n\nNo findings.\nSummary posted' "$F1"
+  '((st == 1)) && [[ $out == *"high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
+review "$F1" 1
 check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
 returned=0
@@ -384,7 +385,7 @@ for st in needs-input working; do
 done
 check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
 # Back as it was, for the automated-review summaries below.
-sed -i '/^### Automated review 1 — /,/^Summary posted$/d' "$F1"; crew set 1 auto_review ""
+sed -i '/^### Automated review 1$/,+1d' "$F1"; crew set 1 auto_review ""
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 # A merge of the base leaves the branch's own work as it was, so its evidence stays
 # current; a merge whose conflict the worker resolved changes it.
@@ -512,22 +513,22 @@ check "a followup after the model and the instructions both change says both" \
 git -C "$L" checkout -q -- agents; install_agents; crew set 1 model ""; out=$(followup1 "back to the default")
 check "a followup after the model is cleared starts the worker fresh on the default, without --model" \
   '[[ $out == *"(fresh: its model changed from haiku to the default, and its instructions or settings changed)"* && $(last_launch) != *--model* && -z $(crew get 1 worker_model) ]]'
-# A task's auto_review: the lead turns its automated review off, or asks for at least
-# one, and the worker reads how many reviews it may run from crew config --task.
-check "crew config --task gives a task without auto_review the project's AUTO_REVIEWS" '[[ $(crew config AUTO_REVIEWS --task 1) == 3 ]]'
-check "set refuses an auto_review that isn't yes or no" \
-  '[[ $(crew set 1 auto_review off 2>&1) == *"auto_review must be yes or no, not '"'"'off'"'"'"* && -z $(crew get 1 auto_review) ]]'
-crew set 1 auto_review no
-check "a task whose automated review is off gets none, and crew config --task lists it so" '[[ $(crew config AUTO_REVIEWS --task 1) == 0 ]] && crew config --task 1 | grep -qx AUTO_REVIEWS=0'
-crew set 1 auto_review yes; echo 'AUTO_REVIEWS=0' >>"$PE"; none=$(crew config AUTO_REVIEWS --task 1)
-sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
-check "a task that asks for automated review gets at least one, and otherwise the project's AUTO_REVIEWS" '[[ $none == 1 && $(crew config AUTO_REVIEWS --task 1) == 3 ]]'
 row1() { crew status | grep "^  001-saved-search-filters "; }
+# A task's auto_review: the lead turns its automated review off, and the worker reads
+# how many reviews it may run from crew config --task.
+check "crew config --task gives a task without auto_review the project's AUTO_REVIEWS" '[[ $(crew config AUTO_REVIEWS --task 1) == 3 ]]'
+check "set refuses an auto_review that isn't no" \
+  '[[ $(crew set 1 auto_review yes 2>&1) == *"auto_review must be no, not '"'"'yes'"'"'"* && -z $(crew get 1 auto_review) ]]'
+crew set 1 auto_review no
+check "a high-risk task gets the project's AUTO_REVIEWS though its automated review is off" \
+  '[[ $(crew get 1 risk) == high && $(crew config AUTO_REVIEWS --task 1) == 3 && $(row1) != *"automated review"* ]]'
+crew set 1 risk medium
+check "a task whose automated review is off gets none, and crew config --task lists it so" '[[ $(crew config AUTO_REVIEWS --task 1) == 0 ]] && crew config --task 1 | grep -qx AUTO_REVIEWS=0'
 crew set 1 auto_review ""
-check "status shows neither a model nor automated review on the row of a task that sets neither" '[[ $(row1) != *model* && $(row1) != *"automated review"* ]]'
+check "status shows neither a model nor automated review on the row of a task that sets neither" 'r=$(row1); [[ $r != *model* && $r != *"automated review"* ]]'
 crew set 1 model sonnet; crew set 1 auto_review no
 check "status shows the model, and that automated review is off, on the row of a task that sets them" '[[ $(row1) == *"  model sonnet  automated review off"* ]]'
-crew set 1 model ""; crew set 1 auto_review ""
+crew set 1 model ""; crew set 1 auto_review ""; crew set 1 risk high
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'
 setstate blocked null
 check "a worker that ended its turn on a question doesn't count as running" '[[ $(crew status) == *"workers running: 0/"* ]]'
@@ -554,7 +555,6 @@ check "react refuses an ID that isn't a number, and reacts to none of the IDs" '
 check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
 check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
-review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
 check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
 review "$F1" 1
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1); body=$(cat "$HOME/gh-last-body")
@@ -844,7 +844,7 @@ echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
 check "a raise by sync turns the task's automated review back on, and logs why" \
-  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew get 10 auto_review) == yes && $(tail -1 "$F10") == *" — automated review back on: high risk" ]]'
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew config AUTO_REVIEWS --task 10) == 3 && $(tail -1 "$F10") == *" — risk → high: touches admin.txt; automated review back on" ]]'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'

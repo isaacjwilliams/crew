@@ -292,8 +292,8 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 		ok = slices.Contains(models, value)
 		takes = orList(models)
 	case "auto_review":
-		ok = value == autoReviewOn || value == autoReviewOff
-		takes = autoReviewOn + " or " + autoReviewOff
+		ok = value == autoReviewOff
+		takes = autoReviewOff
 	default:
 		if r, ok := linkRules(key); ok {
 			return c.resolveLink(proj, r, value)

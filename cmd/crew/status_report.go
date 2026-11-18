@@ -483,7 +483,7 @@ func (s *statusView) notes(t Task) []string {
 	if m := t.Model(); m != "" {
 		notes = append(notes, "model "+m)
 	}
-	if t.Get("auto_review") == autoReviewOff {
+	if t.AutomatedReviewOff() {
 		notes = append(notes, "automated review off")
 	}
 	if st == Ready && t.Goal() != "" {
