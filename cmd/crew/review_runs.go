@@ -60,12 +60,18 @@ var reviewRecord = regexp.MustCompile(`^([^:]+): (\d+) raised, (\d+) taken\b`)
 // should count those runs, as runs of unknown value rather than runs that took
 // nothing. A brief review was a "Plan review" before 053 renamed it, and an
 // observer's result often sat inside another entry.
-var (
-	oldBriefReview = regexp.MustCompile(`^(Plan|Brief) review( \d+| \([^)]*\))?:`)
-	oldExhale      = regexp.MustCompile(`^Exhale:`)
-	oldPrePRReview = regexp.MustCompile(`Pre-PR review|casual-observer declined`)
-	oldAgentRuns   = regexp.MustCompile(`\b([a-z]+(?:-[a-z]+)+) x(\d+)\b`) // "test-review x3": three runs
-)
+var oldRecords = []struct {
+	step string
+	re   *regexp.Regexp
+}{
+	{stepBriefReview, regexp.MustCompile(`^(Plan|Brief) review( \d+| \([^)]*\))?:`)},
+	{stepExhale, regexp.MustCompile(`^Exhale:`)},
+	{stepPrePRReview, regexp.MustCompile(`Pre-PR review|casual-observer declined`)},
+}
+
+// oldAgentRuns is a repo review agent's runs in the old form: "test-review x3"
+// is three runs of test-review.
+var oldAgentRuns = regexp.MustCompile(`\b([a-z]+(?:-[a-z]+)+) x(\d+)\b`)
 
 // reviewRunsIn is the runs a Log entry records: one, when it's a review
 // step's record, or else those its free text names in an old form.
@@ -74,19 +80,14 @@ func reviewRunsIn(e logEntry) []ReviewRun {
 		return []ReviewRun{{Step: m[1], At: e.at, Raised: atoiOr0(m[2]), Taken: atoiOr0(m[3]), Known: true}}
 	}
 	var runs []ReviewRun
-	unknown := func(step string) { runs = append(runs, ReviewRun{Step: step, At: e.at}) }
-	if oldBriefReview.MatchString(e.msg) {
-		unknown(stepBriefReview)
-	}
-	if oldExhale.MatchString(e.msg) {
-		unknown(stepExhale)
-	}
-	if oldPrePRReview.MatchString(e.msg) {
-		unknown(stepPrePRReview)
+	for _, old := range oldRecords {
+		if old.re.MatchString(e.msg) {
+			runs = append(runs, ReviewRun{Step: old.step, At: e.at})
+		}
 	}
 	for _, m := range oldAgentRuns.FindAllStringSubmatch(e.msg, -1) {
 		for range atoiOr0(m[2]) {
-			unknown(m[1])
+			runs = append(runs, ReviewRun{Step: m[1], At: e.at})
 		}
 	}
 	return runs
