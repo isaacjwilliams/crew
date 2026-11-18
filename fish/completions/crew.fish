@@ -11,6 +11,8 @@ complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
 complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
+complete -c crew -n "__fish_seen_subcommand_from config" -l task -x -d 'With this task\'s overrides too' \
+    -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea, and why it is worth keeping'
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'

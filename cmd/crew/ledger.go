@@ -580,6 +580,34 @@ func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 func (t Task) Model() string     { return t.Get("model") }
 
+// The values of a task's auto_review. "no" turns its automated review off.
+// "yes" asks for at least one review, and crew hand-over checks there is one. A
+// task without auto_review gets the project's AUTO_REVIEWS.
+const (
+	autoReviewOn  = "yes"
+	autoReviewOff = "no"
+)
+
+// AutoReviews is how many automated reviews a pass on the task may run, given
+// the project's AUTO_REVIEWS.
+func (t Task) AutoReviews(project string) string {
+	switch t.Get("auto_review") {
+	case autoReviewOff:
+		return "0"
+	case autoReviewOn:
+		if n, err := strconv.Atoi(project); err != nil || n < 1 {
+			return "1"
+		}
+	}
+	return project
+}
+
+// AwaitsAutomatedReview: the task asks for automated review and records none
+// yet, though it has a PR to review.
+func (t Task) AwaitsAutomatedReview() bool {
+	return t.Get("auto_review") == autoReviewOn && t.PR() != "" && t.NewestReview() == 0
+}
+
 // Kind is the task's kind. A task without one, made before kinds, is a build.
 func (t Task) Kind() Kind {
 	if k := Kind(t.Get("kind")); k != "" {

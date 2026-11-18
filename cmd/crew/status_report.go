@@ -483,6 +483,9 @@ func (s *statusView) notes(t Task) []string {
 	if m := t.Model(); m != "" {
 		notes = append(notes, "model "+m)
 	}
+	if t.Get("auto_review") == autoReviewOff {
+		notes = append(notes, "automated review off")
+	}
 	if st == Ready && t.Goal() != "" {
 		// Only a goal's ready tasks are dispatched in priority order.
 		if n, err := t.Priority(); err != nil {

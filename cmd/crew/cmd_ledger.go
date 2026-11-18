@@ -16,16 +16,28 @@ var configKeys = []string{"MAX_WORKERS", "GOAL_MAX_IN_FLIGHT", "BRANCH_PREFIX", 
 	"MAX_PR_LINES", "CODEX_REVIEW", "CODEX_MODEL", "CODEX_MODEL_EFFORT", "AUTO_REVIEW_REBUTTALS",
 	"SENSITIVE_PATHS", "WORKTREE_COPY", "WORKTREE_TOOL", "EVIDENCE_REPO", "GARDENER_LOOKBACK", "GARDENER_MAX_TURNS", "REMOTE", "REPO", "DEFAULT_BRANCH"}
 
-// crew config [KEY] [--project P]: the effective settings, with the overrides
-// of P or the default project (defaultProject).
+// crew config [KEY] [--project P|--task T]: the effective settings, with the
+// overrides of P or the default project (defaultProject), or of T's project and
+// T itself.
 func cmdConfig(c *Crew, args []string) error {
-	key, name := "", ""
+	key, name, task := "", "", ""
 	for len(args) > 0 {
-		if args[0] == "--project" && len(args) > 1 {
+		switch {
+		case args[0] == "--project" && len(args) > 1:
 			name, args = args[1], args[2:]
-		} else {
+		case args[0] == "--task" && len(args) > 1:
+			task, args = args[1], args[2:]
+		default:
 			key, args = args[0], args[1:]
 		}
+	}
+	var t Task
+	if task != "" {
+		var err error
+		if t, err = c.resolveTask(task); err != nil {
+			return err
+		}
+		name = t.Project()
 	}
 	settings := c.Settings
 	name, err := c.scope(name, false)
@@ -38,6 +50,10 @@ func cmdConfig(c *Crew, args []string) error {
 			return err
 		}
 		settings = p.Settings
+	}
+	if task != "" {
+		settings = settings.clone()
+		settings["AUTO_REVIEWS"] = t.AutoReviews(settings["AUTO_REVIEWS"])
 	}
 	value := func(k string) string {
 		switch k {
@@ -275,6 +291,9 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	case "model":
 		ok = slices.Contains(models, value)
 		takes = orList(models)
+	case "auto_review":
+		ok = value == autoReviewOn || value == autoReviewOff
+		takes = autoReviewOn + " or " + autoReviewOff
 	default:
 		if r, ok := linkRules(key); ok {
 			return c.resolveLink(proj, r, value)
