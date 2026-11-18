@@ -417,6 +417,8 @@ for st in needs-input pr-open; do
   sed -i "s/^status: .*/status: $st/" "$F1"; setstate "done" null
   check "note-only followup moves a $st task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 done
+setstate "done" null
+check "note-only followup to a working task logs no status line" 'n=$(grep -c "status → working" "$F1"); crew followup 1 --note "carry on" >/dev/null && [[ $(grep -c "status → working" "$F1") == "$n" ]]'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 rm -f "$HOME/fail-resume"
