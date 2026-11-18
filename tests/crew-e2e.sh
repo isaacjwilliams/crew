@@ -411,7 +411,8 @@ check "followup resumes on a new round" 'crew followup 1 >/dev/null && [[ $(crew
 check "resume passes the recorded session" 'grep -q -- "--resume $(crew get 1 worker_session) " "$HOME/claude-calls.log"'
 check "a review-round followup tells the worker to reply with crew reply" 'grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -q "Reply to each comment in those rounds with .crew reply."'
 setstate "done" null
-check "note-only followup doesn't resend the old round, and leaves a worker in its round addressing-feedback" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults" && [[ $(crew get 1 status) == addressing-feedback ]]'
+check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults"'
+check "note-only followup leaves a task in its review round addressing-feedback" '[[ $(crew get 1 status) == addressing-feedback ]]'
 moved=0
 for st in needs-input pr-open; do
   sed -i "s/^status: .*/status: $st/" "$F1"; setstate "done" null
