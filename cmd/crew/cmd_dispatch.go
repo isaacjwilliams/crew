@@ -198,10 +198,13 @@ func (c *Crew) pendingDeps(idx Branches, t Task) ([]Task, error) {
 	if parent, ok := idx.abandonedParent(t); ok {
 		deps = append(deps, parent)
 	}
+	names := strings.Fields(strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on")))
+	if len(names) == 0 {
+		return deps, nil // listing the project's task files is the costly part
+	}
 	parent, stacked := idx.liveParent(t)
-	names := strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on"))
 	files := c.files("tasks", project)
-	for _, dep := range strings.Fields(names) {
+	for _, dep := range names {
 		f, matches := resolveIn(dep, files)
 		if f == "" {
 			return nil, ambiguousFail(dep, matches, "%s depends on '%s', which doesn't match exactly one task in %s", t.ID(), dep, project)

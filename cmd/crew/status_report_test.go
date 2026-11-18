@@ -1,0 +1,193 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// reportTask writes a task file in a project of the ledger c is on, from front
+// matter lines, with an open question when asks is true.
+func reportTask(t *testing.T, c *Crew, project, name string, asks bool, fields ...string) Task {
+	t.Helper()
+	questions := ""
+	if asks {
+		questions = "- [ ] Which way?\n"
+	}
+	p := c.path("projects", project, "tasks", name+".md")
+	content := "---\nid: " + name + "\n" + strings.Join(fields, "\n") + "\n---\n# " + name +
+		"\n\n## Open questions\n" + questions + "\n## Log\n"
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Task{Doc{p}}
+}
+
+// writeFile writes a file in the home, making its directory.
+func writeFile(t *testing.T, c *Crew, content string, path ...string) {
+	t.Helper()
+	p := c.path(path...)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWaitingOf(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	for _, tc := range []struct {
+		name string
+		task Task
+		want waitingOnUser
+	}{
+		{"a task with an open question", reportTask(t, c, "p", "001-asks", true, "status: draft"), waitingOnUser{Questions: 1}},
+		{"a pr-open task", reportTask(t, c, "p", "002-pr", false, "status: pr-open"), waitingOnUser{PRs: 1}},
+		{"a finished task with an open question", reportTask(t, c, "p", "003-merged", true, "status: merged"), waitingOnUser{}},
+		{"a working task", reportTask(t, c, "p", "004-working", false, "status: working"), waitingOnUser{}},
+	} {
+		if got := waitingOf(tc.task); got != tc.want {
+			t.Errorf("%s: waitingOf = %+v, want %+v", tc.name, got, tc.want)
+		}
+		if got, want := waitsOnUser(tc.task), tc.want != (waitingOnUser{}); got != want {
+			t.Errorf("%s: waitsOnUser = %v, want %v", tc.name, got, want)
+		}
+	}
+}
+
+func TestWaitingOnUserWording(t *testing.T) {
+	for _, tc := range []struct {
+		w    waitingOnUser
+		want string
+	}{
+		{waitingOnUser{Questions: 5, PRs: 2, MemorySuggestions: 2}, "5 task(s) with open questions, 2 PR(s) to review, 2 memory suggestion(s)"},
+		{waitingOnUser{PRs: 1}, "1 PR(s) to review"},
+		{waitingOnUser{}, ""},
+	} {
+		if got := tc.w.String(); got != tc.want {
+			t.Errorf("%+v words as %q, want %q", tc.w, got, tc.want)
+		}
+	}
+}
+
+// statusLedger is a home with two projects. p has a running goal with a task in
+// flight, seven ready to go and one parked; outside the goal, a stack, a draft
+// that folds and three open PRs. q has a task with an open question, an open PR,
+// a finished task with an open question and a memory suggestion.
+func statusLedger(t *testing.T) *Crew {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	c := &Crew{Home: t.TempDir(), Host: "here", Settings: Settings{"MAX_WORKERS": "3", "GOAL_MAX_IN_FLIGHT": "2"}}
+	writeFile(t, c, "here\n", "host")
+	writeFile(t, c, `#!/bin/sh
+echo '[{"id":"w1","state":"working","pid":1}]'
+`, "bin", "claude")
+	t.Setenv("PATH", c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, p := range []string{"p", "q"} {
+		writeFile(t, c, "", "projects", p, "project.env")
+	}
+	writeFile(t, c, "---\nid: 001-launch\nstatus: running\n---\n# launch\n\n## Log\n", "projects", "p", "goals", "001-launch.md")
+	goal := []string{"goal: 001-launch", "base: main"}
+	reportTask(t, c, "p", "001-in-flight", false, slices.Concat(goal, []string{"status: working", "worker_job: w1"})...)
+	for i := 2; i <= 8; i++ {
+		reportTask(t, c, "p", fmt.Sprintf("%03d-next", i), false, slices.Concat(goal, []string{"status: ready"})...)
+	}
+	reportTask(t, c, "p", "009-parked", true, slices.Concat(goal, []string{"status: draft"})...)
+	reportTask(t, c, "p", "010-parent", false, "status: working", "base: main", "branch: agent/parent")
+	reportTask(t, c, "p", "011-child", true, "status: draft", "base: agent/parent", "branch: agent/child")
+	reportTask(t, c, "p", "012-idea", false, "status: draft", "base: main")
+	reportTask(t, c, "p", "013-risky", false, "status: pr-open", "risk: high", "pr: https://github.com/o/r/pull/9")
+	reportTask(t, c, "p", "014-later", false, "status: pr-open", "risk: low", "pr: https://github.com/o/r/pull/12")
+	reportTask(t, c, "p", "015-earlier", false, "status: pr-open", "risk: low", "pr: https://github.com/o/r/pull/5")
+
+	reportTask(t, c, "q", "001-asks", true, "status: draft")
+	reportTask(t, c, "q", "002-pr", false, "status: pr-open", "pr: https://github.com/o/q/pull/3")
+	reportTask(t, c, "q", "003-merged", true, "status: merged")
+	writeFile(t, c, "# Memory suggestions: q\n\n- [ ] **A** a. (lead, 2026-11-09)\n", "projects", "q", "memory-suggestions.md")
+	return c
+}
+
+func rowIDs(rows []taskRow) []string {
+	var ids []string
+	for _, r := range rows {
+		ids = append(ids, r.Task.ID())
+	}
+	return ids
+}
+
+func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
+	r := buildReport(statusLedger(t), []string{"p"}, false)
+	p := r.Projects[0]
+	if p.Name != "p" || !p.InScope || len(p.Goals) != 1 {
+		t.Fatalf("project p = %+v", p)
+	}
+	g := p.Goals[0]
+	var kinds []groupKind
+	for _, group := range g.Groups {
+		kinds = append(kinds, group.Kind)
+	}
+	if want := []groupKind{groupInFlight, groupNext, groupParked}; !slices.Equal(kinds, want) {
+		t.Fatalf("goal groups = %v, want %v", kinds, want)
+	}
+	inFlight, next := g.Groups[0].Rows, g.Groups[1].Rows
+	if len(inFlight) != 1 || inFlight[0].Worker.ID != "w1" || inFlight[0].Number != 0 {
+		t.Errorf("in flight = %+v, want 001-in-flight with its worker and no number", inFlight)
+	}
+	// The plain text lists only the first nextShown; the report has every one.
+	if len(next) != 7 || next[5].Task.ID() != "007-next" || next[5].Number != 6 {
+		t.Errorf("next = %v, want all seven, the sixth numbered 6", rowIDs(next))
+	}
+	if g.Total != 9 || g.Merged != 0 || g.InFlight != (slots{used: 1, limit: 2}) {
+		t.Errorf("goal counts: %d of %d merged, %+v in flight", g.Merged, g.Total, g.InFlight)
+	}
+}
+
+func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
+	p := buildReport(statusLedger(t), []string{"p"}, false).Projects[0]
+	if got, want := rowIDs(p.Rows), []string{"010-parent", "012-idea", "013-risky", "014-later", "015-earlier"}; !slices.Equal(got, want) {
+		t.Fatalf("rows outside the goal = %v, want %v", got, want)
+	}
+	parent, idea := p.Rows[0], p.Rows[1]
+	if got := rowIDs(parent.Kids); !slices.Equal(got, []string{"011-child"}) {
+		t.Errorf("010-parent's kids = %v, want 011-child", got)
+	} else if notes := parent.Kids[0].Notes; !slices.Contains(notes, "1 open question(s)") {
+		t.Errorf("011-child's notes = %q, want its open question", notes)
+	}
+	if parent.Folded || !idea.Folded {
+		t.Errorf("folded: 010-parent %v, 012-idea %v; want only the draft folded", parent.Folded, idea.Folded)
+	}
+	if risky := p.Rows[2]; !slices.Contains(risky.Notes, "high: no security review yet") {
+		t.Errorf("013-risky's notes = %q, want its look", risky.Notes)
+	}
+	var review []string
+	for _, task := range p.ToReview {
+		review = append(review, task.ID())
+	}
+	if want := []string{"015-earlier", "014-later", "013-risky"}; !slices.Equal(review, want) {
+		t.Errorf("to review = %v, want cheapest look first, then by PR number: %v", review, want)
+	}
+}
+
+func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
+	r := buildReport(statusLedger(t), []string{"p"}, false)
+	if len(r.Projects) != 2 || r.Projects[1].Name != "q" {
+		t.Fatalf("projects = %+v, want p then q", r.Projects)
+	}
+	q := r.Projects[1]
+	if q.InScope || q.Rows != nil || q.Goals != nil || q.ToReview != nil {
+		t.Errorf("q, out of scope = %+v", q)
+	}
+	if want := (waitingOnUser{Questions: 1, PRs: 1, MemorySuggestions: 1}); q.Waiting != want {
+		t.Errorf("q waiting = %+v, want %+v", q.Waiting, want)
+	}
+	if r.ReadOnlyOn != "" || r.Workers != (slots{used: 1, limit: 3}) || r.NoneDispatch {
+		t.Errorf("crew-wide: read-only on %q, workers %+v, none dispatch %v", r.ReadOnlyOn, r.Workers, r.NoneDispatch)
+	}
+}

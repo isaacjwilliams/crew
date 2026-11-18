@@ -226,6 +226,7 @@ sed -i '/^LEAD_PERMISSION_MODE=/d' "$TH/projects/$P/local.env"
 wait_for '[[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-parse main)" ]]'
 
 git clone -q "$SB/crew.git" "$LH"
+git clone -q "$SB/crew.git" "$SB/laptop/crew-behind"   # it will still say the tower runs the crew once that's no longer so
 out=$(laptop "$LH/bin/crew" status 2>&1)
 check "a machine that doesn't run the crew reads it" '[[ $out == *"read-only: crew runs on tower"* && $out == *"1 draft(s)"* ]]'
 out=$(laptop "$LH/bin/crew" log 1 "from the laptop" 2>&1)
@@ -240,6 +241,9 @@ LREPO=$SB/laptop/agent-work/$P/repo
 check "host up --take moves the lease" '[[ $(origin_host) == laptop ]] && grep -qx crew-tick.timer "$SB/laptop/systemctl-enabled"'
 check "its push leaves the home's git config alone" '[[ $(stat -c %i "$LH/.git/config") == "$config" ]]'
 check "and clones each project this machine has no clone of" '[[ $(git -C "$LREPO" remote get-url origin) == "$SB/webapp.git" ]] && grep -q "^REPO=\"$LREPO\"" "$LH/projects/$P/local.env"'
+out=$(laptop "$SB/laptop/crew-behind/bin/crew" status 2>&1)
+check "status on a home that's behind pulls first, and isn't read-only when the pull hands this machine the lease" '[[ $(cat "$SB/laptop/crew-behind/host") == laptop && $out == "workers running: "* && $out != *"read-only"* ]]'
+rm -rf "$SB/laptop/crew-behind"
 
 # The tower hasn't heard yet. Its next commit is refused by origin, so it learns.
 echo '[{"id":"job1","name":"crew-x-001","pid":4242,"state":"working","sessionId":"job1-s"}]' >"$SB/tower/agents.json"
