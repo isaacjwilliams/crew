@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -71,5 +73,36 @@ func TestReviewRuns(t *testing.T) {
 	}
 	if got := (Task{docWith(t, sampleTask)}).ReviewRuns(); got != nil {
 		t.Errorf("a task with no review step: %v", runsText(got))
+	}
+}
+
+// The record each agent file tells its agent to write, as written there, is
+// read as a run of its step with the counts it states. Every other record of a
+// review step the files ask for would be read as a run of unknown value, so
+// there is none.
+func TestAgentFilesWriteReviewRecords(t *testing.T) {
+	logCommand := regexp.MustCompile("`crew log <task> \"([^\"`]*)\"`")
+	for file, steps := range map[string][]string{
+		"lead.md":        {stepBriefReview},
+		"goal-lead.md":   {stepBriefReview},
+		"implementer.md": {stepExhale, stepPrePRReview, stepSecurityReview, "<agent name>"},
+	} {
+		b, err := os.ReadFile("../../agents/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, m := range logCommand.FindAllStringSubmatch(string(b), -1) {
+			msg := strings.NewReplacer("<raised>", "7", "<taken>", "2").Replace(m[1])
+			for _, r := range reviewRunsIn(logEntry{msg: msg}) {
+				if !r.Known || r.Raised != 7 || r.Taken != 2 {
+					t.Errorf("%s: %q isn't read as 7 raised and 2 taken: %+v", file, m[1], r)
+				}
+				got = append(got, r.Step)
+			}
+		}
+		if !slices.Equal(got, steps) {
+			t.Errorf("%s records the steps %q, want %q", file, got, steps)
+		}
 	}
 }
