@@ -413,12 +413,10 @@ check "a review-round followup tells the worker to reply with crew reply" 'grep 
 setstate "done" null
 check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults"'
 check "note-only followup leaves a task in its review round addressing-feedback" '[[ $(crew get 1 status) == addressing-feedback ]]'
-moved=0
 for st in needs-input pr-open; do
   sed -i "s/^status: .*/status: $st/" "$F1"; setstate "done" null
-  crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]] && moved=$((moved + 1))
+  check "note-only followup moves a $st task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 done
-check "note-only followup moves a task waiting on an answer or on review back to working" '((moved == 2))'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 rm -f "$HOME/fail-resume"
