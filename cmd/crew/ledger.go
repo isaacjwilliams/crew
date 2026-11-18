@@ -581,7 +581,8 @@ func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 func (t Task) Model() string     { return t.Get("model") }
 
 // autoReviewOff, as a task's auto_review, turns its automated review off, while
-// the task isn't high risk: a high-risk PR is always reviewed.
+// the task isn't high risk: a high-risk PR is always reviewed. It's the only
+// value, since a task without one gets the project's AUTO_REVIEWS.
 const autoReviewOff = "no"
 
 // AutomatedReviewOff: the lead turned the task's automated review off, and the
@@ -599,9 +600,9 @@ func (t Task) AutoReviews(project string) string {
 	return project
 }
 
-// AwaitsAutomatedReview: the task's automated review was off when its worker
-// opened the PR, and is back on now the task is high risk, but no review is
-// recorded yet.
+// AwaitsAutomatedReview: the task's automated review was off, and is back on
+// now the task is high risk, but no review is recorded yet. A task without a PR
+// (pr_mode none) has nothing to review.
 func (t Task) AwaitsAutomatedReview(project string) bool {
 	return t.Get("auto_review") == autoReviewOff && t.Risk() == RiskHigh && atoiOr0(project) > 0 &&
 		t.PR() != "" && t.NewestReview() == 0

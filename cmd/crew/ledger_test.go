@@ -164,15 +164,19 @@ func TestNewestReview(t *testing.T) {
 func TestAutomatedReviewOffUntilHighRisk(t *testing.T) {
 	reviewed := "## Automated reviews\n### Automated review 1\n\n## Log\n"
 	for _, c := range []struct {
-		front, body, project string
-		reviews              string
-		awaits               bool
+		front, body, project string // the task's front matter and body, and the project's AUTO_REVIEWS
+		reviews              string // what AutoReviews gives
+		awaits               bool   // what AwaitsAutomatedReview gives
 	}{
+		// Without auto_review: the project's, and hand-over doesn't wait.
 		{"risk: high\npr: u", "## Log\n", "3", "3", false},
+		// Off below high risk.
 		{"auto_review: no\nrisk: medium\npr: u", "## Log\n", "3", "0", false},
+		// Back on at high risk, and hand-over waits only with a PR and no review.
 		{"auto_review: no\nrisk: high", "## Log\n", "3", "3", false},
 		{"auto_review: no\nrisk: high\npr: u", "## Log\n", "3", "3", true},
 		{"auto_review: no\nrisk: high\npr: u", reviewed, "3", "3", false},
+		// A project without automated review has none to turn back on.
 		{"auto_review: no\nrisk: high\npr: u", "## Log\n", "0", "0", false},
 	} {
 		task := Task{docWith(t, "---\n"+c.front+"\n---\n"+c.body)}

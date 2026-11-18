@@ -17,8 +17,8 @@ var configKeys = []string{"MAX_WORKERS", "GOAL_MAX_IN_FLIGHT", "BRANCH_PREFIX", 
 	"SENSITIVE_PATHS", "WORKTREE_COPY", "WORKTREE_TOOL", "EVIDENCE_REPO", "GARDENER_LOOKBACK", "GARDENER_MAX_TURNS", "REMOTE", "REPO", "DEFAULT_BRANCH"}
 
 // crew config [KEY] [--project P|--task T]: the effective settings, with the
-// overrides of P or the default project (defaultProject), or of T's project and
-// T itself.
+// overrides of P or the default project (defaultProject), or of T's project,
+// with the AUTO_REVIEWS T's worker reads (the one setting a task can change).
 func cmdConfig(c *Crew, args []string) error {
 	key, name, task := "", "", ""
 	for len(args) > 0 {

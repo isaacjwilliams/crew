@@ -939,8 +939,9 @@ out=$(crew review 13 2>/dev/null)
 check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
 setstate "done" null; out=$(crew tick 2>/dev/null)
 check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
-hand_over 13; setstate "done" null
-check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+hand_over 13; setstate "done" null; crew set 13 auto_review no
+check "crew review sends the request to an idle worker straight away, though the task's automated review is off" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+crew set 13 auto_review ""
 # Red CI on a PR: crew tick sends it to the worker as a review round once the worker has
 # handed the PR over (pr-open), once for each head commit, and asks you past MAX_CI_FIXES.
 ci() {  # head name:conclusion…: the PR's head commit and its check runs; a conclusion of - is one still running

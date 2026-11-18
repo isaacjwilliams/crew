@@ -129,10 +129,10 @@ func (idx Branches) restackReason(t Task, repo string) string {
 
 // raiseRisk makes a task high risk when its own work (ownWork) changes a file
 // that matches one of the project's SENSITIVE_PATHS (git pathspecs), and logs
-// the first such file, and that its automated review is back on when the raise
-// does that (AutoReviews). It never lowers a tier. It returns the line it
-// logged, or nothing, and an error when it couldn't look. Call it with the lock
-// held.
+// the first such file. When the raise turns the task's automated review back on
+// (AutomatedReviewOff), the line says so too. It never lowers a tier. It returns
+// the line it logged, or nothing, and an error when it couldn't look. Call it
+// with the lock held.
 func raiseRisk(t Task, p *Project) (string, error) {
 	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
 	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
@@ -162,11 +162,10 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	if len(touched) > 1 {
 		line += fmt.Sprintf(" (+%d more)", len(touched)-1)
 	}
-	reviews := t.AutoReviews(p.Settings["AUTO_REVIEWS"])
-	t.Set("risk", string(RiskHigh))
-	if t.AutoReviews(p.Settings["AUTO_REVIEWS"]) != reviews {
+	if t.AutomatedReviewOff() && atoiOr0(p.Settings["AUTO_REVIEWS"]) > 0 {
 		line += "; automated review back on"
 	}
+	t.Set("risk", string(RiskHigh))
 	t.Touch()
 	t.Log(line)
 	return line, nil

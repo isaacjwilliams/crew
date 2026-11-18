@@ -367,6 +367,7 @@ func (l launch) record(d Doc) {
 	d.Set(l.by.prefix+"_session", l.session)
 	if l.mode != "resume" {
 		d.Set(l.by.prefix+"_fingerprint", l.by.fingerprint)
+		// An unset model clears one the file records, but adds no empty key.
 		if _, ok := d.Lookup(l.by.prefix + "_model"); ok || l.by.model != "" {
 			d.Set(l.by.prefix+"_model", l.by.model)
 		}
@@ -387,9 +388,9 @@ var (
 // ledger as an extra directory. A resume passes only the session and the prompt:
 // a background session keeps the options it was started with (agent, model,
 // permission mode, settings, --add-dir), and passing any launch flag again makes
-// Claude Code start a copy under a new session instead of continuing this one. A fresh
-// session takes the one it replaces out of agent view once it has started. Both
-// refresh the project's MCP config first (refreshMCPConfig).
+// Claude Code start a copy under a new session instead of continuing this one.
+// A fresh session takes the one it replaces out of agent view once it has
+// started. Both refresh the project's MCP config first (refreshMCPConfig).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {

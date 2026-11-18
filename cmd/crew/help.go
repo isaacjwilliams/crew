@@ -51,6 +51,7 @@ Setup
   crew config [KEY] [--project P|--task T]
                                    Show effective config, with the project's
                                    overrides, and with --task, the task's
+                                   AUTO_REVIEWS
 
 Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path)
   crew new "<title>" [--kind KIND] [--informs TASK] [--fixes TASK] [--branch NAME] [--on TASK] [--goal GOAL] [--project P]
