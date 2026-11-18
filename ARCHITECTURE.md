@@ -682,6 +682,7 @@ Go, standard library only, in one package. Each area has a file of its own; each
   - `Section` returns a section's text without HTML comments or blank lines; `crew ready` uses it. `crew hand-over` reads the criteria with it (`Task.AcceptanceCriteria`) and the evidence (`Task.Evidence`, and the PR body's with `PREvidence`), and `crew ready` checks each criterion is a `- ` item. `InsertBefore` puts review rounds before `## Log`.
   - `Log` appends to the end of the file, so **`## Log` must stay the last section**. `LogEntries` reads the lines back. `Task.SetStatus` is the only writer of a task's status, and logs each change as `status → <status>`.
   - `Task.AutomatedReviews` reads the record under `## Automated reviews`: each review's findings, their outcomes bucketed by first words (`Finding.Outcome`), and whether it was clean (`AutomatedReview.Clean`). `Task.ReviewRounds` reads each round's number, time and comment items; `Task.ReviewComments` counts the items, and `Task.CommentsAfterReview` pairs each item in a round recorded after an automated review with the newest review before it, from the headings' times.
+- **Review runs (`review_runs.go`):** `Task.ReviewRuns` reads what each run of a review step found, raised and taken: the records review steps write to the Log (`reviewRecord`), the records from before that form, as runs of unknown value, and each automated review, from `Task.AutomatedReviews`.
 - **Resolution (`resolve.go`):** `resolve` accepts:
   - a path;
   - `#<pr>` (matches the `pr` field);
