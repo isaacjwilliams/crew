@@ -33,6 +33,9 @@ check "crew doctor finds a git new enough for the evidence check" '[[ $doctor_ou
 mkdir -p "$HOME/old-git" && printf '#!/bin/sh\n[ "$1" = --version ] && { echo "git version 2.39.5 (Apple Git-154)"; exit; }\nexec %s "$@"\n' "$(command -v git)" >"$HOME/old-git/git" && chmod +x "$HOME/old-git/git"
 doctor_out=$(PATH="$HOME/old-git:$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor flags a git too old for the evidence check, and says to upgrade it" '[[ $doctor_out == *"FAIL git 2.39.5 >= 2.40 — upgrade git: crew hand-over checks evidence with git merge-tree --merge-base"* && $doctor_out == *"Some required checks failed."* ]]'
+mkdir -p "$HOME/old-claude" && printf '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.292 (Claude Code)"; exit; }\nexec %s "$@"\n' "$(command -v claude)" >"$HOME/old-claude/claude" && chmod +x "$HOME/old-claude/claude"
+doctor_out=$(PATH="$HOME/old-claude:$H/bin:$PATH" crew doctor 2>&1 || true)
+check "crew doctor flags a Claude Code whose haiku can't run a worker in auto mode" '[[ $doctor_out == *"FAIL claude 2.1.292 >= 2.1.293 — run '"'"'claude update'"'"'"* && $doctor_out == *"Some required checks failed."* ]]'
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor finds crew and lead linked into the home" '[[ $doctor_out == *"ok   ~/.local/bin/crew links to this home"* && $doctor_out == *"ok   ~/.local/bin/lead links to this home"* ]]'
 check "crew doctor flags an untrusted work root as a required check" '[[ $doctor_out == *"FAIL $HOME/agent-work trusted — cd $HOME/agent-work && claude"* && $doctor_out == *"Some required checks failed."* ]]'

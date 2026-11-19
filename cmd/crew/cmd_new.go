@@ -320,9 +320,10 @@ func cmdHandOver(c *Crew, args []string) error {
 // handOverPR checks a build is ready for the user: the evidence they read, in
 // the task and the PR body, shows every acceptance criterion holding on the
 // code they would merge (checkEvidence), and a high-risk task has a security
-// review, which a branch that touches a sensitive path needs. It reads the
-// branch and the PR body first, before crew hand-over takes the lock, so a slow
-// network doesn't hold up other crew commands.
+// review, which a branch that touches a sensitive path needs, and an automated
+// review its worker skipped while it was off. It reads the branch and the PR
+// body first, before crew hand-over takes the lock, so a slow network doesn't
+// hold up other crew commands.
 func handOverPR(c *Crew, t Task) (func() error, error) {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -360,6 +361,9 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		}
 		if t.AwaitsSecurityReview() {
 			return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
+		}
+		if t.AwaitsAutomatedReview(p.Settings["AUTO_REVIEWS"]) {
+			return fail("high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again")
 		}
 		return nil
 	}, nil

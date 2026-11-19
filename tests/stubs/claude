@@ -65,7 +65,7 @@ agents() {  # jq-filter [jq args...]: update agents.json in place
 }
 
 case ${1:-} in
-  --version) echo "2.1.290 (Claude Code)" ;;
+  --version) echo "2.1.296 (Claude Code)" ;;
   agents)
     if [[ -f $HOME/agents-fail ]]; then
       echo "Error: couldn't reach the supervisor" >&2; exit 1

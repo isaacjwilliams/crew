@@ -316,7 +316,7 @@ func prMayHaveNewComments(t Task) bool {
 // is recorded, and listed by the next tick, so this holds once.
 func movedHere(t Task, as Agents) bool {
 	st, wt := t.Status(), t.Worktree()
-	return (st == Working || st == AddressingFeedback) && wt != "" && !isDir(wt) && !as.jobListed(t.WorkerJob())
+	return st.WorkersTurn() && wt != "" && !isDir(wt) && !as.jobListed(t.WorkerJob())
 }
 
 // tickGoal is one running goal's share of a tick: pass the goal lead its input

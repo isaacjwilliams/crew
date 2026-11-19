@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -30,5 +31,35 @@ func TestTurnEndedReadsTheSessionTranscript(t *testing.T) {
 	}
 	if turnEnded("no-such-session") {
 		t.Error("turnEnded is true for a session with no transcript")
+	}
+}
+
+func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := &Crew{Home: t.TempDir()}
+	if err := os.MkdirAll(c.path("config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.path("config/worker-settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_PERMISSION_MODE": "auto", "WORKER_AUTOCOMPACT_WINDOW": "400k"}}
+	unset, err := c.launchWorker(p, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sonnet, err := c.launchWorker(p, "sonnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(unset.flags, "--model") || unset.model != "" {
+		t.Errorf("a worker without a model got one: %q, model %q", unset.flags, unset.model)
+	}
+	if want := c.fingerprint(unset.flags, c.agentFiles("implementer")...); unset.fingerprint != want {
+		t.Errorf("fingerprint = %s, want %s: only the flags and agent files count", unset.fingerprint, want)
+	}
+	// The model is recorded and compared on its own, so it changes neither.
+	if !slices.Equal(sonnet.flags, unset.flags) || sonnet.fingerprint != unset.fingerprint || sonnet.model != "sonnet" {
+		t.Errorf("a model changed the flags or fingerprint: %q %s, want %q %s", sonnet.flags, sonnet.fingerprint, unset.flags, unset.fingerprint)
 	}
 }

@@ -346,7 +346,7 @@ check "reviewer is read-only (a tools allowlist without Edit, Write or NotebookE
 check "reviewer leaves commit messages, which are stated intent, until it has derived intent" \
   "grep -q 'Commit messages are stated intent' $A/reviewer.md && grep -q 'log --format=%H <range>' $A/reviewer.md && ! grep -q 'diff and log' $A/reviewer.md"
 check "the implementer runs pr-review after opening its PR when AUTO_REVIEWS is above 0, and stops at that many reviews" \
-  "grep -q 'crew config AUTO_REVIEWS --project <project>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'this pass has run fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
+  "grep -q 'crew config AUTO_REVIEWS --task <task>. is above 0' $A/implementer.md && grep -q 'Run the .pr-review. skill' $A/implementer.md && grep -q 'this pass has run fewer reviews than .AUTO_REVIEWS.' $A/implementer.md && grep -qx 'AUTO_REVIEWS=3' $C/defaults.env"
 check "the implementer pushes its fixes after every review, the last one included, before it posts the summary" \
   "awk '/^## Workflow: automated review/ {w=1} w && /Then run the checks and push/ && !p {p=NR} w && /post it with .crew review-summary/ && !s {s=NR} END {exit !(p && s && p < s)}' $A/implementer.md && ! grep -q 'run the checks, push, and go back' $A/implementer.md"
 check "a pass is counted from the last Summary posted, one the user asked for runs at least one review, and only a draft is marked ready" \

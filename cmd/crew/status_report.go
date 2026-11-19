@@ -479,6 +479,13 @@ func (s *statusView) notes(t Task) []string {
 	if t.Get("interrupted") != "" {
 		notes = append(notes, "interrupted by a pause")
 	}
+	// The lead's choices at intake, so the user sees what each worker runs with.
+	if m := t.Model(); m != "" {
+		notes = append(notes, "model "+m)
+	}
+	if t.AutomatedReviewOff() {
+		notes = append(notes, "automated review off")
+	}
 	if st == Ready && t.Goal() != "" {
 		// Only a goal's ready tasks are dispatched in priority order.
 		if n, err := t.Priority(); err != nil {

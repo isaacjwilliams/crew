@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 )
 
 // crew followup TASK [--fresh] [--note TEXT]
@@ -46,7 +47,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	}
 	// Building the launcher reads the worker settings, so a bad one stops here,
 	// before anything changes.
-	start, err := c.launchWorker(p)
+	start, err := c.launchWorker(p, t.Model())
 	if err != nil {
 		return err
 	}
@@ -125,8 +126,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	switch {
 	case newRound:
 		t.SetStatus(AddressingFeedback)
-	case note != "":
-		t.SetStatus(Working)
+	case note != "" && !t.Status().WorkersTurn():
+		// A note hands a task that waits on you back to its worker.
+		t.SetStatus(backToWorker(t))
 	}
 	t.Touch()
 	msg := fmt.Sprintf("followup (%s): worker %s", l.mode, l.job)
@@ -150,6 +152,24 @@ func unsentRounds(t Task) string {
 		return fmt.Sprintf("round %d", to)
 	}
 	return fmt.Sprintf("rounds %d to %d", from, to)
+}
+
+// backToWorker is the status a note gives a task that waits on you. A question
+// goes back to the worker's turn it was asked in, which the Log tells, so one
+// asked in a review round goes back to addressing-feedback. Anything else goes
+// to working.
+func backToWorker(t Task) Status {
+	if t.Status() == NeedsInput {
+		for _, e := range slices.Backward(t.LogEntries()) {
+			if s, ok := e.status(); ok && s != NeedsInput {
+				if s.WorkersTurn() {
+					return s
+				}
+				break
+			}
+		}
+	}
+	return Working
 }
 
 // crew attach TASK: attaches this terminal to the task's worker, as `claude
