@@ -31,12 +31,30 @@ type ReviewRun struct {
 }
 
 // ReviewRuns is every run of a review step the task records, oldest first: the
-// Log's records (reviewRecord), and each automated review, whose findings are
-// raised and whose fixed ones are taken.
+// Log's records (reviewRecord), each automated review, whose findings are
+// raised and whose fixed ones are taken, and the runs old records name.
 func (t Task) ReviewRuns() []ReviewRun {
-	var runs []ReviewRun
-	for _, e := range t.LogEntries() {
-		runs = append(runs, reviewRunsIn(e)...)
+	var runs, old []ReviewRun
+	entries := t.LogEntries()
+	for _, e := range entries {
+		if run, ok := recordedRun(e); ok {
+			runs = append(runs, run)
+		} else {
+			old = append(old, oldRunsIn(e)...)
+		}
+	}
+	if t.SecurityReviewed() {
+		old = append(old, ReviewRun{Step: stepSecurityReview, At: firstHandOver(entries)})
+	}
+	// An old record counts only when no record of its step states the counts:
+	// a task logged in both forms names the same runs twice. The observer ran
+	// once a task, however many entries name it.
+	for _, o := range old {
+		if !slices.ContainsFunc(runs, func(r ReviewRun) bool {
+			return r.Step == o.Step && (r.Known || o.Step == stepPrePRReview)
+		}) {
+			runs = append(runs, o)
+		}
 	}
 	for _, r := range t.AutomatedReviews() {
 		run := ReviewRun{Step: stepAutomatedReview, At: r.At, Raised: len(r.Findings), Known: true}
@@ -56,10 +74,20 @@ func (t Task) ReviewRuns() []ReviewRun {
 // It takes any step name, so a repo's own review agent needs no listing here.
 var reviewRecord = regexp.MustCompile(`^([^:]+): (\d+) raised, (\d+) taken\b`)
 
+// recordedRun is the run a Log entry records, when it's a review step's record.
+func recordedRun(e logEntry) (ReviewRun, bool) {
+	m := reviewRecord.FindStringSubmatch(e.msg)
+	if m == nil {
+		return ReviewRun{}, false
+	}
+	return ReviewRun{Step: m[1], At: e.at, Raised: atoiOr0(m[2]), Taken: atoiOr0(m[3]), Known: true}, true
+}
+
 // The records from before steps stated their counts, in the forms the ledger
 // holds. A report over past tasks should count those runs, as runs of unknown
 // value rather than runs that took nothing. They can go once no report reads
-// tasks logged before 2026-11-18, when the counted records began.
+// tasks logged before 2026-11-18, when the counted records began. A past
+// security review is read from the task's Evidence (SecurityReviewed).
 var oldRecords = []struct {
 	step string
 	re   *regexp.Regexp
@@ -74,26 +102,44 @@ var oldRecords = []struct {
 	{stepPrePRReview, regexp.MustCompile(`Pre-PR review|casual-observer declined`)},
 }
 
-// oldAgentRuns is a repo review agent's runs in the old form, its name and how
-// many times it ran: "test-review x3" is three runs of test-review.
-var oldAgentRuns = regexp.MustCompile(`\b([a-z]+(?:-[a-z]+)+) x(\d+)\b`)
+// A repo review agent's runs in the old forms: a sentence that starts with its
+// result, "test-review: no findings." or "test-review x3 (…)", and the agents a
+// pre-PR review lists, "Pre-PR review (casual-observer, test-review x2,
+// comment-review)". Each ran once, or as many times as its " x<n>" says.
+var (
+	oldAgentRuns   = regexp.MustCompile(`(?:^|[.;] )([a-z]+(?:-[a-z]+)*-review)(?::| x(\d+))`)
+	oldAgentList   = regexp.MustCompile(`Pre-PR review \(([^)]*)\)`)
+	oldListedAgent = regexp.MustCompile(`\b([a-z]+(?:-[a-z]+)*-review)(?: x(\d+))?\b`)
+)
 
-// reviewRunsIn is the runs a Log entry records: one, when it's a review
-// step's record, or else those its free text names in an old form.
-func reviewRunsIn(e logEntry) []ReviewRun {
-	if m := reviewRecord.FindStringSubmatch(e.msg); m != nil {
-		return []ReviewRun{{Step: m[1], At: e.at, Raised: atoiOr0(m[2]), Taken: atoiOr0(m[3]), Known: true}}
-	}
+// oldRunsIn is the runs a Log entry's free text names in an old form.
+func oldRunsIn(e logEntry) []ReviewRun {
 	var runs []ReviewRun
 	for _, old := range oldRecords {
 		if old.re.MatchString(e.msg) {
 			runs = append(runs, ReviewRun{Step: old.step, At: e.at})
 		}
 	}
-	for _, m := range oldAgentRuns.FindAllStringSubmatch(e.msg, -1) {
-		for range atoiOr0(m[2]) {
+	agents := oldAgentRuns.FindAllStringSubmatch(e.msg, -1)
+	for _, list := range oldAgentList.FindAllStringSubmatch(e.msg, -1) {
+		agents = append(agents, oldListedAgent.FindAllStringSubmatch(list[1], -1)...)
+	}
+	for _, m := range agents {
+		for range max(1, atoiOr0(m[2])) {
 			runs = append(runs, ReviewRun{Step: m[1], At: e.at})
 		}
 	}
 	return runs
+}
+
+// firstHandOver is when the task first went to pr-open, which a high-risk task
+// can't do before its security review is recorded. It's the zero time when the
+// task hasn't been handed over.
+func firstHandOver(entries []logEntry) time.Time {
+	for _, e := range entries {
+		if s, ok := e.status(); ok && s == PROpen {
+			return e.at
+		}
+	}
+	return time.Time{}
 }
