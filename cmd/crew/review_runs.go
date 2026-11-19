@@ -69,10 +69,14 @@ func (t Task) ReviewRuns() []ReviewRun {
 	return runs
 }
 
+// rerunLabel is what a lead adds to a step's name for its second run: "Brief
+// review 2", "Brief review (2nd)". The run is still a run of that step.
+const rerunLabel = `(?: \d+| \([^)]*\))?`
+
 // reviewRecord is a review step's record, a Log message that starts
 // "<step>: <raised> raised, <taken> taken", as LEDGER.md's Log section gives it.
 // It takes any step name, so a repo's own review agent needs no listing here.
-var reviewRecord = regexp.MustCompile(`^([^:]+): (\d+) raised, (\d+) taken\b`)
+var reviewRecord = regexp.MustCompile(`^([^:(]+?)` + rerunLabel + `: (\d+) raised, (\d+) taken\b`)
 
 // recordedRun is the run a Log entry records, when it's a review step's record.
 func recordedRun(e logEntry) (ReviewRun, bool) {
@@ -94,7 +98,7 @@ var oldRecords = []struct {
 }{
 	// "Plan review: 3 of 4 taken.", "Brief review (2nd): …". A brief review was
 	// called a plan review at first. "Plan review skipped: …" isn't a run.
-	{stepBriefReview, regexp.MustCompile(`^(Plan|Brief) review( \d+| \([^)]*\))?:`)},
+	{stepBriefReview, regexp.MustCompile(`^(Plan|Brief) review` + rerunLabel + `:`)},
 	// "Exhale: folded a repeated line."
 	{stepExhale, regexp.MustCompile(`^Exhale:`)},
 	// "PR #24 opened. Pre-PR review: took 1 …": the observer's result often sat

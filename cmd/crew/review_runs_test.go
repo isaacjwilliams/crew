@@ -25,8 +25,9 @@ func runsText(runs []ReviewRun) []string {
 
 func TestReviewRuns(t *testing.T) {
 	recorded := Task{docWith(t, reviewedTask+
-		// Records in the form the agent files give.
+		// Records in the form the agent files give, a rerun's label included.
 		"- 2026-11-09 08:00 — Brief review: 5 raised, 3 taken. (1) a gate sharpened; (4) kept: …\n"+
+		"- 2026-11-09 08:30 — Brief review (2nd): 1 raised, 1 taken. …\n"+
 		"- 2026-11-10 09:00 — Exhale: 4 raised, 2 taken. Folded …; reverted …\n"+
 		"- 2026-11-10 09:10 — test-review: 2 raised, 1 taken. …\n"+
 		"- 2026-11-10 09:20 — Pre-PR review: 3 raised, 2 taken. Findings declined: (3) …\n"+
@@ -36,6 +37,7 @@ func TestReviewRuns(t *testing.T) {
 		"- 2026-11-10 09:50 — status → pr-open\n")}
 	want := []string{
 		"2026-11-09 08:00 Brief review 5/3",
+		"2026-11-09 08:30 Brief review 1/1",
 		"2026-11-10 09:00 Exhale 4/2",
 		"2026-11-10 09:10 test-review 2/1",
 		"2026-11-10 09:20 Pre-PR review 3/2",
