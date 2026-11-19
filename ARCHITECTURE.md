@@ -311,7 +311,8 @@ you review on GitHub → tell the lead (or run it yourself):
                          # if resume fails, or its job ends `failed` → fresh worker with a "pick up this task" prompt
                          # a new round's prompt says whether to reply on the PR (REPLY_TO_THREADS)
                          # records last_round_sent; status → addressing-feedback for a new round;
-                         #   a note alone → working from needs-input or pr-open, and leaves working or addressing-feedback as they are
+                         #   a note alone → working from needs-input or pr-open, but back to addressing-feedback for a question asked
+                         #   in a review round (the Log tells); it leaves working or addressing-feedback as they are
   crew review TASK       # another automated review: a round holding only "- [ ] Automated review requested (crew review)";
                          # refuses a task with no open PR; sends it now (crew followup) if the worker is idle,
                          # else leaves it for crew tick. Your PR comment "crew review" (its whole text, any case)

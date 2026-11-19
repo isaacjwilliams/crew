@@ -413,10 +413,12 @@ check "a review-round followup tells the worker to reply with crew reply" 'grep 
 setstate "done" null
 check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults"'
 check "note-only followup leaves a task in its review round addressing-feedback" '[[ $(crew get 1 status) == addressing-feedback ]]'
-for st in needs-input pr-open; do
-  sed -i "s/^status: .*/status: $st/" "$F1"; setstate "done" null
-  check "note-only followup moves a $st task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
-done
+crew set 1 status working; crew set 1 status needs-input; setstate "done" null
+check "note-only followup moves a needs-input task asked while working back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
+crew set 1 status addressing-feedback; crew set 1 status needs-input; setstate "done" null
+check "note-only followup moves a needs-input task asked in a review round back to addressing-feedback" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == addressing-feedback ]]'
+sed -i "s/^status: .*/status: pr-open/" "$F1"; setstate "done" null  # crew set refuses pr-open
+check "note-only followup moves a pr-open task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 setstate "done" null
 check "note-only followup keeps a working task working and logs no status line" 'n=$(grep -c "status → " "$F1"); crew followup 1 --note "carry on" >/dev/null && [[ $(crew get 1 status) == working && $(grep -c "status → " "$F1") == "$n" ]]'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
