@@ -485,6 +485,10 @@ func kindNames() string {
 // caught the defect, in the order work passes them.
 var missedBy = []string{"brief-review", "tests", "pre-pr-review", "security-review", "automated-review", "ci", "user-review"}
 
+// models are the models a task's worker can run on, by Claude Code's aliases. A
+// task without one runs on the session's default.
+var models = []string{"opus", "sonnet", "haiku"}
+
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string { return listJoin(items, " or ") }
 
@@ -574,6 +578,35 @@ func (t Task) Worktree() string  { return t.Get("worktree") }
 func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
+func (t Task) Model() string     { return t.Get("model") }
+
+// autoReviewOff, as a task's auto_review, turns its automated review off, while
+// the task isn't high risk: a high-risk PR is always reviewed. It's the only
+// value, since a task without one gets the project's AUTO_REVIEWS.
+const autoReviewOff = "no"
+
+// AutomatedReviewOff: the lead turned the task's automated review off, and the
+// task isn't high risk.
+func (t Task) AutomatedReviewOff() bool {
+	return t.Get("auto_review") == autoReviewOff && t.Risk() != RiskHigh
+}
+
+// AutoReviews is how many automated reviews a pass on the task may run, given
+// the project's AUTO_REVIEWS.
+func (t Task) AutoReviews(project string) string {
+	if t.AutomatedReviewOff() {
+		return "0"
+	}
+	return project
+}
+
+// AwaitsAutomatedReview: the task's automated review was off, and is back on
+// now the task is high risk, but no review is recorded yet. A task without a PR
+// (pr_mode none) has nothing to review.
+func (t Task) AwaitsAutomatedReview(project string) bool {
+	return t.Get("auto_review") == autoReviewOff && t.Risk() == RiskHigh && atoiOr0(project) > 0 &&
+		t.PR() != "" && t.NewestReview() == 0
+}
 
 // Kind is the task's kind. A task without one, made before kinds, is a build.
 func (t Task) Kind() Kind {

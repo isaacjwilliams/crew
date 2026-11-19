@@ -45,7 +45,14 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
 }
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
+# runs_on TASK MODEL: the latest launch runs the task's worker on MODEL: crew started it
+# with --model MODEL, or resumed in place, passing no flags, a session it started so.
+runs_on() {
+  local launch; launch=$(last_launch)
+  [[ $launch == *" --model $2 "* || ($launch == "claude --resume $(crew get "$1" worker_session) --bg "* && $(crew get "$1" worker_model) == "$2") ]]
+}
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
+review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
 # criterion, on its branch as it is now, here or on origin. Recording it again names
@@ -354,23 +361,31 @@ check "sync fetches and raises the risk of a task whose branch on origin gained 
 check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
-crew set 1 status addressing-feedback; crew set 1 risk medium
+crew set 1 status addressing-feedback; crew set 1 risk medium; crew set 1 auto_review no
 git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; git -C "$WT" push -q origin HEAD; record_evidence 1; pr_body 1
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
+check "a raise at the hand-over turns the task's automated review back on, and logs why" \
+  '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
 sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
-check "hand-over hands a high-risk task over once its security review is under Evidence" \
+out=$(crew hand-over 1 2>&1); st=$?
+check "hand-over refuses a task whose automated review was turned back on until a review is recorded" \
+  '((st == 1)) && [[ $out == *"high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
+review "$F1" 1
+check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
 returned=0
 for st in needs-input working; do
   crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
 done
 check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
+# Back as it was, for the automated-review summaries below.
+sed -i '/^### Automated review 1$/,+1d' "$F1"; crew set 1 auto_review ""
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 # A merge of the base leaves the branch's own work as it was, so its evidence stays
 # current; a merge whose conflict the worker resolved changes it.
@@ -480,6 +495,40 @@ check "a worker started before crew recorded fingerprints starts fresh on its ne
   '[[ $out == *"(fresh: its instructions or settings changed)"* && $(crew get 1 worker_fingerprint) =~ ^[0-9a-f]{12}$ ]] && ! resumed'
 check "a fresh start takes the session it replaces out of agent view" \
   'grep -qx "claude rm $job" "$HOME/claude-calls.log" && [[ -z $(jq -r --arg id "$job" ".[] | select(.id == \$id) | .id" "$HOME/agents.json") && $(crew get 1 worker_job) != "$job" ]]'
+# A task's model: a fresh worker runs on it, and a resume keeps the model its session
+# started with, so a change of model starts the worker fresh at its next followup.
+check "no launch so far, for a task without a model, passes --model" '! grep -q -- "--model" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_model) ]]'
+check "set refuses a model that isn't opus, sonnet or haiku, naming them" \
+  '[[ $(crew set 1 model gpt-5 2>&1) == *"model must be opus, sonnet or haiku, not '"'"'gpt-5'"'"'"* && -z $(crew get 1 model) ]]'
+fp=$(crew get 1 worker_fingerprint); crew set 1 model sonnet; out=$(followup1 "now on sonnet")
+check "a followup after the task's model changes starts the worker fresh on it, says so, and records the model but no new fingerprint" \
+  '[[ $out == *"(fresh: its model changed from the default to sonnet)"* && $(last_launch) == *" --model sonnet You are picking up task"* && $(crew get 1 worker_model) == sonnet && $(crew get 1 worker_fingerprint) == "$fp" && $(tail -1 "$F1") == *"followup (fresh: its model changed from the default to sonnet): worker "* ]]'
+out=$(followup1 "still on sonnet")
+check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
+out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
+check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
+crew set 1 model haiku; echo "# changed" >>"$L/agents/implementer.md"; install_agents; out=$(followup1 "both changed")
+check "a followup after the model and the instructions both change says both" \
+  '[[ $out == *"(fresh: its model changed from sonnet to haiku, and its instructions or settings changed)"* && $(last_launch) == *" --model haiku "* && $(crew get 1 worker_model) == haiku ]]'
+git -C "$L" checkout -q -- agents; install_agents; crew set 1 model ""; out=$(followup1 "back to the default")
+check "a followup after the model is cleared starts the worker fresh on the default, without --model" \
+  '[[ $out == *"(fresh: its model changed from haiku to the default, and its instructions or settings changed)"* && $(last_launch) != *--model* && -z $(crew get 1 worker_model) ]]'
+row1() { crew status | grep "^  001-saved-search-filters "; }
+# A task's auto_review: the lead turns its automated review off, and the worker reads
+# how many reviews it may run from crew config --task.
+check "crew config --task gives a task without auto_review the project's AUTO_REVIEWS" '[[ $(crew config AUTO_REVIEWS --task 1) == 3 ]]'
+check "set refuses an auto_review that isn't no" \
+  '[[ $(crew set 1 auto_review yes 2>&1) == *"auto_review must be no, not '"'"'yes'"'"'"* && -z $(crew get 1 auto_review) ]]'
+crew set 1 auto_review no
+check "a high-risk task gets the project's AUTO_REVIEWS though its automated review is off" \
+  '[[ $(crew get 1 risk) == high && $(crew config AUTO_REVIEWS --task 1) == 3 && $(row1) != *"automated review"* ]]'
+crew set 1 risk medium
+check "a task whose automated review is off gets none, and crew config --task lists it so" '[[ $(crew config AUTO_REVIEWS --task 1) == 0 ]] && crew config --task 1 | grep -qx AUTO_REVIEWS=0'
+crew set 1 auto_review ""
+check "status shows neither a model nor automated review on the row of a task that sets neither" 'r=$(row1); [[ $r != *model* && $r != *"automated review"* ]]'
+crew set 1 model sonnet; crew set 1 auto_review no
+check "status shows the model, and that automated review is off, on the row of a task that sets them" '[[ $(row1) == *"  model sonnet  automated review off"* ]]'
+crew set 1 model ""; crew set 1 auto_review ""; crew set 1 risk high
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'
 setstate blocked null
 check "a worker that ended its turn on a question doesn't count as running" '[[ $(crew status) == *"workers running: 0/"* ]]'
@@ -506,7 +555,6 @@ check "react refuses an ID that isn't a number, and reacts to none of the IDs" '
 check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
 check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
-review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
 check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
 review "$F1" 1
 out=$(crew review-summary 1 "$HOME/summary.md" 2>&1); body=$(cat "$HOME/gh-last-body")
@@ -772,7 +820,7 @@ check "restack has nothing to do for a task that's up to date" '[[ $(crew restac
 check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'
 
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
-crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
+crew set 11 model sonnet; crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
 work "$WT11" picker.txt; crew set 11 pr https://github.com/isaac/webapp/pull/23; hand_over 11
 check "status nests a three-deep stack in order" '[[ $(crew status | grep -A2 "^  009-season-model " | tail -1) == "    └ 011-season-picker "* ]]'
 # The user squash-merges 9, and GitHub deletes its branch.
@@ -791,10 +839,13 @@ out=$(crew sync)
 check "after a merge, a PR GitHub already moved to what the parent merged into isn't sent back" \
   '[[ $out == *"010-season-admin: needs a restack, 009-season-model merged"* && $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
 git update-ref -d refs/remotes/origin/agent/season-model; rm -f "$HOME/gh-pr-base-22"
+crew set 10 auto_review no
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
-sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
+check "a raise by sync turns the task's automated review back on, and logs why" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew config AUTO_REVIEWS --task 10) == 3 && $(tail -1 "$F10") == *" — risk → high: touches admin.txt; automated review back on" ]]'
+sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'
 crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
@@ -812,6 +863,7 @@ sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
+check "a restack goes to a sonnet task's worker on Sonnet" 'runs_on 11 sonnet'
 (cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
@@ -828,13 +880,16 @@ crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
 resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13 >/dev/null
-crew dispatch 13 >/dev/null; crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
+crew set 13 model sonnet; crew dispatch 13 >/dev/null
+check "dispatch starts a sonnet task's worker on Sonnet" '[[ $(last_launch) == *" --model sonnet "* && $(crew get 13 worker_model) == sonnet ]]'
+crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
 check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
+check "a review round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 hand_over 13; setstate working 4242
 out=$(crew tick)
 check "a task with open questions isn't marked waiting on the user while its worker is busy" '[[ -z $out && $(crew get 13 status) == pr-open ]]'
@@ -884,8 +939,9 @@ out=$(crew review 13 2>/dev/null)
 check "crew review appends a round holding only the request, and leaves it for a busy worker" '[[ $(round "$F13" 7) == "- [ ] Automated review requested (crew review)" && $out == *"crew tick sends it once worker"* && $(crew get 13 last_round_sent) == 5 && $(resumes) == "$n" ]]'
 setstate "done" null; out=$(crew tick 2>/dev/null)
 check "crew tick sends the request with the round before it" '[[ $out == *"013-tick-routing: rounds 6 to 7 sent to its worker"* && $(crew get 13 last_round_sent) == 7 && $(resumes) == $((n + 1)) ]]'
-hand_over 13; setstate "done" null
-check "crew review sends the request to an idle worker straight away" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+hand_over 13; setstate "done" null; crew set 13 auto_review no
+check "crew review sends the request to an idle worker straight away, though the task's automated review is off" 'crew review 13 >/dev/null 2>&1 && [[ $(crew get 13 last_round_sent) == 8 && $(resumes) == $((n + 2)) && $(crew get 13 status) == addressing-feedback && $(last_prompt) == *"New review feedback is in round 8 under"* ]]'
+crew set 13 auto_review ""
 # Red CI on a PR: crew tick sends it to the worker as a review round once the worker has
 # handed the PR over (pr-open), once for each head commit, and asks you past MAX_CI_FIXES.
 ci() {  # head name:conclusion…: the PR's head commit and its check runs; a conclusion of - is one still running
@@ -907,6 +963,7 @@ check "red CI while another check on the head is still running is left alone" '[
 ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED build:CANCELLED
 out=$(crew tick 2>/dev/null)
 check "once every check has finished, a tick records the red CI as a round and sends it to the idle worker" '[[ $out == $'"'"'013-tick-routing: CI round 9 recorded: red on aaaa111\n013-tick-routing: round 9 sent to its worker'"'"' && $(round "$F13" 9) == "- [ ] CI failed on aaaa111: test" && $(crew get 13 last_round_sent) == 9 && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+check "a CI round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "a second tick on the same red head records nothing" '[[ -z $out && $(crew get 13 review_rounds) == 9 && $(resumes) == $((n + 1)) ]]'
@@ -976,6 +1033,7 @@ check "a task abandoned while crew catch-up reads GitHub is sent nothing" '[[ $o
 rm "$HOME/gh-pr-view-hook"; crew set 13 status working; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "once the PR is handed over, a tick records the conflict with main's tip on origin as a round of its own, and sends it to the idle worker" '[[ $out == *"013-tick-routing: catch-up round $((r + 1)) recorded: conflicts with main"* && $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(round "$F13" $((r + 1))) == "- [ ] Conflicts with main at $B1" && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
+check "a catch-up round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
 setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
@@ -1971,7 +2029,7 @@ check "a judge weighs each case's miss, with an inline comment's place and the u
 check "the report gives each case's verdict and range, the totals and what was tested, and is committed" \
   '[[ $(grep -c "^- \`095-eval-one/" "$EV") == 3 ]] && grep -qF -- "- \`095-eval-one/round-2/comment-5\` **found** — \`${EF:0:7}..${EH:0:7}\` — b.go has no test — #### 1. [should fix] A stub finding" "$EV" &&
    grep -qF -- "- \`095-eval-one/round-2/comment-6\` **missed** — \`${EF:0:7}..${EH:0:7}\` — On \`a.go:1\`: why is a.go here?" "$EV" && grep -qF -- "- \`095-eval-one/fix-096-eval-fix\` **missed**" "$EV" && grep -qx "Found 1 of 3 misses." "$EV" &&
-   grep -qF -- "- Rubric: \`$L/.claude/skills/pr-review/rubric.md\` (" "$EV" && grep -qF -- "- Reviewer: \`$HOME/.claude/agents/reviewer.md\` (" "$EV" && grep -qx -- "- Claude Code: 2.1.290" "$EV" && grep -qx -- "- Cases: all" "$EV" &&
+   grep -qF -- "- Rubric: \`$L/.claude/skills/pr-review/rubric.md\` (" "$EV" && grep -qF -- "- Reviewer: \`$HOME/.claude/agents/reviewer.md\` (" "$EV" && grep -qx -- "- Claude Code: 2.1.296" "$EV" && grep -qx -- "- Cases: all" "$EV" &&
    [[ $out == *"Found 1 of 3 misses. Report: $EV"* && $(git -C "$L" log -1 --format=%s) == "review eval $PJ (3 cases)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
 # A second run, against another rubric, finds the other comment instead.
 mv "$EV" "$PD/review-eval/2026-11-14-090000.md" && crew commit "an earlier eval" >/dev/null

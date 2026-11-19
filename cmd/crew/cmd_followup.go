@@ -46,7 +46,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	}
 	// Building the launcher reads the worker settings, so a bad one stops here,
 	// before anything changes.
-	start, err := c.launchWorker(p)
+	start, err := c.launchWorker(p, t.Model())
 	if err != nil {
 		return err
 	}

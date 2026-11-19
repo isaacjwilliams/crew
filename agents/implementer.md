@@ -84,7 +84,7 @@ A person reads your reports and PR replies, and apart from the crew they work al
    For a stacked task, see "Stacked tasks" below.
 8. **Record**: `crew set <task> pr <url>`, and a `crew log` entry that summarizes what you did, the observer findings you declined, and the proposals you wrote.
    - Write each follow-up worth keeping as a proposal: `crew propose "<title>" --project <project> --source worker:<task> --why "<what to do and why, in a paragraph>"`. It's worth keeping when the user would want to hear of it again, not for a nit. A proposal stays out of the task list until the user or the lead picks it up; a follow-up left only in the Log is lost.
-9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --project <project>` is above 0: follow "Workflow: automated review" below.
+9. **Automated review**, if you opened a PR and `crew config AUTO_REVIEWS --task <task>` is above 0: follow "Workflow: automated review" below. It's the project's `AUTO_REVIEWS`, or 0 when the lead turned this task's automated review off. That holds only while the task isn't high risk: if crew raises it, at a hand-over or later, read the number again.
 10. **Hand over**: `crew hand-over <task>`. It's the only way into `pr-open`, now and after every review round or restack, and it refuses until every acceptance criterion has an entry under `## Evidence` and an item in the PR body's Evidence, each naming a commit that holds the branch's own work as it is now, and, for a high-risk task, the security review has an entry (step 5). A restack, or a merge of the base without conflicts, leaves your own work as it was, so the evidence stays current; any other change to it makes all of it stale.
     - When it refuses, do what it names and run it again. Acceptance criteria that aren't `- ` items are the one exception: they're the brief's, and only the lead changes the brief, so ask (see "When you're blocked").
     - Once it succeeds, if `pr_mode` is `ready` and the PR is still a draft (`gh pr view <url> --json isDraft`), mark it ready: `gh pr ready <url>`. Only this first hand-over marks the PR ready: later ones, after a review round or a restack, leave it as it is, since the user may have made it a draft again.
@@ -105,7 +105,7 @@ After you open your PR, you review it before the user does: that's the first pas
 
 A pass is the reviews recorded after the last `Summary posted` line, or every review when there's no such line yet. A pass that ended before its summary was posted (a blocked one, say) runs on into the next, and the next summary covers both. Review numbers carry on from one pass to the next. The PR's first review reads all of it; each later one reads only the commits since the last finished review, unless the skill finds it has to read the whole PR again (after a rebase, say).
 
-`AUTO_REVIEWS` (`crew config AUTO_REVIEWS --project <project>`) is how many reviews you may run in a pass. A pass the user asked for runs at least one, even when `AUTO_REVIEWS` is 0.
+`AUTO_REVIEWS` (`crew config AUTO_REVIEWS --task <task>`) is how many reviews you may run in a pass. A pass the user asked for runs at least one, even when `AUTO_REVIEWS` is 0.
 
 1. Run the `pr-review` skill with your task's ID (`/pr-review <task>`). It records the review in your task file as `### Automated review N`, under `## Automated reviews`: every finding with its agreed severity and an empty `Outcome:` line.
 
