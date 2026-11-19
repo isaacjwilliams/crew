@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -117,21 +118,26 @@ func taskCost(t Task, transcripts, wt string, briefs []string) (TaskCost, error)
 		return TaskCost{}, err
 	}
 	tc := TaskCost{Steps: ch.sum()}
-	if len(briefs) == 0 && slices.ContainsFunc(t.ReviewRuns(), func(r ReviewRun) bool { return r.Step == stepBriefReview }) {
+	briefMissing := len(briefs) == 0 && slices.ContainsFunc(t.ReviewRuns(), func(r ReviewRun) bool { return r.Step == stepBriefReview })
+	if briefMissing {
 		tc.Missing = append(tc.Missing, stepBriefReview)
 	}
+	workerMissing := false
 	for _, job := range t.WorkerJobs() {
 		if found, _ := filepath.Glob(filepath.Join(dir, job+"*.jsonl")); len(found) == 0 {
 			tc.Missing = append(tc.Missing, "worker session "+job)
+			workerMissing = true
 		}
 	}
-	workerMissing := len(tc.Missing) > 0 && tc.Missing[len(tc.Missing)-1] != stepBriefReview
 	for _, step := range crewSteps {
-		if slices.Contains(tc.Missing, step) || step != stepBriefReview && workerMissing ||
-			slices.ContainsFunc(tc.Steps, func(s StepCost) bool { return s.Step == step }) {
-			continue
+		// A missing session could have run any of the worker's steps.
+		missing := workerMissing
+		if step == stepBriefReview {
+			missing = briefMissing
 		}
-		tc.NotRun = append(tc.NotRun, step)
+		if !missing && !slices.ContainsFunc(tc.Steps, func(s StepCost) bool { return s.Step == step }) {
+			tc.NotRun = append(tc.NotRun, step)
+		}
 	}
 	return tc, nil
 }
@@ -139,8 +145,10 @@ func taskCost(t Task, transcripts, wt string, briefs []string) (TaskCost, error)
 // transcriptFolder is the folder Claude Code keeps the transcripts of sessions
 // started in dir in: dir with every character but a letter or digit made "-".
 func transcriptFolder(dir string) string {
-	return regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(dir, "-")
+	return notLetterOrDigit.ReplaceAllString(dir, "-")
 }
+
+var notLetterOrDigit = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 // workerJob is the job a Log line starts or resumes the worker in.
 var workerJob = regexp.MustCompile(`^(?:dispatched|followup \([^)]*\)): worker ([0-9a-f]{8})\b`)
@@ -283,6 +291,7 @@ type transcript struct {
 type transcriptLine struct {
 	Type      string
 	Timestamp time.Time
+	Effort    string
 	Message   struct {
 		ID      string
 		Model   string
@@ -343,30 +352,47 @@ func readTranscripts(pattern string) ([]transcript, error) {
 	return all, nil
 }
 
-// readTranscript reads the transcript at path. A line that doesn't read could
-// hold a message's only usage, so it fails the read rather than leave the cost
-// short.
+// readTranscript reads the transcript at path.
 func readTranscript(path string) (transcript, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return transcript{}, err
-	}
 	t := transcript{path: path}
-	lines := bufio.NewScanner(bytes.NewReader(b))
+	err := eachTranscriptLine(path, func(l transcriptLine) bool {
+		t.lines = append(t.lines, l)
+		return true
+	})
+	return t, err
+}
+
+// eachTranscriptLine calls f with each line of the transcript at path, in
+// order, until f returns false.
+func eachTranscriptLine(path string, f func(transcriptLine) bool) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := scanTranscript(file, f); err != nil {
+		return fmt.Errorf("%s: %v", path, err)
+	}
+	return nil
+}
+
+// scanTranscript calls f with each line of a Claude Code transcript, in order,
+// until f returns false. A line that doesn't read could hold a message's only
+// usage, so it fails the scan rather than leave a cost short.
+func scanTranscript(r io.Reader, f func(transcriptLine) bool) error {
+	lines := bufio.NewScanner(r)
 	lines.Buffer(nil, 64<<20)
 	for n := 1; lines.Scan(); n++ {
 		var l transcriptLine
 		if len(bytes.TrimSpace(lines.Bytes())) == 0 {
 			continue
 		} else if err := json.Unmarshal(lines.Bytes(), &l); err != nil {
-			return transcript{}, fmt.Errorf("%s: line %d: %v", path, n, err)
+			return fmt.Errorf("line %d: %v", n, err)
+		} else if !f(l) {
+			return nil
 		}
-		t.lines = append(t.lines, l)
 	}
-	if err := lines.Err(); err != nil {
-		return transcript{}, fmt.Errorf("%s: %v", path, err)
-	}
-	return t, nil
+	return lines.Err()
 }
 
 // start is when the transcript's session started: its first time.
@@ -474,11 +500,17 @@ func (s stepper) roundSteps(from, to int) []string {
 	if redCI {
 		steps = append(steps, stepCIRounds)
 	}
-	if comments || len(steps) == 0 && !reviewRequested {
+	if comments {
 		steps = append(steps, stepReviewRounds)
 	}
 	if len(steps) == 0 {
-		steps = append(steps, stepAutomatedReview)
+		// A round that only asks for another automated review, or that holds
+		// nothing crew could read.
+		if reviewRequested {
+			steps = append(steps, stepAutomatedReview)
+		} else {
+			steps = append(steps, stepReviewRounds)
+		}
 	}
 	return steps
 }
@@ -498,17 +530,17 @@ func briefReviews(transcripts string) (map[string][]string, error) {
 		if a := subagentOf(path).AgentType; a != "brief-reviewer" && a != "plan-reviewer" {
 			continue
 		}
-		review, err := readTranscript(path)
+		// Its first prompt names the task; the rest is read only for a task
+		// that needs it.
+		err := eachTranscriptLine(path, func(l transcriptLine) bool {
+			p := l.prompt()
+			if m := briefTask.FindStringSubmatch(p); m != nil {
+				reviews[m[1]+"/"+m[2]] = append(reviews[m[1]+"/"+m[2]], path)
+			}
+			return p == ""
+		})
 		if err != nil {
 			return nil, err
-		}
-		for _, l := range review.lines {
-			if p := l.prompt(); p != "" {
-				if m := briefTask.FindStringSubmatch(p); m != nil {
-					reviews[m[1]+"/"+m[2]] = append(reviews[m[1]+"/"+m[2]], path)
-				}
-				break
-			}
 		}
 	}
 	return reviews, nil

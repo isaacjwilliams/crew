@@ -4,9 +4,7 @@ package main
 // pr-review keeps of each review. crew codex reports a Codex run's cost itself.
 
 import (
-	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,27 +116,9 @@ func claudeRunCost(transcript []byte) (runCost, error) {
 	var cost runCost
 	usage := map[string]claudeUsage{}
 	var first, last time.Time
-	lines := bufio.NewScanner(bytes.NewReader(transcript))
-	lines.Buffer(nil, 64<<20)
-	for n := 1; lines.Scan(); n++ {
-		if len(bytes.TrimSpace(lines.Bytes())) == 0 {
-			continue
-		}
-		var e struct {
-			Type      string
-			Timestamp time.Time
-			Effort    string
-			Message   struct {
-				ID    string
-				Model string
-				Usage *claudeUsage
-			}
-		}
-		// A line that doesn't read could hold a message's only usage, so the
-		// count would be short.
-		if err := json.Unmarshal(lines.Bytes(), &e); err != nil {
-			return runCost{}, fmt.Errorf("line %d: %v", n, err)
-		}
+	n := 0
+	err := scanTranscript(bytes.NewReader(transcript), func(e transcriptLine) bool {
+		n++
 		if !e.Timestamp.IsZero() {
 			if first.IsZero() {
 				first = e.Timestamp
@@ -146,7 +126,7 @@ func claudeRunCost(transcript []byte) (runCost, error) {
 			last = e.Timestamp
 		}
 		if e.Type != "assistant" {
-			continue
+			return true
 		}
 		// Claude Code names its own messages, such as an API error, <synthetic>.
 		if m := e.Message.Model; m != "" && m != "<synthetic>" && !slices.Contains(cost.models, m) {
@@ -157,12 +137,13 @@ func claudeRunCost(transcript []byte) (runCost, error) {
 		}
 		if id := e.Message.ID; e.Message.Usage != nil {
 			if id == "" {
-				id = fmt.Sprintf("line %d", n)
+				id = fmt.Sprintf("entry %d", n)
 			}
 			usage[id] = *e.Message.Usage
 		}
-	}
-	if err := lines.Err(); err != nil {
+		return true
+	})
+	if err != nil {
 		return runCost{}, err
 	}
 	if len(usage) > 0 {
