@@ -339,6 +339,10 @@ func (s Status) InFlight() bool {
 	return s == Working || s == NeedsInput || s == AddressingFeedback || s == PROpen
 }
 
+// WorkersTurn is working or addressing-feedback: the worker has the task. The
+// other statuses in flight, needs-input and pr-open, wait on you.
+func (s Status) WorkersTurn() bool { return s == Working || s == AddressingFeedback }
+
 // Finished is merged, done or abandoned: nothing more happens to the task.
 func (s Status) Finished() bool { return s.Delivered() || s == Abandoned }
 
