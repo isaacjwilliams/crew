@@ -59,7 +59,7 @@ func TestReviewRuns(t *testing.T) {
 		"- 2026-11-11 08:02 — Brief review (2nd): 5 findings. Taken: (1) …\n"+
 		"- 2026-11-11 08:03 — Exhale: folded a repeated line. Skipped: …\n"+
 		"- 2026-11-11 08:04 — Specs pass. test-review: no findings. comment-review: cut one sentence.\n"+
-		"- 2026-11-11 08:05 — PR #24 opened (draft). Pre-PR review (casual-observer, test-review x2, comment-review): fixed …\n"+
+		"- 2026-11-11 08:05 — PR #24 opened (draft). Pre-PR review (casual-observer, test-review x2, comment-review): fixed …. test-review: no must/should fix.\n"+
 		"- 2026-11-11 08:06 — Branch pushed. test-review x3 (all findings addressed).\n"+
 		// Lines that only mention a step aren't runs of it, and the observer
 		// ran once however many entries name it.

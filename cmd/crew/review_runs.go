@@ -128,9 +128,19 @@ func oldRunsIn(e logEntry) []ReviewRun {
 	for _, list := range oldAgentList.FindAllStringSubmatch(e.msg, -1) {
 		agents = append(agents, oldListedAgent.FindAllStringSubmatch(list[1], -1)...)
 	}
+	// An entry may name an agent in both forms. It ran as many times as the
+	// larger count says, not their sum.
+	var names []string
+	times := map[string]int{}
 	for _, m := range agents {
-		for range max(1, atoiOr0(m[2])) {
-			runs = append(runs, ReviewRun{Step: m[1], At: e.at})
+		if _, named := times[m[1]]; !named {
+			names = append(names, m[1])
+		}
+		times[m[1]] = max(times[m[1]], atoiOr0(m[2]), 1)
+	}
+	for _, name := range names {
+		for range times[name] {
+			runs = append(runs, ReviewRun{Step: name, At: e.at})
 		}
 	}
 	return runs
