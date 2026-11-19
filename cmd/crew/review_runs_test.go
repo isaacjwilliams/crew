@@ -24,7 +24,9 @@ func runsText(runs []ReviewRun) []string {
 }
 
 func TestReviewRuns(t *testing.T) {
-	recorded := Task{docWith(t, reviewedTask+
+	recorded := Task{docWith(t, "## Evidence\n### Security review\nNo findings.\n\n"+reviewedTask+
+		// An old record from before the step's first counted one is a run.
+		"- 2026-11-09 07:00 — Plan review: 3 of 4 taken.\n"+
 		// Records in the form the agent files give, a rerun's label included.
 		"- 2026-11-09 08:00 — Brief review: 5 raised, 3 taken. (1) a gate sharpened; (4) kept: …\n"+
 		"- 2026-11-09 08:30 — Brief review (2nd): 1 raised, 1 taken. …\n"+
@@ -32,10 +34,11 @@ func TestReviewRuns(t *testing.T) {
 		"- 2026-11-10 09:10 — test-review: 2 raised, 1 taken. …\n"+
 		"- 2026-11-10 09:20 — Pre-PR review: 3 raised, 2 taken. Findings declined: (3) …\n"+
 		"- 2026-11-10 09:30 — Security review: 0 raised, 0 taken\n"+
-		// Other entries that name a step in an old form don't add a run to it.
-		"- 2026-11-10 09:40 — PR #70 opened. Pre-PR review (casual-observer, test-review): declined (3) …\n"+
-		"- 2026-11-10 09:50 — status → pr-open\n")}
+		// Later entries that name a step in an old form don't add a run to it,
+		// and nor does the Evidence's security review.
+		"- 2026-11-10 09:40 — PR #70 opened. Pre-PR review (casual-observer, test-review): declined (3) …\n")}
 	want := []string{
+		"2026-11-09 07:00 Brief review ?",
 		"2026-11-09 08:00 Brief review 5/3",
 		"2026-11-09 08:30 Brief review 1/1",
 		"2026-11-10 09:00 Exhale 4/2",

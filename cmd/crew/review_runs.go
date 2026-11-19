@@ -46,12 +46,15 @@ func (t Task) ReviewRuns() []ReviewRun {
 	if t.SecurityReviewed() {
 		old = append(old, ReviewRun{Step: stepSecurityReview, At: firstHandOver(entries)})
 	}
-	// An old record counts only when no record of its step states the counts:
-	// a task logged in both forms names the same runs twice. The observer ran
-	// once a task, however many entries name it.
+	// An old record counts unless a counted record of its step comes at or
+	// before it: from then on the step's runs are counted, so an old-form line
+	// only names one of them again. The observer and the Evidence's security
+	// review say only that the step ran in the task, so any counted record of
+	// it covers them.
 	for _, o := range old {
+		onceATask := o.Step == stepPrePRReview || o.Step == stepSecurityReview
 		if !slices.ContainsFunc(runs, func(r ReviewRun) bool {
-			return r.Step == o.Step && (r.Known || o.Step == stepPrePRReview)
+			return r.Step == o.Step && (onceATask || r.Known && !r.At.After(o.At))
 		}) {
 			runs = append(runs, o)
 		}
