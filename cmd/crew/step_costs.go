@@ -393,8 +393,10 @@ type stepper struct {
 var (
 	roundsPrompt = regexp.MustCompile(`(?i)review feedback is in rounds? (\d+)(?: to (\d+))?`)
 	// A note that has the worker rebase or retarget its branch, or merge its
-	// base in: crew's restack and retarget notes, and a lead's about a conflict.
-	restackNote = regexp.MustCompile(`Restack \(|Retarget \(|\bconflicts with\b`)
+	// base in: crew's restack and retarget notes, and a lead's about a conflict
+	// or asking for a rebase. "rebase" must start a word, so a task ID such as
+	// 042-auto-rebase doesn't count.
+	restackNote = regexp.MustCompile(`Restack \(|Retarget \(|\bconflicts with\b|(?i:(?:^|\s)rebase\b)`)
 )
 
 // prompt follows a prompt sent to the session: crew's open with "You are" or

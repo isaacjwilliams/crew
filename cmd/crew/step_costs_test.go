@@ -127,14 +127,14 @@ const (
 )
 
 // Every step of crew's process, through a first run, a round with both red CI
-// and comments, a fakeTranscript interrupted and picked up fresh, a restack and a
+// and comments, a session interrupted and picked up fresh, a lead's rebase note, a restack and a
 // repo's own review agent, is charged where it ran, and every token once.
 func TestTaskCostChargesEachStep(t *testing.T) {
 	transcripts, wt := t.TempDir(), "/work/webapp/001-feature"
 	task := taskFile(t, "001-feature", "## Review rounds\n"+
 		"### Round 1 — 2026-11-10 10:00 (PR #12)\n\n- [ ] CI failed on aaa1111: test\n\n**Conversation comments**\n- [ ] comment 5 — [link](u5)\n  > rename it\n\n"+
 		"### Round 2 — 2026-11-11 10:00 (PR #12)\n\n- [ ] Automated review requested (crew review)\n\n"+
-		"## Log\n- 2026-11-09 09:00 — dispatched: worker aaaa1111 (fakeTranscript aaaa1111-0000) in /work/webapp/001-feature on claude/feature\n")
+		"## Log\n- 2026-11-09 09:00 — dispatched: worker aaaa1111 (session aaaa1111-0000) in /work/webapp/001-feature on claude/feature\n")
 	start := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
 
 	first := newFakeSession(t, transcripts, wt, "aaaa1111-0000", start).
@@ -163,12 +163,15 @@ func TestTaskCostChargesEachStep(t *testing.T) {
 	reviewer.subagent("e1", "Explore", "r1/1").reply("e1", 1<<17).write()
 	first.write()
 
-	// Interrupted, then picked up in a fresh fakeTranscript for round 2 and a restack.
+	// Interrupted, then picked up in a fresh session for round 2, a lead's
+	// note asking for a rebase, and a restack.
 	newFakeSession(t, transcripts, wt, "bbbb2222-0000", first.at.Add(time.Hour)).
 		prompt("You are picking up task 001-feature in project webapp, which already has work on its branch.\nTask file: x\nNew input for task 001-feature (task file: x). New review feedback is in round 2 under '## Review rounds'; follow your review-round workflow.").
 		reply("p1", 1<<18).
-		prompt("New input for task 001-feature (task file: x). Restack (main moved): run git rebase --onto abc def").
+		prompt("New input for task 001-feature (task file: x). Note from the lead (also check Decisions in the task file): Rebase claude/feature onto origin/main and force-push with lease.").
 		reply("p2", 1<<19).
+		prompt("New input for task 001-feature (task file: x). Restack (main moved): run git rebase --onto abc def").
+		reply("p3", 1<<20).
 		write()
 
 	tc, err := taskCost(task, transcripts, wt, nil)
@@ -189,7 +192,7 @@ func TestTaskCostChargesEachStep(t *testing.T) {
 		"Automated review, worker: " + fmt.Sprint(512+1024+1<<18), // the review, and round 2's request for another
 		"Review rounds, worker: 12288",
 		"CI rounds, worker: 2048",
-		"Restacks and conflicts, worker: 524288",
+		"Restacks and conflicts, worker: " + fmt.Sprint(1<<19+1<<20),
 		"test-review, test-review: 16384",
 	}
 	if got := outputs(tc); !slices.Equal(got, want) {
