@@ -1076,6 +1076,12 @@ const (
 // reads it back, and the worker ticks it once it has merged the base in.
 const conflictsWith = "Conflicts with " // - [ ] Conflicts with <base> at <sha>
 
+// The line in a review round that asks the worker for another pass of
+// automated review: crew review writes it, or crew feedback for a comment that
+// asks for one. The worker runs the pass and ticks it, and ReviewRounds reads
+// it back.
+const reviewRequested = "Automated review requested " // - [ ] Automated review requested (<source>)
+
 // crewReports are the kinds of line crew writes into a review round of its own,
 // to report what it found on the PR rather than pass on the user's feedback.
 var crewReports = []string{ciFailedOn, conflictsWith}
@@ -1163,12 +1169,14 @@ func (t Task) FeedbackRounds() int {
 	return n
 }
 
-// A review round: its number, when crew recorded it, and the user's comments
-// in it.
+// A review round: its number, when crew recorded it, the user's comments in
+// it, and what else it reports: a conflict with the base, red CI, and a request
+// for another automated review.
 type ReviewRound struct {
-	Number   int
-	At       time.Time
-	Comments []RoundComment
+	Number                           int
+	At                               time.Time
+	Comments                         []RoundComment
+	Conflict, RedCI, ReviewRequested bool
 }
 
 // A comment of the user's in a review round: its checklist item, "review 7
@@ -1178,8 +1186,8 @@ type ReviewRound struct {
 type RoundComment struct{ Item, Text string }
 
 // ReviewRounds is the task's review rounds, oldest first, as reviewRound.add
-// writes them. Red CI and requests for another automated review aren't
-// comments, so a round of only those has none.
+// writes them. A conflict, red CI and a request for another automated review
+// aren't comments, so a round of only those has none.
 func (t Task) ReviewRounds() []ReviewRound {
 	var rounds []ReviewRound
 	var cm *RoundComment // the comment whose quote the line may continue
@@ -1193,6 +1201,12 @@ func (t Task) ReviewRounds() []ReviewRound {
 			r := &rounds[len(rounds)-1]
 			r.Comments = append(r.Comments, RoundComment{Item: item})
 			cm = &r.Comments[len(r.Comments)-1]
+		} else if ok && len(rounds) > 0 {
+			r := &rounds[len(rounds)-1]
+			r.Conflict = r.Conflict || strings.HasPrefix(item, conflictsWith)
+			r.RedCI = r.RedCI || strings.HasPrefix(item, ciFailedOn)
+			r.ReviewRequested = r.ReviewRequested || strings.HasPrefix(item, reviewRequested)
+			cm = nil
 		} else if isQuote && cm != nil {
 			if cm.Text != "" {
 				cm.Text += "\n"

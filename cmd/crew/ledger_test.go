@@ -633,6 +633,7 @@ const commentedTask = "## Automated reviews\n" +
 	"### Round 3 — 2026-11-10 14:00 (PR #12)\n\n**Review summaries**\n- [x] review 7 (changes_requested)\n  > Two things.\n  > - [ ] not an item\n\n" +
 	"**Inline comments**\n- [x] `a.go:3` — comment 9 — [link](u9)\n  > why?\n\n- [x] Automated review requested (comment 11)\n\n" +
 	"### Round 4 — 2026-11-11 10:00 (PR #12)\n\n**Conversation comments**\n- [ ] comment 12 — [link](u12)\n  > ok\n\n" +
+	"### Round 5 — 2026-11-11 11:00 (PR #12)\n\n- [ ] Conflicts with main at bbb2222\n\n" +
 	"## Log\n"
 
 func TestReviewRounds(t *testing.T) {
@@ -643,13 +644,19 @@ func TestReviewRounds(t *testing.T) {
 		for _, cm := range r.Comments {
 			line += fmt.Sprintf(" [%s: %q]", cm.Item, cm.Text)
 		}
+		for kind, is := range map[string]bool{"conflict": r.Conflict, "red CI": r.RedCI, "review requested": r.ReviewRequested} {
+			if is {
+				line += " " + kind
+			}
+		}
 		got = append(got, line)
 	}
 	want := []string{
 		`1 2026-11-10 10:00: [comment 5 — [link](u5): "too early"]`,
-		"2 2026-11-10 13:00:",
-		`3 2026-11-10 14:00: [review 7 (changes_requested): "Two things.\n- [ ] not an item"] [` + "`a.go:3`" + ` — comment 9 — [link](u9): "why?"]`,
+		"2 2026-11-10 13:00: red CI",
+		`3 2026-11-10 14:00: [review 7 (changes_requested): "Two things.\n- [ ] not an item"] [` + "`a.go:3`" + ` — comment 9 — [link](u9): "why?"] review requested`,
 		`4 2026-11-11 10:00: [comment 12 — [link](u12): "ok"]`,
+		"5 2026-11-11 11:00: conflict",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)

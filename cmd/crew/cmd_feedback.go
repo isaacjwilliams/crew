@@ -408,7 +408,7 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 		b.WriteString("\n")
 	}
 	for _, source := range r.reviewRequests {
-		fmt.Fprintf(&b, "- [ ] Automated review requested (%s)\n", source)
+		fmt.Fprintf(&b, "- [ ] %s(%s)\n", reviewRequested, source)
 	}
 	if len(r.reviewRequests) > 0 {
 		b.WriteString("\n")
