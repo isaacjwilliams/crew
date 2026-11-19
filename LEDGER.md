@@ -240,6 +240,23 @@ When CI goes red on a PR its worker has handed to you (`pr-open`), `crew tick` r
 
 When a PR its worker has handed to you (`pr-open`) stops merging cleanly into the task's `base`, and the task isn't stacked, `crew tick` runs `crew catch-up TASK`, which appends a round of its own holding one line: `- [ ] Conflicts with <base> at <short sha>`, the SHA being the base branch's tip on origin when crew saw the conflict. It does so once for each commit of the base: the line is the record, and no key keeps it. While GitHub is still working out whether a PR conflicts, and when the PR targets a branch other than the task's `base`, it waits. The worker merges the base in before anything else in the round, resolves the conflicts, runs the checks, pushes without force, and ticks the line. It posts no comment: the merge commit says what happened. A round that only reports a conflict doesn't count toward `MAX_REVIEW_ROUNDS`. A stacked task's conflicts are a restack's (see Stacked tasks).
 
+## Cost
+
+A task's `## Cost` keeps what the task cost in tokens, so it outlives the transcripts it's read from and can be read on any machine. Once a task is finished (merged, done or abandoned) and `crew cleanup` has removed its worktree, the next `crew tick` reads the Claude Code transcripts of the machine running crew and adds the section, once, with `crew keep-costs`. A new task's file doesn't have it: crew adds it just before `## Log`, where review rounds go too, when no more can come. The first tick after an upgrade keeps the costs of every finished task that doesn't have them yet.
+
+It holds one line for each step of crew's process, agent and model that took tokens, then one for each step that didn't run, then what's missing:
+
+```
+- Implementing, worker, claude-opus-5-5: 412 input, 1,204,330 cache write, 18,950,112 cache read, 96,201 output
+- Pre-PR review, casual-observer, claude-opus-5-5: 38 input, 98,114 cache write, 610,277 cache read, 7,950 output
+- Security review: not run
+- Brief review: missing
+```
+
+The counts are input, cache write, cache read and output, which don't overlap, so a step's tokens are their sum. Every token of every session run in the task's worktree, its subagents included, goes to exactly one step, and a message Claude Code wrote several times counts once. The agent is `worker` for the worker's own session, and otherwise the subagent's type. The steps are `Brief review` (the brief reviewer, run by a lead or a goal lead, found by the task file its prompt names), `Implementing`, `Exhale`, `Pre-PR review`, `Security review`, `Evidence and PR` (from the first evidence entry or `gh pr create` until automated review starts), `Automated review` (the reviewer, and the worker settling its findings), `Review rounds`, `CI rounds`, `Restacks and conflicts`, and each of a repo's own review agents (one whose type ends `-review`) by its type. A worker's session moves from step to step with the prompts crew sends it and the marks each step leaves: the skill or agent it runs, the evidence, the PR.
+
+A step with no tokens is `not run`. One that ran but whose transcript isn't on this machine is `missing`, never zero: a worker session the Log names (its `dispatched:` or `followup (…):` line) with no transcript is `worker session <job>: missing`, and then the worker's steps without tokens aren't called not run; a brief review the Log records (a `Brief review:` line) with no transcript is `Brief review: missing`.
+
 ## Log
 
 A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you.

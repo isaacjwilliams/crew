@@ -299,6 +299,7 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
 - restacks stacked tasks whose parent moved or merged, bottom-up, and has a task's worker retarget its PR when the PR targets a branch other than the task's base, never sending the same restack twice;
 - cleans up merged tasks and done spikes;
+- keeps what each finished task cost in its task file, once its worktree is gone: the tokens of each step of crew's process, by agent and model, read from this machine's transcripts (see `## Cost` in [LEDGER.md](LEDGER.md#cost));
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
 - for a goal you started (below): dispatches its ready tasks as the caps allow, passes its goal lead your notes, its workers' questions and its spikes' reports, and closes the goal once every task is finished (merged, done or abandoned).
 

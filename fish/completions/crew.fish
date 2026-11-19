@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost keep-costs status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -9,7 +9,7 @@ complete -c crew -n "__fish_seen_subcommand_from ready hand-over dispatch feedba
 complete -c crew -n "__fish_seen_subcommand_from evidence" -F
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
+complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status stats list sync keep-costs cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from config" -l task -x -d 'With this task\'s overrides too' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -33,7 +33,7 @@ complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a re
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks and done spikes with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
-complete -c crew -n "__fish_seen_subcommand_from status stats list sync proposals pause resume" -l all -d 'Every project, not just this one'
+complete -c crew -n "__fish_seen_subcommand_from status stats list sync keep-costs proposals pause resume" -l all -d 'Every project, not just this one'
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/done/abandoned'
 complete -c crew -n "__fish_seen_subcommand_from stats" -l since -x -d 'Tasks merged since this date (YYYY-MM-DD)'
 complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'

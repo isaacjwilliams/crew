@@ -674,6 +674,23 @@ check "cleanup removes the worktree, run from inside it too" '[[ $out == *"clean
 check "cleanup ends a background process left running in the worktree, and nothing else" '[[ $out == *"stopping 1 process(es) still running in $WT"* ]] && [[ ! -e /proc/$IN_WT/cwd ]] && kill -0 $ELSEWHERE'
 check "cleanup leaves a process with a terminal running in the worktree" 'kill -0 $IN_TTY'
 kill $ELSEWHERE $IN_TTY $WITH_TTY 2>/dev/null || true
+# crew keep-costs keeps what a finished task cost in its file, once its worktree
+# is gone, so a clone of the ledger with no transcripts reads it.
+TD="$HOME/.claude/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$WT")"
+mkdir -p "$TD"
+jobs1=$(sed -nE 's/.* — (dispatched|followup \([^)]*\)): worker ([0-9a-f]{8}).*/\2/p' "$F1" | sort -u)
+for j in $jobs1; do
+  printf '%s\n' '{"type":"user","timestamp":"2026-11-17T03:42:54Z","message":{"role":"user","content":"You are the implementer for task 001."}}' \
+    '{"type":"assistant","timestamp":"2026-11-17T03:43:00Z","message":{"id":"msg_'"$j"'","model":"claude-opus-5-5","usage":{"input_tokens":1,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}}}' >"$TD/$j-stub.jsonl"
+done
+n1=$(wc -w <<<"$jobs1")
+out=$(crew keep-costs 2>&1)
+rm -rf "$SB/costs-clone"; pushed && git clone -q "$SB/home.git" "$SB/costs-clone"
+cost1=$(sed -n '/^## Cost$/,/^## Log$/p' "$SB/costs-clone/${F1#"$L"/}")
+check "crew keep-costs keeps a finished task's tokens per step, agent and model, read back from a fresh clone of the ledger" \
+  '[[ $out == "kept the costs of "* && $cost1 == *"- Implementing, worker, claude-opus-5-5: $n1 input, $((2 * n1)) cache write, $((3 * n1)) cache read, $((4 * n1)) output"* ]]'
+check "a step the task didn't run is kept as not run" '[[ $cost1 == *"- Exhale: not run"* && $cost1 != *missing* ]]'
+check "a task's costs are kept once" '[[ -z $(crew keep-costs 2>&1) ]] && (( $(grep -c "^- Implementing, worker" "$F1") == 1 ))'
 
 # WORKTREE_TOOL=worktrunk: task worktrees come from `wt`, so the repo's hooks run.
 PD=$(ls -d "$L"/projects/*)

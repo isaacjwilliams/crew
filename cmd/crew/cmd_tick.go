@@ -79,6 +79,9 @@ func cmdTick(c *Crew, args []string) error {
 			c.tickGoal(g, as, paused)
 		}
 	}
+	// Once a task's worktree is cleaned up above, nothing runs in it any more,
+	// so what it cost is final.
+	c.step(nil, "keep-costs", "--all")
 	c.dispatchReady()
 	// A catch-all for background pushes that failed, or that a crash cut short.
 	if gitOK(c.Home, "remote", "get-url", "origin") && !c.pushNow(os.Stderr) {

@@ -128,6 +128,11 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review-cost AGENT_ID        What the run of Claude subagent AGENT_ID cost:
                                    tokens, time, model and effort, from its
                                    transcript (used by pr-review)
+  crew keep-costs [--all|--project P]
+                                   Keep what each finished task cost in its task
+                                   file: tokens by step of crew's process, agent and
+                                   model, read from this machine's transcripts once
+                                   its worktree is cleaned up (run by crew tick)
   crew status [--done] [--all|--project P]
                                    Tasks with worker state, and what each one not yet
                                    dispatched waits for. A goal's tasks are grouped,
