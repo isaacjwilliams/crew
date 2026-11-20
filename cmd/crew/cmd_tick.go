@@ -114,6 +114,23 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 	return 0
 }
 
+// tickCleanup cleans up a delivered task's worktree. When cleanup leaves it
+// (uncommitted changes, say) it says so on its last stderr line, and the leads are
+// told why for as long as it stays, and tried again next tick.
+func (c *Crew) tickCleanup(p *Project, t Task, news *tickNews) {
+	var errs strings.Builder
+	code := c.step(&errs, "cleanup", t.Path)
+	fmt.Fprint(os.Stderr, errs.String())
+	switch code {
+	case 0:
+		news.did(p.Name, "%s: %s; worktree cleaned up", t.ID(), t.Status())
+	case exitNotYet:
+		// A worktree tool's own output comes before it, and differs every try.
+		lines := append(splitLines(errs.String()), "")
+		news.heldBack(p.Name, "%s", strings.TrimPrefix(lines[len(lines)-2], "crew: "))
+	}
+}
+
 // tickTask is one task's share of a tick, for a task already under way: its
 // cleanup once it has delivered (Status.Delivered), or what its worker is sent
 // while it's in flight, which is nothing while its project is paused.
@@ -121,9 +138,8 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool, news *tickNews) {
 	id, st := t.ID(), t.Status()
 	if st.Delivered() {
-		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
-		if t.Worktree() != "" && c.step(nil, "cleanup", t.Path) == 0 {
-			news.did(p.Name, "%s: %s; worktree cleaned up", id, st)
+		if t.Worktree() != "" {
+			c.tickCleanup(p, t, news)
 		}
 		return
 	}
