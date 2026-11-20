@@ -58,9 +58,12 @@ func (c *Crew) recordNews(project, text string) {
 // newsSince is the news written after since, oldest first.
 func (c *Crew) newsSince(since time.Time) []newsItem {
 	var items []newsItem
+	// A day file is named for the local day its lines were written on. The day
+	// before since's is read too, in case the clock's time zone has moved since.
+	first := since.AddDate(0, 0, -1).Format(newsDay)
 	files, _ := filepath.Glob(c.path("news", "*.log"))
 	for _, f := range files {
-		if strings.TrimSuffix(filepath.Base(f), ".log") < since.Format(newsDay) {
+		if strings.TrimSuffix(filepath.Base(f), ".log") < first {
 			continue
 		}
 		b, _ := os.ReadFile(f)
