@@ -358,6 +358,8 @@ git -C "$WT" push -q -u origin HEAD 2>/dev/null
 echo OPEN >"$HOME/gh-pr-state"; out=$(crew sync 2>&1); rm "$HOME/gh-pr-state"
 check "sync fetches and raises the risk of a task whose branch on origin gained a sensitive path after its hand-over, and logs it" \
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
+check "sync records an open PR's state with its review decision, its base, its checks and that it merges cleanly" \
+  '[[ $(crew get 1 pr_state) == "open, approved" && $(crew get 1 pr_base) == "" && $(crew get 1 ci_state) == "" && $(crew get 1 mergeable) == "" ]]'
 check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
   '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
@@ -815,6 +817,8 @@ check "status shows the restack that's needed" '[[ $(crew status) == *"needs res
 setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); crew restack 10 >/dev/null
 check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_prompt) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_prompt) == *"git rebase --onto $T9b $T9\`"* && $(last_prompt) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
+check "status shows the restack a working task needs" \
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" ]]'
 setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
