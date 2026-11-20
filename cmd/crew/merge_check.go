@@ -96,6 +96,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		{pr.Mergeable == conflicting, "conflicts with " + base},
 		{pr.MergeState == "BEHIND", "behind " + base},
 		{pr.CI == ciFailing, "CI failing"},
+		{pr.CI == ciCancelled, "CI cancelled"},
 		{pr.Draft, "draft"},
 		{pr.ReviewDecision == "CHANGES_REQUESTED", "changes requested"},
 		{t.AwaitsSecurityReview(), "no security review yet"},

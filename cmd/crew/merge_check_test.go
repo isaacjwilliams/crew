@@ -72,6 +72,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "conflicts", pr: func(p *gitHubPR) { p.Mergeable = conflicting }, want: "not yet: conflicts with main"},
 		{name: "behind its base, which the branch rules want it up to date with", pr: func(p *gitHubPR) { p.MergeState = "BEHIND" }, want: "not yet: behind main"},
 		{name: "CI failing", pr: func(p *gitHubPR) { p.CI = ciFailing }, want: "not yet: CI failing"},
+		{name: "CI cancelled", pr: func(p *gitHubPR) { p.CI = ciCancelled }, want: "not yet: CI cancelled"},
 		{name: "no checks", pr: func(p *gitHubPR) { p.CI = "" }, want: "merge now"},
 		{name: "draft", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
 		{name: "changes requested", pr: func(p *gitHubPR) { p.ReviewDecision = "CHANGES_REQUESTED" }, want: "not yet: changes requested"},

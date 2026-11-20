@@ -68,7 +68,7 @@ func (pr gitHubPR) record(t Task) bool {
 	for _, kv := range []struct{ key, value string }{
 		{"pr_updated", pr.UpdatedAt}, // for prMayHaveNewComments in crew tick
 		{"pr_base", pr.Base},         // for retargetReason
-		{"ci_state", string(pr.CI)},  // for crew tick, which runs crew ci-fix only while CI is failing
+		{"ci_state", string(pr.CI)},  // for crew tick, which runs crew ci-fix only while CI is failing, and for crew status
 		{"mergeable", pr.Mergeable},  // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
 		{"pr_state", pr.label()},
 	} {
