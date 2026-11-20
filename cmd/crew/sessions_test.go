@@ -34,6 +34,32 @@ func TestTurnEndedReadsTheSessionTranscript(t *testing.T) {
 	}
 }
 
+// claude agents can list a job as working after its turn has ended: a shell it
+// started keeps it working, and the state can stay working once its process has
+// exited.
+func TestAWorkingJobWhoseTurnEnded(t *testing.T) {
+	bin, config := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(bin, "claude"), []byte(`#!/bin/sh
+echo '[{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"live-s"},
+{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"}]'
+`), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-home-me-work")
+	os.MkdirAll(dir, 0o755)
+	for _, s := range []string{"live-s", "gone-s"} {
+		os.WriteFile(filepath.Join(dir, s+".jsonl"), []byte(`{"type":"system","subtype":"turn_duration"}`+"\n"), 0o644)
+	}
+	as := (&Crew{Home: t.TempDir()}).agents()
+	if as.jobBusy("live") || as.jobState("live") != "idle, background task running" {
+		t.Errorf("with its process running: busy %v, state %q", as.jobBusy("live"), as.jobState("live"))
+	}
+	if !as.jobBusy("gone") || as.jobState("gone") != "working" {
+		t.Errorf("with its process gone: busy %v, state %q", as.jobBusy("gone"), as.jobState("gone"))
+	}
+}
+
 func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	c := &Crew{Home: t.TempDir()}
