@@ -9,6 +9,11 @@ package main
 //	news/held-back      what the last tick held back, and why
 //	news/sessions/<id>  what a lead's session has been told
 //
+// Each file has a line per item, its fields separated by tabs: the day files
+// start with the time, then the project, then the text; the others start with
+// the project. A session's file has the time of the newest line it's had on
+// its first line.
+//
 // The lead's hooks (crew lead --hook) tell each session what's new since its
 // previous prompt: the lines written since, and what's held back that it hasn't
 // been told yet.
@@ -90,33 +95,41 @@ func (n *tickNews) heldBack(project, format string, a ...any) {
 	n.held = append(n.held, newsItem{project: project, text: line})
 }
 
-// save replaces news/held-back with what this tick held back, in one step, so
-// a hook reading it meanwhile reads the last tick's or this one's. It also
-// removes what's older than newsKept.
+// save replaces news/held-back with what this tick held back.
 func (n *tickNews) save() {
 	var b strings.Builder
 	for _, h := range n.held {
 		fmt.Fprintf(&b, "%s\t%s\n", h.project, h.text)
 	}
-	f := n.c.path("news", "held-back")
-	err := os.MkdirAll(filepath.Dir(f), 0o755)
-	if err == nil {
-		err = os.WriteFile(f+".new", []byte(b.String()), 0o644)
-	}
-	if err == nil {
-		err = os.Rename(f+".new", f)
-	}
-	if err != nil {
+	if err := replaceNewsFile(n.c.path("news", "held-back"), b.String()); err != nil {
 		warn("couldn't record what this tick held back: %v", err)
 	}
+}
+
+// replaceNewsFile writes a news file in one step, so a hook reading it
+// meanwhile reads the old one or the new one, never half of one.
+func replaceNewsFile(path, text string) error {
+	err := os.MkdirAll(filepath.Dir(path), 0o755)
+	if err == nil {
+		err = os.WriteFile(path+".new", []byte(text), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(path+".new", path)
+	}
+	return err
+}
+
+// pruneNews removes the day files older than newsKept, and the files of the
+// sessions that haven't been prompted since.
+func (c *Crew) pruneNews() {
 	old := time.Now().Add(-newsKept)
-	days, _ := filepath.Glob(n.c.path("news", "*.log"))
+	days, _ := filepath.Glob(c.path("news", "*.log"))
 	for _, d := range days {
 		if strings.TrimSuffix(filepath.Base(d), ".log") < old.Format(newsDay) {
 			os.Remove(d)
 		}
 	}
-	sessions, _ := filepath.Glob(n.c.path("news", "sessions", "*"))
+	sessions, _ := filepath.Glob(c.path("news", "sessions", "*"))
 	for _, s := range sessions {
 		if fi, err := os.Stat(s); err == nil && fi.ModTime().Before(old) {
 			os.Remove(s)
@@ -169,9 +182,7 @@ func (s sessionNews) save() {
 	for l := range s.told {
 		b += l + "\n"
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err == nil {
-		os.WriteFile(s.path, []byte(b), 0o644)
-	}
+	replaceNewsFile(s.path, b)
 }
 
 // leadNews is what a lead's session is told with a prompt: the news since its
@@ -204,9 +215,11 @@ func (c *Crew) leadNews(id, scope string, starting bool, room int) string {
 		s.save()
 		return ""
 	}
+	// since moves to the newest line read, not to now, so a line written while
+	// this runs is heard with the next prompt. It takes the newest, not the
+	// last: two commands can append their lines a little out of order.
 	var did []newsItem
 	for _, i := range c.newsSince(s.since) {
-		// Two commands can append their lines a little out of order.
 		if i.at.After(s.since) {
 			s.since = i.at
 		}
@@ -238,6 +251,8 @@ func (c *Crew) newsMessage(did, held []newsItem, room int) string {
 		return fmt.Sprintf("%d earlier lines left out: this machine's news is in %s, a file a day, and what crew tick holds back is in %s.\n",
 			n, c.path("news"), c.path("news", "held-back"))
 	}
+	// Leave out lines from the front until the rest, the headers and the note
+	// fit. lines has did's lines first, so left cuts into did before held.
 	size, left := len(didHeader)+len(heldHeader), 0
 	for _, l := range lines {
 		size += utf8.RuneCountInString(l)

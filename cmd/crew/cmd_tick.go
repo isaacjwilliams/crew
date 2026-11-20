@@ -83,6 +83,7 @@ func cmdTick(c *Crew, args []string) error {
 	}
 	c.dispatchReady(news)
 	news.save()
+	c.pruneNews()
 	// A catch-all for background pushes that failed, or that a crash cut short.
 	if gitOK(c.Home, "remote", "get-url", "origin") && !c.pushNow(os.Stderr) {
 		warn("couldn't push the ledger to origin; the next tick tries again")
@@ -163,6 +164,8 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	}
 	job := t.WorkerJob()
 	if movedHere(t, as) {
+		// A paused project's task goes on below: it can still be marked as
+		// waiting on the user.
 		if paused {
 			news.heldBack(p.Name, "%s: a fresh worker for it here waits: %s is paused", id, p.Name)
 		} else {
@@ -183,7 +186,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	switch {
 	case held != "":
 		news.heldBack(p.Name, "%s: %s", id, held)
-	case send == nil:
+	case send == nil: // nothing to send
 	case busy:
 		news.heldBack(p.Name, "%s: %s waiting for its worker (%s)", id, send.what, as.jobState(job))
 	case paused:
@@ -194,7 +197,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 		}
 		return
 	}
-	if busy {
+	if busy { // it may still be answering its open questions
 		return
 	}
 	// Read the status again: the task may have been merged or abandoned while

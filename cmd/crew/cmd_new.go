@@ -312,7 +312,7 @@ func cmdHandOver(c *Crew, args []string) error {
 	t.SetStatus(rules.handedOver)
 	t.Touch()
 	t.Log("handed over")
-	if inCrewSession() {
+	if inWorkerOrGoalLead() {
 		c.recordNews(taskProjectDir(t), fmt.Sprintf("%s: handed over (%s)", t.ID(), rules.handedOver))
 	}
 	c.commit("hand over " + t.ID())

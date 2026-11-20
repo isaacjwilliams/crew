@@ -214,7 +214,7 @@ func cmdSet(c *Crew, args []string) error {
 		return err
 	}
 	// A lead hears the statuses crew's sessions set; crew tick reports its own.
-	if key == "status" && !isProposal(f) && inCrewSession() {
+	if key == "status" && !isProposal(f) && inWorkerOrGoalLead() {
 		c.recordNews(taskProjectDir(Task{d}), d.ID()+": "+statusLogged+value)
 	}
 	d.Touch()

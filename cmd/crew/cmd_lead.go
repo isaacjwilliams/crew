@@ -69,22 +69,24 @@ func (c *Crew) leadFingerprint(settings Settings) string {
 // the news since its previous one (leadNews). A lead runs on the instructions
 // and settings it started with, so once they've changed, crew lead's session
 // is also told to have the user start a new lead. The phone lead (crew serve)
-// has no CREW_LEAD_FINGERPRINT, and hears the news; a goal lead's session runs
-// with the lead's settings too, and hears nothing.
+// hears the news too; a goal lead runs with the lead's settings, and hears
+// nothing (see inWorkerOrGoalLead).
 func (c *Crew) leadHook(in io.Reader) error {
-	if inCrewSession() {
+	if inWorkerOrGoalLead() {
 		return nil
 	}
 	var input struct {
 		SessionID string `json:"session_id"`
 		Event     string `json:"hook_event_name"`
 	}
+	// Without a session ID in the input, leadNews has no record to keep and says nothing.
 	json.NewDecoder(in).Decode(&input)
 	// The project crew lead or crew serve gave the session in CREW_PROJECT.
 	proj, err := c.scope("", false)
 	if err != nil {
 		return err
 	}
+	// A session that's starting has just loaded what's current: nothing has changed.
 	starting := input.Event == "SessionStart"
 	var out string
 	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && !starting {

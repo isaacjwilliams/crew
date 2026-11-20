@@ -568,10 +568,13 @@ func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	return encodeJSON(settings, false)
 }
 
-// inCrewSession: this runs in a session crew started for a project, a worker's
-// or a goal lead's, whose settings set CREW_LEAD_FINGERPRINT empty. crew lead
-// sets it to a fingerprint, and nothing else sets it.
-func inCrewSession() bool {
+// inWorkerOrGoalLead: this runs in a worker's or a goal lead's session. Which
+// session crew runs in shows in CREW_LEAD_FINGERPRINT:
+//
+//	empty        a worker or goal lead (sessionSettings sets it so)
+//	a value      crew lead's session: the fingerprint of what it loaded
+//	unset        the phone lead (crew serve), or no session crew started
+func inWorkerOrGoalLead() bool {
 	fp, set := os.LookupEnv("CREW_LEAD_FINGERPRINT")
 	return set && fp == ""
 }
