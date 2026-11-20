@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -68,67 +67,21 @@ func cmdSync(c *Crew, args []string) error {
 			if pr == "" {
 				continue
 			}
-			out, err := ghQuiet(p.Repo(), "pr", "view", pr, "--json", "state,isDraft,reviewDecision,updatedAt,baseRefName,statusCheckRollup,mergeable")
-			var info struct {
-				State             string    `json:"state"`
-				IsDraft           bool      `json:"isDraft"`
-				ReviewDecision    string    `json:"reviewDecision"`
-				UpdatedAt         string    `json:"updatedAt"`
-				BaseRefName       string    `json:"baseRefName"`
-				StatusCheckRollup []ciCheck `json:"statusCheckRollup"`
-				Mergeable         string    `json:"mergeable"`
-			}
-			if err != nil || json.Unmarshal(out, &info) != nil {
+			onGitHub, err := readPR(p.Repo(), pr)
+			if err != nil {
 				warn("%s: couldn't read %s", t.ID(), pr)
 				continue
 			}
-			// For prMayHaveNewComments in crew tick.
-			if t.Get("pr_updated") != info.UpdatedAt {
-				t.Set("pr_updated", info.UpdatedAt)
+			if onGitHub.record(t) {
 				changed = true
 			}
-			// The branch the PR targets, which retargetReason compares with the task's.
-			if t.Get("pr_base") != info.BaseRefName {
-				t.Set("pr_base", info.BaseRefName)
-				changed = true
-			}
-			// For crew tick, which runs crew ci-fix only while CI is failing.
-			if ci, _ := rollup(info.StatusCheckRollup); t.Get("ci_state") != string(ci) {
-				t.Set("ci_state", string(ci))
-				changed = true
-			}
-			// For crew tick, which runs crew catch-up only while the PR conflicts with its base.
-			mergeable := ""
-			if info.Mergeable == "CONFLICTING" {
-				mergeable = conflicting
-			}
-			if t.Get("mergeable") != mergeable {
-				t.Set("mergeable", mergeable)
-				changed = true
-			}
-			label := "open"
-			switch {
-			case info.State == "MERGED":
-				label = "merged"
-			case info.State == "CLOSED":
-				label = "closed"
-			case info.IsDraft:
-				label = "draft"
-			}
-			if info.State != "MERGED" && info.State != "CLOSED" && info.ReviewDecision != "" {
-				label += ", " + strings.ToLower(strings.ReplaceAll(info.ReviewDecision, "_", " "))
-			}
-			if t.Get("pr_state") != label {
-				t.Set("pr_state", label)
-				changed = true
-			}
-			if info.State == "MERGED" && st != Merged {
+			if onGitHub.State == "MERGED" && st != Merged {
 				t.SetStatus(Merged)
 				t.Touch()
 				t.Log("PR merged")
 				changed = true
 				fmt.Printf("%s: merged (run 'crew cleanup %s')\n", t.ID(), t.ID())
-			} else if info.State == "CLOSED" && st != Abandoned {
+			} else if onGitHub.State == "CLOSED" && st != Abandoned {
 				say("%s: PR closed without merging (status left as '%s')", t.ID(), st)
 			}
 		}
