@@ -893,6 +893,7 @@ rm -f "$HOME/gh-pr-state"
 # crew tick, starting from a ledger with nothing in flight.
 for f in "$PD"/tasks/*.md; do has=$(crew get "$f" status); [[ $has == merged ]] || crew set "$f" status abandoned; done
 prompt every SessionStart >/dev/null; prompt held >/dev/null   # leads that hear what the ticks below do, and hold back
+PJ=$(basename "$PD")   # the project, which a lead for every project hears before each line
 crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
 resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
@@ -903,7 +904,7 @@ crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
 check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
-check "a lead hears a round held back for a busy worker, and why" '[[ $(prompt held) == *"$HELD$NL- 013-tick-routing: round 1 waiting for its worker (working)"* ]]'
+check "a lead hears a round held back for a busy worker, and why" '[[ $(prompt held) == *"$HELD$NL- $PJ: 013-tick-routing: round 1 waiting for its worker (working)"* ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
@@ -1150,7 +1151,7 @@ check "tick holds back the restack of a task that isn't pr-open, saying why" \
 check "and a child's restack until its parent's, saying why" '[[ $out == *"015-tick-child: restack (016-tick-replacement moved) waits for 016-tick-replacement'"'"'s own restack"* ]]'
 out=$(prompt held)
 check "a lead hears each restack held back, and why" \
-  '[[ $out == *"$HELD"*"$NL- 016-tick-replacement: restack (014-tick-parent moved) waits until the task is pr-open; it'"'"'s working"* && $out == *"$NL- 015-tick-child: restack (016-tick-replacement moved) waits for 016-tick-replacement'"'"'s own restack"* ]]'
+  '[[ $out == *"$HELD"*"$NL- $PJ: 016-tick-replacement: restack (014-tick-parent moved) waits until the task is pr-open; it'"'"'s working"* && $out == *"$NL- $PJ: 015-tick-child: restack (016-tick-replacement moved) waits for 016-tick-replacement'"'"'s own restack"* ]]'
 crew tick >/dev/null 2>&1
 check "and isn't told again while the same reason holds them back" '[[ $(prompt held) != *"$HELD"* ]]'
 echo MERGED >"$HOME/gh-pr-state"; setstate "done" null; touch "$HOME/rm-fail"
@@ -1262,14 +1263,14 @@ out=$(crew tick 2>&1)
 check "goal cap sets max_in_flight, and tick says a goal task over it waits for the cap" '[[ $(gget "$GF" max_in_flight) == 0 && $out == "$T1: dispatch held back: goal $G already has 0 task(s) in flight (max_in_flight 0); leaving $T1 ready" && $(crew get "$GT1" status) == ready ]]'
 check "goal cap refuses a value that isn't a whole number" '! crew goal cap 1 -1 2>/dev/null && ! crew goal cap 1 two 2>/dev/null && [[ $(gget "$GF" max_in_flight) == 0 ]]'
 out=$(prompt held)
-check "a lead hears what the cap holds back, and why" '[[ $out == "$HELD$NL- $T1: dispatch held back: goal $G already has 0 task(s) in flight (max_in_flight 0); leaving $T1 ready" ]]'
+check "a lead hears what the cap holds back, and why" '[[ $out == "$HELD$NL- $PJ: $T1: dispatch held back: goal $G already has 0 task(s) in flight (max_in_flight 0); leaving $T1 ready" ]]'
 crew tick >/dev/null 2>&1
 check "and isn't told it again while the cap holds the task back" '[[ -z $(prompt held) ]]'
 crew goal cap 1 1 >/dev/null
 echo "MAX_WORKERS=0" >>"$L/config/crew.env"
 out=$(crew tick 2>&1)
 check "tick says when MAX_WORKERS holds a goal task back" '[[ $out == "$T1: dispatch held back: 0 workers already running (MAX_WORKERS=0); leaving $T1 ready" && $(crew get "$GT1" status) == ready ]]'
-check "and hears it again when another cap holds the task back" '[[ $(prompt held) == "$HELD$NL- $T1: dispatch held back: 0 workers already running (MAX_WORKERS=0); leaving $T1 ready" ]]'
+check "and hears it again when another cap holds the task back" '[[ $(prompt held) == "$HELD$NL- $PJ: $T1: dispatch held back: 0 workers already running (MAX_WORKERS=0); leaving $T1 ready" ]]'
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
 sed -i '/^## Plan$/a 1. Style the header.' "$GT1"
 out=$(crew tick 2>&1)
@@ -1349,7 +1350,7 @@ setstate "done" null
 echo "WORKER_AUTOCOMPACT_WINDOW=bad" >>"$PE"   # so every dispatch tick runs fails, and says so
 out=$(crew tick 2>&1)
 check "tick runs crew dispatch for the ready tasks that can go, and not for one waiting on another, which it says waits" '[[ $out == *"$TB: dispatch failed:"*"WORKER_AUTOCOMPACT_WINDOW"* && $out == *"$TH: dispatch waits: it comes after "* && $out != *"$TH: dispatch failed"* ]]'
-check "a lead hears a dispatch held back by a dependency, and why" '[[ $(prompt held) == *"$HELD"*"$NL- $TH: dispatch waits: it comes after "* ]]'
+check "a lead hears a dispatch held back by a dependency, and why" '[[ $(prompt held) == *"$HELD"*"$NL- $PJ: $TH: dispatch waits: it comes after "* ]]'
 sed -i '/^WORKER_AUTOCOMPACT_WINDOW=bad$/d' "$PE"
 out=$(crew tick 2>&1)
 check "tick dispatches the highest priority ready task first, a tie going to the lower ID, past one a dependency holds" '[[ $out == *"$TB: dispatched for goal $G3"* && $out != *"$TA: dispatched"* && $out != *"$TC: dispatched"* && $out != *"$TH: dispatched"* && $(crew get "$PB" status) == working && $(crew get "$PC" status) == ready && $(crew get "$PH" status) == ready ]]'
@@ -1582,7 +1583,6 @@ check "set clears a fix's fixes and missed_by with an empty value, and ready the
 for f in "$FX" "$FU"; do crew set "$f" status abandoned; done
 
 # Proposals from anyone: a title and a paragraph, kept out of the task list until promoted.
-PJ=$(basename "$PD")
 SP=$(crew propose "Give each jurisdiction a PricingStrategy" --project "$PJ" --source user \
   --why "Tax, currency and receipts vary by place." --revisit-when "a second pricing rule varies by place: currency, say")
 check "propose writes an open proposal from a title and a paragraph" '[[ $(basename "$SP") == "$(date +%F)-give-each-jurisdiction-a-pricings.md" && $(crew get "$SP" status) == open && $(crew get "$SP" source) == user && $(section "$SP" "## Why it matters") == "Tax, currency and receipts vary by place." ]]'
@@ -1880,7 +1880,7 @@ check "while paused, crew tick sends the project's workers and goal leads nothin
   '[[ $out == *"$(basename "$Q2" .md): round"*"sent to its worker"* && $out == *"$TPT: round 1 waits: $PJ is paused"* && $out == *"goal $TGP: input waits: $PJ is paused"* && $out == *"$(basename "$GPT" .md): dispatch waits: $PJ is paused"* && $(launches) == $((n + 1)) && $(crew get "$GPT" status) == ready && -n $(crew get "$PT" interrupted) && -n $(gget "$GPF" interrupted) ]]'
 out=$(prompt held)
 check "a lead hears what a paused project's work waits for" \
-  '[[ $out == *"$HELD"*"$NL- $TPT: round 1 waits: $PJ is paused"* && $out == *"$NL- goal $TGP: input waits: $PJ is paused"* && $out == *"$NL- $(basename "$GPT" .md): dispatch waits: $PJ is paused"* ]]'
+  '[[ $out == *"$HELD"*"$NL- $PJ: $TPT: round 1 waits: $PJ is paused"* && $out == *"$NL- $PJ: goal $TGP: input waits: $PJ is paused"* && $out == *"$NL- $PJ: $(basename "$GPT" .md): dispatch waits: $PJ is paused"* ]]'
 out=$(crew resume --project "$PJ")
 check "crew resume removes the mark, commits, and says the next tick follows up" \
   '[[ ! -e $MARK && $out == "resumed $PJ$NL""the next crew tick follows up the work the pause interrupted" && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "resume $PJ" ]]'
@@ -2151,15 +2151,15 @@ CREW_LEAD_FINGERPRINT=$fp prompt lead >/dev/null; CREW_LEAD_FINGERPRINT='' promp
 check "a prompt with nothing new since the previous one gets nothing added" '[[ -z $(prompt turns-1) ]]'
 as_worker set "$NA" status draft; crew set "$NB" status needs-input
 out=$(prompt turns-1)
-check "a prompt hears the status a worker set, naming its task, and not one the lead set" '[[ $out == "$DID$NL- "????-??-??" "??:??" $TNA: status → draft" ]]'
+check "a prompt hears the status a worker set, naming its task, and not one the lead set" '[[ $out == "$DID$NL- "????-??-??" "??:??" $PJ: $TNA: status → draft" ]]'
 as_worker set "$NB" status draft
 check "two sessions taking turns each hear what's new since their own previous prompt" \
   '[[ $(prompt turns-1) == "$DID$NL- "*" $TNB: status → draft" && $(prompt turns-2) == "$DID$NL- "*" $TNA: status → draft$NL- "*" $TNB: status → draft" ]]'
 check "and nothing twice" '[[ -z $(prompt turns-1) && -z $(prompt turns-2) ]]'
 out=$(CREW_PROJECT=$PJ prompt here); out2=$(CREW_PROJECT=$P2 prompt there)
-check "a lead for one project hears only that project" '[[ $out == "$DID$NL- "*" $TNA: status → draft" && $out2 == "$DID$NL- "*" $TNB: status → draft" ]]'
+check "a lead for one project hears only that project, without its name before each line" '[[ $out == "$DID$NL- "????-??-??" "??:??" $TNA: status → draft" && $out2 == "$DID$NL- "????-??-??" "??:??" $TNB: status → draft" ]]'
 out=$(CREW_LEAD_FINGERPRINT=$fp prompt lead)
-check "crew lead's session hears every project, as the phone lead does" '[[ $out == "$DID$NL- "*" $TNA: status → draft$NL- "*" $TNB: status → draft" ]]'
+check "crew lead's session hears every project, each line's name before it, as the phone lead does" '[[ $out == "$DID$NL- "*" $PJ: $TNA: status → draft$NL- "*" $P2: $TNB: status → draft" ]]'
 check "a goal lead's session hears nothing, and keeps no record" '[[ -z $(CREW_LEAD_FINGERPRINT='' prompt goal-lead) && ! -e $L/news/sessions/goal-lead ]]'
 echo "# changed" >>"$L/agents/lead.md"; install_agents
 as_worker set "$NA" status needs-input; out=$(CREW_LEAD_FINGERPRINT=$fp prompt lead)

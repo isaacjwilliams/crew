@@ -243,20 +243,28 @@ func (c *Crew) leadNews(id, scope string, starting bool, room int) string {
 	}
 	s.since, s.told = now, held
 	s.save()
-	return c.newsMessage(did, newlyHeld, room)
+	return c.newsMessage(did, newlyHeld, scope, room)
 }
 
-// newsMessage lists what crew did, then what it's holding back. When that's
-// more than room characters, the oldest lines are left out, and a note at the
-// top says how many and where to read them.
-func (c *Crew) newsMessage(did, held []newsItem, room int) string {
+// newsMessage lists what crew did, then what it's holding back. A lead for
+// every project (scope "") hears each line's project first, since two projects
+// can have tasks of the same name. When that's more than room characters, the
+// oldest lines are left out, and a note at the top says how many and where to
+// read them.
+func (c *Crew) newsMessage(did, held []newsItem, scope string, room int) string {
 	const didHeader, heldHeader = "What crew did since the user's previous message:\n", "What crew tick is holding back, and why:\n"
+	text := func(i newsItem) string {
+		if scope == "" && i.project != "" {
+			return i.project + ": " + i.text
+		}
+		return i.text
+	}
 	var lines []string
 	for _, i := range did {
-		lines = append(lines, "- "+i.at.Format(logTime)+" "+i.text+"\n")
+		lines = append(lines, "- "+i.at.Format(logTime)+" "+text(i)+"\n")
 	}
 	for _, h := range held {
-		lines = append(lines, "- "+h.text+"\n")
+		lines = append(lines, "- "+text(h)+"\n")
 	}
 	if len(lines) == 0 {
 		return ""
