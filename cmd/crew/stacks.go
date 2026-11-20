@@ -262,19 +262,19 @@ func (idx Branches) retargetReason(t Task, repo string) string {
 	if !gitOK(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+idx.effectiveBase(t)) {
 		return ""
 	}
-	return idx.misTargeted(t, t.Get("pr_base"))
+	return idx.offBaseReason(t, t.Get("pr_base"))
 }
 
 // prOffBase: crew sync last saw the task's open PR target a branch other than
 // the one the task belongs on now.
 func (idx Branches) prOffBase(t Task) bool {
-	return t.HasOpenPR() && idx.misTargeted(t, t.Get("pr_base")) != ""
+	return t.HasOpenPR() && idx.offBaseReason(t, t.Get("pr_base")) != ""
 }
 
-// misTargeted says "PR targets <prBase>, not <base>" when the task's PR targets
+// offBaseReason says "PR targets <prBase>, not <base>" when the task's PR targets
 // prBase but the task belongs on another branch now (effectiveBase). It's empty
 // when prBase is that branch, or unknown.
-func (idx Branches) misTargeted(t Task, prBase string) string {
+func (idx Branches) offBaseReason(t Task, prBase string) string {
 	if base := idx.effectiveBase(t); prBase != "" && prBase != base {
 		return fmt.Sprintf("PR targets %s, not %s", prBase, base)
 	}

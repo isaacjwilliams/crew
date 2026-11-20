@@ -841,6 +841,17 @@ func (r AutomatedReview) Clean() bool {
 	return r.ClaudeReported
 }
 
+// LeftForUser counts the review's findings whose outcome left them for the user.
+func (r AutomatedReview) LeftForUser() int {
+	n := 0
+	for _, f := range r.Findings {
+		if f.Outcome() == OutcomeLeftForUser {
+			n++
+		}
+	}
+	return n
+}
+
 // mustOrShouldFix: the finding is held at must fix or should fix, whatever
 // labels come before that ("split: held at pre-existing: must fix, …") and
 // notes after it ("should fix (lowered from must fix: …)").

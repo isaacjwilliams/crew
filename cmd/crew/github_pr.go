@@ -52,7 +52,8 @@ func readPR(repo, url string) (gitHubPR, error) {
 	case "UNKNOWN":
 		mergeable = mergeableUnknown
 	}
-	return gitHubPR{v.State, v.IsDraft, v.ReviewDecision, v.UpdatedAt, v.BaseRefName, ci, mergeable}, nil
+	return gitHubPR{State: v.State, Draft: v.IsDraft, ReviewDecision: v.ReviewDecision, UpdatedAt: v.UpdatedAt,
+		Base: v.BaseRefName, CI: ci, Mergeable: mergeable}, nil
 }
 
 // record writes the PR into the task's front matter, and says whether that
@@ -75,7 +76,8 @@ func (pr gitHubPR) record(t Task) bool {
 }
 
 // label words the PR's state for pr_state: merged, closed, draft or open, and,
-// while it's open, GitHub's review decision, as in "open, approved".
+// while it's open, GitHub's review decision, as in "open, approved". syncedPR
+// reads it back, so the two change together.
 func (pr gitHubPR) label() string {
 	label := "open"
 	switch {
@@ -92,13 +94,14 @@ func (pr gitHubPR) label() string {
 	return label
 }
 
-// syncedPR is the PR as crew sync last recorded it in the task file (record).
-// Its State is empty when sync never read it.
+// syncedPR is the PR as crew sync last recorded it in the task file (record),
+// reading pr_state back the way label wrote it. Its State is empty when sync
+// never read it.
 func syncedPR(t Task) gitHubPR {
 	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable")}
 	state, decision, _ := strings.Cut(t.Get("pr_state"), ", ")
 	switch state {
-	case "":
+	case "": // never synced
 	case "merged", "closed":
 		pr.State = strings.ToUpper(state)
 	default:
