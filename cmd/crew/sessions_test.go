@@ -55,7 +55,7 @@ echo '[{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"li
 	if as.jobBusy("live") || as.jobState("live") != "idle, background task running" {
 		t.Errorf("with its process running: busy %v, state %q", as.jobBusy("live"), as.jobState("live"))
 	}
-	if !as.jobBusy("gone") || as.jobState("gone") != "working" {
+	if as.jobBusy("gone") || as.jobState("gone") != "idle" {
 		t.Errorf("with its process gone: busy %v, state %q", as.jobBusy("gone"), as.jobState("gone"))
 	}
 }

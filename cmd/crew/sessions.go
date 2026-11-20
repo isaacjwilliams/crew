@@ -24,7 +24,7 @@ type Agent struct {
 	WaitingFor                         string // the prompt it's waiting on, if any
 	PID                                bool   // whether it has a process: pid isn't null
 	// TurnEnded: the session's transcript says its last turn has ended, though its
-	// state may still be working (see busy).
+	// state is still working (see busy), with its process running or not.
 	TurnEnded bool
 }
 
@@ -95,7 +95,7 @@ func (c *Crew) listAgents() (Agents, error) {
 	for _, e := range entries {
 		a := Agent{ID: text(e, "id"), State: text(e, "state"), Status: text(e, "status"), SessionID: text(e, "sessionId"),
 			Name: text(e, "name"), WaitingFor: text(e, "waitingFor"), PID: len(e["pid"]) > 0 && string(e["pid"]) != "null"}
-		if a.State == "working" && a.PID && a.SessionID != "" {
+		if a.State == "working" && a.SessionID != "" {
 			a.TurnEnded = turnEnded(a.SessionID)
 		}
 		as = append(as, a)
@@ -161,8 +161,9 @@ func (as Agents) find(job string) *Agent {
 // permission dialog (status waiting). Anything else can take a followup, a
 // blocked session too: it ended its turn on a question for the user, and the
 // answer is what the followup sends. A background shell the session started,
-// such as a dev server, keeps its state working after the turn ends, so the turn
-// counts as running only until its transcript says it ended.
+// such as a dev server, keeps its state working after the turn ends, and so can a
+// process that has exited, so the turn counts as running only until its
+// transcript says it ended.
 func (a Agent) busy() bool {
 	return (a.State == "working" && !a.TurnEnded) || a.Status == "waiting"
 }
@@ -175,8 +176,10 @@ func (a Agent) open() bool { return a.PID }
 // listed.
 func (a Agent) stateText() string {
 	switch {
-	case a.TurnEnded:
+	case a.TurnEnded && a.open():
 		return "idle, background task running"
+	case a.TurnEnded:
+		return "idle"
 	case a.WaitingFor != "":
 		return a.State + " (" + a.WaitingFor + ")"
 	}
