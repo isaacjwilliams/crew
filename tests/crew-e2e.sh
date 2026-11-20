@@ -207,9 +207,12 @@ check "crew doctor fails its required checks for a signed-out codex" '((st != 0)
 rm "$HOME/codex-signed-out"
 mkdir -p "$SB/no-codex"
 for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex ]] || ln -sf "$s" "$SB/no-codex/"; done
-no_codex_path=$SB/no-codex
+no_codex_path=
 IFS=: read -ra dirs <<<"$PATH"
-for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done
+for d in "${dirs[@]}"; do
+  [[ $d == "$TESTS_DIR/stubs" ]] && d=$SB/no-codex   # in the stubs' place, behind the home's crew
+  [[ -e $d/codex ]] || no_codex_path+=${no_codex_path:+:}$d
+done
 doctor_out=$(env -u CLAUDECODE PATH="$no_codex_path" crew doctor 2>&1); st=$?
 check "crew doctor fails its required checks when CODEX_REVIEW=yes and codex isn't installed" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex installed (CODEX_REVIEW=yes)"* ]]'
 printf 'CODEX_REVIEW=maybe\nAUTO_REVIEW_REBUTTALS=3\n' >>"$PE"

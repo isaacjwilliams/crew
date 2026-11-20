@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stub crew for tests: it stands behind the crew of a home the suite made, whose bin/
+# goes first on PATH, so a crew call that finds no such home stops here instead of
+# reaching a real one (~/.local/bin's, or the one a worker's session puts on PATH).
+echo "stub crew: no crew home of the suite's own on PATH, so refusing: crew $*" >&2
+exit 2

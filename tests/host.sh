@@ -441,7 +441,7 @@ SB=$(new_sandbox suites)
 isolate_home "$SB/home"
 CH=$SB/session/crew; make_home "$CH"
 # A worker's session: crew's settings in its environment and its home's bin/ first on PATH.
-session() { CREW_HOME=$CH CREW_PROJECT=webapp CREW_LEAD_FINGERPRINT= PATH="$CH/bin:$PATH" "$@"; }
+session() { CREW_HOME=$CH CREW_PROJECT=webapp CREW_LEAD_FINGERPRINT=f1ngerpr1nt PATH="$CH/bin:$PATH" "$@"; }
 out=$(session bash -c '. "$1/lib.sh"; isolate_home "$2"; compgen -e | grep "^CREW_"; crew config CREW_HOME' _ "$TESTS_DIR" "$SB/probe" 2>&1)
 check "a suite started from a worker's session keeps none of its crew settings, and can't run its crew" \
   '[[ $(grep "^CREW_" <<<"$out") == CREW_TEST_RELEASES && $out != *"$CH"* ]]'
