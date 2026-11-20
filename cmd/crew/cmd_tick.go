@@ -216,6 +216,10 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task, a *Agent) bool {
 		return true
 	}
 	if stalled(t, a) {
+		// crew nudge runs in a process of its own, and when it asks the lead
+		// rather than nudge, its question lands in the task file, which t reads
+		// afresh. A nudge that fails or finds nothing to do counts as tried, so
+		// the task isn't marked waiting on the strength of it.
 		asked := t.OpenQuestions()
 		if c.step(nil, "nudge", t.Path) == 0 {
 			if t.OpenQuestions() > asked {

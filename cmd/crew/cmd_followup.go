@@ -361,11 +361,14 @@ const stallAfter = 15 * time.Minute
 // worker seen stalled had waited on a sub-agent, or just stopped after a step.
 const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
 
-// stalled: the task is working or addressing-feedback with no open question, and
-// its worker a (nil when claude agents doesn't list it) isn't stopped and isn't
-// mid-turn, with a transcript quiet for stallAfter. Whatever state claude agents
-// gives it, a worker waiting on the user would have set needs-input, so this one
-// stopped by mistake. A stopped one was stopped on purpose: by crew pause, say.
+// stalled reports whether a task's worker a (nil when claude agents doesn't list
+// it) ended its turn by mistake. It did when:
+//   - the task is working or addressing-feedback, with no open question: a worker
+//     waiting on an answer would have asked one and set needs-input;
+//   - a is listed and not stopped: a stopped worker was stopped on purpose, by
+//     crew pause, say;
+//   - a isn't mid-turn, whatever other state claude agents gives it;
+//   - its transcript has been quiet for stallAfter.
 func stalled(t Task, a *Agent) bool {
 	if !t.Status().WorkersTurn() || t.OpenQuestions() > 0 {
 		return false
@@ -406,7 +409,8 @@ func cmdNudge(c *Crew, args []string) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
-	// Decided under the lock, which followup keeps, so two runs can't both act.
+	// Decided under the ledger lock, held until this command exits (followup
+	// takes it again at no cost), so two runs can't both act.
 	if err := c.lock(); err != nil {
 		return err
 	}

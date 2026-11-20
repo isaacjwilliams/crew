@@ -95,6 +95,8 @@ func (c *Crew) listAgents() (Agents, error) {
 	for _, e := range entries {
 		a := Agent{ID: text(e, "id"), State: text(e, "state"), Status: text(e, "status"), SessionID: text(e, "sessionId"),
 			Name: text(e, "name"), WaitingFor: text(e, "waitingFor"), PID: len(e["pid"]) > 0 && string(e["pid"]) != "null"}
+		// Read whether or not its process runs: a job whose process exited can
+		// still read working, and its transcript says whether the turn ended.
 		if a.State == "working" && a.SessionID != "" {
 			a.TurnEnded = turnEnded(a.SessionID)
 		}
@@ -114,8 +116,8 @@ func claudeTranscripts() string {
 	return filepath.Join(dir, "projects")
 }
 
-// transcript is the path of a session's transcript, or "" when there's none. It
-// outlives the session's process.
+// transcript is the path of a session's transcript, or "" when there's none.
+// The file stays after the session's process exits.
 func transcript(session string) string {
 	if session == "" {
 		return ""
@@ -129,7 +131,7 @@ func transcript(session string) string {
 
 // turnEnded reads a session's transcript: Claude Code writes a turn_duration
 // entry when a turn ends, and a prompt or a reply once the next one starts. It's
-// false when there's no transcript to read.
+// false when there's no transcript to read (reading the path "" fails).
 func turnEnded(session string) bool {
 	b, err := os.ReadFile(transcript(session))
 	if err != nil {

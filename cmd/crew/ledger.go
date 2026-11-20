@@ -1148,8 +1148,9 @@ func (t Task) CIReported(head string) bool {
 const nudgedAt = "nudged: turn ended mid-task at "
 
 // NudgedWithoutProgress: crew nudge last resumed the worker with its branch at
-// head, and the task's status hasn't changed since. Log lines alone aren't
-// progress: a worker could answer every nudge with one.
+// head (so there's no new commit since), and the task's status hasn't changed
+// since. Log lines alone aren't progress: a worker could answer every nudge with
+// one.
 func (t Task) NudgedWithoutProgress(head string) bool {
 	for _, e := range slices.Backward(t.LogEntries()) {
 		if _, changed := e.status(); changed {
