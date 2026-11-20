@@ -85,8 +85,9 @@ func (c *Crew) leadHook(in io.Reader) error {
 	if err != nil {
 		return err
 	}
+	starting := input.Event == "SessionStart"
 	var out string
-	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && input.Event != "SessionStart" {
+	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && !starting {
 		settings := c.Settings
 		if proj != "" {
 			if settings, err = c.projectSettings(proj); err != nil {
@@ -97,7 +98,7 @@ func (c *Crew) leadHook(in io.Reader) error {
 			out = fmt.Sprintf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
 		}
 	}
-	out += c.leadNews(input.SessionID, proj, input.Event == "SessionStart", hookOutputCap-utf8.RuneCountInString(out))
+	out += c.leadNews(input.SessionID, proj, starting, hookOutputCap-utf8.RuneCountInString(out))
 	fmt.Print(out)
 	return nil
 }

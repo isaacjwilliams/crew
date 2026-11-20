@@ -1341,8 +1341,8 @@ sed -i 's/^priority: *$/priority: x/' "$PA"   # written by hand
 setstate "done" null
 echo "WORKER_AUTOCOMPACT_WINDOW=bad" >>"$PE"   # so every dispatch tick runs fails, and says so
 out=$(crew tick 2>&1)
-check "tick runs crew dispatch for the ready tasks that can go, and not for one waiting on another, which it says waits" '[[ $out == *"$TB: dispatch failed:"*"WORKER_AUTOCOMPACT_WINDOW"* && $out == *"$TH: dispatch waits for "*" to be merged or done"* && $out != *"$TH: dispatch failed"* ]]'
-check "a lead hears a dispatch held back by a dependency, and why" '[[ $(prompt held) == *"$HELD"*"$NL- $TH: dispatch waits for "*" to be merged or done"* ]]'
+check "tick runs crew dispatch for the ready tasks that can go, and not for one waiting on another, which it says waits" '[[ $out == *"$TB: dispatch failed:"*"WORKER_AUTOCOMPACT_WINDOW"* && $out == *"$TH: dispatch waits: it comes after "* && $out != *"$TH: dispatch failed"* ]]'
+check "a lead hears a dispatch held back by a dependency, and why" '[[ $(prompt held) == *"$HELD"*"$NL- $TH: dispatch waits: it comes after "* ]]'
 sed -i '/^WORKER_AUTOCOMPACT_WINDOW=bad$/d' "$PE"
 out=$(crew tick 2>&1)
 check "tick dispatches the highest priority ready task first, a tie going to the lower ID, past one a dependency holds" '[[ $out == *"$TB: dispatched for goal $G3"* && $out != *"$TA: dispatched"* && $out != *"$TC: dispatched"* && $out != *"$TH: dispatched"* && $(crew get "$PB" status) == working && $(crew get "$PC" status) == ready && $(crew get "$PH" status) == ready ]]'

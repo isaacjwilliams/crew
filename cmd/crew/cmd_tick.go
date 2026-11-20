@@ -292,11 +292,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
 		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
-			var ids []string
-			for _, d := range deps {
-				ids = append(ids, d.ID())
-			}
-			news.heldBack(project, "%s: dispatch waits for %s to be merged or done", t.ID(), strings.Join(ids, ", "))
+			news.heldBack(project, "%s: dispatch waits: it comes %s", t.ID(), after(deps))
 			continue
 		}
 		var errs strings.Builder
@@ -304,6 +300,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		case 0:
 			news.did(project, "%s: dispatched for goal %s", t.ID(), t.Goal())
 		case exitNotYet: // held back, by a cap say; the next tick tries again
+			// main prints the refusal last, after "crew: ".
 			why := strings.TrimRight(errs.String(), "\n")
 			why = strings.TrimPrefix(why[strings.LastIndex(why, "\n")+1:], "crew: ")
 			news.heldBack(project, "%s: dispatch held back: %s", t.ID(), why)

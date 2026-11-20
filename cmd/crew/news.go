@@ -40,13 +40,10 @@ type newsItem struct {
 // command for, so a line that can't be written is only warned of.
 func (c *Crew) recordNews(project, text string) {
 	now := time.Now()
-	err := os.MkdirAll(c.path("news"), 0o755)
+	f, err := openLog(c.path("news", now.Format(newsDay)+".log"))
 	if err == nil {
-		var f *os.File
-		if f, err = os.OpenFile(c.path("news", now.Format(newsDay)+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			_, err = fmt.Fprintf(f, "%s\t%s\t%s\n", now.Format(time.RFC3339Nano), project, oneLine(text))
-			f.Close()
-		}
+		_, err = fmt.Fprintf(f, "%s\t%s\t%s\n", now.Format(time.RFC3339Nano), project, oneLine(text))
+		f.Close()
 	}
 	if err != nil {
 		warn("couldn't record news: %v", err)
@@ -62,7 +59,7 @@ func (c *Crew) newsSince(since time.Time) []newsItem {
 			continue
 		}
 		b, _ := os.ReadFile(f)
-		for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		for _, line := range splitLines(string(b)) {
 			at, rest, _ := strings.Cut(line, "\t")
 			project, text, _ := strings.Cut(rest, "\t")
 			if t, err := time.Parse(time.RFC3339Nano, at); err == nil && t.After(since) {
@@ -131,7 +128,7 @@ func (n *tickNews) save() {
 func (c *Crew) heldBack() []newsItem {
 	var items []newsItem
 	b, _ := os.ReadFile(c.path("news", "held-back"))
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+	for _, line := range splitLines(string(b)) {
 		if project, text, ok := strings.Cut(line, "\t"); ok {
 			items = append(items, newsItem{project: project, text: text})
 		}
@@ -149,18 +146,15 @@ type sessionNews struct {
 	told  map[string]bool // project, a tab, then the line
 }
 
-// sessionNews is the session's record, and whether it has one yet. A session
-// ID that couldn't be a file name gets none.
-func (c *Crew) sessionNews(id string) (s sessionNews, ok bool) {
-	if id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
-		return sessionNews{}, false
-	}
+// readSessionNews is the session's record, and whether it has one yet.
+func (c *Crew) readSessionNews(id string) (s sessionNews, ok bool) {
 	s = sessionNews{path: c.path("news", "sessions", id), told: map[string]bool{}}
-	b, err := os.ReadFile(s.path)
-	if err != nil {
+	b, _ := os.ReadFile(s.path)
+	lines := splitLines(string(b))
+	if len(lines) == 0 {
 		return s, false
 	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	var err error
 	if s.since, err = time.Parse(time.RFC3339Nano, lines[0]); err != nil {
 		return s, false
 	}
@@ -187,8 +181,11 @@ func (s sessionNews) save() {
 // doesn't fit in room characters is left out, oldest first, and the message
 // says how much and where to read it.
 func (c *Crew) leadNews(id, scope string, starting bool, room int) string {
-	s, ok := c.sessionNews(id)
-	if s.path == "" || (starting && ok) {
+	if id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
+		return "" // not a session ID that could name its record
+	}
+	s, ok := c.readSessionNews(id)
+	if starting && ok {
 		return ""
 	}
 	inScope := func(i newsItem) bool { return scope == "" || i.project == "" || i.project == scope }
