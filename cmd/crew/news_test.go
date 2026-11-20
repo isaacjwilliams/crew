@@ -23,3 +23,25 @@ func TestNewsSinceReadsTheDayBeforeSinceToo(t *testing.T) {
 		t.Fatalf("newsSince(%s) = %v, want the line written at 23:45 UTC", since, items)
 	}
 }
+
+// A line is timed once its writer holds the news lock, so a lead's session that
+// read the news meanwhile, and moved its since past then, still hears it.
+func TestRecordNewsTimesALineOnceItHoldsTheLock(t *testing.T) {
+	c := &Crew{Home: t.TempDir()}
+	lock, err := c.lockNews()
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := make(chan bool)
+	go func() {
+		c.recordNews("p", "001: status → pr-open")
+		close(written)
+	}()
+	time.Sleep(200 * time.Millisecond) // the writer is waiting for the lock
+	since := time.Now()
+	lock.Close()
+	<-written
+	if items := c.newsSince(since); len(items) != 1 {
+		t.Fatalf("newsSince(the lock's release) = %v, want the line written after it", items)
+	}
+}

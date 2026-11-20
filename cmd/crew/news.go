@@ -41,14 +41,25 @@ type newsItem struct {
 	text    string
 }
 
+// lockNews holds back other writers and readers of the day files until the lock
+// is closed. A line is timed and written under it, and a session reads and moves
+// its since under it, so no line can turn up behind a since that's passed it.
+func (c *Crew) lockNews() (*os.File, error) {
+	return flock(c.path(".crew-news.lock"), 10*time.Second)
+}
+
 // recordNews adds a line to today's news. News is never worth failing a
 // command for, so a line that can't be written is only warned of.
 func (c *Crew) recordNews(project, text string) {
-	now := time.Now()
-	f, err := openLog(c.path("news", now.Format(newsDay)+".log"))
+	lock, err := c.lockNews()
 	if err == nil {
-		_, err = fmt.Fprintf(f, "%s\t%s\t%s\n", now.Format(time.RFC3339Nano), project, oneLine(text))
-		f.Close()
+		defer lock.Close()
+		now := time.Now()
+		var f *os.File
+		if f, err = openLog(c.path("news", now.Format(newsDay)+".log")); err == nil {
+			_, err = fmt.Fprintf(f, "%s\t%s\t%s\n", now.Format(time.RFC3339Nano), project, oneLine(text))
+			f.Close()
+		}
 	}
 	if err != nil {
 		warn("couldn't record news: %v", err)
@@ -198,6 +209,12 @@ func (c *Crew) leadNews(id, scope string, starting bool, room int) string {
 	if id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
 		return "" // not a session ID that could name its record
 	}
+	lock, err := c.lockNews()
+	if err != nil {
+		return "" // the record stays as it was, so this is heard with the next prompt
+	}
+	defer lock.Close()
+	now := time.Now() // no line timed before now is written once the lock is let go
 	s, ok := c.readSessionNews(id)
 	if starting && ok {
 		return ""
@@ -214,23 +231,17 @@ func (c *Crew) leadNews(id, scope string, starting bool, room int) string {
 		}
 	}
 	if !ok {
-		s.since, s.told = time.Now(), held
+		s.since, s.told = now, held
 		s.save()
 		return ""
 	}
-	// since moves to the newest line read, not to now, so a line written while
-	// this runs is heard with the next prompt. It takes the newest, not the
-	// last: two commands can append their lines a little out of order.
 	var did []newsItem
 	for _, i := range c.newsSince(s.since) {
-		if i.at.After(s.since) {
-			s.since = i.at
-		}
 		if inScope(i) {
 			did = append(did, i)
 		}
 	}
-	s.told = held
+	s.since, s.told = now, held
 	s.save()
 	return c.newsMessage(did, newlyHeld, room)
 }
