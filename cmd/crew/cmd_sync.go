@@ -142,6 +142,7 @@ func cmdSync(c *Crew, args []string) error {
 	if changed {
 		c.commit("sync")
 	}
+	// Each project it skipped is named already; exit 1 tells the caller the sync wasn't whole.
 	if skipped {
 		return exitQuietly(1)
 	}

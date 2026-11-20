@@ -206,7 +206,7 @@ doctor_out=$(env -u CLAUDECODE crew doctor 2>&1); st=$?
 check "crew doctor fails its required checks for a signed-out codex" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex signed in — run '"'codex login'"'"* && $doctor_out == *"Some required checks failed."* ]]'
 rm "$HOME/codex-signed-out"
 mkdir -p "$SB/no-codex"
-for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex || $s == */crew ]] || ln -sf "$s" "$SB/no-codex/"; done   # the home's crew stays first
+for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex || $s == */crew ]] || ln -sf "$s" "$SB/no-codex/"; done   # the stub crew would hide the home's
 no_codex_path=$SB/no-codex
 IFS=: read -ra dirs <<<"$PATH"
 for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done

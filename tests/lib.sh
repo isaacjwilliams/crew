@@ -51,7 +51,7 @@ isolate_home() {
   export MISE_CACHE_DIR=${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}
   export HOME=$1
   mkdir -p "$HOME"
-  # Drop every crew setting but the tests' own: a worker's session sets several.
+  # Drop every crew setting but the tests' own (CREW_TEST_*): a worker's session sets several.
   local v
   for v in "${!CREW_@}"; do [[ $v == CREW_TEST_* ]] || unset "$v"; done
   unset CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR

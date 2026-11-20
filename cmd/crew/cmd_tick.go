@@ -57,8 +57,8 @@ func cmdTick(c *Crew, args []string) error {
 	if _, err := c.ghLogin(); err != nil {
 		return err
 	}
-	// Sync reports its own problems, a project it can't load among them, and the
-	// rest of the tick goes by the ledger as sync left it.
+	// Sync reports its own problems, a project it can't load among them, so its exit
+	// code is left unread: the rest of the tick goes by the ledger as sync left it.
 	c.step(nil, "sync", "--quiet", "--all")
 	// So an edit to a project's mcp.json reaches the leads within a tick. It reports
 	// its own problems, which stop nothing else.
