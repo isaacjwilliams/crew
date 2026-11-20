@@ -1052,7 +1052,7 @@ out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo UNKNOWN >"$HOME/gh-pr-mergeable"; B2=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
-check "while GitHub is still working out whether the PR conflicts, crew leaves it alone" '[[ -z $(crew get 13 mergeable) && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
+check "while GitHub is still working out whether the PR conflicts, sync records it and crew leaves it alone" '[[ $(crew get 13 mergeable) == unknown && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo agent/elsewhere >"$HOME/gh-pr-base-12"; setstate working 4242   # busy, so no retarget goes out
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "a PR whose GitHub base isn't the task's base gets no conflict round" '[[ $(crew get 13 mergeable) == conflicting && -z $out && $byhand == "nothing to do: PR #12 targets agent/elsewhere, not the task'"'"'s base main" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'

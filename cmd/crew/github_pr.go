@@ -45,15 +45,18 @@ func readPR(repo, url string) (gitHubPR, error) {
 // changed anything.
 func (pr gitHubPR) record(t Task) bool {
 	mergeable := ""
-	if pr.Mergeable == "CONFLICTING" {
+	switch pr.Mergeable {
+	case "CONFLICTING":
 		mergeable = conflicting
+	case "UNKNOWN":
+		mergeable = mergeableUnknown
 	}
 	changed := false
 	for _, kv := range []struct{ key, value string }{
 		{"pr_updated", pr.UpdatedAt}, // for prMayHaveNewComments in crew tick
 		{"pr_base", pr.Base},         // for retargetReason
 		{"ci_state", string(pr.CI)},  // for crew tick, which runs crew ci-fix only while CI is failing
-		{"mergeable", mergeable},     // for crew tick, which runs crew catch-up only while the PR conflicts
+		{"mergeable", mergeable},     // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
 		{"pr_state", pr.label()},
 	} {
 		if t.Get(kv.key) != kv.value {
