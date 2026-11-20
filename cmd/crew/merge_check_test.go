@@ -18,7 +18,7 @@ var (
 	}
 	clearBody = "## Open questions\n\n## Evidence\n\n## Automated reviews\n" + reviewed + "## Log\n"
 	reviewed  = "### Automated review 1 — 2026-11-20 10:00\n- Reviewers: Claude reviewer\nNo findings.\n\n"
-	clearPR   = gitHubPR{State: "OPEN", Base: "main", CI: ciPassing, Mergeable: "MERGEABLE"}
+	clearPR   = gitHubPR{State: "OPEN", Base: "main", CI: ciPassing}
 )
 
 // mergeTask writes a task file in project p of a ledger at dir, from its front
@@ -59,8 +59,8 @@ func TestMergeCheck(t *testing.T) {
 	}{
 		{name: "nothing in the way", want: "merge now"},
 		{name: "worker busy", worker: Agent{State: "working"}, want: "not yet: worker busy"},
-		{name: "review round not sent", fields: map[string]string{"review_rounds": "2", "last_round_sent": "1"}, want: "not yet: review round not sent yet"},
-		{name: "GitHub still checking for conflicts", pr: func(p *gitHubPR) { p.Mergeable = "UNKNOWN" }, want: "not yet: GitHub still checking for conflicts"},
+		{name: "review round not sent", fields: map[string]string{"review_rounds": "2", "last_round_sent": "1"}, want: "not yet: round 2 not sent yet"},
+		{name: "GitHub still checking for conflicts", pr: func(p *gitHubPR) { p.Mergeable = mergeableUnknown }, want: "not yet: GitHub still checking for conflicts"},
 		{name: "CI running", pr: func(p *gitHubPR) { p.CI = ciRunning }, want: "not yet: CI running"},
 		{name: "automated review due", body: "## Log\n", want: "not yet: no automated review yet"},
 		{name: "automated review off for the task", fields: map[string]string{"auto_review": "no"}, body: "## Log\n", want: "merge now"},
@@ -69,7 +69,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "PR targets another branch", pr: func(p *gitHubPR) { p.Base = "agent/old" }, want: "not yet: PR targets agent/old, not main"},
 		{name: "stacked on an unmerged task", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: stacked on 020"},
 		{name: "based on another branch", fields: map[string]string{"base": "release"}, pr: func(p *gitHubPR) { p.Base = "release" }, want: "not yet: based on release, not main"},
-		{name: "conflicts", pr: func(p *gitHubPR) { p.Mergeable = "CONFLICTING" }, want: "not yet: conflicts with main"},
+		{name: "conflicts", pr: func(p *gitHubPR) { p.Mergeable = conflicting }, want: "not yet: conflicts with main"},
 		{name: "CI failing", pr: func(p *gitHubPR) { p.CI = ciFailing }, want: "not yet: CI failing"},
 		{name: "no checks", pr: func(p *gitHubPR) { p.CI = "" }, want: "merge now"},
 		{name: "draft", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
@@ -129,10 +129,10 @@ func TestMergeCheck(t *testing.T) {
 // syncedPR reads back what record wrote.
 func TestSyncedPRReadsBackWhatSyncRecorded(t *testing.T) {
 	for _, pr := range []gitHubPR{
-		{State: "OPEN", ReviewDecision: "APPROVED", UpdatedAt: "2026-11-20T10:00:00Z", Base: "main", CI: ciPassing, Mergeable: "MERGEABLE"},
-		{State: "OPEN", Draft: true, ReviewDecision: "CHANGES_REQUESTED", Base: "agent/parent", CI: ciRunning, Mergeable: "UNKNOWN"},
-		{State: "OPEN", CI: ciFailing, Mergeable: "CONFLICTING"},
-		{State: "MERGED", Mergeable: "MERGEABLE"},
+		{State: "OPEN", ReviewDecision: "APPROVED", UpdatedAt: "2026-11-20T10:00:00Z", Base: "main", CI: ciPassing},
+		{State: "OPEN", Draft: true, ReviewDecision: "CHANGES_REQUESTED", Base: "agent/parent", CI: ciRunning, Mergeable: mergeableUnknown},
+		{State: "OPEN", CI: ciFailing, Mergeable: conflicting},
+		{State: "MERGED"},
 	} {
 		task := mergeTask(t, t.TempDir(), "001-task", map[string]string{"status": "pr-open"}, "## Log\n")
 		pr.record(task)

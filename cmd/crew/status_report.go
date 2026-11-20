@@ -147,6 +147,7 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
 	r.NoneDispatch = s.noProjectDispatches()
+	s.prs = s.readPRs(inScope)
 	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
 	}
@@ -240,7 +241,6 @@ func (s *statusView) project(name string) projectReport {
 	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
 	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
 	s.spikes = map[string][]Task{}
-	s.prs = readPRs(s.repo, tasks)
 	for _, t := range tasks {
 		if d := t.Get("informs"); d != "" {
 			s.spikes[d] = append(s.spikes[d], t)
@@ -462,7 +462,7 @@ func (s *statusView) notes(t Task) []string {
 	if st == PROpen {
 		notes = append(notes, lookNote(t))
 	} else {
-		notes = append(notes, s.inTheWay(t)...)
+		notes = append(notes, s.prNotes(t)...)
 	}
 	if l := s.learning(t); l != "" {
 		notes = append(notes, l)
@@ -517,10 +517,10 @@ func (s *statusView) notes(t Task) []string {
 	return notes
 }
 
-// inTheWay is what a task that isn't pr-open says of its PR and its branch: the
+// prNotes is what a task that isn't pr-open says of its PR and its branch: the
 // PR's state as crew sync last read it, a restack or retarget it needs, and its
-// open questions.
-func (s *statusView) inTheWay(t Task) []string {
+// open questions. A pr-open task's merge check says these instead.
+func (s *statusView) prNotes(t Task) []string {
 	var notes []string
 	if prs := t.Get("pr_state"); prs != "" {
 		notes = append(notes, "("+prs+")")

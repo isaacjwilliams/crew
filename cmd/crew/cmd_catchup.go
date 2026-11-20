@@ -16,14 +16,6 @@ import (
 	"strings"
 )
 
-// conflicting is crew sync's mergeable for a PR that GitHub says conflicts with
-// its base, and mergeableUnknown while GitHub is still working it out.
-// mergeable is empty when the PR merges cleanly.
-const (
-	conflicting      = "conflicting"
-	mergeableUnknown = "unknown"
-)
-
 // baseConflict is a PR's conflict with its base branch at a commit of it, for
 // a review round to report.
 type baseConflict struct {

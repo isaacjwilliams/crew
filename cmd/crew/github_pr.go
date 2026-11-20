@@ -16,8 +16,15 @@ type gitHubPR struct {
 	UpdatedAt      string
 	Base           string  // the branch it targets
 	CI             ciState // the checks on its head commit (rollup)
-	Mergeable      string  // MERGEABLE, CONFLICTING, or UNKNOWN while GitHub works it out
+	Mergeable      string  // conflicting, mergeableUnknown, or empty when it merges cleanly
 }
+
+// A PR's Mergeable, as crew sync records it: GitHub says it conflicts with its
+// base, or GitHub is still working that out.
+const (
+	conflicting      = "conflicting"
+	mergeableUnknown = "unknown"
+)
 
 // readPR asks GitHub for the PR at url.
 func readPR(repo, url string) (gitHubPR, error) {
@@ -38,25 +45,25 @@ func readPR(repo, url string) (gitHubPR, error) {
 		return gitHubPR{}, err
 	}
 	ci, _ := rollup(v.StatusCheckRollup)
-	return gitHubPR{v.State, v.IsDraft, v.ReviewDecision, v.UpdatedAt, v.BaseRefName, ci, v.Mergeable}, nil
-}
-
-// record writes the PR into the task's front matter, and says whether that
-// changed anything.
-func (pr gitHubPR) record(t Task) bool {
 	mergeable := ""
-	switch pr.Mergeable {
+	switch v.Mergeable {
 	case "CONFLICTING":
 		mergeable = conflicting
 	case "UNKNOWN":
 		mergeable = mergeableUnknown
 	}
+	return gitHubPR{v.State, v.IsDraft, v.ReviewDecision, v.UpdatedAt, v.BaseRefName, ci, mergeable}, nil
+}
+
+// record writes the PR into the task's front matter, and says whether that
+// changed anything.
+func (pr gitHubPR) record(t Task) bool {
 	changed := false
 	for _, kv := range []struct{ key, value string }{
 		{"pr_updated", pr.UpdatedAt}, // for prMayHaveNewComments in crew tick
 		{"pr_base", pr.Base},         // for retargetReason
 		{"ci_state", string(pr.CI)},  // for crew tick, which runs crew ci-fix only while CI is failing
-		{"mergeable", mergeable},     // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
+		{"mergeable", pr.Mergeable},  // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
 		{"pr_state", pr.label()},
 	} {
 		if t.Get(kv.key) != kv.value {
@@ -88,13 +95,7 @@ func (pr gitHubPR) label() string {
 // syncedPR is the PR as crew sync last recorded it in the task file (record).
 // Its State is empty when sync never read it.
 func syncedPR(t Task) gitHubPR {
-	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: "MERGEABLE"}
-	switch t.Get("mergeable") {
-	case conflicting:
-		pr.Mergeable = "CONFLICTING"
-	case mergeableUnknown:
-		pr.Mergeable = "UNKNOWN"
-	}
+	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable")}
 	state, decision, _ := strings.Cut(t.Get("pr_state"), ", ")
 	switch state {
 	case "":

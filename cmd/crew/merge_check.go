@@ -72,21 +72,22 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	if s.repo != "" {
 		restack = s.branches.restackReason(t, s.repo)
 	}
+	retarget := s.branches.misTargeted(t, pr.Base)
 	defaultBranch := s.settings["DEFAULT_BRANCH"]
 	for _, c := range []struct {
 		holds  bool
 		reason string
 	}{
 		{!s.readOnly && worker.busy(), "worker busy"},
-		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), "review round not sent yet"},
-		{pr.Mergeable == "UNKNOWN", "GitHub still checking for conflicts"},
+		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), unsentRounds(t) + " not sent yet"},
+		{pr.Mergeable == mergeableUnknown, "GitHub still checking for conflicts"},
 		{pr.CI == ciRunning, "CI running"},
 		{atoiOr0(t.AutoReviews(s.settings["AUTO_REVIEWS"])) > 0 && t.NewestReview() == 0, "no automated review yet"},
 		{restack != "", "needs restack: " + restack},
-		{pr.Base != "" && pr.Base != base, fmt.Sprintf("PR targets %s, not %s", pr.Base, base)},
+		{retarget != "", retarget},
 		{onParent, "stacked on " + taskNumber(parent)},
 		{!stacked && defaultBranch != "" && t.Base() != defaultBranch, fmt.Sprintf("based on %s, not %s", t.Base(), defaultBranch)},
-		{pr.Mergeable == "CONFLICTING", "conflicts with " + base},
+		{pr.Mergeable == conflicting, "conflicts with " + base},
 		{pr.CI == ciFailing, "CI failing"},
 		{pr.Draft, "draft"},
 		{t.AwaitsSecurityReview(), "no security review yet"},
@@ -107,23 +108,29 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	return m
 }
 
-// readPRs asks GitHub for the PR of each pr-open task, all at once, and keys
-// them by task file. A PR GitHub didn't answer for is left out.
-func readPRs(repo string, tasks []Task) map[string]gitHubPR {
+// readPRs asks GitHub for the PR of every pr-open task in the projects, all at
+// once, and keys them by task file. A PR GitHub didn't answer for is left out.
+func (s *statusView) readPRs(projects []string) map[string]gitHubPR {
 	prs := map[string]gitHubPR{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, t := range tasks {
-		if t.Status() != PROpen || t.PR() == "" {
+	for _, name := range projects {
+		p, err := s.loadProject(name)
+		if err != nil {
 			continue
 		}
-		wg.Go(func() {
-			if pr, err := readPR(repo, t.PR()); err == nil {
-				mu.Lock()
-				prs[t.Path] = pr
-				mu.Unlock()
+		for _, t := range s.tasks(name) {
+			if t.Status() != PROpen || t.PR() == "" {
+				continue
 			}
-		})
+			wg.Go(func() {
+				if pr, err := readPR(p.Repo(), t.PR()); err == nil {
+					mu.Lock()
+					prs[t.Path] = pr
+					mu.Unlock()
+				}
+			})
+		}
 	}
 	wg.Wait()
 	return prs
