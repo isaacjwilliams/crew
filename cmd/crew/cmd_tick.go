@@ -7,7 +7,8 @@ package main
 // input and close finished goals. Last, it dispatches the ready tasks of running
 // goals, highest priority first.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
-// prints one line per thing it did.
+// prints one line per thing it did, and one per thing it held back and why, and
+// keeps them as news for the leads (news.go).
 //
 // Every step is a crew command run as a process of its own, so one that refuses
 // skips that step and not the rest. The stand-down and the lease check are gates,
@@ -43,10 +44,11 @@ func cmdTick(c *Crew, args []string) error {
 		return err
 	}
 	defer lock.Close()
+	news := &tickNews{c: c}
 	// A machine that ran the crew, and finds on origin that another one does now,
 	// steps back and does nothing else.
 	if holder, taken := c.leaseTakenElsewhere(); taken {
-		return c.standDown(holder)
+		return c.standDown(holder, news)
 	}
 	if err := c.requireHost(); err != nil {
 		return err
@@ -73,13 +75,14 @@ func cmdTick(c *Crew, args []string) error {
 		// session wait, quietly, for crew resume.
 		paused, idx := p.Paused(), c.branches(name)
 		for _, t := range c.tasks(name) {
-			c.tickTask(p, idx, t, as, paused)
+			c.tickTask(p, idx, t, as, paused, news)
 		}
 		for _, g := range c.goals(name) {
-			c.tickGoal(g, as, paused)
+			c.tickGoal(p, g, as, paused, news)
 		}
 	}
-	c.dispatchReady()
+	c.dispatchReady(news)
+	news.save()
 	// A catch-all for background pushes that failed, or that a crash cut short.
 	if gitOK(c.Home, "remote", "get-url", "origin") && !c.pushNow(os.Stderr) {
 		warn("couldn't push the ledger to origin; the next tick tries again")
@@ -113,12 +116,12 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 // cleanup once it has delivered (Status.Delivered), or what its worker is sent
 // while it's in flight, which is nothing while its project is paused.
 // Dispatching ready tasks is dispatchReady's.
-func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool) {
+func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool, news *tickNews) {
 	id, st := t.ID(), t.Status()
 	if st.Delivered() {
 		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
 		if t.Worktree() != "" && c.step(nil, "cleanup", t.Path) == 0 {
-			fmt.Printf("%s: %s; worktree cleaned up\n", id, st)
+			news.did(p.Name, "%s: %s; worktree cleaned up", id, st)
 		}
 		return
 	}
@@ -131,10 +134,10 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 		rounds, asked := t.Get("review_rounds"), t.OpenQuestions()
 		if c.step(nil, "feedback", t.Path) == 0 {
 			if now := t.Get("review_rounds"); now != rounds {
-				fmt.Printf("%s: review round %s recorded\n", id, now)
+				news.did(p.Name, "%s: review round %s recorded", id, now)
 			}
 			if n := t.OpenQuestions(); n != asked {
-				fmt.Printf("%s: %d comment(s) from collaborators, for you\n", id, n-asked)
+				news.did(p.Name, "%s: %d comment(s) from collaborators, for you", id, n-asked)
 			}
 		}
 	}
@@ -145,9 +148,9 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 		if c.step(nil, "ci-fix", t.Path) == 0 {
 			failures := t.CIFailures()
 			if now := t.Get("review_rounds"); now != rounds {
-				fmt.Printf("%s: CI round %s recorded: red on %s\n", id, now, failures[len(failures)-1])
+				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, now, failures[len(failures)-1])
 			} else {
-				fmt.Printf("%s: CI still red after %d CI rounds, for you\n", id, len(failures))
+				news.did(p.Name, "%s: CI still red after %d CI rounds, for you", id, len(failures))
 			}
 		}
 	}
@@ -155,84 +158,100 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	// 0 when it recorded a round. A stacked task's conflicts are a restack's.
 	if _, stacked := idx.parentOf(t); st == PROpen && t.Get("mergeable") == conflicting && !stacked {
 		if c.step(nil, "catch-up", t.Path) == 0 {
-			fmt.Printf("%s: catch-up round %s recorded: conflicts with %s\n", id, t.Get("review_rounds"), t.Base())
+			news.did(p.Name, "%s: catch-up round %s recorded: conflicts with %s", id, t.Get("review_rounds"), t.Base())
 		}
 	}
 	job := t.WorkerJob()
-	if !paused && movedHere(t, as) {
-		var errs strings.Builder
-		if c.step(&errs, "followup", t.Path, "--fresh", "--note", "This task moved to "+c.Host+"; your earlier session is gone. Rebuild context from the task file and the branch.") == 0 {
-			fmt.Printf("%s: its worker and worktree aren't on this machine; a fresh worker picks it up\n", id)
+	if movedHere(t, as) {
+		if paused {
+			news.heldBack(p.Name, "%s: a fresh worker for it here waits: %s is paused", id, p.Name)
 		} else {
-			warn("%s: couldn't start a fresh worker for it here: %s", id, strings.TrimRight(errs.String(), "\n"))
+			var errs strings.Builder
+			if c.step(&errs, "followup", t.Path, "--fresh", "--note", "This task moved to "+c.Host+"; your earlier session is gone. Rebuild context from the task file and the branch.") == 0 {
+				news.did(p.Name, "%s: its worker and worktree aren't on this machine; a fresh worker picks it up", id)
+			} else {
+				warn("%s: couldn't start a fresh worker for it here: %s", id, strings.TrimRight(errs.String(), "\n"))
+			}
+			return
 		}
-		return
 	}
 	// The rest needs the worker free (see busy); a busy one is left for a later
 	// tick. It does at most one thing, in this order: send what the worker hasn't
-	// had (sendToWorker), or mark the task as waiting on the user.
-	if as.jobBusy(job) {
-		if rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent")); rounds > sent {
-			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
+	// had (forWorker), or mark the task as waiting on the user.
+	send, held := c.forWorker(p, idx, t)
+	busy := as.jobBusy(job)
+	switch {
+	case held != "":
+		news.heldBack(p.Name, "%s: %s", id, held)
+	case send == nil:
+	case busy:
+		news.heldBack(p.Name, "%s: %s waiting for its worker (%s)", id, send.what, as.jobState(job))
+	case paused:
+		news.heldBack(p.Name, "%s: %s waits: %s is paused", id, send.what, p.Name)
+	default:
+		if c.step(nil, append([]string{send.command}, t.Path)...) == 0 {
+			news.did(p.Name, "%s: %s", id, send.sent)
 		}
 		return
 	}
-	if !paused && c.sendToWorker(p, idx, t) {
+	if busy {
 		return
 	}
 	// Read the status again: the task may have been merged or abandoned while
 	// the steps above waited on GitHub.
 	if st, waiting := t.Status(), t.OpenQuestions(); st.InFlight() && st != NeedsInput && waiting > 0 {
 		if c.step(nil, "set", t.Path, "status", string(NeedsInput)) == 0 {
-			fmt.Printf("%s: waiting on you (%d open question(s))\n", id, waiting)
+			news.did(p.Name, "%s: waiting on you (%d open question(s))", id, waiting)
 		}
 	}
 }
 
-// sendToWorker resumes a task's idle worker with the first of these it hasn't
-// had: unsent review rounds, word that a pause cut its last turn short, or a
-// restack (a rebase, a retarget or both). It reports whether it tried. Nothing
-// goes out twice: last_round_sent, interrupted, restack_sent and retarget_sent
-// record what was sent.
-func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
-	id := t.ID()
+// workerSend is what crew tick resumes a task's idle worker with: the crew
+// command that sends it, what it is, and what tick says once it's sent.
+type workerSend struct{ command, what, sent string }
+
+// forWorker is the first of these that a task's worker hasn't had: unsent
+// review rounds, word that a pause cut its last turn short, or a restack (a
+// rebase, a retarget or both). Nothing goes out twice: last_round_sent,
+// interrupted, restack_sent and retarget_sent record what was sent. A restack
+// that's due but can't go yet is held back instead, and held says why.
+func (c *Crew) forWorker(p *Project, idx Branches, t Task) (send *workerSend, held string) {
 	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
 		unsent := unsentRounds(t)
-		if c.step(nil, "followup", t.Path) == 0 {
-			fmt.Printf("%s: %s sent to its worker\n", id, unsent)
-		}
-		return true
+		return &workerSend{"followup", unsent, unsent + " sent to its worker"}, ""
 	}
 	if t.Get("interrupted") != "" {
-		if c.step(nil, "followup", t.Path) == 0 {
-			fmt.Printf("%s: its worker carries on after the pause\n", id)
-		}
-		return true
+		return &workerSend{"followup", "word that the pause is over", "its worker carries on after the pause"}, ""
 	}
-	if t.Status() != PROpen {
-		return false
-	}
-	repo := p.Repo()
-	restack := func(reason string) bool {
-		if c.step(nil, "restack", t.Path) == 0 {
-			fmt.Printf("%s: restack sent to its worker (%s)\n", id, reason)
+	repo, st := p.Repo(), t.Status()
+	restack := func(reason string) (*workerSend, string) {
+		if st != PROpen {
+			return nil, fmt.Sprintf("restack (%s) waits until the task is %s; it's %s", reason, PROpen, st)
 		}
-		return true
+		return &workerSend{"restack", "restack (" + reason + ")", "restack sent to its worker (" + reason + ")"}, ""
 	}
 	// As in crew restack: a retarget goes with a rebase when there is one, and on
 	// its own only when the branch needs no rebase (onBase). So a rebase that has
 	// to wait (for its parent's, say) holds its retarget back with it.
 	if reason := idx.restackReason(t, repo); reason != "" {
+		parent, _ := idx.parentOf(t)
 		target := idx.restackTarget(t, repo)
-		if strings.HasSuffix(reason, " abandoned") || idx.parentNeedsRestack(t, repo) || target == "" || t.Get("restack_sent") == target {
-			return false
+		switch {
+		case target != "" && t.Get("restack_sent") == target:
+			return nil, "" // sent already
+		case parent.Status() == Abandoned:
+			return nil, fmt.Sprintf("restack held back: %s was abandoned; give it another base with 'crew set %s base <branch>'", parent.ID(), t.ID())
+		case idx.parentNeedsRestack(t, repo):
+			return nil, fmt.Sprintf("restack (%s) waits for %s's own restack", reason, parent.ID())
+		case target == "":
+			return nil, fmt.Sprintf("restack (%s) waits: origin has no branch %s", reason, idx.effectiveBase(t))
 		}
 		return restack(reason)
 	}
 	if reason := idx.retargetReason(t, repo); reason != "" && idx.onBase(t, repo) && t.Get("retarget_sent") != t.Base() {
 		return restack(reason)
 	}
-	return false
+	return nil, ""
 }
 
 // dispatchReady dispatches the ready tasks of running goals, across every
@@ -246,15 +265,20 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 // again just before its dispatch, since an earlier one can take minutes
 // (worktree hooks) while the ledger is unlocked, time enough for its goal to be
 // abandoned or the task dispatched by hand.
-func (c *Crew) dispatchReady() {
+func (c *Crew) dispatchReady(news *tickNews) {
 	var ready []Task
 	for _, name := range c.projects("") {
 		// No clone here, say: the tick warned of it and skipped it above.
-		if p, err := c.loadProject(name); err != nil || p.Paused() {
+		p, err := c.loadProject(name)
+		if err != nil {
 			continue
 		}
 		for _, t := range c.tasks(name) {
-			if c.goalReady(t) {
+			switch {
+			case !c.goalReady(t):
+			case p.Paused():
+				news.heldBack(name, "%s: dispatch waits: %s is paused", t.ID(), name)
+			default:
 				ready = append(ready, t)
 			}
 		}
@@ -265,15 +289,24 @@ func (c *Crew) dispatchReady() {
 		if !c.goalReady(t) {
 			continue
 		}
+		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
 		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
+			var ids []string
+			for _, d := range deps {
+				ids = append(ids, d.ID())
+			}
+			news.heldBack(project, "%s: dispatch waits for %s to be merged or done", t.ID(), strings.Join(ids, ", "))
 			continue
 		}
 		var errs strings.Builder
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
-			fmt.Printf("%s: dispatched for goal %s\n", t.ID(), t.Goal())
+			news.did(project, "%s: dispatched for goal %s", t.ID(), t.Goal())
 		case exitNotYet: // held back, by a cap say; the next tick tries again
+			why := strings.TrimRight(errs.String(), "\n")
+			why = strings.TrimPrefix(why[strings.LastIndex(why, "\n")+1:], "crew: ")
+			news.heldBack(project, "%s: dispatch held back: %s", t.ID(), why)
 		default:
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
 		}
@@ -322,20 +355,23 @@ func movedHere(t Task, as Agents) bool {
 // tickGoal is one running goal's share of a tick: pass the goal lead its input
 // once it's free and its project isn't paused, or close the goal once its tasks
 // are all finished.
-func (c *Crew) tickGoal(g Goal, as Agents, paused bool) {
+func (c *Crew) tickGoal(p *Project, g Goal, as Agents, paused bool, news *tickNews) {
 	if g.Status() != GoalRunning {
 		return
 	}
 	id, job := g.ID(), g.LeadJob()
 	if c.goalHasInput(g) {
-		if as.jobBusy(job) {
-			fmt.Printf("goal %s: input waits for its goal lead (%s)\n", id, as.jobState(job))
-		} else if !paused && c.step(nil, "goal", "followup", g.Path) == 0 {
-			fmt.Printf("goal %s: input sent to its goal lead\n", id)
+		switch {
+		case as.jobBusy(job):
+			news.heldBack(p.Name, "goal %s: input waits for its goal lead (%s)", id, as.jobState(job))
+		case paused:
+			news.heldBack(p.Name, "goal %s: input waits: %s is paused", id, p.Name)
+		case c.step(nil, "goal", "followup", g.Path) == 0:
+			news.did(p.Name, "goal %s: input sent to its goal lead", id)
 		}
 	} else if c.goalFinished(g) && !as.jobBusy(job) {
 		if c.step(nil, "goal", "done", g.Path) == 0 {
-			fmt.Printf("goal %s: done, every task finished\n", id)
+			news.did(p.Name, "goal %s: done, every task finished", id)
 		}
 	}
 }
@@ -374,11 +410,12 @@ func (c *Crew) leaseTakenElsewhere() (holder string, taken bool) {
 // to origin, and its services off. Run with the tick lock held. The services go
 // off last, so a stand-down that fails on the way leaves the tick on to try
 // again.
-func (c *Crew) standDown(holder string) error {
+func (c *Crew) standDown(holder string, news *tickNews) error {
 	if holder == "" {
 		holder = "no machine"
 	}
-	fmt.Printf("crew now runs on %s; standing down here\n", holder)
+	news.did("", "crew now runs on %s; standing down here", holder)
+	news.save() // this machine holds nothing back now
 	c.stopCrewJobs()
 	if err := c.takeLock(); err != nil {
 		return err

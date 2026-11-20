@@ -568,6 +568,14 @@ func (c *Crew) sessionSettings(settings *object, p *Project) string {
 	return encodeJSON(settings, false)
 }
 
+// inCrewSession: this runs in a session crew started for a project, a worker's
+// or a goal lead's, whose settings set CREW_LEAD_FINGERPRINT empty. crew lead
+// sets it to a fingerprint, and nothing else sets it.
+func inCrewSession() bool {
+	fp, set := os.LookupEnv("CREW_LEAD_FINGERPRINT")
+	return set && fp == ""
+}
+
 // addPauseHook adds the PostToolUse hook that runs crew pause --hook after every
 // tool call, for the sessions a pause asks to wrap up: workers and goal leads.
 // It's added here, not listed in a settings file, so the user's own leads (crew

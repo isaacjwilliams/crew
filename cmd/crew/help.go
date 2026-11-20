@@ -40,9 +40,11 @@ Setup
   crew lead [--project P] [claude options] ["<request>"]
                                    Talk to the lead, in a new session (lead -c
                                    continues the last one); bin/lead runs it
-  crew lead --hook                 From the lead's UserPromptSubmit hook: say when
-                                   the lead's instructions or settings changed
-                                   since its session started (always exits 0)
+  crew lead --hook                 From the lead's SessionStart and UserPromptSubmit
+                                   hooks: tell the session what crew did since its
+                                   previous prompt, and say when the lead's
+                                   instructions or settings changed since it
+                                   started (always exits 0)
   crew serve                       Serve the lead with Remote Control (what
                                    crew-lead.service runs); exits 3 on a machine
                                    that doesn't run the crew
