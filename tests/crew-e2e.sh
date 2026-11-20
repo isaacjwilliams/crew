@@ -1179,6 +1179,7 @@ mv "$HOME/agents.kept" "$HOME/agents.json"
 crew pause --project "$(basename "$PD")" >/dev/null 2>&1; stall13 "done" null
 out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
 check "nothing is nudged while the project is paused, by tick or by hand; tick holds it back, saying why" '[[ $out == "013-tick-routing: a nudge waits: $(basename "$PD") is paused" && $byhand == *"crew resume --project $(basename "$PD")"* && $st == 4 && $(resumes) == "$n" ]]'
+check "a lead hears the nudge a pause holds back" '[[ $(prompt held) == *"$HELD"*"$NL- $PJ: 013-tick-routing: a nudge waits: $PJ is paused"* ]]'
 crew resume --project "$(basename "$PD")" >/dev/null
 sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
 out=$(crew tick 2>/dev/null)
