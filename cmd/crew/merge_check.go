@@ -81,7 +81,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		reason string
 	}{
 		// Clears by itself, within minutes: the worker, crew tick, GitHub or CI.
-		{!s.readOnly && worker.busy(), "worker busy"},
+		{s.workersUnseen == "" && worker.busy(), "worker busy"},
 		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), unsentRounds(t) + " not sent yet"},
 		{pr.Mergeable == mergeableUnknown, "GitHub still checking for conflicts"},
 		{pr.CI == ciRunning, "CI running"},
@@ -103,7 +103,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		// Needs the user, or whoever the branch rules ask to review it.
 		{pr.ReviewDecision == "REVIEW_REQUIRED", "review required"},
 		{t.OpenQuestions() > 0, fmt.Sprintf("%d open question(s)", t.OpenQuestions())},
-		{s.readOnly, "worker can't be seen from this machine"},
+		{s.workersUnseen != "", s.workersUnseen},
 	} {
 		if c.holds {
 			m.InTheWay = append(m.InTheWay, c.reason)

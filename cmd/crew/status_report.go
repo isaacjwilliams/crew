@@ -142,8 +142,15 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 	if len(inScope) == 0 {
 		return r
 	}
-	s := statusView{Crew: c, doneToo: doneToo, readOnly: r.ReadOnlyOn != ""}
-	s.agents = c.agents()
+	s := statusView{Crew: c, doneToo: doneToo}
+	var err error
+	s.agents, err = c.listAgents()
+	switch {
+	case r.ReadOnlyOn != "":
+		s.workersUnseen = "worker can't be seen from this machine"
+	case err != nil:
+		s.workersUnseen = "workers couldn't be listed"
+	}
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
 	r.NoneDispatch = s.noProjectDispatches()
@@ -164,10 +171,14 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 // rows, notes and caps read them.
 type statusView struct {
 	*Crew
-	doneToo  bool
-	readOnly bool // another machine runs the crew, so its workers can't be seen here
-	agents   Agents
-	running  int // the workers running across the crew, counted once
+	doneToo bool
+	agents  Agents
+	running int // the workers running across the crew, counted once
+	// workersUnseen says why the workers can't be seen here, so none counts as
+	// busy or idle: another machine runs the crew, or claude agents failed. It's
+	// empty when they can be seen.
+	workersUnseen string
+
 	branches Branches
 	repo     string              // the project's clone here, for restack reasons; empty when there's none
 	settings Settings            // the project's, or the crew's when they can't be read (settingsOf)

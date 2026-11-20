@@ -52,7 +52,7 @@ func TestMergeCheck(t *testing.T) {
 		pr       func(*gitHubPR)   // changes clearPR
 		unread   bool              // GitHub couldn't be read
 		worker   Agent
-		readOnly bool
+		unseen   string            // why the workers can't be seen
 		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
 		parent   string            // the status of 020-parent, on branch agent/parent
 		want     string
@@ -83,7 +83,8 @@ func TestMergeCheck(t *testing.T) {
 		{name: "blocked on GitHub for a reason crew can't name", pr: func(p *gitHubPR) { p.MergeState = "BLOCKED" }, want: "not yet: blocked by a branch rule on GitHub"},
 		{name: "blocked on GitHub, with a reason crew names", pr: func(p *gitHubPR) { p.CI, p.MergeState = ciRunning, "BLOCKED" }, want: "not yet: CI running"},
 		{name: "GitHub unread, changes requested when last synced", unread: true, fields: map[string]string{"pr_state": "open, changes requested"}, want: "not yet: changes requested (couldn't read GitHub; as of the last sync)"},
-		{name: "another machine runs the crew", worker: Agent{State: "working"}, readOnly: true, want: "not yet: worker can't be seen from this machine"},
+		{name: "another machine runs the crew", worker: Agent{State: "working"}, unseen: "worker can't be seen from this machine", want: "not yet: worker can't be seen from this machine"},
+		{name: "claude agents failed", unseen: "workers couldn't be listed", want: "not yet: workers couldn't be listed"},
 		{name: "several, soonest to clear first", worker: Agent{State: "working"}, pr: func(p *gitHubPR) { p.Draft, p.CI = true, ciFailing }, want: "not yet: worker busy; CI failing; draft"},
 		{name: "findings left for the user", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", want: "merge now, 2 finding(s) left for you"},
 		{name: "findings left for the user, and in the way", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
@@ -117,7 +118,7 @@ func TestMergeCheck(t *testing.T) {
 			if tc.pr != nil {
 				tc.pr(&pr)
 			}
-			s := &statusView{Crew: &Crew{Home: dir}, readOnly: tc.readOnly, repo: repo, settings: settings, prs: map[string]gitHubPR{}}
+			s := &statusView{Crew: &Crew{Home: dir}, workersUnseen: tc.unseen, repo: repo, settings: settings, prs: map[string]gitHubPR{}}
 			s.branches = s.Crew.branches("p")
 			if !tc.unread {
 				s.prs[task.Path] = pr

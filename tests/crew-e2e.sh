@@ -405,6 +405,8 @@ before=$(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD); crew statu
 check "status writes nothing" '[[ $(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD) == "$before" ]]'
 check "on a machine that doesn't run the crew, the merge check says the worker can't be seen there" \
   '[[ $(CREW_HOST=laptop crew status | grep "^  001-saved-search-filters ") == *" not yet: worker can'"'"'t be seen from this machine  high"* ]]'
+touch "$HOME/agents-fail"; a=$(merge_note); rm "$HOME/agents-fail"
+check "when claude agents fails, the merge check doesn't take the worker for idle" '[[ $a == *" not yet: workers couldn'"'"'t be listed  high"* ]]'
 touch "$HOME/gh-pr-view-fails"; a=$(merge_note); rm "$HOME/gh-pr-view-fails"
 echo UNKNOWN >"$HOME/gh-pr-mergeable"; crew sync >/dev/null 2>&1; rm "$HOME/gh-pr-mergeable"
 touch "$HOME/gh-pr-view-fails"; b=$(merge_note); rm "$HOME/gh-pr-view-fails"
