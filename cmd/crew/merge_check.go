@@ -94,14 +94,16 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		{!stacked && defaultBranch != "" && t.Base() != defaultBranch, fmt.Sprintf("based on %s, not %s", t.Base(), defaultBranch)},
 		// Needs a fix from the worker.
 		{pr.Mergeable == conflicting, "conflicts with " + base},
-		{pr.MergeState == "BEHIND", "behind " + base},
 		{pr.CI == ciFailing, "CI failing"},
-		{pr.CI == ciCancelled, "CI cancelled"},
 		{pr.Draft, "draft"},
-		{pr.ReviewDecision == "CHANGES_REQUESTED", "changes requested"},
 		{t.AwaitsSecurityReview(), "no security review yet"},
-		// Needs the user, or whoever the branch rules ask to review it.
+		// Needs someone on GitHub: an update of the branch, a rerun of the
+		// checks, or a reviewer's approval.
+		{pr.MergeState == "BEHIND", "behind " + base},
+		{pr.CI == ciCancelled, "CI cancelled"},
+		{pr.ReviewDecision == "CHANGES_REQUESTED", "changes requested"},
 		{pr.ReviewDecision == "REVIEW_REQUIRED", "review required"},
+		// Needs the user.
 		{t.OpenQuestions() > 0, fmt.Sprintf("%d open question(s)", t.OpenQuestions())},
 		{s.workersUnseen != "", s.workersUnseen},
 	} {
