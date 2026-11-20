@@ -79,8 +79,9 @@ func TestWaitingOnUserWording(t *testing.T) {
 
 // statusLedger is a home with two projects. p has a running goal with a task in
 // flight, seven ready to go and one parked; outside the goal, a stack, a draft
-// that folds and three open PRs. q has a task with an open question, an open PR,
-// a finished task with an open question and a memory suggestion.
+// that folds and three open PRs, which GitHub can't be read for. q has a task
+// with an open question, an open PR, a finished task with an open question and a
+// memory suggestion.
 func statusLedger(t *testing.T) *Crew {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -89,6 +90,7 @@ func statusLedger(t *testing.T) *Crew {
 	writeFile(t, c, `#!/bin/sh
 echo '[{"id":"w1","state":"working","pid":1}]'
 `, "bin", "claude")
+	writeFile(t, c, "#!/bin/sh\nexit 1\n", "bin", "gh") // GitHub can't be read
 	t.Setenv("PATH", c.path("bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for _, p := range []string{"p", "q"} {
 		writeFile(t, c, "", "projects", p, "project.env")
@@ -103,7 +105,7 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	reportTask(t, c, "p", "010-parent", false, "status: working", "base: main", "branch: agent/parent")
 	reportTask(t, c, "p", "011-child", true, "status: draft", "base: agent/parent", "branch: agent/child")
 	reportTask(t, c, "p", "012-idea", false, "status: draft", "base: main")
-	reportTask(t, c, "p", "013-risky", false, "status: pr-open", "risk: high", "pr: https://github.com/o/r/pull/9")
+	reportTask(t, c, "p", "013-risky", false, "status: pr-open", "risk: high", "pr: https://github.com/o/r/pull/9", "pr_state: open")
 	reportTask(t, c, "p", "014-later", false, "status: pr-open", "risk: low", "pr: https://github.com/o/r/pull/12")
 	reportTask(t, c, "p", "015-earlier", false, "status: pr-open", "risk: low", "pr: https://github.com/o/r/pull/5")
 
@@ -163,8 +165,8 @@ func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 	if parent.Folded || !idea.Folded {
 		t.Errorf("folded: 010-parent %v, 012-idea %v; want only the draft folded", parent.Folded, idea.Folded)
 	}
-	if risky := p.Rows[2]; !slices.Contains(risky.Notes, "high: no security review yet") {
-		t.Errorf("013-risky's notes = %q, want its look", risky.Notes)
+	if risky := p.Rows[2]; !slices.Equal(risky.Notes, []string{"high"}) || risky.Merge == nil || !slices.Contains(risky.Merge.InTheWay, "no security review yet") {
+		t.Errorf("013-risky's notes = %q and merge check %+v, want its tier, and its security review in the way", risky.Notes, risky.Merge)
 	}
 	var review []string
 	for _, task := range p.ToReview {

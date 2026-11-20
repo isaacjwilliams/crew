@@ -30,6 +30,8 @@
 # $HOME/gh-pr-checks; without them, it has no checks. A PR merges cleanly into its base, unless
 # $HOME/gh-pr-mergeable says otherwise (CONFLICTING, UNKNOWN). `pr view` runs $HOME/gh-pr-view-hook
 # first, when it exists, with gh's arguments: something that happens while crew waits for GitHub.
+# A PR is a draft while $HOME/gh-pr-draft exists. `pr view --json state,…` fails, as when GitHub
+# can't be reached, while $HOME/gh-pr-view-fails exists.
 # PR #<n>'s body is $HOME/gh-pr-body-<n>; without it, the body is empty.
 echo "gh $*" >>"$HOME/gh-calls.log"
 for a in "$@"; do [[ $a == body=* ]] && printf '%s' "${a#body=}" >"$HOME/gh-last-body"; done
@@ -92,10 +94,11 @@ case "$*" in
     cat "$HOME/gh-pr-body-${3##*/}" 2>/dev/null; echo ;;
   "pr view"*)
     [[ -x $HOME/gh-pr-view-hook ]] && "$HOME/gh-pr-view-hook" "$@"
-    jq -cn --arg state "$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)" --arg updated "$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)" \
+    [[ -e $HOME/gh-pr-view-fails ]] && exit 1
+    jq -cn --argjson draft "$([[ -e $HOME/gh-pr-draft ]] && echo true || echo false)" --arg state "$(cat "$HOME/gh-pr-state" 2>/dev/null || echo MERGED)" --arg updated "$(cat "$HOME/gh-pr-updated" 2>/dev/null || echo 2026-09-25T21:31:00Z)" \
       --arg head "$(cat "$HOME/gh-pr-head" 2>/dev/null || echo 0123456789abcdef)" --argjson checks "$(cat "$HOME/gh-pr-checks" 2>/dev/null || echo '[]')" \
       --arg mergeable "$(cat "$HOME/gh-pr-mergeable" 2>/dev/null || echo MERGEABLE)" --arg base "$(cat "$HOME/gh-pr-base-${3##*/}" 2>/dev/null)" \
-      '{state: $state, isDraft: false, reviewDecision: "APPROVED", updatedAt: $updated, baseRefName: $base, headRefOid: $head, statusCheckRollup: $checks,
+      '{state: $state, isDraft: $draft, reviewDecision: "APPROVED", updatedAt: $updated, baseRefName: $base, headRefOid: $head, statusCheckRollup: $checks,
         mergeable: $mergeable}' ;;
   "auth status") exit 0 ;;
 esac

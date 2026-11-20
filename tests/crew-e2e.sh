@@ -360,8 +360,9 @@ check "sync fetches and raises the risk of a task whose branch on origin gained 
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
 check "sync records an open PR's state with its review decision, its base, its checks and that it merges cleanly" \
   '[[ $(crew get 1 pr_state) == "open, approved" && $(crew get 1 pr_base) == "" && $(crew get 1 ci_state) == "" && $(crew get 1 mergeable) == "" ]]'
-check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
-  '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
+echo OPEN >"$HOME/gh-pr-state"; row=$(crew status | grep "^  001-saved-search-filters "); rm "$HOME/gh-pr-state"
+check "status shows a pr-open task raised after its hand-over as waiting on its security review, once on its row, and in to review" \
+  '[[ $row == *"not yet: "*"no security review yet"*"  high" && $(grep -o "security review" <<<"$row" | wc -l) == 1 && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
 crew set 1 status addressing-feedback; crew set 1 risk medium; crew set 1 auto_review no
 git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; git -C "$WT" push -q origin HEAD; record_evidence 1; pr_body 1
@@ -380,7 +381,37 @@ check "hand-over refuses a task whose automated review was turned back on until 
   '((st == 1)) && [[ $out == *"high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
 review "$F1" 1
 check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
-  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran" ]]'
+# Whether a pr-open task's PR can merge now: crew status reads the PR on GitHub as it
+# runs. The ledger's last sync says the PR is open and clear throughout.
+merge_note() { crew status | grep "^  001-saved-search-filters "; }
+checks() { echo "[{\"__typename\": \"CheckRun\", \"name\": \"test\", $1}]" >"$HOME/gh-pr-checks"; }   # the PR's one check run
+passing='"status": "COMPLETED", "conclusion": "SUCCESS"'
+cp "$HOME/agents.json" "$HOME/agents.before"; setstate "done" null   # the worker is idle
+echo OPEN >"$HOME/gh-pr-state"; echo main >"$HOME/gh-pr-base-12"; checks "$passing"
+check "status says merge now for an open PR that merges cleanly, with its checks passing and its automated review recorded" \
+  '[[ $(merge_note) == *" #12    merge now  high: read the diff; security review ran" ]]'
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; a=$(merge_note); rm "$HOME/gh-pr-mergeable"
+touch "$HOME/gh-pr-draft"; b=$(merge_note); rm "$HOME/gh-pr-draft"
+checks '"status": "COMPLETED", "conclusion": "FAILURE"'; c=$(merge_note); checks '"status": "IN_PROGRESS"'; d=$(merge_note); checks "$passing"
+echo agent/elsewhere >"$HOME/gh-pr-base-12"; e=$(merge_note); echo main >"$HOME/gh-pr-base-12"
+check "status reads the PR on GitHub, so one the last sync found clear isn't while it conflicts, is a draft, its CI fails or runs, or it targets another branch" \
+  '[[ $a == *" not yet: conflicts with main  high"* && $b == *" not yet: draft  high"* && $c == *" not yet: CI failing  high"* && $d == *" not yet: CI running  high"* && $e == *" not yet: PR targets agent/elsewhere, not main  high"* ]]'
+echo MERGED >"$HOME/gh-pr-state"; a=$(merge_note); echo CLOSED >"$HOME/gh-pr-state"; b=$(merge_note); echo OPEN >"$HOME/gh-pr-state"
+check "a PR merged or closed on GitHub never says merge now, though crew sync hasn't caught up" \
+  '[[ $a == *" merged on GitHub  high"* && $b == *" closed on GitHub  high"* && $(crew get 1 status) == pr-open ]]'
+check "only pr-open rows have a merge check" '[[ $(crew status | grep -v " pr-open " | grep -cE "merge now|not yet:|on GitHub") == 0 ]]'
+before=$(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD); crew status --all >/dev/null; crew status --done >/dev/null
+check "status writes nothing" '[[ $(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD) == "$before" ]]'
+check "on a machine that doesn't run the crew, the merge check says the worker can't be seen there" \
+  '[[ $(CREW_HOST=laptop crew status | grep "^  001-saved-search-filters ") == *" not yet: worker can'"'"'t be seen from this machine  high"* ]]'
+touch "$HOME/gh-pr-view-fails"; a=$(merge_note); rm "$HOME/gh-pr-view-fails"
+echo UNKNOWN >"$HOME/gh-pr-mergeable"; crew sync >/dev/null 2>&1; rm "$HOME/gh-pr-mergeable"
+touch "$HOME/gh-pr-view-fails"; b=$(merge_note); rm "$HOME/gh-pr-view-fails"
+check "when GitHub can't be read, status goes by the last sync and says so, and one that found GitHub still checking for conflicts isn't merge now" \
+  '[[ $(crew get 1 mergeable) == unknown && $a == *" merge now (couldn'"'"'t read GitHub; as of the last sync)  high"* && $b == *" not yet: GitHub still checking for conflicts (couldn'"'"'t read GitHub; as of the last sync)  high"* ]]'
+# Back as it was: the worker busy, the last sync found the PR clear, and GitHub has it merged.
+mv "$HOME/agents.before" "$HOME/agents.json"; sed -i '/^mergeable: unknown$/d' "$F1"; rm "$HOME/gh-pr-state" "$HOME/gh-pr-base-12" "$HOME/gh-pr-checks"
 returned=0
 for st in needs-input working; do
   crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
@@ -813,12 +844,12 @@ check "sync leaves a stack alone while the parent hasn't moved" '[[ $out != *res
 work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
-check "status shows the restack that's needed" '[[ $(crew status) == *"needs restack: 009-season-model moved"* ]]'
+check "status shows the restack that's needed, once on the row" '[[ $(crew status | grep -c "needs restack: 009-season-model moved") == 1 ]]'
 setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); crew restack 10 >/dev/null
 check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_prompt) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_prompt) == *"git rebase --onto $T9b $T9\`"* && $(last_prompt) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
-check "status shows the restack a working task needs" \
-  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" ]]'
+check "status shows the restack a working task needs, and no merge check" \
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
 setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
@@ -1098,7 +1129,7 @@ crew set 15 base agent/tick-replacement; rs15=$(crew get 15 restack_sent)
 echo agent/tick-parent >"$HOME/gh-pr-base-32"
 out=$(crew sync)
 check "sync records the branch each PR targets on GitHub" '[[ $(crew get 15 pr_base) == agent/tick-parent ]]'
-check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* ]]'
 setstate "done" null; crew dispatch "$FR" >/dev/null; (cd "$(crew get "$FR" worktree)" && git push -q -u origin HEAD 2>/dev/null)
 crew set "$FR" pr https://github.com/isaac/webapp/pull/33; hand_over "$FR"
 echo agent/tick-old >"$HOME/gh-pr-base-31"

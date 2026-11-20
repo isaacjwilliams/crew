@@ -56,7 +56,7 @@ func cmdCatchUp(c *Crew, args []string) error {
 	if parent, stacked := c.branches(p.Name).parentOf(t); stacked {
 		return nothingToDo("%s is stacked on %s, so its conflicts are a restack's (crew restack)", t.ID(), parent.ID())
 	}
-	// Read the PR afresh: mergeable is only crew tick's filter.
+	// Read the PR afresh: mergeable is only as fresh as the last crew sync.
 	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,mergeable,baseRefName")
 	if err != nil {
 		return quietly(err)

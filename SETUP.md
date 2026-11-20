@@ -446,7 +446,16 @@ SENSITIVE_PATHS="db/migrate config/credentials :(glob)app/**/auth*"
 
 When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review; the worker's model stays as it was. A task raised after its hand-over shows `high: no security review yet` in `crew status` until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
 
-**In `crew status`**, each open PR's row says the look it needs (`low: approve from the evidence`), and each project ends with the PRs waiting on you, cheapest look first, then by number:
+**In `crew status`**, each open PR's row says whether you can merge it now, and the look it needs:
+
+```
+  041-season-export   pr-open   worker: done   #41   merge now  low: approve from the evidence
+  038-season-admin    pr-open   worker: done   #38   not yet: CI running; draft  medium: read the diff
+```
+
+`merge now` means GitHub has the PR open, ready, clean against its base and its checks passing, and crew has nothing more to do on it: its worker is idle, its automated review is recorded, it needs no restack and has no open question. Otherwise `not yet:` names what stands in the way, what's likely to clear soonest first. Status reads each PR from GitHub as it runs; when it can't, it goes by the last `crew sync` and says `(couldn't read GitHub; as of the last sync)`. On a machine that doesn't run the crew, it can't see the workers, so it never says `merge now` there. A PR merged or closed on GitHub that sync hasn't caught up with says `merged on GitHub` or `closed on GitHub`.
+
+Each project ends with the PRs waiting on you, cheapest look first, then by number:
 
 ```
   to review: #41 low, #38 medium, #35 high

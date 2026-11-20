@@ -84,3 +84,25 @@ func (pr gitHubPR) label() string {
 	}
 	return label
 }
+
+// syncedPR is the PR as crew sync last recorded it in the task file (record).
+// Its State is empty when sync never read it.
+func syncedPR(t Task) gitHubPR {
+	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: "MERGEABLE"}
+	switch t.Get("mergeable") {
+	case conflicting:
+		pr.Mergeable = "CONFLICTING"
+	case mergeableUnknown:
+		pr.Mergeable = "UNKNOWN"
+	}
+	state, decision, _ := strings.Cut(t.Get("pr_state"), ", ")
+	switch state {
+	case "":
+	case "merged", "closed":
+		pr.State = strings.ToUpper(state)
+	default:
+		pr.State, pr.Draft = "OPEN", state == "draft"
+		pr.ReviewDecision = strings.ToUpper(strings.ReplaceAll(decision, " ", "_"))
+	}
+	return pr
+}

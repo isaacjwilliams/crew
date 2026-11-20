@@ -240,7 +240,11 @@ func printRow(r taskRow, indent string) {
 	if r.Task.PR() != "" {
 		pr = "#" + r.Task.PRNumber()
 	}
-	fmt.Printf("  %s %-20s %-26s %-6s %s\n", padID(indent+r.Task.ID()), r.Task.Status(), worker, pr, strings.Join(r.Notes, "  "))
+	notes := r.Notes
+	if r.Merge != nil {
+		notes = append([]string{r.Merge.String()}, notes...)
+	}
+	fmt.Printf("  %s %-20s %-26s %-6s %s\n", padID(indent+r.Task.ID()), r.Task.Status(), worker, pr, strings.Join(notes, "  "))
 	for _, k := range r.Kids {
 		printRow(k, strings.Repeat(" ", utf8.RuneCountInString(indent))+"└ ")
 	}
