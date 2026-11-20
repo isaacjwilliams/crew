@@ -442,11 +442,14 @@ isolate_home "$SB/home"
 CH=$SB/session/crew; make_home "$CH"
 # A worker's session: crew's settings in its environment and its home's bin/ first on PATH.
 session() { CREW_HOME=$CH CREW_PROJECT=webapp CREW_LEAD_FINGERPRINT=f1ngerpr1nt PATH="$CH/bin:$PATH" "$@"; }
-out=$(session bash -c '. "$1/lib.sh"; isolate_home "$2"; compgen -e | grep "^CREW_"; crew config CREW_HOME' _ "$TESTS_DIR" "$SB/probe" 2>&1)
+in_suite() {  # checkout 'commands': runs them as a suite in that checkout would, started from a worker's session
+  session bash -c '. "$1/tests/lib.sh"; isolate_home "$2"; eval "$3"' _ "$1" "$(mktemp -d "$SB/home.XXXXXX")" "$2" 2>&1
+}
+out=$(in_suite "$REPO_DIR" 'compgen -e | grep "^CREW_"; crew config CREW_HOME')
 check "a suite started from a worker's session keeps none of its crew settings, and can't run its crew" \
   '[[ $(grep "^CREW_" <<<"$out") == CREW_TEST_RELEASES && $out != *"$CH"* ]]'
 COPY=$SB/copy; mkdir "$COPY"; git -C "$CH" archive HEAD | tar -x -C "$COPY"
-out=$(session bash -c '. "$1/tests/lib.sh"; isolate_home "$2"; make_home "$HOME/crew"; PATH="$HOME/crew/bin:$PATH" crew config CREW_HOME' _ "$COPY" "$SB/copy-home" 2>&1); rc=$?
+out=$(in_suite "$COPY" 'make_home "$HOME/crew"; PATH="$HOME/crew/bin:$PATH" crew config CREW_HOME'); rc=$?
 check "a suite run from a copy of the repo with no .git refuses to start, saying why, and reaches no crew home" \
   '((rc == 2)) && [[ $out == *"isn'"'"'t a git checkout"* && $out != *"$CH"* ]]'
 

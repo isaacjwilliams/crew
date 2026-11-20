@@ -20,7 +20,7 @@ The suites run only on Linux: they use GNU and util-linux tools (`sed -i`, `stat
 ## How isolation works (`lib.sh`)
 
 - `release_binary VERSION` builds `crew` from this checkout, stamped with VERSION, into `$CREW_TEST_RELEASES/v<VERSION>/crew-<os>-<arch>`, where the stub `curl` serves it from. Each suite builds the one for `VERSION` when it starts.
-- `make_home DIR` builds a crew home the way a clone would be once it has run: the working files of this checkout, uncommitted changes included, committed to a new repo, with that binary in its `bin/release/`. It takes the list of files from git, so it refuses to run from a copy of the repo that isn't a git checkout (one made with `git archive`, say): `git init` and commit the copy first.
+- `make_home DIR` builds a crew home the way a clone would be once it has run: the working files of this checkout, uncommitted changes included, committed to a new repo, with that binary in its `bin/release/`. It takes the list of files from git, so it refuses to run from a copy of the repo that isn't a git checkout (one made with `git archive`, say): run `git init` in the copy first.
 - Each suite creates sandboxes under `tests/.tmp/` and deletes them on exit. They're kept out of `/tmp` because the guard always allows writes under `/tmp`, which would hide write-guard failures.
 - `isolate_home` sets `HOME` to the sandbox, gives git a throwaway identity, clears every `CREW_` setting but the tests' own (`CREW_TEST_RELEASES`) and `CLAUDE_PROJECT_DIR`, and puts `tests/stubs/` first on `PATH`. It refuses to run if the stub `claude`, `gh`, `wt`, `curl`, `codex` or `crew` isn't the one that resolves.
 - The stubs:

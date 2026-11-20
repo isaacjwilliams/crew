@@ -53,7 +53,7 @@ isolate_home() {
   mkdir -p "$HOME"
   # Drop every crew setting but the tests' own: a worker's session sets several.
   local v
-  for v in $(compgen -e); do [[ $v == CREW_* && $v != CREW_TEST_* ]] && unset "$v"; done
+  for v in "${!CREW_@}"; do [[ $v == CREW_TEST_* ]] || unset "$v"; done
   unset CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
   export GIT_CONFIG_NOSYSTEM=1
   git config --global user.email test@example.com
@@ -72,10 +72,10 @@ isolate_home() {
 # the working files of this checkout (uncommitted changes included), committed to
 # a new git repo, with the binary for its VERSION in bin/release/.
 make_home() {
-  local f v prefix
+  local f v
   # Only git can tell this checkout's files from what it ignores and the suites leave.
-  prefix=$(git -C "$REPO_DIR" rev-parse --show-prefix 2>/dev/null) && [[ -z $prefix ]] ||
-    { echo "refusing to run: $REPO_DIR isn't a git checkout, so make_home can't tell which of its files are crew's (git init and commit the copy first)" >&2; exit 2; }
+  [[ -e $REPO_DIR/.git ]] ||
+    { echo "refusing to run: $REPO_DIR isn't a git checkout, so make_home can't tell which of its files are crew's (run git init in the copy first)" >&2; exit 2; }
   mkdir -p "$1"
   while IFS= read -r -d '' f; do
     if [[ -e $REPO_DIR/$f ]]; then mkdir -p "$1/$(dirname "$f")"; cp -p "$REPO_DIR/$f" "$1/$f"; fi
