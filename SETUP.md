@@ -294,7 +294,7 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 `crew tick` does everything that needs no decision from you, across all your projects:
 
 - syncs PR states from GitHub;
-- records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for. While a round waits, the tick says so;
+- records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for;
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
 - restacks stacked tasks whose parent moved or merged, bottom-up, and has a task's worker retarget its PR when the PR targets a branch other than the task's base, never sending the same restack twice;
@@ -312,6 +312,8 @@ journalctl --user -u crew-tick   # one line per thing it did
 On a Mac the jobs run only while you're logged in (see [On a Mac](#on-a-mac)), and a tick's lines go to its log: `tail -f ~/crew/logs/crew-tick.log`.
 
 The lead runs `crew tick` at the start of a session and whenever you ask how things are going, so it works without the timer too, only less promptly.
+
+Whatever a tick does, and whatever it holds back, it says so with a line: a round waiting for a busy worker, a restack waiting for the one below it, a dispatch held by a cap or a dependency, a paused project's work. Your lead hears those lines with your next message, along with what workers did meanwhile (a PR handed over to you, a question for you), so it knows what crew did since you last spoke without running `crew tick` or being asked. It hears each line once, and something held back once until the reason changes. A new session starts with what happens from then on. A lead for one project hears only that project; the lead on your phone hears every project, like a plain `lead`. The lines stay on the machine that runs the crew for 30 days, in `~/crew/news/`: a file a day, and `held-back`.
 
 ### Hand the crew a goal
 
