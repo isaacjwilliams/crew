@@ -11,8 +11,8 @@ package main
 //
 // Each file has a line per item, its fields separated by tabs: the day files
 // start with the time, then the project, then the text; the others start with
-// the project. A session's file has the time of the newest line it's had on
-// its first line.
+// the project. A session's file has the time it last read the news on its
+// first line.
 //
 // The lead's hooks (crew lead --hook) tell each session what's new since its
 // previous prompt: the lines written since, and what's held back that it hasn't
@@ -163,8 +163,8 @@ func (c *Crew) heldBack() []newsItem {
 	return items
 }
 
-// sessionNews is what a lead's session has been told: the time of the newest
-// line of news it has had, and the held-back lines it has been told, which it
+// sessionNews is what a lead's session has been told: the time it last read
+// the news, and the held-back lines it has been told, which it
 // isn't told again while they're held back for the same reason. Its file has
 // the time on its first line, then one held-back line per line.
 type sessionNews struct {
