@@ -9,6 +9,7 @@ package main
 //	.crew-upgrade.lock  one crew upgrade at a time
 //	.crew-eval-<p>.lock  one crew review-eval of project p at a time
 //	.crew-evidence-<p>.lock  one crew evidence of project p at a time
+//	.crew-news.lock  writing a line of news, or reading it for a lead (lockNews)
 //
 // A lock is held by its open file. Go opens files close-on-exec, so the sessions
 // and processes crew starts never hold one.

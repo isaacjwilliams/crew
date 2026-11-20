@@ -41,6 +41,10 @@
           {
             "type": "command",
             "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew\" memory --hook"
+          },
+          {
+            "type": "command",
+            "command": "\"${CREW_HOME:-$HOME/crew}/bin/crew\" lead --hook"
           }
         ]
       }

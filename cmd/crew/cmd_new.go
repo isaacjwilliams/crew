@@ -312,6 +312,9 @@ func cmdHandOver(c *Crew, args []string) error {
 	t.SetStatus(rules.handedOver)
 	t.Touch()
 	t.Log("handed over")
+	if inWorkerOrGoalLead() {
+		c.recordNews(taskProjectDir(t), fmt.Sprintf("%s: handed over (%s)", t.ID(), rules.handedOver))
+	}
 	c.commit("hand over " + t.ID())
 	fmt.Printf("handed over: %s (%s)\n", t.ID(), rules.handedOver)
 	return nil

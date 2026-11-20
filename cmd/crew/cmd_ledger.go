@@ -213,6 +213,10 @@ func cmdSet(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A lead hears the statuses crew's sessions set; crew tick reports its own.
+	if key == "status" && !isProposal(f) && inWorkerOrGoalLead() {
+		c.recordNews(taskProjectDir(Task{d}), d.ID()+": "+statusLogged+value)
+	}
 	d.Touch()
 	c.commit("set " + d.ID() + " " + key)
 	return nil

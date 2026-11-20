@@ -294,7 +294,7 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 `crew tick` does everything that needs no decision from you, across all your projects:
 
 - syncs PR states from GitHub;
-- records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for. While a round waits, the tick says so;
+- records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for;
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
 - nudges a worker whose turn ended while its task still says it's being worked on, with no question asked, once its transcript has been quiet for 15 minutes: it resumes the worker once to carry on. If the worker stalls again with no new commit and no change of status, or its worktree isn't on this machine, the tick asks the lead under the task's Open questions instead. `crew nudge TASK` does the same by hand;
@@ -313,6 +313,8 @@ journalctl --user -u crew-tick   # one line per thing it did
 On a Mac the jobs run only while you're logged in (see [On a Mac](#on-a-mac)), and a tick's lines go to its log: `tail -f ~/crew/logs/crew-tick.log`.
 
 The lead runs `crew tick` at the start of a session and whenever you ask how things are going, so it works without the timer too, only less promptly.
+
+Whatever a tick does, and whatever it holds back, it says so with a line: a round waiting for a busy worker, a restack waiting for the one below it, a dispatch held by a cap or a dependency, a paused project's work. Your lead hears those lines with your next message, along with what workers did meanwhile (a PR handed over to you, a question for you), so it knows what crew did since you last spoke without running `crew tick` or being asked. It hears each line once, and something held back once until the reason changes. A new session starts with what happens from then on. A lead for one project hears only that project; the lead on your phone hears every project, like a plain `lead`, with each line's project before it. The lines stay on the machine that runs the crew for 30 days, in `~/crew/news/`: a file a day, and `held-back`.
 
 ### Hand the crew a goal
 
@@ -780,7 +782,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - per-project worker settings: merged in, and unable to override a shipped value or drop a `deny` rule;
   - each worker, goal lead and gardener getting its own project and the home in its settings' `env`, whatever project the command that started it was for;
   - per-project MCP servers: workers and goal leads started with the project's `mcp.local.json`, filled in from `local.env`, git-ignored and private, and resumed without flags after it's rebuilt; a broken `mcp.json` stopping only its project's dispatches;
-  - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (quietly holding one back for a cap, a goal's `max_in_flight` among them, counting every task of a stack), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
+  - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (holding one back for a cap, saying why, a goal's `max_in_flight` among them, counting every task of a stack), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
   - stacked tasks: `--on`, dispatch once the parent's branch is pushed, sync reporting a moved or merged parent, `crew restack` through a real squash merge and rebases of a three-task stack, and a PR that targets a branch other than its task's base retargeted once, alone or with a rebase;
   - the home: settings layered from `defaults.env`, `crew.env` and `project.env`, the ledger pushed to a bare origin in the background (rebased over commits from elsewhere), agents' own edits committed by the hook, `crew checkout`, and tasks that moved here getting their worktrees back and fresh workers.
 - Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, a stray file where a link goes, new and dropped files, the fish files an older install shipped, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `lead`, run in bash through its link: its project scope, and the MCP servers it syncs, then switches off for one project; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, its confirmation, the pause it makes and lifts, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.

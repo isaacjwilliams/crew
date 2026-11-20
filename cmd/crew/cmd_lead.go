@@ -5,10 +5,13 @@ package main
 // the session the lead and give it the ledger and the project checkouts.
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
+	"unicode/utf8"
 )
 
 // crew lead [--project P] [claude options] ["<request>"]: talk to the lead. Every
@@ -22,7 +25,7 @@ import (
 // CREW_LEAD_FINGERPRINT what it loads, for crew lead --hook.
 func cmdLead(c *Crew, args []string) error {
 	if len(args) > 0 && args[0] == "--hook" {
-		return c.leadHook()
+		return c.leadHook(os.Stdin)
 	}
 	project, claudeArgs, err := takeProject(args)
 	if err != nil {
@@ -61,30 +64,44 @@ func (c *Crew) leadFingerprint(settings Settings) string {
 		append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
 
-// crew lead --hook, the lead's UserPromptSubmit hook: Claude Code adds what it
-// prints to the prompt. A lead runs on the instructions and settings it started
-// with, so once they've changed, it tells the session to have the user start a
-// new lead. Sessions crew lead didn't start, such as goal leads and the phone
-// lead, have no CREW_LEAD_FINGERPRINT, or an empty one, and hear nothing.
-func (c *Crew) leadHook() error {
-	started := os.Getenv("CREW_LEAD_FINGERPRINT")
-	if started == "" {
+// crew lead --hook, the lead's SessionStart and UserPromptSubmit hook: Claude
+// Code adds what it prints to the prompt. With each prompt, the session hears
+// the news since its previous one (leadNews). A lead runs on the instructions
+// and settings it started with, so once they've changed, crew lead's session
+// is also told to have the user start a new lead. The phone lead (crew serve)
+// hears the news too; a goal lead runs with the lead's settings, and hears
+// nothing (see inWorkerOrGoalLead).
+func (c *Crew) leadHook(in io.Reader) error {
+	if inWorkerOrGoalLead() {
 		return nil
 	}
-	// The settings of the project crew lead gave the session in CREW_PROJECT.
+	var input struct {
+		SessionID string `json:"session_id"`
+		Event     string `json:"hook_event_name"`
+	}
+	// Without a session ID in the input, leadNews has no record to keep and says nothing.
+	json.NewDecoder(in).Decode(&input)
+	// The project crew lead or crew serve gave the session in CREW_PROJECT.
 	proj, err := c.scope("", false)
 	if err != nil {
 		return err
 	}
-	settings := c.Settings
-	if proj != "" {
-		if settings, err = c.projectSettings(proj); err != nil {
-			return err
+	// A session that's starting has just loaded what's current: nothing has changed.
+	starting := input.Event == "SessionStart"
+	var out string
+	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && !starting {
+		settings := c.Settings
+		if proj != "" {
+			if settings, err = c.projectSettings(proj); err != nil {
+				return err
+			}
+		}
+		if started != c.leadFingerprint(settings) {
+			out = fmt.Sprintf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
 		}
 	}
-	if started != c.leadFingerprint(settings) {
-		fmt.Printf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
-	}
+	out += c.leadNews(input.SessionID, proj, starting, hookOutputCap-utf8.RuneCountInString(out))
+	fmt.Print(out)
 	return nil
 }
 
