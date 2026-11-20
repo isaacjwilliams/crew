@@ -357,9 +357,8 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 // spell doesn't count.
 const stallAfter = 15 * time.Minute
 
-// stalledNote is what crew nudge tells a worker whose turn ended mid-task. Of the
-// stalls seen, one ended its turn to wait on a background sub-agent, whose result
-// started no new turn; the others just stopped after a step.
+// stalledNote is what crew nudge tells a worker whose turn ended mid-task: a
+// worker seen stalled had waited on a sub-agent, or just stopped after a step.
 const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
 
 // stalled: the task is working or addressing-feedback with no open question, and
@@ -368,8 +367,7 @@ const stalledNote = "Your last turn ended while this task's status still says yo
 // gives it, a worker waiting on the user would have set needs-input, so this one
 // stopped by mistake. A stopped one was stopped on purpose: by crew pause, say.
 func stalled(t Task, a *Agent) bool {
-	st := t.Status()
-	if onIt := st == Working || st == AddressingFeedback; !onIt || t.OpenQuestions() > 0 {
+	if !t.Status().WorkersTurn() || t.OpenQuestions() > 0 {
 		return false
 	}
 	if a == nil || a.State == "stopped" || a.busy() {

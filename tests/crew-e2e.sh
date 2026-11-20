@@ -1080,8 +1080,10 @@ NUDGE="Your last turn ended while this task's status still says you're working o
 head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
 answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
 asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }
-stall13() {  # state pid [status]: 13's worker so, its last turn ended 20 minutes ago
-  local s; s=$(crew get 13 worker_session); setstate "$@"; transcript "$s" ended; touch -d '20 minutes ago' "$STUB/$s.jsonl"; }
+quiet() { touch -d '20 minutes ago' "$STUB/$(crew get "$1" worker_session).jsonl"; }  # task: its transcript, 20 minutes ago
+stall() {  # task state pid [status]: the task's worker so, its last turn ended 20 minutes ago
+  local t=$1; shift; setstate "$@"; transcript "$(crew get "$t" worker_session)" ended; quiet "$t"; }
+stall13() { stall 13 "$@"; }
 nudged13() { [[ $(tail -1 "$F13") == *" — nudged: turn ended mid-task at $(head13)" ]]; }
 NUDGED="013-tick-routing: its worker's turn ended mid-task; nudged it"
 ASKED="013-tick-routing: its worker stalled and can't be nudged, for the lead"
@@ -1115,7 +1117,7 @@ work "$WT13" nudge5.txt; crew set 13 status working; n=$(resumes)
 stall13 "done" null; touch "$STUB/$(crew get 13 worker_session).jsonl"
 out=$(crew tick 2>/dev/null)
 check "nothing is nudged while the worker's transcript changed in the last 15 minutes" '[[ -z $out && $(resumes) == "$n" ]]'
-stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; touch -d '20 minutes ago' "$STUB/$(crew get 13 worker_session).jsonl"
+stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
 out=$(crew tick 2>/dev/null)
 check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
 for state in stopped gone; do
@@ -1334,10 +1336,10 @@ check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(cr
 crew set "$GS" status abandoned >/dev/null; crew goal cap 1 3 >/dev/null
 # The stub's PR has comments of its own; none of these tests are about them.
 crew set "$GT1" feedback_since 2099-01-01T00:00:00Z
-s1=$(crew get "$GT1" worker_session); setstate "done" null; transcript "$s1" ended; touch -d '20 minutes ago' "$STUB/$s1.jsonl"; n=$(resumes)
+stall "$GT1" "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "tick nudges a goal task's worker whose turn ended mid-task, as any other" '[[ $out == *"$T1: its worker'"'"'s turn ended mid-task; nudged it"* && $(resumes) == $((n + 1)) && $(crew get "$GT1" status) == working ]]'
-rm -f "$STUB/$s1.jsonl"
+rm -f "$STUB/$(crew get "$GT1" worker_session).jsonl"
 crew set "$GT1" status needs-input
 sed -i '/^## Open questions$/a - [ ] @bob commented on PR #40, comment 77 — [link](u77)' "$GT1"
 setstate "done" null; n=$(resumes)

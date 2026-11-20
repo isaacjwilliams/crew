@@ -87,12 +87,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    and any task's worker retarget a PR that targets
                                    another branch than its base;
                                    --again resends a restack the worker already has
-  crew nudge TASK                  Resume a worker whose turn ended mid-task, its
-                                   task still working or addressing-feedback with
-                                   no open question and its transcript quiet for 15
-                                   minutes; if it stalls again with no new commit or
-                                   change of status, or its worktree isn't here, ask
-                                   the lead under Open questions (run by crew tick)
+  crew nudge TASK                  Resume, once, a worker whose turn ended mid-task;
+                                   ask the lead if it stalls again (run by crew tick)
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
