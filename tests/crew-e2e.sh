@@ -903,6 +903,7 @@ crew set 13 pr https://github.com/isaac/webapp/pull/12; hand_over 13
 setstate working 4242; n=$(resumes)
 out=$(crew tick)
 check "tick records a new round but leaves a busy worker alone" '[[ $out == *"013-tick-routing: review round 1 recorded"* && $out == *"013-tick-routing: round 1 waiting for its worker (working)"* && $out == *"2 comment(s) from collaborators, for you"* && $(crew get 13 last_round_sent) == 0 && $(resumes) == "$n" && $(crew get 13 status) == pr-open ]]'
+check "a lead hears a round held back for a busy worker, and why" '[[ $(prompt held) == *"$HELD$NL- 013-tick-routing: round 1 waiting for its worker (working)"* ]]'
 setstate "done" null
 out=$(crew tick)
 check "tick sends the round once the worker is idle, without recording it again" '[[ $out == "013-tick-routing: round 1 sent to its worker" && $(crew get 13 last_round_sent) == 1 && $(crew get 13 review_rounds) == 1 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
