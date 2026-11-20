@@ -694,6 +694,20 @@ func TestSetStatusLogsTheChange(t *testing.T) {
 	}
 }
 
+func TestSetStatusToTheSameStatusLogsNothing(t *testing.T) {
+	task := Task{docWith(t, sampleTask)}
+	if err := task.SetStatus(PROpen); err != nil {
+		t.Fatal(err)
+	}
+	before := contents(t, task.Doc)
+	if err := task.SetStatus(PROpen); err != nil {
+		t.Fatal(err)
+	}
+	if after := contents(t, task.Doc); after != before {
+		t.Errorf("SetStatus(pr-open) on a pr-open task changed the file:\n%s", after)
+	}
+}
+
 func TestLogEntries(t *testing.T) {
 	d := docWith(t, "---\nid: 1\n---\n## Log\n<!-- - 2026-11-01 08:00 — a comment -->\n"+
 		"- 2026-11-01 09:00 — created\n- 2026-11-01 09:05 — a message\n  that goes on\n- not dated — skipped\n"+

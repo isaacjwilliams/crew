@@ -1072,6 +1072,91 @@ out=$(crew tick 2>&1 >/dev/null)
 check "tick skips a project with no clone here, rather than using the previous project's" '[[ $out == *"zz-other: skipped"* && $out == *"no clone of zz-other on this machine"* ]]'
 rm -r "$L/projects/zz-other"
 
+# Nudges: crew tick resumes, once, a worker whose turn ended while its task still says
+# it's being worked on, and asks the lead when that doesn't move the task. Task 13's
+# review rounds warn on every tick, so these checks read only what tick prints.
+WT13=$(crew get 13 worktree); STUB=$HOME/.claude/projects/stub
+NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
+head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
+answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
+asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }
+quiet() { touch -d '20 minutes ago' "$STUB/$(crew get "$1" worker_session).jsonl"; }  # task: its transcript, 20 minutes ago
+stall() {  # task state pid [status]: the task's worker so, its last turn ended 20 minutes ago
+  local t=$1; shift; setstate "$@"; transcript "$(crew get "$t" worker_session)" ended; quiet "$t"; }
+stall13() { stall 13 "$@"; }
+nudged13() { [[ $(tail -1 "$F13") == *" — nudged: turn ended mid-task at $(head13)" ]]; }
+NUDGED="013-tick-routing: its worker's turn ended mid-task; nudged it"
+ASKED="013-tick-routing: its worker stalled and can't be nudged, for the lead"
+answer13; crew set 13 status working; stall13 "done" null; n=$(resumes)
+out=$(crew tick 2>/dev/null)
+check "tick nudges a working task whose worker's turn ended with no question asked, on the task's model, and logs the branch's head" \
+  '[[ $out == "$NUDGED" && $(resumes) == $((n + 1)) && $(last_prompt) == *"$NUDGE"* && $(crew get 13 status) == working ]] && runs_on 13 sonnet && nudged13'
+check "the nudge is crew's own word, not a note from the lead, and the Log doesn't repeat it" \
+  '[[ $(last_prompt) != *"Note from the lead"* && $(tail -2 "$F13" | head -1) == *"followup (resume): worker "*", as its turn ended mid-task" ]]'
+crew log 13 "Still on it."; crew set 13 status working; stall13 "done" null
+out=$(crew tick 2>/dev/null); q=$(asked13)
+check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged and set the status it had, and asks the lead" \
+  '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == $((n + 1)) && $(crew get 13 status) == needs-input && $(wc -l <<<"$q") == 1 ]]'
+check "the question names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
+out=$(crew tick 2>/dev/null)
+check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13 | wc -l) == 1 ]]'
+answer13; crew set 13 status working; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a change of status since the nudge lets the next stall be nudged again" '[[ $out == "$NUDGED" && $(resumes) == $((n + 2)) ]] && nudged13'
+work "$WT13" nudge1.txt; stall13 blocked 4242 busy
+out=$(crew tick 2>/dev/null)
+check "so does a new commit; and a blocked worker is stalled too" '[[ $out == "$NUDGED" && $(resumes) == $((n + 3)) ]] && nudged13'
+work "$WT13" nudge2.txt; stall13 working 4242 busy
+out=$(crew tick 2>/dev/null)
+check "a working worker whose turn ended is stalled, with a background task running" '[[ $out == "$NUDGED" && $(resumes) == $((n + 4)) ]] && nudged13'
+work "$WT13" nudge3.txt; stall13 working null
+out=$(crew tick 2>/dev/null)
+check "and with its process gone" '[[ $out == "$NUDGED" && $(resumes) == $((n + 5)) ]] && nudged13'
+work "$WT13" nudge4.txt; crew set 13 status addressing-feedback; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a nudged addressing-feedback task stays addressing-feedback" '[[ $out == "$NUDGED" && $(resumes) == $((n + 6)) && $(crew get 13 status) == addressing-feedback ]]'
+work "$WT13" nudge5.txt; crew set 13 status working; n=$(resumes)
+stall13 "done" null; touch "$STUB/$(crew get 13 worker_session).jsonl"
+out=$(crew tick 2>/dev/null)
+check "nothing is nudged while the worker's transcript changed in the last 15 minutes" '[[ -z $out && $(resumes) == "$n" ]]'
+stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
+out=$(crew tick 2>/dev/null)
+check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
+for state in stopped gone; do
+  stall13 "done" null
+  if [[ $state == stopped ]]; then setstate stopped null; else cp "$HOME/agents.json" "$HOME/agents.kept"; jq --arg j "$(crew get 13 worker_job)" 'map(select(.id != $j))' "$HOME/agents.kept" >"$HOME/agents.json"; fi
+  out=$(crew tick 2>/dev/null)
+  check "nothing is nudged when the worker is ${state/gone/not listed}" '[[ -z $out && $(resumes) == "$n" ]]'
+done
+mv "$HOME/agents.kept" "$HOME/agents.json"
+crew pause --project "$(basename "$PD")" >/dev/null 2>&1; stall13 "done" null
+out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
+check "nothing is nudged while the project is paused, by tick or by hand" '[[ -z $out && $byhand == *"crew resume --project $(basename "$PD")"* && $st == 4 && $(resumes) == "$n" ]]'
+crew resume --project "$(basename "$PD")" >/dev/null
+sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
+out=$(crew tick 2>/dev/null)
+check "nothing is nudged when the task has an unchecked Open question: it waits on you" '[[ $out == "013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" ]]'
+answer13; out=$(crew tick 2>/dev/null)
+check "nor while it's needs-input" '[[ -z $out && $(resumes) == "$n" ]]'
+record_evidence 13; hand_over 13; out=$(crew tick 2>/dev/null)
+check "nor once it's pr-open" '[[ -z $out && $(resumes) == "$n" ]]'
+# The user takes a worker's split: the lead relays it, and the worker leaves the task to
+# the lead, as implementer.md's "split as proposed" says.
+crew set 13 status working; crew followup 13 --note "Split as proposed." >/dev/null 2>&1; n=$(resumes)
+sed -i '/^## Open questions$/a - [ ] Split as proposed: open the pieces as tasks and abandon this one.' "$F13"; crew set 13 status needs-input; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a worker whose split the user took isn't told to carry on" '[[ -z $out && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
+answer13; crew set 13 status working; work "$WT13" nudge6.txt; stall13 "done" null
+jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
+check "no nudge reaches a worker that's busy again by the time it would be sent, from tick or by hand" \
+  '[[ -z $out && $byhand == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $st == 3 && $(resumes) == "$n" ]] && ! nudged13'
+rm -f "$HOME/agents-next"; stall13 "done" null; mv "$WT13" "$WT13.away"
+out=$(crew tick 2>/dev/null); q=$(asked13)
+check "a stalled task whose worktree isn't on this machine isn't nudged, gets no worktree, and the lead is asked how to bring a fresh worker" \
+  '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" && ! -e $WT13 && $q == *"$WT13, isn'"'"'t on this machine"*"crew followup 013-tick-routing --fresh"* && $(crew get 13 status) == needs-input ]]'
+mv "$WT13.away" "$WT13"; answer13; rm -f "$STUB/$(crew get 13 worker_session).jsonl"
+
 # Restacks: 15 is stacked on 14; 14's branch moves.
 F14=$(crew new "Tick parent" --branch tick-parent); fill "$F14"; crew ready 14 >/dev/null
 crew set 13 status abandoned; setstate "done" null; crew dispatch 14 >/dev/null; WT14=$(crew get 14 worktree)
@@ -1252,7 +1337,12 @@ check "a task stacked on one of its goal's counts against the goal's max_in_flig
 check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(crew status) == *"goal $G"*"0 of 3 task(s) merged, 1/1 in flight"* ]]'
 crew set "$GS" status abandoned >/dev/null; crew goal cap 1 3 >/dev/null
 # The stub's PR has comments of its own; none of these tests are about them.
-crew set "$GT1" feedback_since 2099-01-01T00:00:00Z; crew set "$GT1" status needs-input
+crew set "$GT1" feedback_since 2099-01-01T00:00:00Z
+stall "$GT1" "done" null; n=$(resumes)
+out=$(crew tick 2>&1)
+check "tick nudges a goal task's worker whose turn ended mid-task, as any other" '[[ $out == *"$T1: its worker'"'"'s turn ended mid-task; nudged it"* && $(resumes) == $((n + 1)) && $(crew get "$GT1" status) == working ]]'
+rm -f "$STUB/$(crew get "$GT1" worker_session).jsonl"
+crew set "$GT1" status needs-input
 sed -i '/^## Open questions$/a - [ ] @bob commented on PR #40, comment 77 — [link](u77)' "$GT1"
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)

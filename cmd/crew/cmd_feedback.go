@@ -343,7 +343,7 @@ func cmdReview(c *Crew, args []string) error {
 		fmt.Printf("round %d asks for another automated review; crew tick sends it once worker %s is free (%s)\n", n, job, as.jobState(job))
 		return nil
 	}
-	return c.followup(t, false, "")
+	return c.followup(t, followupWith{})
 }
 
 // isReviewRequest: the comment's whole text is "crew review", in any case. Like

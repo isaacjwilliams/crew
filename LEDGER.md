@@ -57,7 +57,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `done` | a spike's report is in (see Kinds of task) | `crew hand-over` |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
-Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log).
+Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log); setting the status a task already has adds none.
 
 "In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. "Finished" means `merged`, `done` or `abandoned`; `crew cleanup --merged` and `crew tick` remove the worktree and local branch of a `merged` or `done` task. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
 
@@ -242,7 +242,7 @@ When a PR its worker has handed to you (`pr-open`) stops merging cleanly into th
 
 ## Log
 
-A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you.
+A task's `## Log` is always its last section: a line for each thing that happened, `- YYYY-MM-DD HH:MM — <message>`, written by `crew` and by `crew log`. Every change of status has a line of its own, `status → <status>`, and a goal lead logs `For the user: <why>` for a worker's question it leaves for you. `crew nudge` logs `nudged: turn ended mid-task at <short sha>` when it resumes a stalled worker, with the head of its branch; until a new commit or a `status → ` line follows it, the next stall goes to the lead instead.
 
 Each run of a review step logs a record of what it found: a line whose message starts `<step>: <raised> raised, <taken> taken`, then anything, such as how each finding was settled. `<raised>` is how many findings the run raised, and `<taken>` how many of them changed the work: the brief, for a brief review, and the branch for the others. The steps are:
 
