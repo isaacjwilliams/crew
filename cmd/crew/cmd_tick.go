@@ -240,10 +240,10 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task) (send *workerSend, he
 		parent, _ := idx.parentOf(t)
 		target := idx.restackTarget(t, repo)
 		switch {
+		case parent.Status() == Abandoned: // before sent already: a restack sent onto it can't help now
+			return nil, fmt.Sprintf("restack held back: %s was abandoned; give it another base with 'crew set %s base <branch>'", parent.ID(), t.ID())
 		case target != "" && t.Get("restack_sent") == target:
 			return nil, "" // sent already
-		case parent.Status() == Abandoned:
-			return nil, fmt.Sprintf("restack held back: %s was abandoned; give it another base with 'crew set %s base <branch>'", parent.ID(), t.ID())
 		case idx.parentNeedsRestack(t, repo):
 			return nil, fmt.Sprintf("restack (%s) waits for %s's own restack", reason, parent.ID())
 		case target == "":

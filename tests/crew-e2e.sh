@@ -1094,6 +1094,12 @@ check "tick restacks a stacked task whose parent moved" '[[ $out == "015-tick-ch
 hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 1)) ]]'
+# 14 is abandoned after 15's restack onto it was sent, and its branch stays where it was.
+crew set 14 status abandoned >/dev/null; setstate "done" null
+out=$(crew tick 2>&1)
+check "tick holds back the restack of a task whose parent was abandoned since its last restack, saying why" \
+  '[[ $out == *"015-tick-child: restack held back: 014-tick-parent was abandoned; give it another base with '"'"'crew set 015-tick-child base <branch>'"'"'"* && $(resumes) == $((n + 1)) ]]'
+crew set 14 status working >/dev/null; record_evidence 14; hand_over 14
 
 # Retargets: 15 moves onto 16, a new task stacked on 14 that holds all of 14's work, as a split's last
 # piece can. 15 restacks onto 14 first, so its branch already holds 16's.
