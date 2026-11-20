@@ -2,10 +2,11 @@ package main
 
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments and red CI on PRs handed to the user, send
-// review rounds and restacks to idle workers, mark tasks that wait on the user,
-// clean up those that delivered (merged, or a spike done), pass goal leads their
-// input and close finished goals. Last, it dispatches the ready tasks of running
-// goals, highest priority first.
+// review rounds and restacks to idle workers, nudge workers whose turn ended
+// mid-task, mark tasks that wait on the user, clean up those that delivered
+// (merged, or a spike done), pass goal leads their input and close finished
+// goals. Last, it dispatches the ready tasks of running goals, highest priority
+// first.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
 // prints one line per thing it did.
 //
@@ -170,14 +171,16 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	}
 	// The rest needs the worker free (see busy); a busy one is left for a later
 	// tick. It does at most one thing, in this order: send what the worker hasn't
-	// had (sendToWorker), or mark the task as waiting on the user.
+	// had (sendToWorker), or mark the task as waiting on the user. A nudge that
+	// asks the lead instead does both: the question it adds is what the task
+	// then waits on.
 	if as.jobBusy(job) {
 		if rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent")); rounds > sent {
 			fmt.Printf("%s: %s waiting for its worker (%s)\n", id, unsentRounds(t), as.jobState(job))
 		}
 		return
 	}
-	if !paused && c.sendToWorker(p, idx, t) {
+	if !paused && c.sendToWorker(p, idx, t, as.find(job)) {
 		return
 	}
 	// Read the status again: the task may have been merged or abandoned while
@@ -189,12 +192,15 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	}
 }
 
-// sendToWorker resumes a task's idle worker with the first of these it hasn't
-// had: unsent review rounds, word that a pause cut its last turn short, or a
-// restack (a rebase, a retarget or both). It reports whether it tried. Nothing
-// goes out twice: last_round_sent, interrupted, restack_sent and retarget_sent
-// record what was sent.
-func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
+// sendToWorker resumes a task's idle worker, a (nil when claude agents doesn't
+// list it), with the first of these it hasn't had: unsent review rounds, word
+// that a pause cut its last turn short, a nudge when its turn ended mid-task, or
+// a restack (a rebase, a retarget or both). It reports whether it tried to
+// resume the worker; a nudge that asks the lead instead doesn't, so the "waiting
+// on you" rule after it marks the task. Nothing goes out twice: last_round_sent,
+// interrupted, restack_sent and retarget_sent record what was sent, and the
+// nudge's Log line records a nudge.
+func (c *Crew) sendToWorker(p *Project, idx Branches, t Task, a *Agent) bool {
 	id := t.ID()
 	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
 		unsent := unsentRounds(t)
@@ -206,6 +212,17 @@ func (c *Crew) sendToWorker(p *Project, idx Branches, t Task) bool {
 	if t.Get("interrupted") != "" {
 		if c.step(nil, "followup", t.Path) == 0 {
 			fmt.Printf("%s: its worker carries on after the pause\n", id)
+		}
+		return true
+	}
+	if stalled(t, a) {
+		asked := t.OpenQuestions()
+		if c.step(nil, "nudge", t.Path) == 0 {
+			if t.OpenQuestions() > asked {
+				fmt.Printf("%s: its worker stalled and can't be nudged, for the lead\n", id)
+				return false
+			}
+			fmt.Printf("%s: its worker's turn ended mid-task; nudged it\n", id)
 		}
 		return true
 	}

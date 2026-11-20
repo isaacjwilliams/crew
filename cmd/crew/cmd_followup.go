@@ -1,13 +1,14 @@
 package main
 
 // Commands that act on a task's worker session: crew followup resumes it,
-// crew attach opens it in this terminal, and crew restack resumes it with a
-// rebase or a retarget to run.
+// crew attach opens it in this terminal, crew restack resumes it with a rebase or
+// a retarget to run, and crew nudge resumes it when its turn ended mid-task.
 
 import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 )
 
 // crew followup TASK [--fresh] [--note TEXT]
@@ -347,5 +348,102 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		t.Set("retarget_sent", retargetTo)
 	}
 	c.commit("restack " + p.Name + "/" + t.ID())
+	return nil
+}
+
+// stallAfter is how long a worker's transcript must have been quiet before its
+// task counts as stalled. A session the user is talking to with crew attach ends
+// its turn after every reply, and a nudge would end the attach, so a short quiet
+// spell doesn't count.
+const stallAfter = 15 * time.Minute
+
+// stalledNote is what crew nudge tells a worker whose turn ended mid-task. Of the
+// stalls seen, one ended its turn to wait on a background sub-agent, whose result
+// started no new turn; the others just stopped after a step.
+const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
+
+// stalled: the task is working or addressing-feedback with no open question, and
+// its worker a (nil when claude agents doesn't list it) isn't stopped and isn't
+// mid-turn, with a transcript quiet for stallAfter. Whatever state claude agents
+// gives it, a worker waiting on the user would have set needs-input, so this one
+// stopped by mistake. A stopped one was stopped on purpose: by crew pause, say.
+func stalled(t Task, a *Agent) bool {
+	st := t.Status()
+	if onIt := st == Working || st == AddressingFeedback; !onIt || t.OpenQuestions() > 0 {
+		return false
+	}
+	if a == nil || a.State == "stopped" || a.busy() {
+		return false
+	}
+	quiet, ok := a.quietFor()
+	return ok && quiet >= stallAfter
+}
+
+// crew nudge TASK: resumes the worker of a stalled task (see stalled) with
+// stalledNote, and logs the nudge with its branch's head commit. When the task
+// stalls again with no new commit and no change of status since
+// (NudgedWithoutProgress), or its worktree isn't on this machine, it adds an
+// Open question for the lead instead, and crew tick's "waiting on you" rule makes
+// the task needs-input. Exits 3 when the task isn't stalled.
+func cmdNudge(c *Crew, args []string) error {
+	for _, tool := range []string{"git", "claude"} {
+		if err := need(tool); err != nil {
+			return err
+		}
+	}
+	if len(args) != 1 {
+		return usage("crew nudge TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	if !t.Dispatched() {
+		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
+	// Decided under the lock, which followup keeps, so two runs can't both act.
+	if err := c.lock(); err != nil {
+		return err
+	}
+	worker := c.agents().find(t.WorkerJob())
+	if !stalled(t, worker) {
+		return nothingToDo("%s hasn't stalled", t.ID())
+	}
+	ask := func(question, log string) error {
+		t.AppendToSection("## Open questions", "- [ ] "+question+"\n")
+		t.Log(log)
+		t.Touch()
+		c.commit("nudge " + p.Name + "/" + t.ID())
+		fmt.Printf("%s: %s; recorded under Open questions\n", t.ID(), log)
+		return nil
+	}
+	// Making the worktree again can take minutes of a repo's hooks, and isn't
+	// a tick's to do: it's left to the lead.
+	if wt := t.Worktree(); !isDir(wt) {
+		return ask(fmt.Sprintf("Its worker's turn ended mid-task, but its worktree, %s, isn't on this machine, so crew didn't nudge it. To have a fresh worker carry on here, run `crew followup %s --fresh --note \"Carry on from where your Log says you stopped.\"`: it makes the worktree again.", wt, c.taskArg(t)),
+			"nudge: worktree missing; for the lead")
+	}
+	sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}")
+	if err != nil {
+		return fail("%s's branch %s isn't in %s", t.ID(), t.Branch(), p.Repo())
+	}
+	head := shortSHA(sha)
+	if t.NudgedWithoutProgress(head) {
+		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
+			"nudge: stalled again at "+head+"; for the lead")
+	}
+	if err := c.followup(t, false, stalledNote); err != nil {
+		return err
+	}
+	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.
+	t.Log(nudgedAt + head)
+	c.commit("nudge " + p.Name + "/" + t.ID())
 	return nil
 }

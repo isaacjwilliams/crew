@@ -1143,6 +1143,25 @@ func (t Task) CIReported(head string) bool {
 	return false
 }
 
+// nudgedAt begins the Log line crew nudge writes when it resumes a worker whose
+// turn ended mid-task. The short SHA of the branch's head then follows it.
+const nudgedAt = "nudged: turn ended mid-task at "
+
+// NudgedWithoutProgress: crew nudge last resumed the worker with its branch at
+// head, and the task's status hasn't changed since. Log lines alone aren't
+// progress: a worker could answer every nudge with one.
+func (t Task) NudgedWithoutProgress(head string) bool {
+	for _, e := range slices.Backward(t.LogEntries()) {
+		if _, changed := e.status(); changed {
+			return false
+		}
+		if at, ok := strings.CutPrefix(e.msg, nudgedAt); ok {
+			return at == head
+		}
+	}
+	return false
+}
+
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
 // round but those that only hold crew's own reports (crewReports), of red CI
 // or a conflict with the base. MAX_REVIEW_ROUNDS limits these.
