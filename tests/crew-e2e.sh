@@ -365,8 +365,11 @@ git -C "$WT" push -q -u origin HEAD 2>/dev/null
 echo OPEN >"$HOME/gh-pr-state"; out=$(crew sync 2>&1); rm "$HOME/gh-pr-state"
 check "sync fetches and raises the risk of a task whose branch on origin gained a sensitive path after its hand-over, and logs it" \
   '[[ $out == *"001-saved-search-filters: risk → high: touches config/auth.yml"* && $(crew get 1 risk) == high && $(tail -1 "$F1") == *" — risk → high: touches config/auth.yml" ]]'
-check "status shows a pr-open task raised after its hand-over as waiting on its security review, on its row and in to review" \
-  '[[ $(crew status | grep "^  001-saved-search-filters ") == *"  high: no security review yet"* && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
+check "sync records an open PR's state with its review decision, its base, its checks and that it merges cleanly" \
+  '[[ $(crew get 1 pr_state) == "open, approved" && $(crew get 1 pr_base) == "" && $(crew get 1 ci_state) == "" && $(crew get 1 mergeable) == "" ]]'
+echo OPEN >"$HOME/gh-pr-state"; row=$(crew status | grep "^  001-saved-search-filters "); rm "$HOME/gh-pr-state"
+check "status shows a pr-open task raised after its hand-over as waiting on its security review, once on its row, and in to review" \
+  '[[ $row == *"not yet: "*"no security review yet"*"  high" && $(grep -o "security review" <<<"$row" | wc -l) == 1 && $(crew status | tail -1) == *"#12 high (no security review yet)"* ]]'
 # A review round's own commits: its return to pr-open is a hand-over, so they're checked too.
 crew set 1 status addressing-feedback; crew set 1 risk medium; crew set 1 auto_review no
 git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; git -C "$WT" push -q origin HEAD; record_evidence 1; pr_body 1
@@ -385,7 +388,39 @@ check "hand-over refuses a task whose automated review was turned back on until 
   '((st == 1)) && [[ $out == *"high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
 review "$F1" 1
 check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
-  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran"* ]]'
+  'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran" ]]'
+# Whether a pr-open task's PR can merge now: crew status reads the PR on GitHub as it
+# runs. The ledger's last sync says the PR is open and clear throughout.
+merge_note() { crew status | grep "^  001-saved-search-filters "; }
+checks() { echo "[{\"__typename\": \"CheckRun\", \"name\": \"test\", $1}]" >"$HOME/gh-pr-checks"; }   # the PR's one check run
+passing='"status": "COMPLETED", "conclusion": "SUCCESS"'
+cp "$HOME/agents.json" "$HOME/agents.before"; setstate "done" null   # the worker is idle
+echo OPEN >"$HOME/gh-pr-state"; echo main >"$HOME/gh-pr-base-12"; checks "$passing"
+check "status says merge now for an open PR that merges cleanly, with its checks passing and its automated review recorded" \
+  '[[ $(merge_note) == *" #12    merge now  high: read the diff; security review ran" ]]'
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; a=$(merge_note); rm "$HOME/gh-pr-mergeable"
+touch "$HOME/gh-pr-draft"; b=$(merge_note); rm "$HOME/gh-pr-draft"
+checks '"status": "COMPLETED", "conclusion": "FAILURE"'; c=$(merge_note); checks '"status": "IN_PROGRESS"'; d=$(merge_note); checks "$passing"
+echo agent/elsewhere >"$HOME/gh-pr-base-12"; e=$(merge_note); echo main >"$HOME/gh-pr-base-12"
+check "status reads the PR on GitHub, so one the last sync found clear isn't while it conflicts, is a draft, its CI fails or runs, or it targets another branch" \
+  '[[ $a == *" not yet: conflicts with main  high"* && $b == *" not yet: draft  high"* && $c == *" not yet: CI failing  high"* && $d == *" not yet: CI running  high"* && $e == *" not yet: PR targets agent/elsewhere, not main  high"* ]]'
+echo MERGED >"$HOME/gh-pr-state"; a=$(merge_note); echo CLOSED >"$HOME/gh-pr-state"; b=$(merge_note); echo OPEN >"$HOME/gh-pr-state"
+check "a PR merged or closed on GitHub never says merge now, though crew sync hasn't caught up" \
+  '[[ $a == *" merged on GitHub  high"* && $b == *" closed on GitHub  high"* && $(crew get 1 status) == pr-open ]]'
+check "only pr-open rows have a merge check" '[[ $(crew status | grep -v " pr-open " | grep -cE "merge now|not yet:|on GitHub") == 0 ]]'
+before=$(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD); crew status --all >/dev/null; crew status --done >/dev/null
+check "status writes nothing" '[[ $(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD) == "$before" ]]'
+check "on a machine that doesn't run the crew, the merge check says the worker can't be seen there" \
+  '[[ $(CREW_HOST=laptop crew status | grep "^  001-saved-search-filters ") == *" not yet: worker can'"'"'t be seen from this machine  high"* ]]'
+touch "$HOME/agents-fail"; a=$(merge_note); rm "$HOME/agents-fail"
+check "when claude agents fails, the merge check doesn't take the worker for idle" '[[ $a == *" not yet: workers couldn'"'"'t be listed  high"* ]]'
+touch "$HOME/gh-pr-view-fails"; a=$(merge_note); rm "$HOME/gh-pr-view-fails"
+echo UNKNOWN >"$HOME/gh-pr-mergeable"; crew sync >/dev/null 2>&1; rm "$HOME/gh-pr-mergeable"
+touch "$HOME/gh-pr-view-fails"; b=$(merge_note); rm "$HOME/gh-pr-view-fails"
+check "when GitHub can't be read, status goes by the last sync and says so, and one that found GitHub still checking for conflicts isn't merge now" \
+  '[[ $(crew get 1 mergeable) == unknown && $a == *" merge now (couldn'"'"'t read GitHub; as of the last sync)  high"* && $b == *" not yet: GitHub still checking for conflicts (couldn'"'"'t read GitHub; as of the last sync)  high"* ]]'
+# Back as it was: the worker busy, the last sync found the PR clear, and GitHub has it merged.
+mv "$HOME/agents.before" "$HOME/agents.json"; sed -i '/^mergeable: unknown$/d' "$F1"; rm "$HOME/gh-pr-state" "$HOME/gh-pr-base-12" "$HOME/gh-pr-checks"
 returned=0
 for st in needs-input working; do
   crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
@@ -818,10 +853,12 @@ check "sync leaves a stack alone while the parent hasn't moved" '[[ $out != *res
 work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
-check "status shows the restack that's needed" '[[ $(crew status) == *"needs restack: 009-season-model moved"* ]]'
+check "status shows the restack that's needed, once on the row" '[[ $(crew status | grep -c "needs restack: 009-season-model moved") == 1 ]]'
 setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); crew restack 10 >/dev/null
 check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_prompt) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_prompt) == *"git rebase --onto $T9b $T9\`"* && $(last_prompt) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
+check "status shows the restack a working task needs, and no merge check" \
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
 setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
@@ -1058,7 +1095,7 @@ out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo UNKNOWN >"$HOME/gh-pr-mergeable"; B2=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
-check "while GitHub is still working out whether the PR conflicts, crew leaves it alone" '[[ -z $(crew get 13 mergeable) && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
+check "while GitHub is still working out whether the PR conflicts, sync records it and crew leaves it alone" '[[ $(crew get 13 mergeable) == unknown && -z $out && $byhand == "nothing to do: GitHub hasn'"'"'t worked out yet whether PR #12 conflicts with main" && $(crew get 13 review_rounds) == $((r + 1)) ]]'
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo agent/elsewhere >"$HOME/gh-pr-base-12"; setstate working 4242   # busy, so no retarget goes out
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13)
 check "a PR whose GitHub base isn't the task's base gets no conflict round, only its retarget, which waits for the busy worker" '[[ $(crew get 13 mergeable) == conflicting && $out == "013-tick-routing: restack (PR targets agent/elsewhere, not main) waiting for its worker (working)" && $byhand == "nothing to do: PR #12 targets agent/elsewhere, not the task'"'"'s base main" && $(crew get 13 review_rounds) == $((r + 1)) ]] && ! grep -q "at $B2" "$F13"'
@@ -1081,6 +1118,91 @@ mkdir -p "$L/projects/zz-other"; printf 'REMOTE="%s"\nDEFAULT_BRANCH="main"\n' "
 out=$(crew tick 2>&1 >/dev/null)
 check "tick skips a project with no clone here, rather than using the previous project's" '[[ $out == *"zz-other: skipped"* && $out == *"no clone of zz-other on this machine"* ]]'
 rm -r "$L/projects/zz-other"
+
+# Nudges: crew tick resumes, once, a worker whose turn ended while its task still says
+# it's being worked on, and asks the lead when that doesn't move the task. Task 13's
+# review rounds warn on every tick, so these checks read only what tick prints.
+WT13=$(crew get 13 worktree); STUB=$HOME/.claude/projects/stub
+NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
+head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
+answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
+asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }
+quiet() { touch -d '20 minutes ago' "$STUB/$(crew get "$1" worker_session).jsonl"; }  # task: its transcript, 20 minutes ago
+stall() {  # task state pid [status]: the task's worker so, its last turn ended 20 minutes ago
+  local t=$1; shift; setstate "$@"; transcript "$(crew get "$t" worker_session)" ended; quiet "$t"; }
+stall13() { stall 13 "$@"; }
+nudged13() { [[ $(tail -1 "$F13") == *" — nudged: turn ended mid-task at $(head13)" ]]; }
+NUDGED="013-tick-routing: its worker's turn ended mid-task; nudged it"
+ASKED="013-tick-routing: its worker stalled and can't be nudged, for the lead"
+answer13; crew set 13 status working; stall13 "done" null; n=$(resumes)
+out=$(crew tick 2>/dev/null)
+check "tick nudges a working task whose worker's turn ended with no question asked, on the task's model, and logs the branch's head" \
+  '[[ $out == "$NUDGED" && $(resumes) == $((n + 1)) && $(last_prompt) == *"$NUDGE"* && $(crew get 13 status) == working ]] && runs_on 13 sonnet && nudged13'
+check "the nudge is crew's own word, not a note from the lead, and the Log doesn't repeat it" \
+  '[[ $(last_prompt) != *"Note from the lead"* && $(tail -2 "$F13" | head -1) == *"followup (resume): worker "*", as its turn ended mid-task" ]]'
+crew log 13 "Still on it."; crew set 13 status working; stall13 "done" null
+out=$(crew tick 2>/dev/null); q=$(asked13)
+check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged and set the status it had, and asks the lead" \
+  '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == $((n + 1)) && $(crew get 13 status) == needs-input && $(wc -l <<<"$q") == 1 ]]'
+check "the question names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
+out=$(crew tick 2>/dev/null)
+check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13 | wc -l) == 1 ]]'
+answer13; crew set 13 status working; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a change of status since the nudge lets the next stall be nudged again" '[[ $out == "$NUDGED" && $(resumes) == $((n + 2)) ]] && nudged13'
+work "$WT13" nudge1.txt; stall13 blocked 4242 busy
+out=$(crew tick 2>/dev/null)
+check "so does a new commit; and a blocked worker is stalled too" '[[ $out == "$NUDGED" && $(resumes) == $((n + 3)) ]] && nudged13'
+work "$WT13" nudge2.txt; stall13 working 4242 busy
+out=$(crew tick 2>/dev/null)
+check "a working worker whose turn ended is stalled, with a background task running" '[[ $out == "$NUDGED" && $(resumes) == $((n + 4)) ]] && nudged13'
+work "$WT13" nudge3.txt; stall13 working null
+out=$(crew tick 2>/dev/null)
+check "and with its process gone" '[[ $out == "$NUDGED" && $(resumes) == $((n + 5)) ]] && nudged13'
+work "$WT13" nudge4.txt; crew set 13 status addressing-feedback; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a nudged addressing-feedback task stays addressing-feedback" '[[ $out == "$NUDGED" && $(resumes) == $((n + 6)) && $(crew get 13 status) == addressing-feedback ]]'
+work "$WT13" nudge5.txt; crew set 13 status working; n=$(resumes)
+stall13 "done" null; touch "$STUB/$(crew get 13 worker_session).jsonl"
+out=$(crew tick 2>/dev/null)
+check "nothing is nudged while the worker's transcript changed in the last 15 minutes" '[[ -z $out && $(resumes) == "$n" ]]'
+stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
+out=$(crew tick 2>/dev/null)
+check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
+for state in stopped gone; do
+  stall13 "done" null
+  if [[ $state == stopped ]]; then setstate stopped null; else cp "$HOME/agents.json" "$HOME/agents.kept"; jq --arg j "$(crew get 13 worker_job)" 'map(select(.id != $j))' "$HOME/agents.kept" >"$HOME/agents.json"; fi
+  out=$(crew tick 2>/dev/null)
+  check "nothing is nudged when the worker is ${state/gone/not listed}" '[[ -z $out && $(resumes) == "$n" ]]'
+done
+mv "$HOME/agents.kept" "$HOME/agents.json"
+crew pause --project "$(basename "$PD")" >/dev/null 2>&1; stall13 "done" null
+out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
+check "nothing is nudged while the project is paused, by tick or by hand; tick holds it back, saying why" '[[ $out == "013-tick-routing: a nudge waits: $(basename "$PD") is paused" && $byhand == *"crew resume --project $(basename "$PD")"* && $st == 4 && $(resumes) == "$n" ]]'
+crew resume --project "$(basename "$PD")" >/dev/null
+sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
+out=$(crew tick 2>/dev/null)
+check "nothing is nudged when the task has an unchecked Open question: it waits on you" '[[ $out == "013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" ]]'
+answer13; out=$(crew tick 2>/dev/null)
+check "nor while it's needs-input" '[[ -z $out && $(resumes) == "$n" ]]'
+record_evidence 13; hand_over 13; out=$(crew tick 2>/dev/null)
+check "nor once it's pr-open" '[[ -z $out && $(resumes) == "$n" ]]'
+# The user takes a worker's split: the lead relays it, and the worker leaves the task to
+# the lead, as implementer.md's "split as proposed" says.
+crew set 13 status working; crew followup 13 --note "Split as proposed." >/dev/null 2>&1; n=$(resumes)
+sed -i '/^## Open questions$/a - [ ] Split as proposed: open the pieces as tasks and abandon this one.' "$F13"; crew set 13 status needs-input; stall13 "done" null
+out=$(crew tick 2>/dev/null)
+check "a worker whose split the user took isn't told to carry on" '[[ -z $out && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
+answer13; crew set 13 status working; work "$WT13" nudge6.txt; stall13 "done" null
+jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
+check "no nudge reaches a worker that's busy again by the time it would be sent, from tick or by hand" \
+  '[[ -z $out && $byhand == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $st == 3 && $(resumes) == "$n" ]] && ! nudged13'
+rm -f "$HOME/agents-next"; stall13 "done" null; mv "$WT13" "$WT13.away"
+out=$(crew tick 2>/dev/null); q=$(asked13)
+check "a stalled task whose worktree isn't on this machine isn't nudged, gets no worktree, and the lead is asked how to bring a fresh worker" \
+  '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" && ! -e $WT13 && $q == *"$WT13, isn'"'"'t on this machine"*"crew followup 013-tick-routing --fresh"* && $(crew get 13 status) == needs-input ]]'
+mv "$WT13.away" "$WT13"; answer13; rm -f "$STUB/$(crew get 13 worker_session).jsonl"
 
 # Restacks: 15 is stacked on 14; 14's branch moves.
 F14=$(crew new "Tick parent" --branch tick-parent); fill "$F14"; crew ready 14 >/dev/null
@@ -1110,7 +1232,7 @@ crew set 15 base agent/tick-replacement; rs15=$(crew get 15 restack_sent)
 echo agent/tick-parent >"$HOME/gh-pr-base-32"
 out=$(crew sync)
 check "sync records the branch each PR targets on GitHub" '[[ $(crew get 15 pr_base) == agent/tick-parent ]]'
-check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
+check "a PR isn't reported for a retarget while its task's base isn't on origin" '[[ $out != *"PR targets"* ]]'
 setstate "done" null; crew dispatch "$FR" >/dev/null; (cd "$(crew get "$FR" worktree)" && git push -q -u origin HEAD 2>/dev/null)
 crew set "$FR" pr https://github.com/isaac/webapp/pull/33; hand_over "$FR"
 echo agent/tick-old >"$HOME/gh-pr-base-31"
@@ -1285,7 +1407,12 @@ check "a task stacked on one of its goal's counts against the goal's max_in_flig
 check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(crew status) == *"goal $G"*"0 of 3 task(s) merged, 1/1 in flight"* ]]'
 crew set "$GS" status abandoned >/dev/null; crew goal cap 1 3 >/dev/null
 # The stub's PR has comments of its own; none of these tests are about them.
-crew set "$GT1" feedback_since 2099-01-01T00:00:00Z; crew set "$GT1" status needs-input
+crew set "$GT1" feedback_since 2099-01-01T00:00:00Z
+stall "$GT1" "done" null; n=$(resumes)
+out=$(crew tick 2>&1)
+check "tick nudges a goal task's worker whose turn ended mid-task, as any other" '[[ $out == *"$T1: its worker'"'"'s turn ended mid-task; nudged it"* && $(resumes) == $((n + 1)) && $(crew get "$GT1" status) == working ]]'
+rm -f "$STUB/$(crew get "$GT1" worker_session).jsonl"
+crew set "$GT1" status needs-input
 sed -i '/^## Open questions$/a - [ ] @bob commented on PR #40, comment 77 — [link](u77)' "$GT1"
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
@@ -1908,7 +2035,7 @@ for heard in "merged; worktree cleaned up" "review round 1 recorded" "comment(s)
   " CI rounds, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
   "restack sent to its worker (014-tick-parent moved)" "restack sent to its worker (PR targets agent/tick-old, not main)" "waiting on you (1 open question(s))" \
   "dispatched for goal" "goal $G: input sent to its goal lead" "goal $G: done, every task finished" "$TPI: its worker carries on after the pause" \
-  "$TPI: handed over (pr-open)" "$TPI: status → needs-input"; do
+  "nudged it" "can't be nudged, for the lead" "$TPI: handed over (pr-open)" "$TPI: status → needs-input"; do
   check "a lead hears what crew did since its previous prompt: $heard" '[[ $out == *"$NL- "????-??-??" "??:??" "*$heard* ]]'
 done
 check "with its time, under one heading, and nothing a lead set itself" '[[ $out == "$DID$NL- "* && $out != *"status → abandoned"* ]]'

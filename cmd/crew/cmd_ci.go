@@ -16,13 +16,17 @@ import (
 
 // ciState is the state of the checks on a PR's head commit, as crew sync records
 // it in ci_state: running while any check hasn't finished, then failing if one
-// failed, else passing. It's empty when the head has no checks.
+// failed, cancelled if one was cancelled or went stale, else passing. It's empty
+// when the head has no checks.
 type ciState string
 
 const (
 	ciRunning ciState = "running"
 	ciFailing ciState = "failing"
-	ciPassing ciState = "passing"
+	// Cancelled isn't failing: nothing on the branch needs fixing, so crew ci-fix
+	// leaves it alone. Nor is it passing: the checks never finished their work.
+	ciCancelled ciState = "cancelled"
+	ciPassing   ciState = "passing"
 )
 
 // A check on a PR's head commit, as `gh pr view --json statusCheckRollup` lists
@@ -46,12 +50,19 @@ func (ch ciCheck) finished() bool {
 	return ch.Status == "COMPLETED"
 }
 
-// failed: the check finished red. A cancelled, skipped or neutral one didn't.
+// failed: the check finished red. A cancelled, stale, skipped or neutral one
+// didn't.
 func (ch ciCheck) failed() bool {
 	if ch.isStatusContext() {
 		return ch.State == "FAILURE" || ch.State == "ERROR"
 	}
 	return slices.Contains([]string{"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}, ch.Conclusion)
+}
+
+// cancelled: a check run that stopped before it gave a verdict, cancelled or
+// left stale by GitHub. Status contexts have no such state.
+func (ch ciCheck) cancelled() bool {
+	return !ch.isStatusContext() && (ch.Conclusion == "CANCELLED" || ch.Conclusion == "STALE")
 }
 
 func (ch ciCheck) name() string {
@@ -68,6 +79,7 @@ func rollup(checks []ciCheck) (ciState, []string) {
 		return "", nil
 	}
 	var failed []string
+	cancelled := false
 	for _, ch := range checks {
 		if !ch.finished() {
 			return ciRunning, nil
@@ -75,9 +87,13 @@ func rollup(checks []ciCheck) (ciState, []string) {
 		if ch.failed() {
 			failed = append(failed, ch.name())
 		}
+		cancelled = cancelled || ch.cancelled()
 	}
-	if len(failed) > 0 {
+	switch {
+	case len(failed) > 0:
 		return ciFailing, failed
+	case cancelled:
+		return ciCancelled, nil
 	}
 	return ciPassing, nil
 }
@@ -120,8 +136,8 @@ func cmdCIFix(c *Crew, args []string) error {
 	if maxFixes == 0 {
 		return nothingToDo("MAX_CI_FIXES is 0, so crew leaves CI alone")
 	}
-	// Read the PR afresh: ci_state is only crew tick's filter, and crew sync leaves
-	// the status of a task whose PR was closed unmerged as it was.
+	// Read the PR afresh: ci_state is only as fresh as the last sync, and crew
+	// sync leaves the status of a task whose PR was closed unmerged as it was.
 	out, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "state,headRefOid,statusCheckRollup")
 	if err != nil {
 		return quietly(err)

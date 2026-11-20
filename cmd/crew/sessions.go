@@ -24,7 +24,7 @@ type Agent struct {
 	WaitingFor                         string // the prompt it's waiting on, if any
 	PID                                bool   // whether it has a process: pid isn't null
 	// TurnEnded: the session's transcript says its last turn has ended, though its
-	// state may still be working (see busy).
+	// state is still working (see busy), with its process running or not.
 	TurnEnded bool
 }
 
@@ -95,7 +95,9 @@ func (c *Crew) listAgents() (Agents, error) {
 	for _, e := range entries {
 		a := Agent{ID: text(e, "id"), State: text(e, "state"), Status: text(e, "status"), SessionID: text(e, "sessionId"),
 			Name: text(e, "name"), WaitingFor: text(e, "waitingFor"), PID: len(e["pid"]) > 0 && string(e["pid"]) != "null"}
-		if a.State == "working" && a.PID && a.SessionID != "" {
+		// Read whether or not its process runs: a job whose process exited can
+		// still read working, and its transcript says whether the turn ended.
+		if a.State == "working" && a.SessionID != "" {
 			a.TurnEnded = turnEnded(a.SessionID)
 		}
 		as = append(as, a)
@@ -114,15 +116,24 @@ func claudeTranscripts() string {
 	return filepath.Join(dir, "projects")
 }
 
-// turnEnded reads a session's transcript: Claude Code writes a turn_duration
-// entry when a turn ends, and a prompt or a reply once the next one starts. It's
-// false when there's no transcript to read.
-func turnEnded(session string) bool {
+// transcript is the path of a session's transcript, or "" when there's none.
+// The file stays after the session's process exits.
+func transcript(session string) string {
+	if session == "" {
+		return ""
+	}
 	matches, _ := filepath.Glob(filepath.Join(claudeTranscripts(), "*", session+".jsonl"))
 	if len(matches) == 0 {
-		return false
+		return ""
 	}
-	b, err := os.ReadFile(matches[0])
+	return matches[0]
+}
+
+// turnEnded reads a session's transcript: Claude Code writes a turn_duration
+// entry when a turn ends, and a prompt or a reply once the next one starts. It's
+// false when there's no transcript to read (reading the path "" fails).
+func turnEnded(session string) bool {
+	b, err := os.ReadFile(transcript(session))
 	if err != nil {
 		return false
 	}
@@ -161,10 +172,21 @@ func (as Agents) find(job string) *Agent {
 // permission dialog (status waiting). Anything else can take a followup, a
 // blocked session too: it ended its turn on a question for the user, and the
 // answer is what the followup sends. A background shell the session started,
-// such as a dev server, keeps its state working after the turn ends, so the turn
-// counts as running only until its transcript says it ended.
+// such as a dev server, keeps its state working after the turn ends, and so can a
+// process that has exited, so the turn counts as running only until its
+// transcript says it ended.
 func (a Agent) busy() bool {
 	return (a.State == "working" && !a.TurnEnded) || a.Status == "waiting"
+}
+
+// quietFor is how long it has been since the session's transcript last changed,
+// and false when there's no transcript to read.
+func (a Agent) quietFor() (time.Duration, bool) {
+	info, err := os.Stat(transcript(a.SessionID))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
 }
 
 // open: its process is running.
@@ -175,8 +197,10 @@ func (a Agent) open() bool { return a.PID }
 // listed.
 func (a Agent) stateText() string {
 	switch {
-	case a.TurnEnded:
+	case a.TurnEnded && a.open():
 		return "idle, background task running"
+	case a.TurnEnded:
+		return "idle"
 	case a.WaitingFor != "":
 		return a.State + " (" + a.WaitingFor + ")"
 	}

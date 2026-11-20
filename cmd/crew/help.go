@@ -89,6 +89,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    and any task's worker retarget a PR that targets
                                    another branch than its base;
                                    --again resends a restack the worker already has
+  crew nudge TASK                  Resume, once, a worker whose turn ended mid-task;
+                                   ask the lead if it stalls again (run by crew tick)
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
@@ -156,7 +158,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew tick                        Do what needs no decision, across all projects:
                                    sync, record new PR comments, red CI and
                                    conflicts, send review rounds and restacks to
-                                   idle workers, mark tasks waiting on you, clean up
+                                   idle workers, nudge workers whose turn ended
+                                   mid-task, mark tasks waiting on you, clean up
                                    merged tasks and done spikes (run by a timer)
   crew pause [--project P|--all] [--force]
                                    Stop the project's work without losing any:

@@ -10,6 +10,8 @@
 #                            before it has loaded the session
 #   $HOME/stop-noop          if present, `claude stop` leaves the process open
 #   $HOME/agents-fail        if present, `claude agents` fails
+#   $HOME/agents-next        if present, the next `claude agents` lists agents.json and then
+#                            makes this file agents.json: a change between two looks
 #   $HOME/rm-fail            if present, `claude rm` fails and keeps the job
 #   $HOME/claude-settings.last  the --settings value of the latest call that had one
 #   $HOME/claude.cwd            the directory the latest call ran in
@@ -74,6 +76,7 @@ case ${1:-} in
       rm -f "$HOME/placeholder-pending"
     else
       cat "$HOME/agents.json"
+      if [[ -f $HOME/agents-next ]]; then mv "$HOME/agents-next" "$HOME/agents.json"; fi
     fi ;;
   stop)
     [[ -f $HOME/stop-noop ]] || agents 'map(if .id==$id then .pid=null | .state="stopped" | del(.status) else . end)' --arg id "${2:-}" ;;

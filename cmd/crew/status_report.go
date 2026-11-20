@@ -113,8 +113,10 @@ type taskRow struct {
 	Task   Task
 	Number int   // its place in a numbered group, 0 for none
 	Worker Agent // its worker, as claude agents lists it; zero when it isn't
-	Notes  []string
-	Kids   []taskRow // the tasks stacked on it
+	// Merge says whether a pr-open task's PR can merge now; nil for any other task.
+	Merge *mergeCheck
+	Notes []string
+	Kids  []taskRow // the tasks stacked on it
 	// Folded: a draft outside a goal that the plain text counts, with its whole
 	// stack, rather than lists (folds).
 	Folded bool
@@ -141,10 +143,18 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 		return r
 	}
 	s := statusView{Crew: c, doneToo: doneToo}
-	s.agents = c.agents()
+	var err error
+	s.agents, err = c.listAgents()
+	switch {
+	case r.ReadOnlyOn != "":
+		s.workersUnseen = "worker can't be seen from this machine"
+	case err != nil:
+		s.workersUnseen = "workers couldn't be listed"
+	}
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
 	r.NoneDispatch = s.noProjectDispatches()
+	s.prs = s.readPRs(inScope)
 	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
 	}
@@ -161,16 +171,22 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 // rows, notes and caps read them.
 type statusView struct {
 	*Crew
-	doneToo  bool
-	agents   Agents
-	running  int // the workers running across the crew, counted once
+	doneToo bool
+	agents  Agents
+	running int // the workers running across the crew, counted once
+	// workersUnseen says why the workers can't be seen here, so none counts as
+	// busy or idle: another machine runs the crew, or claude agents failed. It's
+	// empty when they can be seen.
+	workersUnseen string
+
 	branches Branches
-	repo     string            // the project's clone here, for restack reasons; empty when there's none
-	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
-	kids     map[string][]Task // a task's file → the tasks stacked on it
-	spikes   map[string][]Task // a task's ID → the spikes that inform it
-	deps     map[string]depsOf // a task's file → the tasks it waits on
-	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
+	repo     string              // the project's clone here, for restack reasons; empty when there's none
+	settings Settings            // the project's, or the crew's when they can't be read (settingsOf)
+	kids     map[string][]Task   // a task's file → the tasks stacked on it
+	spikes   map[string][]Task   // a task's ID → the spikes that inform it
+	deps     map[string]depsOf   // a task's file → the tasks it waits on
+	caps     map[string]capOf    // a goal's ID → its tasks in flight against its max_in_flight
+	prs      map[string]gitHubPR // a pr-open task's file → its PR as GitHub has it now (readPRs)
 }
 
 // depsOf and capOf keep what status has worked out for a task or a goal, error
@@ -373,6 +389,7 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
 // row works out one task's row, then the rows of the tasks stacked on it.
 func (s *statusView) row(t Task) taskRow {
 	r := taskRow{Task: t, Worker: s.agent(t.WorkerJob()), Notes: s.notes(t)}
+	r.Merge = s.mergeCheck(t, r.Worker)
 	for _, k := range s.kids[t.Path] {
 		r.Kids = append(r.Kids, s.row(k))
 	}
@@ -380,10 +397,11 @@ func (s *statusView) row(t Task) taskRow {
 }
 
 // lookNote says what look a PR waiting on the user needs: its tier and the
-// tier's look, or, for a high-risk task, that its security review is still to come.
+// tier's look. A high-risk task still waiting for its security review has only
+// its tier: its merge check says what's missing.
 func lookNote(t Task) string {
 	if t.AwaitsSecurityReview() {
-		return "high: no security review yet"
+		return t.Risk().Label()
 	}
 	return t.Risk().Label() + ": " + t.Risk().Look()
 }
@@ -446,27 +464,16 @@ func (s *statusView) goalDispatches(t Task) bool {
 	return ok && (g.Status() == GoalRunning || g.Status() == GoalDraft)
 }
 
-// notes are what a task's row says after its PR: its PR's state, and what it
-// waits for or on.
+// notes are what a task's row says after its PR and its merge check: its PR's
+// state, and what it waits for or on. A pr-open task's merge check already says
+// what stands in its PR's way, so its notes give only the look it needs.
 func (s *statusView) notes(t Task) []string {
 	st := t.Status()
 	var notes []string
-	if prs := t.Get("pr_state"); prs != "" {
-		notes = append(notes, "("+prs+")")
-	}
 	if st == PROpen {
 		notes = append(notes, lookNote(t))
-	}
-	if st.InFlight() && s.repo != "" {
-		if reason := s.branches.restackReason(t, s.repo); reason != "" {
-			notes = append(notes, "needs restack: "+reason)
-		}
-		if reason := s.branches.retargetReason(t, s.repo); reason != "" {
-			notes = append(notes, reason)
-		}
-	}
-	if q := t.OpenQuestions(); q > 0 {
-		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
+	} else {
+		notes = append(notes, s.prNotes(t)...)
 	}
 	if l := s.learning(t); l != "" {
 		notes = append(notes, l)
@@ -517,6 +524,28 @@ func (s *statusView) notes(t Task) []string {
 			}
 		}
 		notes = append(notes, "dispatch by hand")
+	}
+	return notes
+}
+
+// prNotes is what a task that isn't pr-open says of its PR and its branch: the
+// PR's state as crew sync last read it, a restack or retarget it needs, and its
+// open questions. A pr-open task's merge check says these instead.
+func (s *statusView) prNotes(t Task) []string {
+	var notes []string
+	if prs := t.Get("pr_state"); prs != "" {
+		notes = append(notes, "("+prs+")")
+	}
+	if t.Status().InFlight() && s.repo != "" {
+		if reason := s.branches.restackReason(t, s.repo); reason != "" {
+			notes = append(notes, "needs restack: "+reason)
+		}
+		if reason := s.branches.retargetReason(t, s.repo); reason != "" {
+			notes = append(notes, reason)
+		}
+	}
+	if q := t.OpenQuestions(); q > 0 {
+		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
 	}
 	return notes
 }

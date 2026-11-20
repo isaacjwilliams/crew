@@ -297,6 +297,7 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 - records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for;
 - records collaborators' comments under the task's Open questions, for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
+- nudges a worker whose turn ended while its task still says it's being worked on, with no question asked, once its transcript has been quiet for 15 minutes: it resumes the worker once to carry on. If the worker stalls again with no new commit and no change of status, or its worktree isn't on this machine, the tick asks the lead under the task's Open questions instead. `crew nudge TASK` does the same by hand;
 - restacks stacked tasks whose parent moved or merged, bottom-up, and has a task's worker retarget its PR when the PR targets a branch other than the task's base, never sending the same restack twice;
 - cleans up merged tasks and done spikes;
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
@@ -446,9 +447,18 @@ A high-risk task's worker also runs Claude Code's `/security-review` before hand
 SENSITIVE_PATHS="db/migrate config/credentials :(glob)app/**/auth*"
 ```
 
-When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review; the worker's model stays as it was. A task raised after its hand-over shows `high: no security review yet` in `crew status` until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
+When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review; the worker's model stays as it was. A task raised after its hand-over says `not yet: no security review yet` in `crew status`, and `(no security review yet)` on its `to review:` line, until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
 
-**In `crew status`**, each open PR's row says the look it needs (`low: approve from the evidence`), and each project ends with the PRs waiting on you, cheapest look first, then by number:
+**In `crew status`**, each open PR's row says whether you can merge it now, and the look it needs:
+
+```
+  041-season-export   pr-open   worker: done   #41   merge now  low: approve from the evidence
+  038-season-admin    pr-open   worker: done   #38   not yet: CI running; draft  medium: read the diff
+```
+
+`merge now` means GitHub has the PR open, ready, clean against its base, its checks passing, no changes requested and nothing its branch rules still want, and crew has nothing more to do on it: its worker is idle, its automated review is recorded, it needs no restack and has no open question. Otherwise `not yet:` names what stands in the way, what's likely to clear soonest first. Status reads each PR from GitHub as it runs; when it can't, it goes by the last `crew sync` and says `(couldn't read GitHub; as of the last sync)`. On a machine that doesn't run the crew, it can't see the workers, so it never says `merge now` there. A PR merged or closed on GitHub that sync hasn't caught up with says `merged on GitHub` or `closed on GitHub`.
+
+Each project ends with the PRs waiting on you, cheapest look first, then by number:
 
 ```
   to review: #41 low, #38 medium, #35 high
@@ -519,7 +529,7 @@ crew pause --project <p>      # --all for every project; without either, the lea
 crew resume --project <p>     # let it go on
 ```
 
-While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup`, `crew goal start` and `crew review-eval` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
+While a project is paused, nothing starts a session for it: `crew tick` sends its workers and goal leads nothing and dispatches none of its tasks (it still records your comments, red CI and conflicts), the gardener skips it, and `crew dispatch`, `crew followup`, `crew nudge`, `crew goal start` and `crew review-eval` refuse. Workers and goal leads that are mid-turn are told to note in their Log where they are and end their turn; any still mid-turn after `WRAP_UP_SECONDS` (3 minutes) are stopped, unless you resume first. Idle ones are left alone. If one won't stop, `crew pause` names it and fails, so you can stop it in `claude agents`. `crew pause --force` stops every worker and goal lead of the project at once, busy or idle, with no time to wrap up, even one still running for a finished task. Your own `lead` keeps working either way. `crew status` marks the project paused, and the tasks a pause interrupted.
 
 Nothing is lost: worktrees, branches and conversations stay. When crew stops a session, it also ends what that session left running in the background in its worktree, such as a dev server or a Codex review, as cleanup does; `--force` does that for sessions that had already closed, too. A background subagent the session started may still run on: Claude Code carries those over to the session's next process. After `crew resume`, the next tick tells each interrupted worker and goal lead to carry on from its Log.
 

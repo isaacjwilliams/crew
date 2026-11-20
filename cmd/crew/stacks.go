@@ -259,18 +259,26 @@ func (idx Branches) retargetReason(t Task, repo string) string {
 	if !idx.prOffBase(t) {
 		return ""
 	}
-	base := idx.effectiveBase(t)
-	if !gitOK(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+base) {
+	if !gitOK(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+idx.effectiveBase(t)) {
 		return ""
 	}
-	return fmt.Sprintf("PR targets %s, not %s", t.Get("pr_base"), base)
+	return idx.offBaseReason(t, t.Get("pr_base"))
 }
 
 // prOffBase: crew sync last saw the task's open PR target a branch other than
 // the one the task belongs on now.
 func (idx Branches) prOffBase(t Task) bool {
-	prBase := t.Get("pr_base")
-	return t.HasOpenPR() && prBase != "" && prBase != idx.effectiveBase(t)
+	return t.HasOpenPR() && idx.offBaseReason(t, t.Get("pr_base")) != ""
+}
+
+// offBaseReason says "PR targets <prBase>, not <base>" when the task's PR targets
+// prBase but the task belongs on another branch now (effectiveBase). It's empty
+// when prBase is that branch, or unknown.
+func (idx Branches) offBaseReason(t Task, prBase string) string {
+	if base := idx.effectiveBase(t); prBase != "" && prBase != base {
+		return fmt.Sprintf("PR targets %s, not %s", prBase, base)
+	}
+	return ""
 }
 
 // onBase: the task's branch needs no rebase for its PR to target its base. A

@@ -2,10 +2,11 @@ package main
 
 // crew tick is one pass over every project, doing what needs no decision: sync
 // with GitHub, record new PR comments and red CI on PRs handed to the user, send
-// review rounds and restacks to idle workers, mark tasks that wait on the user,
-// clean up those that delivered (merged, or a spike done), pass goal leads their
-// input and close finished goals. Last, it dispatches the ready tasks of running
-// goals, highest priority first.
+// review rounds and restacks to idle workers, nudge workers whose turn ended
+// mid-task, mark tasks that wait on the user, clean up those that delivered
+// (merged, or a spike done), pass goal leads their input and close finished
+// goals. Last, it dispatches the ready tasks of running goals, highest priority
+// first.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
 // prints one line per thing it did, and one per thing it held back and why, and
 // keeps them as news for the leads (news.go).
@@ -180,8 +181,10 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	}
 	// The rest needs the worker free (see busy); a busy one is left for a later
 	// tick. It does at most one thing, in this order: send what the worker hasn't
-	// had (forWorker), or mark the task as waiting on the user.
-	send, held := c.forWorker(p, idx, t)
+	// had (forWorker), or mark the task as waiting on the user. A nudge that
+	// asks the lead instead does both: the question it adds is what the task
+	// then waits on.
+	send, held := c.forWorker(p, idx, t, as.find(job))
 	busy := as.jobBusy(job)
 	switch {
 	case held != "":
@@ -192,10 +195,18 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	case paused:
 		news.heldBack(p.Name, "%s: %s waits: %s is paused", id, send.what, p.Name)
 	default:
-		if c.step(nil, append([]string{send.command}, t.Path)...) == 0 {
-			news.did(p.Name, "%s: %s", id, send.sent)
+		// The command runs in a process of its own; a question it adds for the
+		// lead lands in the task file, which t reads afresh. A command that fails
+		// counts as tried, so the task isn't marked waiting on the strength of it.
+		asked := t.OpenQuestions()
+		if c.step(nil, append([]string{send.command}, t.Path)...) != 0 {
+			return
 		}
-		return
+		if t.OpenQuestions() == asked {
+			news.did(p.Name, "%s: %s", id, send.sent)
+			return
+		}
+		news.did(p.Name, "%s: %s", id, send.asked)
 	}
 	if busy { // it may still be answering its open questions
 		return
@@ -210,28 +221,36 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 }
 
 // workerSend is what crew tick resumes a task's idle worker with: the crew
-// command that sends it, what it is, and what tick says once it's sent.
-type workerSend struct{ command, what, sent string }
+// command that sends it, what it is, and what tick says once it's sent. A nudge
+// can ask the lead instead of resuming the worker, and asked is what tick says
+// then.
+type workerSend struct{ command, what, sent, asked string }
 
-// forWorker is the first of these that a task's worker hasn't had: unsent
-// review rounds, word that a pause cut its last turn short, or a restack (a
+// forWorker is the first of these that a task's worker, a (nil when claude
+// agents doesn't list it), hasn't had: unsent review rounds, word that a pause
+// cut its last turn short, a nudge when its turn ended mid-task, or a restack (a
 // rebase, a retarget or both). Nothing goes out twice: last_round_sent,
-// interrupted, restack_sent and retarget_sent record what was sent. A restack
-// that's due but can't go yet is held back instead, and held says why.
-func (c *Crew) forWorker(p *Project, idx Branches, t Task) (send *workerSend, held string) {
+// interrupted, restack_sent and retarget_sent record what was sent, and the
+// nudge's Log line records a nudge. A restack that's due but can't go yet is
+// held back instead, and held says why.
+func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *workerSend, held string) {
 	if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
 		unsent := unsentRounds(t)
-		return &workerSend{"followup", unsent, unsent + " sent to its worker"}, ""
+		return &workerSend{command: "followup", what: unsent, sent: unsent + " sent to its worker"}, ""
 	}
 	if t.Get("interrupted") != "" {
-		return &workerSend{"followup", "word that the pause is over", "its worker carries on after the pause"}, ""
+		return &workerSend{command: "followup", what: "word that the pause is over", sent: "its worker carries on after the pause"}, ""
+	}
+	if stalled(t, a) {
+		return &workerSend{command: "nudge", what: "a nudge", sent: "its worker's turn ended mid-task; nudged it",
+			asked: "its worker stalled and can't be nudged, for the lead"}, ""
 	}
 	repo, st := p.Repo(), t.Status()
 	restack := func(reason string) (*workerSend, string) {
 		if st != PROpen {
 			return nil, fmt.Sprintf("restack (%s) waits until the task is %s; it's %s", reason, PROpen, st)
 		}
-		return &workerSend{"restack", "restack (" + reason + ")", "restack sent to its worker (" + reason + ")"}, ""
+		return &workerSend{command: "restack", what: "restack (" + reason + ")", sent: "restack sent to its worker (" + reason + ")"}, ""
 	}
 	// As in crew restack: a retarget goes with a rebase when there is one, and on
 	// its own only when the branch needs no rebase (onBase). So a rebase that has

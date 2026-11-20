@@ -1,13 +1,14 @@
 package main
 
 // Commands that act on a task's worker session: crew followup resumes it,
-// crew attach opens it in this terminal, and crew restack resumes it with a
-// rebase or a retarget to run.
+// crew attach opens it in this terminal, crew restack resumes it with a rebase or
+// a retarget to run, and crew nudge resumes it when its turn ended mid-task.
 
 import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 )
 
 // crew followup TASK [--fresh] [--note TEXT]
@@ -34,13 +35,22 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.followup(t, fresh, note)
+	return c.followup(t, followupWith{fresh: fresh, note: note})
+}
+
+// followupWith is what a followup's caller adds to what the task itself holds
+// (review rounds not yet sent, word of a pause).
+type followupWith struct {
+	fresh   bool   // start a fresh worker rather than resume the last one
+	stalled bool   // tell the worker its turn ended mid-task (crew nudge)
+	note    string // a note from the lead
 }
 
 // followup resumes a task's worker with the review rounds it hasn't been sent, a
-// note, or word that a pause cut its last turn short (interrupted), or several of
-// these; or starts a fresh worker when fresh is set or the resume fails.
-func (c *Crew) followup(t Task, fresh bool, note string) error {
+// note from the lead, word that a pause cut its last turn short (interrupted), or
+// word that its turn ended mid-task (stalled), or several of these; or starts a
+// fresh worker when with.fresh is set or the resume fails.
+func (c *Crew) followup(t Task, with followupWith) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -72,7 +82,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
-	if !newRound && note == "" && !interrupted {
+	if !newRound && with.note == "" && !interrupted && !with.stalled {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
 	if st := t.Status(); st.Finished() {
@@ -97,8 +107,11 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if interrupted {
 		prompt += " " + carryOn
 	}
-	if note != "" {
-		prompt += " Note from the lead (also check Decisions in the task file): " + note
+	if with.stalled {
+		prompt += " " + stalledNote
+	}
+	if with.note != "" {
+		prompt += " Note from the lead (also check Decisions in the task file): " + with.note
 	}
 	if err := c.lock(); err != nil {
 		return err
@@ -114,7 +127,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), p.Name, t.Path, wt), fresh)
+		t.ID(), p.Name, t.Path, wt), with.fresh)
 	if err != nil {
 		return err
 	}
@@ -126,7 +139,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	switch {
 	case newRound:
 		t.SetStatus(AddressingFeedback)
-	case note != "" && !t.Status().WorkersTurn():
+	case with.note != "" && !t.Status().WorkersTurn():
 		// A note hands a task that waits on you back to its worker.
 		t.SetStatus(backToWorker(t))
 	}
@@ -135,8 +148,11 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	if interrupted {
 		msg += ", carrying on after a pause"
 	}
-	if note != "" {
-		msg += " — note: " + note
+	if with.stalled {
+		msg += ", as its turn ended mid-task"
+	}
+	if with.note != "" {
+		msg += " — note: " + with.note
 	}
 	t.Log(msg)
 	c.commit("followup " + p.Name + "/" + t.ID())
@@ -279,7 +295,7 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
-	if err := c.followup(t, false, note); err != nil {
+	if err := c.followup(t, followupWith{note: note}); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -336,7 +352,7 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
-	if err := c.followup(t, false, note); err != nil {
+	if err := c.followup(t, followupWith{note: note}); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -347,5 +363,104 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		t.Set("retarget_sent", retargetTo)
 	}
 	c.commit("restack " + p.Name + "/" + t.ID())
+	return nil
+}
+
+// stallAfter is how long a worker's transcript must have been quiet before its
+// task counts as stalled. A session the user is talking to with crew attach ends
+// its turn after every reply, and a nudge would end the attach, so a short quiet
+// spell doesn't count.
+const stallAfter = 15 * time.Minute
+
+// stalledNote is what crew nudge tells a worker whose turn ended mid-task: a
+// worker seen stalled had waited on a sub-agent, or just stopped after a step.
+const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
+
+// stalled reports whether a task's worker a (nil when claude agents doesn't list
+// it) ended its turn by mistake. It did when:
+//   - the task is working or addressing-feedback, with no open question: a worker
+//     waiting on an answer would have asked one and set needs-input;
+//   - a is listed and not stopped: a stopped worker was stopped on purpose, by
+//     crew pause, say;
+//   - a isn't mid-turn, whatever other state claude agents gives it;
+//   - its transcript has been quiet for stallAfter.
+func stalled(t Task, a *Agent) bool {
+	if !t.Status().WorkersTurn() || t.OpenQuestions() > 0 {
+		return false
+	}
+	if a == nil || a.State == "stopped" || a.busy() {
+		return false
+	}
+	quiet, ok := a.quietFor()
+	return ok && quiet >= stallAfter
+}
+
+// crew nudge TASK: resumes the worker of a stalled task (see stalled) with
+// stalledNote, and logs the nudge with its branch's head commit. When the task
+// stalls again with no new commit and no change of status since
+// (NudgedWithoutProgress), or its worktree isn't on this machine, it adds an
+// Open question for the lead instead, and crew tick's "waiting on you" rule makes
+// the task needs-input. Exits 3 when the task isn't stalled.
+func cmdNudge(c *Crew, args []string) error {
+	for _, tool := range []string{"git", "claude"} {
+		if err := need(tool); err != nil {
+			return err
+		}
+	}
+	if len(args) != 1 {
+		return usage("crew nudge TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	if !t.Dispatched() {
+		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
+	// Decided under the ledger lock, held until this command exits (followup
+	// takes it again at no cost), so two runs can't both act.
+	if err := c.lock(); err != nil {
+		return err
+	}
+	worker := c.agents().find(t.WorkerJob())
+	if !stalled(t, worker) {
+		return nothingToDo("%s hasn't stalled", t.ID())
+	}
+	ask := func(question, log string) error {
+		t.AppendToSection("## Open questions", "- [ ] "+question+"\n")
+		t.Log(log)
+		t.Touch()
+		c.commit("nudge " + p.Name + "/" + t.ID())
+		fmt.Printf("%s: %s; recorded under Open questions\n", t.ID(), log)
+		return nil
+	}
+	// Making the worktree again can take minutes of a repo's hooks, and isn't
+	// a tick's to do: it's left to the lead.
+	if wt := t.Worktree(); !isDir(wt) {
+		return ask(fmt.Sprintf("Its worker's turn ended mid-task, but its worktree, %s, isn't on this machine, so crew didn't nudge it. To have a fresh worker carry on here, run `crew followup %s --fresh --note \"Carry on from where your Log says you stopped.\"`: it makes the worktree again.", wt, c.taskArg(t)),
+			"nudge: worktree missing; for the lead")
+	}
+	sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}")
+	if err != nil {
+		return fail("%s's branch %s isn't in %s", t.ID(), t.Branch(), p.Repo())
+	}
+	head := shortSHA(sha)
+	if t.NudgedWithoutProgress(head) {
+		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
+			"nudge: stalled again at "+head+"; for the lead")
+	}
+	if err := c.followup(t, followupWith{stalled: true}); err != nil {
+		return err
+	}
+	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.
+	t.Log(nudgedAt + head)
+	c.commit("nudge " + p.Name + "/" + t.ID())
 	return nil
 }

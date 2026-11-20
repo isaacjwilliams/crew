@@ -689,8 +689,12 @@ func (t Task) SetStatus(s Status) error { return t.setStatus(string(s)) }
 
 // setStatus writes the file's status and logs the change: a task's, or a
 // proposal's through crew set. It takes a string, since a proposal's statuses
-// aren't a task's.
+// aren't a task's. Setting the status a file already has logs nothing, so a
+// status line always means the status changed.
 func (d Doc) setStatus(s string) error {
+	if d.Get("status") == s {
+		return nil
+	}
 	if err := d.Set("status", s); err != nil {
 		return err
 	}
@@ -839,6 +843,17 @@ func (r AutomatedReview) Clean() bool {
 		}
 	}
 	return r.ClaudeReported
+}
+
+// LeftForUser counts the review's findings whose outcome left them for the user.
+func (r AutomatedReview) LeftForUser() int {
+	n := 0
+	for _, f := range r.Findings {
+		if f.Outcome() == OutcomeLeftForUser {
+			n++
+		}
+	}
+	return n
 }
 
 // mustOrShouldFix: the finding is held at must fix or should fix, whatever
@@ -1138,6 +1153,26 @@ func (t Task) CIReported(head string) bool {
 	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
 		if h, ok := ciLineHead(l, ciStillRedOn); ok && h == head {
 			return true
+		}
+	}
+	return false
+}
+
+// nudgedAt begins the Log line crew nudge writes when it resumes a worker whose
+// turn ended mid-task. The short SHA of the branch's head then follows it.
+const nudgedAt = "nudged: turn ended mid-task at "
+
+// NudgedWithoutProgress: crew nudge last resumed the worker with its branch at
+// head (so there's no new commit since), and the task's status hasn't changed
+// since. Log lines alone aren't progress: a worker could answer every nudge with
+// one.
+func (t Task) NudgedWithoutProgress(head string) bool {
+	for _, e := range slices.Backward(t.LogEntries()) {
+		if _, changed := e.status(); changed {
+			return false
+		}
+		if at, ok := strings.CutPrefix(e.msg, nudgedAt); ok {
+			return at == head
 		}
 	}
 	return false

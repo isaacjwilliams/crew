@@ -151,7 +151,7 @@ You come here at one of two moments: the size check in first-run step 4, when th
    - why it should come back clean on its own: it has one concern, and it's under `MAX_PR_LINES`.
 3. **At the end of a pass, post the summary** as step 4 of "Workflow: automated review" says, with the pieces, which it calls "smaller PRs". Don't mark the PR ready.
 4. **Ask** (see "When you're blocked"): one Open questions item with what got in the way, the pieces, and these answers, and say which you recommend:
-   - **split as proposed**: you stop here. The lead, or in a goal the goal lead, opens the pieces as tasks and abandons this one. Leave the status as it is and end your turn.
+   - **split as proposed**: you stop here. The lead, or in a goal the goal lead, opens the pieces as tasks and abandons this one. Until it does, the task waits on it, not on you: add `- [ ] Split as proposed: open the pieces as tasks and abandon this one.` under Open questions, set the status to `needs-input`, and end your turn.
    - **review it anyway**: at the size check, go on to first-run step 5. At the end of a pass, run another pass, as step 3 of "Workflow: automated review" says.
    - **take it as it is**: at the end of a pass, carry on where the pass came from, as step 3 of "Workflow: automated review" says. At the size check nothing has been reviewed yet, so this means the same as "review it anyway".
 
