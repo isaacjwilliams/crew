@@ -35,13 +35,14 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.followup(t, fresh, note)
+	return c.followup(t, fresh, false, note)
 }
 
 // followup resumes a task's worker with the review rounds it hasn't been sent, a
-// note, or word that a pause cut its last turn short (interrupted), or several of
+// note from the lead, word that a pause cut its last turn short (interrupted), or
+// word that its turn ended mid-task (stalled, from crew nudge), or several of
 // these; or starts a fresh worker when fresh is set or the resume fails.
-func (c *Crew) followup(t Task, fresh bool, note string) error {
+func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -73,7 +74,7 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
-	if !newRound && note == "" && !interrupted {
+	if !newRound && note == "" && !interrupted && !stalled {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
 	if st := t.Status(); st.Finished() {
@@ -97,6 +98,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	}
 	if interrupted {
 		prompt += " " + carryOn
+	}
+	if stalled {
+		prompt += " " + stalledNote
 	}
 	if note != "" {
 		prompt += " Note from the lead (also check Decisions in the task file): " + note
@@ -135,6 +139,9 @@ func (c *Crew) followup(t Task, fresh bool, note string) error {
 	msg := fmt.Sprintf("followup (%s): worker %s", l.mode, l.job)
 	if interrupted {
 		msg += ", carrying on after a pause"
+	}
+	if stalled {
+		msg += ", as its turn ended mid-task"
 	}
 	if note != "" {
 		msg += " — note: " + note
@@ -280,7 +287,7 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
-	if err := c.followup(t, false, note); err != nil {
+	if err := c.followup(t, false, false, note); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -337,7 +344,7 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
-	if err := c.followup(t, false, note); err != nil {
+	if err := c.followup(t, false, false, note); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -359,7 +366,7 @@ const stallAfter = 15 * time.Minute
 
 // stalledNote is what crew nudge tells a worker whose turn ended mid-task: a
 // worker seen stalled had waited on a sub-agent, or just stopped after a step.
-const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent, its result is in your conversation now; read it. Then carry on from your last step."
+const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
 
 // stalled reports whether a task's worker a (nil when claude agents doesn't list
 // it) ended its turn by mistake. It did when:
@@ -441,7 +448,7 @@ func cmdNudge(c *Crew, args []string) error {
 		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
 			"nudge: stalled again at "+head+"; for the lead")
 	}
-	if err := c.followup(t, false, stalledNote); err != nil {
+	if err := c.followup(t, false, true, ""); err != nil {
 		return err
 	}
 	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.

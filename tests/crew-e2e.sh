@@ -1076,7 +1076,7 @@ rm -r "$L/projects/zz-other"
 # it's being worked on, and asks the lead when that doesn't move the task. Task 13's
 # review rounds warn on every tick, so these checks read only what tick prints.
 WT13=$(crew get 13 worktree); STUB=$HOME/.claude/projects/stub
-NUDGE="Your last turn ended while this task's status still says you're working on it."
+NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
 head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
 answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
 asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }
@@ -1091,6 +1091,8 @@ answer13; crew set 13 status working; stall13 "done" null; n=$(resumes)
 out=$(crew tick 2>/dev/null)
 check "tick nudges a working task whose worker's turn ended with no question asked, on the task's model, and logs the branch's head" \
   '[[ $out == "$NUDGED" && $(resumes) == $((n + 1)) && $(last_prompt) == *"$NUDGE"* && $(crew get 13 status) == working ]] && runs_on 13 sonnet && nudged13'
+check "the nudge is crew's own word, not a note from the lead, and the Log doesn't repeat it" \
+  '[[ $(last_prompt) != *"Note from the lead"* && $(tail -2 "$F13" | head -1) == *"followup (resume): worker "*", as its turn ended mid-task" ]]'
 crew log 13 "Still on it."; crew set 13 status working; stall13 "done" null
 out=$(crew tick 2>/dev/null); q=$(asked13)
 check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged and set the status it had, and asks the lead" \
