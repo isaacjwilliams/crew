@@ -689,8 +689,12 @@ func (t Task) SetStatus(s Status) error { return t.setStatus(string(s)) }
 
 // setStatus writes the file's status and logs the change: a task's, or a
 // proposal's through crew set. It takes a string, since a proposal's statuses
-// aren't a task's.
+// aren't a task's. Setting the status a file already has logs nothing, so a
+// status line always means the status changed.
 func (d Doc) setStatus(s string) error {
+	if d.Get("status") == s {
+		return nil
+	}
 	if err := d.Set("status", s); err != nil {
 		return err
 	}

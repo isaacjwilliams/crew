@@ -1091,9 +1091,9 @@ answer13; crew set 13 status working; stall13 "done" null; n=$(resumes)
 out=$(crew tick 2>/dev/null)
 check "tick nudges a working task whose worker's turn ended with no question asked, on the task's model, and logs the branch's head" \
   '[[ $out == "$NUDGED" && $(resumes) == $((n + 1)) && $(last_prompt) == *"$NUDGE"* && $(crew get 13 status) == working ]] && runs_on 13 sonnet && nudged13'
-crew log 13 "Still on it."; stall13 "done" null
+crew log 13 "Still on it."; crew set 13 status working; stall13 "done" null
 out=$(crew tick 2>/dev/null); q=$(asked13)
-check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged, and asks the lead" \
+check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged and set the status it had, and asks the lead" \
   '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == $((n + 1)) && $(crew get 13 status) == needs-input && $(wc -l <<<"$q") == 1 ]]'
 check "the question names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
 out=$(crew tick 2>/dev/null)
