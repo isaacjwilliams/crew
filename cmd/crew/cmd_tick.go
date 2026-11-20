@@ -57,9 +57,9 @@ func cmdTick(c *Crew, args []string) error {
 	if _, err := c.ghLogin(); err != nil {
 		return err
 	}
-	if c.step(nil, "sync", "--quiet", "--all") != 0 {
-		warn("sync failed; carrying on with what the ledger has")
-	}
+	// Sync reports its own problems, a project it can't load among them, and the
+	// rest of the tick goes by the ledger as sync left it.
+	c.step(nil, "sync", "--quiet", "--all")
 	// So an edit to a project's mcp.json reaches the leads within a tick. It reports
 	// its own problems, which stop nothing else.
 	c.step(nil, "mcp", "sync")
@@ -67,9 +67,7 @@ func cmdTick(c *Crew, args []string) error {
 	for _, name := range c.projects("") {
 		p, err := c.loadProject(name)
 		if err != nil {
-			report(err)
-			warn("%s: skipped", name)
-			continue
+			continue // sync has said why, and that it skipped it
 		}
 		// A paused project still gets the steps that only record (cleanup,
 		// feedback, ci-fix, catch-up, needs-input, goal done); those that would start a
@@ -290,7 +288,7 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *work
 func (c *Crew) dispatchReady(news *tickNews) {
 	var ready []Task
 	for _, name := range c.projects("") {
-		// No clone here, say: the tick warned of it and skipped it above.
+		// No clone here, say: sync named it, and the tick skipped it above.
 		p, err := c.loadProject(name)
 		if err != nil {
 			continue

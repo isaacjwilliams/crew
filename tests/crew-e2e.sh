@@ -1919,8 +1919,9 @@ out=$(crew sync --all 2>&1); st=$?
 check "sync --all syncs the other projects when one can't be loaded, names the one it skipped and why, and exits 1" \
   '((st == 1)) && [[ $(crew get "$FS" status) == merged && $out == *"crew: no clone of 0-no-clone on this machine"* && $out == *"crew: 0-no-clone: skipped"* ]]'
 FT=$(merged_task "Merged beside a broken project, by a tick")
-crew tick >/dev/null 2>&1
-check "a tick records another project's merge while one can't be loaded" '[[ $(crew get "$FT" status) == merged ]]'
+err=$(crew tick 2>&1 >/dev/null)
+check "a tick records another project's merge while one can't be loaded, naming the one it skipped once, and not as a failed sync" \
+  '[[ $(crew get "$FT" status) == merged && $(grep -c "0-no-clone: skipped" <<<"$err") == 1 && $err != *"sync failed"* ]]'
 rm -r "$NC"; crew cleanup --merged --project "$PJ" >/dev/null 2>&1
 
 

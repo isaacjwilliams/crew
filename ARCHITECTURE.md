@@ -395,7 +395,7 @@ crew tick
   │    → stand down: crew-* sessions stopped, unpushed ledger work kept on
   │      lost/<host>-<time>, home reset to origin, services disabled; nothing else happens
   ├─ require_host: this machine holds the lease, or the tick stops
-  ├─ crew sync --all
+  ├─ crew sync --all: names any project it can't load, which the rest of the tick skips
   ├─ crew mcp sync: every project's mcp.local.json, then lead/.mcp.json
   ├─ for each task (a paused project's get only cleanup, feedback, ci-fix, catch-up and needs-input):
   │    merged or done, worktree still recorded   → crew cleanup
