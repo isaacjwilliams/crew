@@ -93,6 +93,8 @@ func TestMergeCheck(t *testing.T) {
 		{name: "GitHub unread, clear when last synced", unread: true, want: "merge now (couldn't read GitHub; as of the last sync)"},
 		{name: "GitHub unread, mergeable unknown when last synced", unread: true, fields: map[string]string{"mergeable": "unknown"}, want: "not yet: GitHub still checking for conflicts (couldn't read GitHub; as of the last sync)"},
 		{name: "GitHub unread, draft and failing when last synced", unread: true, fields: map[string]string{"pr_state": "draft, approved", "ci_state": "failing"}, want: "not yet: CI failing; draft (couldn't read GitHub; as of the last sync)"},
+		{name: "GitHub unread, behind when last synced", unread: true, fields: map[string]string{"merge_state": "behind"}, want: "not yet: behind main (couldn't read GitHub; as of the last sync)"},
+		{name: "GitHub unread, blocked when last synced", unread: true, fields: map[string]string{"merge_state": "blocked"}, want: "not yet: blocked by a branch rule on GitHub (couldn't read GitHub; as of the last sync)"},
 		{name: "GitHub unread, never synced", unread: true, fields: map[string]string{"pr_state": ""}, want: "not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet"},
 		{name: "no PR", fields: map[string]string{"pr": ""}, want: "not yet: no PR"},
 		{name: "not pr-open", fields: map[string]string{"status": "working"}, want: ""},
@@ -137,9 +139,10 @@ func TestMergeCheck(t *testing.T) {
 // syncedPR reads back what record wrote.
 func TestSyncedPRReadsBackWhatSyncRecorded(t *testing.T) {
 	for _, pr := range []gitHubPR{
-		{State: "OPEN", ReviewDecision: "APPROVED", UpdatedAt: "2026-11-20T10:00:00Z", Base: "main", CI: ciPassing},
-		{State: "OPEN", Draft: true, ReviewDecision: "CHANGES_REQUESTED", Base: "agent/parent", CI: ciRunning, Mergeable: mergeableUnknown},
-		{State: "OPEN", CI: ciFailing, Mergeable: conflicting},
+		{State: "OPEN", ReviewDecision: "APPROVED", UpdatedAt: "2026-11-20T10:00:00Z", Base: "main", CI: ciPassing, MergeState: "CLEAN"},
+		{State: "OPEN", Draft: true, ReviewDecision: "CHANGES_REQUESTED", Base: "agent/parent", CI: ciRunning, Mergeable: mergeableUnknown, MergeState: "BLOCKED"},
+		{State: "OPEN", CI: ciFailing, Mergeable: conflicting, MergeState: "DIRTY"},
+		{State: "OPEN", CI: ciPassing, MergeState: "BEHIND"},
 		{State: "MERGED"},
 	} {
 		task := mergeTask(t, t.TempDir(), "001-task", map[string]string{"status": "pr-open"}, "## Log\n")

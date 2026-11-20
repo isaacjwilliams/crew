@@ -19,7 +19,7 @@ type gitHubPR struct {
 	Mergeable      string  // conflicting, mergeableUnknown, or empty when it merges cleanly
 	// MergeState is GitHub's verdict on merging it now: CLEAN, BEHIND (its base
 	// moved, and the branch rules want it up to date), BLOCKED (by a branch
-	// rule) and so on. crew sync doesn't record it, so it's empty from syncedPR.
+	// rule) and so on.
 	MergeState string
 }
 
@@ -66,10 +66,11 @@ func readPR(repo, url string) (gitHubPR, error) {
 func (pr gitHubPR) record(t Task) bool {
 	changed := false
 	for _, kv := range []struct{ key, value string }{
-		{"pr_updated", pr.UpdatedAt}, // for prMayHaveNewComments in crew tick
-		{"pr_base", pr.Base},         // for retargetReason
-		{"ci_state", string(pr.CI)},  // for crew tick, which runs crew ci-fix only while CI is failing, and for crew status
-		{"mergeable", pr.Mergeable},  // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
+		{"pr_updated", pr.UpdatedAt},                    // for prMayHaveNewComments in crew tick
+		{"pr_base", pr.Base},                            // for retargetReason
+		{"ci_state", string(pr.CI)},                     // for crew tick, which runs crew ci-fix only while CI is failing, and for crew status
+		{"mergeable", pr.Mergeable},                     // for crew tick, which runs crew catch-up only while the PR conflicts, and for crew status
+		{"merge_state", strings.ToLower(pr.MergeState)}, // for crew status
 		{"pr_state", pr.label()},
 	} {
 		if t.Get(kv.key) != kv.value {
@@ -103,7 +104,8 @@ func (pr gitHubPR) label() string {
 // reading pr_state back the way label wrote it. Its State is empty when sync
 // never read it.
 func syncedPR(t Task) gitHubPR {
-	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable")}
+	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable"),
+		MergeState: strings.ToUpper(t.Get("merge_state"))}
 	state, decision, _ := strings.Cut(t.Get("pr_state"), ", ")
 	switch state {
 	case "": // never synced
