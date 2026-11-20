@@ -35,14 +35,22 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.followup(t, fresh, false, note)
+	return c.followup(t, followupWith{fresh: fresh, note: note})
+}
+
+// followupWith is what a followup's caller adds to what the task itself holds
+// (review rounds not yet sent, word of a pause).
+type followupWith struct {
+	fresh   bool   // start a fresh worker rather than resume the last one
+	stalled bool   // tell the worker its turn ended mid-task (crew nudge)
+	note    string // a note from the lead
 }
 
 // followup resumes a task's worker with the review rounds it hasn't been sent, a
 // note from the lead, word that a pause cut its last turn short (interrupted), or
-// word that its turn ended mid-task (stalled, from crew nudge), or several of
-// these; or starts a fresh worker when fresh is set or the resume fails.
-func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
+// word that its turn ended mid-task (stalled), or several of these; or starts a
+// fresh worker when with.fresh is set or the resume fails.
+func (c *Crew) followup(t Task, with followupWith) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return err
@@ -74,7 +82,7 @@ func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
-	if !newRound && note == "" && !interrupted && !stalled {
+	if !newRound && with.note == "" && !interrupted && !with.stalled {
 		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
 	if st := t.Status(); st.Finished() {
@@ -99,11 +107,11 @@ func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 	if interrupted {
 		prompt += " " + carryOn
 	}
-	if stalled {
+	if with.stalled {
 		prompt += " " + stalledNote
 	}
-	if note != "" {
-		prompt += " Note from the lead (also check Decisions in the task file): " + note
+	if with.note != "" {
+		prompt += " Note from the lead (also check Decisions in the task file): " + with.note
 	}
 	if err := c.lock(); err != nil {
 		return err
@@ -119,7 +127,7 @@ func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), p.Name, t.Path, wt), fresh)
+		t.ID(), p.Name, t.Path, wt), with.fresh)
 	if err != nil {
 		return err
 	}
@@ -131,7 +139,7 @@ func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 	switch {
 	case newRound:
 		t.SetStatus(AddressingFeedback)
-	case note != "" && !t.Status().WorkersTurn():
+	case with.note != "" && !t.Status().WorkersTurn():
 		// A note hands a task that waits on you back to its worker.
 		t.SetStatus(backToWorker(t))
 	}
@@ -140,11 +148,11 @@ func (c *Crew) followup(t Task, fresh, stalled bool, note string) error {
 	if interrupted {
 		msg += ", carrying on after a pause"
 	}
-	if stalled {
+	if with.stalled {
 		msg += ", as its turn ended mid-task"
 	}
-	if note != "" {
-		msg += " — note: " + note
+	if with.note != "" {
+		msg += " — note: " + with.note
 	}
 	t.Log(msg)
 	c.commit("followup " + p.Name + "/" + t.ID())
@@ -287,7 +295,7 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
-	if err := c.followup(t, false, false, note); err != nil {
+	if err := c.followup(t, followupWith{note: note}); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -344,7 +352,7 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
-	if err := c.followup(t, false, false, note); err != nil {
+	if err := c.followup(t, followupWith{note: note}); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -448,7 +456,7 @@ func cmdNudge(c *Crew, args []string) error {
 		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
 			"nudge: stalled again at "+head+"; for the lead")
 	}
-	if err := c.followup(t, false, true, ""); err != nil {
+	if err := c.followup(t, followupWith{stalled: true}); err != nil {
 		return err
 	}
 	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.
