@@ -444,7 +444,7 @@ A high-risk task's worker also runs Claude Code's `/security-review` before hand
 SENSITIVE_PATHS="db/migrate config/credentials :(glob)app/**/auth*"
 ```
 
-When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review; the worker's model stays as it was. A task raised after its hand-over shows `high: no security review yet` in `crew status` until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
+When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review; the worker's model stays as it was. A task raised after its hand-over says `not yet: no security review yet` in `crew status`, and `(no security review yet)` on its `to review:` line, until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
 
 **In `crew status`**, each open PR's row says whether you can merge it now, and the look it needs:
 
