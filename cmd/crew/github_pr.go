@@ -17,6 +17,10 @@ type gitHubPR struct {
 	Base           string  // the branch it targets
 	CI             ciState // the checks on its head commit (rollup)
 	Mergeable      string  // conflicting, mergeableUnknown, or empty when it merges cleanly
+	// MergeState is GitHub's verdict on merging it now: CLEAN, BEHIND (its base
+	// moved, and the branch rules want it up to date), BLOCKED (by a branch
+	// rule) and so on. crew sync doesn't record it, so it's empty from syncedPR.
+	MergeState string
 }
 
 // A PR's Mergeable, as crew sync records it: GitHub says it conflicts with its
@@ -28,7 +32,7 @@ const (
 
 // readPR asks GitHub for the PR at url.
 func readPR(repo, url string) (gitHubPR, error) {
-	out, err := ghQuiet(repo, "pr", "view", url, "--json", "state,isDraft,reviewDecision,updatedAt,baseRefName,statusCheckRollup,mergeable")
+	out, err := ghQuiet(repo, "pr", "view", url, "--json", "state,isDraft,reviewDecision,updatedAt,baseRefName,statusCheckRollup,mergeable,mergeStateStatus")
 	if err != nil {
 		return gitHubPR{}, err
 	}
@@ -40,6 +44,7 @@ func readPR(repo, url string) (gitHubPR, error) {
 		BaseRefName       string    `json:"baseRefName"`
 		StatusCheckRollup []ciCheck `json:"statusCheckRollup"`
 		Mergeable         string    `json:"mergeable"`
+		MergeStateStatus  string    `json:"mergeStateStatus"`
 	}
 	if err := json.Unmarshal(out, &v); err != nil {
 		return gitHubPR{}, err
@@ -53,7 +58,7 @@ func readPR(repo, url string) (gitHubPR, error) {
 		mergeable = mergeableUnknown
 	}
 	return gitHubPR{State: v.State, Draft: v.IsDraft, ReviewDecision: v.ReviewDecision, UpdatedAt: v.UpdatedAt,
-		Base: v.BaseRefName, CI: ci, Mergeable: mergeable}, nil
+		Base: v.BaseRefName, CI: ci, Mergeable: mergeable, MergeState: v.MergeStateStatus}, nil
 }
 
 // record writes the PR into the task's front matter, and says whether that

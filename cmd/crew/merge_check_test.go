@@ -18,7 +18,7 @@ var (
 	}
 	clearBody = "## Open questions\n\n## Evidence\n\n## Automated reviews\n" + reviewed + "## Log\n"
 	reviewed  = "### Automated review 1 — 2026-11-20 10:00\n- Reviewers: Claude reviewer\nNo findings.\n\n"
-	clearPR   = gitHubPR{State: "OPEN", Base: "main", CI: ciPassing}
+	clearPR   = gitHubPR{State: "OPEN", Base: "main", CI: ciPassing, MergeState: "CLEAN"}
 )
 
 // mergeTask writes a task file in project p of a ledger at dir, from its front
@@ -70,12 +70,18 @@ func TestMergeCheck(t *testing.T) {
 		{name: "stacked on an unmerged task", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: stacked on 020"},
 		{name: "based on another branch", fields: map[string]string{"base": "release"}, pr: func(p *gitHubPR) { p.Base = "release" }, want: "not yet: based on release, not main"},
 		{name: "conflicts", pr: func(p *gitHubPR) { p.Mergeable = conflicting }, want: "not yet: conflicts with main"},
+		{name: "behind its base, which the branch rules want it up to date with", pr: func(p *gitHubPR) { p.MergeState = "BEHIND" }, want: "not yet: behind main"},
 		{name: "CI failing", pr: func(p *gitHubPR) { p.CI = ciFailing }, want: "not yet: CI failing"},
 		{name: "no checks", pr: func(p *gitHubPR) { p.CI = "" }, want: "merge now"},
 		{name: "draft", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
+		{name: "changes requested", pr: func(p *gitHubPR) { p.ReviewDecision = "CHANGES_REQUESTED" }, want: "not yet: changes requested"},
 		{name: "high risk without its security review", fields: map[string]string{"risk": "high"}, want: "not yet: no security review yet"},
 		{name: "high risk with its security review", fields: map[string]string{"risk": "high"}, body: "## Evidence\n### Security review\nNothing found.\n\n## Automated reviews\n" + reviewed + "## Log\n", want: "merge now"},
 		{name: "open question", body: "## Open questions\n- [ ] Which way?\n\n## Automated reviews\n" + reviewed + "## Log\n", want: "not yet: 1 open question(s)"},
+		{name: "review required", pr: func(p *gitHubPR) { p.ReviewDecision, p.MergeState = "REVIEW_REQUIRED", "BLOCKED" }, want: "not yet: review required"},
+		{name: "blocked on GitHub for a reason crew can't name", pr: func(p *gitHubPR) { p.MergeState = "BLOCKED" }, want: "not yet: blocked by a branch rule on GitHub"},
+		{name: "blocked on GitHub, with a reason crew names", pr: func(p *gitHubPR) { p.CI, p.MergeState = ciRunning, "BLOCKED" }, want: "not yet: CI running"},
+		{name: "GitHub unread, changes requested when last synced", unread: true, fields: map[string]string{"pr_state": "open, changes requested"}, want: "not yet: changes requested (couldn't read GitHub; as of the last sync)"},
 		{name: "another machine runs the crew", worker: Agent{State: "working"}, readOnly: true, want: "not yet: worker can't be seen from this machine"},
 		{name: "several, soonest to clear first", worker: Agent{State: "working"}, pr: func(p *gitHubPR) { p.Draft, p.CI = true, ciFailing }, want: "not yet: worker busy; CI failing; draft"},
 		{name: "findings left for the user", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", want: "merge now, 2 finding(s) left for you"},

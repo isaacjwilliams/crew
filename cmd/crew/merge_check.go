@@ -94,16 +94,24 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		{!stacked && defaultBranch != "" && t.Base() != defaultBranch, fmt.Sprintf("based on %s, not %s", t.Base(), defaultBranch)},
 		// Needs a fix from the worker.
 		{pr.Mergeable == conflicting, "conflicts with " + base},
+		{pr.MergeState == "BEHIND", "behind " + base},
 		{pr.CI == ciFailing, "CI failing"},
 		{pr.Draft, "draft"},
+		{pr.ReviewDecision == "CHANGES_REQUESTED", "changes requested"},
 		{t.AwaitsSecurityReview(), "no security review yet"},
-		// Needs the user.
+		// Needs the user, or whoever the branch rules ask to review it.
+		{pr.ReviewDecision == "REVIEW_REQUIRED", "review required"},
 		{t.OpenQuestions() > 0, fmt.Sprintf("%d open question(s)", t.OpenQuestions())},
 		{s.readOnly, "worker can't be seen from this machine"},
 	} {
 		if c.holds {
 			m.InTheWay = append(m.InTheWay, c.reason)
 		}
+	}
+	// GitHub has the last word: a PR it blocks for a reason not named above, such
+	// as a required check that hasn't reported, isn't merge now either.
+	if len(m.InTheWay) == 0 && pr.MergeState == "BLOCKED" {
+		m.InTheWay = []string{"blocked by a branch rule on GitHub"}
 	}
 	if reviews := t.AutomatedReviews(); len(reviews) > 0 {
 		m.LeftForUser = reviews[len(reviews)-1].LeftForUser()
