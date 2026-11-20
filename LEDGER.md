@@ -57,7 +57,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `done` | a spike's report is in (see Kinds of task) | `crew hand-over` |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
-Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log).
+Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log); setting the status a task already has adds none.
 
 "In flight" means `working`, `needs-input`, `addressing-feedback`, or `pr-open`. "Finished" means `merged`, `done` or `abandoned`; `crew cleanup --merged` and `crew tick` remove the worktree and local branch of a `merged` or `done` task. `MAX_WORKERS` caps how many worker sessions can be running at once, and a goal's `max_in_flight` caps how many of its tasks can be in flight at once (see Goals).
 
