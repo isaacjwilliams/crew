@@ -433,4 +433,21 @@ mkdir -p "$RELEASES/v9.9.6"; printf '#!/bin/sh\necho 0.0.1\n' >"$RELEASES/v9.9.6
 rc=0; out=$("$H/bin/crew" version 2>&1) || rc=$?
 check "a download that isn't the version asked for is refused, and not kept" '[[ $rc == 1 && $out == *"couldn'"'"'t download crew 9.9.6"* ]] && ! compgen -G "$H/bin/release/crew-9.9.6*" >/dev/null'
 
+# 13. A suite reaches no crew home but the ones it makes: not the one a worker's
+#     session names, and not when it can't make its own. On 2026-11-20 a run from a
+#     copy of the repo with no .git made an empty home, so its crew calls fell
+#     through to the crew home it was started from, and wrote to it.
+SB=$(new_sandbox suites)
+isolate_home "$SB/home"
+CH=$SB/session/crew; make_home "$CH"
+# A worker's session: crew's settings in its environment and its home's bin/ first on PATH.
+session() { CREW_HOME=$CH CREW_PROJECT=webapp CREW_LEAD_FINGERPRINT= PATH="$CH/bin:$PATH" "$@"; }
+out=$(session bash -c '. "$1/lib.sh"; isolate_home "$2"; compgen -e | grep "^CREW_"; crew config CREW_HOME' _ "$TESTS_DIR" "$SB/probe" 2>&1)
+check "a suite started from a worker's session keeps none of its crew settings, and can't run its crew" \
+  '[[ $(grep "^CREW_" <<<"$out") == CREW_TEST_RELEASES && $out != *"$CH"* ]]'
+COPY=$SB/copy; mkdir "$COPY"; git -C "$CH" archive HEAD | tar -x -C "$COPY"
+out=$(session bash -c '. "$1/tests/lib.sh"; isolate_home "$2"; make_home "$HOME/crew"; PATH="$HOME/crew/bin:$PATH" crew config CREW_HOME' _ "$COPY" "$SB/copy-home" 2>&1); rc=$?
+check "a suite run from a copy of the repo with no .git refuses to start, saying why, and reaches no crew home" \
+  '((rc == 2)) && [[ $out == *"isn'"'"'t a git checkout"* && $out != *"$CH"* ]]'
+
 summary host
