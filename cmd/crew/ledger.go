@@ -476,6 +476,15 @@ func linkRules(key string) (kindRules, bool) {
 	return kindRules{}, false
 }
 
+// goAheadWaits are the statuses a go-ahead can wait for a task of this kind to
+// reach: the one its hand-over moves it to, and merged for a kind that makes a PR.
+func (r kindRules) goAheadWaits() []Status {
+	if r.pr {
+		return []Status{r.handedOver, Merged}
+	}
+	return []Status{r.handedOver}
+}
+
 // kindNames lists the kinds as a sentence does: "build, spike, fix or refine".
 func kindNames() string {
 	names := make([]string, len(kinds))
@@ -684,8 +693,20 @@ const statusLogged = "status → "
 const recordedForTheUser = "recorded under Open questions for the user"
 
 // SetStatus writes the task's status and logs the change. Every change of a
-// task's status goes through setStatus, so the Log has a line for each.
-func (t Task) SetStatus(s Status) error { return t.setStatus(string(s)) }
+// task's status goes through it, so the Log has a line for each. A go-ahead
+// lasts only while the task is ready, so any other status ends it.
+func (t Task) SetStatus(s Status) error {
+	if err := t.setStatus(string(s)); err != nil {
+		return err
+	}
+	if g := t.Get("go_ahead"); g != "" && s != Ready {
+		if err := t.Set("go_ahead", ""); err != nil {
+			return err
+		}
+		return t.Log(fmt.Sprintf("go-ahead (%s) ended: the task is %s now", g, s))
+	}
+	return nil
+}
 
 // setStatus writes the file's status and logs the change: a task's, or a
 // proposal's through crew set. It takes a string, since a proposal's statuses
@@ -721,6 +742,62 @@ func parsePriority(s string) (int, bool) {
 	n, err := strconv.Atoi(s)
 	return n, err == nil
 }
+
+// A GoAhead is the user's word to dispatch a ready task once another task in
+// its project has reached a status. It's recorded as go_ahead: <that task's ID>
+// <the status>, and crew tick dispatches the task once it's met.
+type GoAhead struct {
+	After  Task
+	Status Status
+}
+
+// newGoAhead is a go-ahead waiting for after to reach st, or an error when
+// after's kind never reaches st.
+func newGoAhead(after Task, st Status) (*GoAhead, error) {
+	r, err := after.rules()
+	if err != nil {
+		return nil, err
+	}
+	if waits := r.goAheadWaits(); !slices.Contains(waits, st) {
+		return nil, fmt.Errorf("a go-ahead can wait for %s to be %s, not '%s'", after.ID(), orList(waits), st)
+	}
+	return &GoAhead{after, st}, nil
+}
+
+// GoAhead is the task's go-ahead, or nil when it has none. A task in a goal
+// has none: the goal is its go-ahead. A value crew set wouldn't have written is
+// an error.
+func (t Task) GoAhead() (*GoAhead, error) {
+	v := t.Get("go_ahead")
+	if v == "" || t.Goal() != "" {
+		return nil, nil
+	}
+	id, st, ok := strings.Cut(v, " ")
+	after := Task{Doc{filepath.Join(filepath.Dir(t.Path), id+".md")}}
+	if !ok || !exists(after.Path) {
+		return nil, fmt.Errorf("go_ahead '%s' isn't a task in this project and a status", v)
+	}
+	return newGoAhead(after, Status(st))
+}
+
+// Met: the task the go-ahead waits on has reached its status, wherever it has
+// moved since. Its Log has the change, or it's delivered, which is past every
+// status a go-ahead waits for. An abandoned task meets none.
+func (g GoAhead) Met() bool {
+	switch st := g.After.Status(); {
+	case st == Abandoned:
+		return false
+	case st.Delivered():
+		return true
+	}
+	return slices.ContainsFunc(g.After.LogEntries(), func(e logEntry) bool {
+		s, ok := e.status()
+		return ok && s == g.Status
+	})
+}
+
+// String is the go-ahead as go_ahead records it.
+func (g GoAhead) String() string { return g.After.ID() + " " + string(g.Status) }
 
 // PRNumber is the number at the end of the task's PR URL.
 func (t Task) PRNumber() string {

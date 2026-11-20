@@ -160,7 +160,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    conflicts, send review rounds and restacks to
                                    idle workers, nudge workers whose turn ended
                                    mid-task, mark tasks waiting on you, clean up
-                                   merged tasks and done spikes (run by a timer)
+                                   merged tasks and done spikes, dispatch running
+                                   goals' ready tasks and those whose go-ahead is
+                                   met (run by a timer)
   crew pause [--project P|--all] [--force]
                                    Stop the project's work without losing any:
                                    nothing new starts, sessions mid-turn are told to
@@ -179,7 +181,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew get TASK KEY                Read a front-matter field
   crew set TASK KEY VALUE...       Write a front-matter field (not status pr-open:
                                    crew hand-over sets that). TASK can be a
-                                   proposal's file; an accepted one keeps its task
+                                   proposal's file; an accepted one keeps its task.
+                                   go_ahead "OTHER STATUS": crew tick dispatches the
+                                   ready TASK once OTHER is pr-open, merged or done
   crew log TASK MESSAGE...         Append to the task's Log
   crew cleanup TASK|--merged [--project P] [--force]
                                    Remove worktree/local branch of merged tasks and

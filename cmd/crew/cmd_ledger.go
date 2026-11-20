@@ -205,9 +205,12 @@ func cmdSet(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if key == "status" {
+	switch {
+	case key == "status" && isProposal(f):
 		err = d.setStatus(value)
-	} else {
+	case key == "status":
+		err = Task{d}.SetStatus(Status(value))
+	default:
 		err = d.Set(key, value)
 	}
 	if err != nil {
@@ -242,7 +245,43 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 	if err := c.checkStacks(t, key, value); err != nil {
 		return "", err
 	}
+	if key == "go_ahead" && value != "" {
+		return c.checkGoAhead(t, value)
+	}
 	return value, nil
+}
+
+// checkGoAhead is the go_ahead crew set records for a ready task outside a
+// goal: value names another task in its project and a status, and is recorded
+// with that task's ID. It refuses a wait that could never end: a status the
+// other task's kind never reaches, or an abandoned task.
+func (c *Crew) checkGoAhead(t Task, value string) (string, error) {
+	if g := t.Goal(); g != "" {
+		return "", fail("%s is one of goal %s's tasks, which crew tick dispatches while the goal runs; a go-ahead is for a task outside a goal", t.ID(), g)
+	}
+	if st := t.Status(); st != Ready {
+		return "", fail("%s is '%s'; a go-ahead is for a ready task", t.ID(), st)
+	}
+	arg, st, ok := strings.Cut(value, " ")
+	if !ok {
+		return "", mustBe("go_ahead", "a task and the status it waits for", value)
+	}
+	f, matches := resolveIn(arg, c.files("tasks", taskProjectDir(t)))
+	if f == "" {
+		return "", ambiguousFail(arg, matches, "go_ahead: '%s' doesn't match exactly one task in %s", arg, taskProjectDir(t))
+	}
+	after := Task{Doc{f}}
+	switch {
+	case after.Path == t.Path:
+		return "", fail("a go-ahead waits on another task, not %s itself", t.ID())
+	case after.Status() == Abandoned:
+		return "", fail("%s is abandoned, so a go-ahead waiting on it would never be met", after.ID())
+	}
+	g, err := newGoAhead(after, Status(strings.TrimSpace(st)))
+	if err != nil {
+		return "", fail("%v", err)
+	}
+	return g.String(), nil
 }
 
 // checkStacks refuses a base or kind that would put a task in a stack its kind
