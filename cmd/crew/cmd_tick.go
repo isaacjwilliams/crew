@@ -72,7 +72,7 @@ func cmdTick(c *Crew, args []string) error {
 		}
 		// A paused project still gets the steps that only record (cleanup,
 		// feedback, ci-fix, catch-up, needs-input, goal done); those that would start a
-		// session wait, quietly, for crew resume.
+		// session are held back, saying so, until crew resume.
 		paused, idx := p.Paused(), c.branches(name)
 		for _, t := range c.tasks(name) {
 			c.tickTask(p, idx, t, as, paused, news)
