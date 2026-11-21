@@ -115,23 +115,33 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 }
 
 // tickCleanup cleans up a delivered task's worktree. When cleanup leaves it
-// (uncommitted changes, say), cleanup says why on its last stderr line. That line
-// is held back for the leads, who hear it once, and cleanup is tried again next tick.
+// (uncommitted changes, say), cleanup warns why on its last stderr line. That
+// line is held back for the leads, who hear it once, and cleanup is tried again
+// next tick.
 func (c *Crew) tickCleanup(p *Project, t Task, news *tickNews) {
 	var errs strings.Builder
-	code := c.step(&errs, "cleanup", t.Path)
-	fmt.Fprint(os.Stderr, errs.String()) // step collected it, but a tick's own stderr still shows it
-	switch code {
+	switch c.step(&errs, "cleanup", t.Path) {
 	case 0:
+		fmt.Fprint(os.Stderr, errs.String())
 		news.did(p.Name, "%s: %s; worktree cleaned up", t.ID(), t.Status())
 	case exitNotYet:
-		// Cleanup's report adds "crew: " to its message. A worktree tool's own
-		// output comes before it, and differs every try.
-		lines := splitLines(strings.TrimSpace(errs.String()))
-		if len(lines) > 0 {
-			news.heldBack(p.Name, "%s", strings.TrimPrefix(lines[len(lines)-1], "crew: "))
-		}
+		// The reason is held back, which prints it; what came before it is shown here.
+		rest, why := splitRefusal(errs.String())
+		fmt.Fprint(os.Stderr, rest)
+		news.heldBack(p.Name, "%s", why)
+	default:
+		fmt.Fprint(os.Stderr, errs.String())
 	}
+}
+
+// splitRefusal splits what a step wrote to stderr into everything before its
+// last line, and that line without the "crew: " that main puts before the
+// refusal it reports.
+func splitRefusal(stderr string) (rest, why string) {
+	stderr = strings.TrimRight(stderr, "\n")
+	cut := strings.LastIndex(stderr, "\n") + 1
+	rest = stderr[:cut]
+	return rest, strings.TrimPrefix(stderr[cut:], "crew: ")
 }
 
 // tickTask is one task's share of a tick, for a task already under way: its
@@ -341,9 +351,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		case 0:
 			news.did(project, "%s: dispatched for goal %s", t.ID(), t.Goal())
 		case exitNotYet: // held back, by a cap say; the next tick tries again
-			// main prints the refusal last, after "crew: ".
-			why := strings.TrimRight(errs.String(), "\n")
-			why = strings.TrimPrefix(why[strings.LastIndex(why, "\n")+1:], "crew: ")
+			_, why := splitRefusal(errs.String())
 			news.heldBack(project, "%s: dispatch held back: %s", t.ID(), why)
 		default:
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))

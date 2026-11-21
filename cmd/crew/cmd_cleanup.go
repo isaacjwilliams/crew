@@ -1,17 +1,14 @@
 package main
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 // crew cleanup TASK|--merged [--force]: stops a finished task's worker and
 // removes it from agent view, ends what it left running in the worktree,
 // removes the worktree, and deletes the local branch of a task that delivered
 // (merged, or a spike done). --merged cleans up every task that delivered.
-// A task it leaves alone is named on stderr, one line for all of them, and the
-// exit code is exitNotYet (tick runs it for one task, so its line is that task's;
-// --merged by hand joins the lines with "; "): crew tick reads that line to tell the leads why.
+// A task it leaves alone is warned of, "<task>: worktree stays: <why>", and the
+// exit code is exitNotYet. crew tick runs it for one task and reads that warning,
+// the last line of stderr, to tell the leads why.
 func cmdCleanup(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -58,9 +55,10 @@ func cmdCleanup(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	var stays []string
+	stays := 0
 	stay := func(t Task, why string) {
-		stays = append(stays, t.ID()+": worktree stays: "+why)
+		warn("%s: worktree stays: %s", t.ID(), why)
+		stays++
 	}
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
@@ -108,8 +106,8 @@ func cmdCleanup(c *Crew, args []string) error {
 		fmt.Println("cleaned up " + t.ID())
 	}
 	c.commit("cleanup")
-	if len(stays) > 0 {
-		return notYet("%s", strings.Join(stays, "; "))
+	if stays > 0 {
+		return exitQuietly(exitNotYet)
 	}
 	return nil
 }
