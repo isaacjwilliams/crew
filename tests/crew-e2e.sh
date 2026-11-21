@@ -905,7 +905,8 @@ check "sync sees the restack, moves base_sha to the parent's new tip and keeps t
   '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" && $(crew get 10 earlier_base_shas) == "$T9" ]]'
 setstate "done" null
 check "restack has nothing to do for a task that's up to date" '[[ $(crew restack 10) == *"nothing to restack"* ]]'
-check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'
+sed -i 's/^status: pr-open$/status: working/' "$F9"; out=$(crew restack 9 2>&1); st=$?; sed -i "s/^status: working$/status: pr-open/" "$F9"
+check "restack refuses a task that isn't stacked, before waiting for pr-open" '((st == 1)) && [[ $out == *"009-season-model has nothing to restack"* ]]'
 
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
 crew set 11 model sonnet; crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
