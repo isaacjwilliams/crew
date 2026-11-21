@@ -129,6 +129,10 @@ case ${1:-} in
       if [[ -z $session ]]; then
         id=$(printf '%08x' $((RANDOM * RANDOM + RANDOM)))
         session=$id-stub
+        if [[ -f $HOME/fresh-transcript ]]; then
+          rm "$HOME/fresh-transcript"; mkdir -p "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/stub"
+          echo '{"type":"user","message":{"role":"user","content":"New input"}}' >"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/stub/$session.jsonl"
+        fi
       else
         id=${session:0:8}
       fi

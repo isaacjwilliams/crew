@@ -556,6 +556,13 @@ out=$(followup1 "still on sonnet")
 check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
 out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
 check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
+sess=$(crew get 1 worker_session); transcript "$sess" ended
+for _ in {1..40}; do echo '{"type":"system","subtype":"stop_hook_summary"}' >>"$HOME/.claude/projects/stub/$sess.jsonl"; done
+touch "$HOME/fresh-transcript"; SECONDS=0
+out=$(setstate "done" null; crew followup 1 --fresh --note "fresh over a long transcript" 2>&1)
+check "a fresh followup is confirmed once its new session takes its prompt, however long the replaced session's transcript" \
+  '((SECONDS < 10)) && [[ $out == *"(fresh)"* && $(crew get 1 worker_session) != "$sess" ]]'
+rm -f "$HOME/.claude/projects/stub/$sess.jsonl" "$HOME/.claude/projects/stub/$(crew get 1 worker_session).jsonl"
 crew set 1 model haiku; echo "# changed" >>"$L/agents/implementer.md"; install_agents; out=$(followup1 "both changed")
 check "a followup after the model and the instructions both change says both" \
   '[[ $out == *"(fresh: its model changed from sonnet to haiku, and its instructions or settings changed)"* && $(last_launch) == *" --model haiku "* && $(crew get 1 worker_model) == haiku ]]'
