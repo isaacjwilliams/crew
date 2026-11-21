@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -189,11 +190,36 @@ func (a Agent) quietFor() (time.Duration, bool) {
 	return time.Since(info.ModTime()), true
 }
 
-// wroteSince: the session has written to its transcript since t, or has no
-// transcript to read, as a session just started may not.
-func (a Agent) wroteSince(t time.Time) bool {
-	info, err := os.Stat(transcript(a.SessionID))
-	return err != nil || info.ModTime().After(t)
+// transcriptSize is how many bytes a session's transcript holds, or 0 when it
+// has none.
+func transcriptSize(session string) int64 {
+	info, err := os.Stat(transcript(session))
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// turnStartedAfter: the session's transcript has a prompt or a reply past its
+// first `from` bytes, or there's no transcript to read, as a session just started
+// may not have. Other entries don't count: a resume writes metadata first.
+func (a Agent) turnStartedAfter(from int64) bool {
+	f, err := os.Open(transcript(a.SessionID))
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	if _, err := f.Seek(from, io.SeekStart); err != nil {
+		return true
+	}
+	b, _ := io.ReadAll(f)
+	for _, l := range strings.Split(string(b), "\n") {
+		var e struct{ Type string }
+		if json.Unmarshal([]byte(l), &e) == nil && (e.Type == "user" || e.Type == "assistant") {
+			return true
+		}
+	}
+	return false
 }
 
 // open: its process is running.
@@ -450,7 +476,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 		cmd = c.claude(slices.Concat([]string{"--name", d.Get(start.prefix + "_name"), "--add-dir", c.Home, "--bg"}, mcp, start.flags, model, []string{prompt})...)
 	}
 	cmd.Dir = wt
-	launched := time.Now()
+	before := transcriptSize(session)
 	raw, _ := cmd.CombinedOutput()
 	// The job ID can come wrapped in color codes, which would never match `claude agents`.
 	out := ansiCode.ReplaceAllString(string(raw), "")
@@ -476,7 +502,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 			fmt.Fprintln(os.Stderr, l)
 		}
 	}
-	started, ok := c.waitForLaunch(job, launched)
+	started, ok := c.waitForLaunch(job, before)
 	switch {
 	case !ok:
 		warn("claude started job %s, but it failed straight away (see 'claude agents')", job)
@@ -509,10 +535,10 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 // session ID. A process that has just started can report a new session ID for a
 // moment, before it loads the one it resumes, so only one that starts with the job
 // ID counts. A resumed process also shows a moment before it writes its prompt to
-// the transcript, and reads as idle until then; returning sooner would let the
-// next command take it for idle too. A resume of a session that can't be found
-// ends in failed: then ok is false.
-func (c *Crew) waitForLaunch(job string, launched time.Time) (session string, ok bool) {
+// the transcript, past the `before` bytes it held, and reads as idle until then;
+// returning sooner would let the next command take it for idle too. A resume of a
+// session that can't be found ends in failed: then ok is false.
+func (c *Crew) waitForLaunch(job string, before int64) (session string, ok bool) {
 	for range 60 {
 		if a := c.agents().find(job); a != nil {
 			if a.State == "failed" {
@@ -520,7 +546,7 @@ func (c *Crew) waitForLaunch(job string, launched time.Time) (session string, ok
 			}
 			if a.open() && strings.HasPrefix(a.SessionID, job) {
 				session = a.SessionID
-				if a.wroteSince(launched) {
+				if a.turnStartedAfter(before) {
 					return session, true
 				}
 			}
