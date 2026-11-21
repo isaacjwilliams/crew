@@ -84,10 +84,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    Resume the task's worker on the latest round/note
   crew attach TASK                 Attach this terminal to the task's worker; a
                                    followup or tick that resumes the worker ends it
-  crew restack TASK [--again]      Have a stacked task's worker rebase it after its
-                                   parent moved or merged (bottom of the stack first),
-                                   and any task's worker retarget a PR that targets
-                                   another branch than its base;
+  crew restack TASK [--again]      Start a fresh worker on Sonnet to rebase a stacked
+                                   task after its parent moved or merged (bottom of the
+                                   stack first), or to retarget a PR that targets another
+                                   branch than its base; only for a pr-open task;
                                    --again resends a restack the worker already has
   crew nudge TASK                  Resume, once, a worker whose turn ended mid-task;
                                    ask the lead if it stalls again (run by crew tick)
