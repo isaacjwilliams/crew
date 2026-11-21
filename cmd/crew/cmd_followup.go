@@ -1,8 +1,9 @@
 package main
 
 // Commands that act on a task's worker session: crew followup resumes it,
-// crew attach opens it in this terminal, crew restack resumes it with a rebase or
-// a retarget to run, and crew nudge resumes it when its turn ended mid-task.
+// crew attach opens it in this terminal, crew restack starts a fresh one with a
+// rebase or a retarget to run, and crew nudge resumes it when its turn ended
+// mid-task.
 
 import (
 	"fmt"
@@ -61,6 +62,13 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if err != nil {
 		return err
 	}
+	// A restack session ran one restack and nothing else, so the worker after it
+	// starts fresh, on the task's own model.
+	restack, err := c.launchRestack(p)
+	if err != nil {
+		return err
+	}
+	afterRestack := t.Get("worker_fingerprint") == restack.fingerprint
 	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
 	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
 		return err
@@ -127,9 +135,12 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), p.Name, t.Path, wt), with.fresh)
+		t.ID(), p.Name, t.Path, wt), with.fresh || afterRestack)
 	if err != nil {
 		return err
+	}
+	if afterRestack {
+		l.mode = "fresh: its last session only ran a restack"
 	}
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
@@ -212,11 +223,15 @@ func cmdAttach(c *Crew, args []string) error {
 
 // crew restack TASK [--again]: has a task's worker rebase its branch after its
 // parent moved or merged, or point its PR at the task's base when GitHub has it
-// targeting another branch, or both. crew only works out what to run; the worker
-// does the rebase, the push and the retarget, and records a new base when it has
-// succeeded, so a failed restack still shows as one that's needed. restack_sent
-// records the commit the last rebase was asked onto, and retarget_sent the base
-// the last retarget asked for, so neither is sent twice unless --again.
+// targeting another branch, or both. crew only works out what to run; a fresh
+// worker (startRestack) does the rebase, the push and the retarget, and records a
+// new base when it has succeeded, so a failed restack still shows as one that's
+// needed. restack_sent records the commit the last rebase was asked onto, and
+// retarget_sent the base the last retarget asked for, so neither is sent twice
+// unless --again.
+//
+// A restack waits until the task is pr-open, as crew tick's does: before that,
+// the worker is still making the branch.
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -246,11 +261,14 @@ func cmdRestack(c *Crew, args []string) error {
 	}
 	// Refuse a task there's nothing to send for before making its worktree.
 	if st := t.Status(); st.Finished() {
-		return fail("%s is %s; not resuming its worker", t.ID(), st)
+		return fail("%s is %s; not restacking it", t.ID(), st)
 	}
 	parent, stacked := idx.parentOf(t)
 	if !stacked && !idx.prOffBase(t) {
 		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
+	}
+	if st := t.Status(); st != PROpen {
+		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
 	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
@@ -286,7 +304,7 @@ func cmdRestack(c *Crew, args []string) error {
 	return fail("%s's branch doesn't start on %s (base_sha %s isn't on it), so its PR would bring other commits there. crew restack rebases only stacked tasks; tell its worker what to do with 'crew followup %s --note'", t.ID(), t.Base(), cut(t.Get("base_sha"), 12), t.ID())
 }
 
-// sendRetarget resumes a task's worker to point its PR at the task's base, with
+// sendRetarget has a fresh worker point its PR at the task's base, with
 // nothing to rebase. retarget_sent is that base, not the PR's: moving the task
 // to yet another branch is a new retarget, to be sent.
 func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error {
@@ -295,19 +313,11 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
-	if err := c.followup(t, followupWith{note: note}); err != nil {
-		return err
-	}
-	if err := c.lock(); err != nil {
-		return err
-	}
-	t.Set("retarget_sent", base)
-	c.commit("retarget " + p.Name + "/" + t.ID())
-	return nil
+	return c.startRestack(p, t, note, "", base)
 }
 
-// sendRebase resumes a stacked task's worker to rebase its branch onto its
-// parent's latest commit, or onto what the parent merged into, and to retarget
+// sendRebase has a fresh worker rebase a stacked task's branch onto its
+// parent's latest commit, or onto what the parent merged into, and retarget
 // its PR when that's needed too. retarget is retargetReason's answer for t.
 func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarget string, again bool) error {
 	repo, base, branch, pid := p.Repo(), t.Base(), t.Branch(), parent.ID()
@@ -352,17 +362,85 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
-	if err := c.followup(t, followupWith{note: note}); err != nil {
+	return c.startRestack(p, t, note, target, retargetTo)
+}
+
+// restackModel is the model a restack runs on, whatever the task's own: a
+// rebase or a retarget, with the exact commands to run, needs no more.
+const restackModel = "sonnet"
+
+// restackPrompt opens a restack session's first message, before the note: the
+// task and project, then the task file and the worktree. implementer.md's one
+// exception to reading the whole task file first matches its opening.
+const restackPrompt = "You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs."
+
+// launchRestack is the launcher of a restack session: a worker on restackModel
+// that restackPrompt tells to run one restack and nothing else. Its fingerprint
+// takes in that prompt, since it's part of what the session loads. That sets a
+// restack session's fingerprint apart from a worker's, so followup can tell one
+// and start a fresh worker after it, even on a task whose model is restackModel.
+func (c *Crew) launchRestack(p *Project) (launcher, error) {
+	l, err := c.launchWorker(p, restackModel)
+	if err != nil {
+		return l, err
+	}
+	l.fingerprint = c.fingerprint([]string{l.fingerprint, restackPrompt})
+	return l, nil
+}
+
+// startRestack starts a fresh session on restackModel to run note, a rebase or
+// a retarget, and makes it the task's worker. Resuming the worker's own
+// conversation would cost far more than the restack does, since it's long.
+//
+// It records what it sent as restack_sent (the commit to rebase onto) and
+// retarget_sent (the PR's new base), leaving out an empty one.
+//
+// The session gets the restack and nothing else. Review rounds and word of a
+// pause wait for the next followup, which starts a fresh worker on the task's
+// own model (launchRestack).
+func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) error {
+	// Building the launcher reads the worker settings, and a bad mcp.json would
+	// stop the launch: either stops here, before anything changes.
+	start, err := c.launchRestack(p)
+	if err != nil {
 		return err
+	}
+	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
+		return err
+	}
+	// A busy worker would be working in the same worktree.
+	if as, job := c.agents(), t.WorkerJob(); as.jobBusy(job) {
+		return fail("worker %s is busy (%s). crew tick sends the restack once it's free", job, as.jobState(job))
 	}
 	if err := c.lock(); err != nil {
 		return err
 	}
-	t.Set("restack_sent", target)
+	// Again under the lock: the task may have moved on since crew restack
+	// looked at it, and the project may have paused.
+	if st := t.Status(); st != PROpen {
+		return fail("%s is %s now; not restacking it", t.ID(), st)
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
+	wt := t.Worktree()
+	// fresh: never resume the worker's conversation.
+	l, err := c.relaunch(start, t.Doc, wt, note, fmt.Sprintf(restackPrompt, t.ID(), p.Name, t.Path, wt), true)
+	if err != nil {
+		return err
+	}
+	l.record(t.Doc)
+	if onto != "" {
+		t.Set("restack_sent", onto)
+	}
 	if retargetTo != "" {
 		t.Set("retarget_sent", retargetTo)
 	}
+	t.SetStatus(Working)
+	t.Touch()
+	t.Log(fmt.Sprintf("restack: fresh worker %s on %s — %s", l.job, restackModel, note))
 	c.commit("restack " + p.Name + "/" + t.ID())
+	fmt.Printf("restack sent to %s → fresh worker %s on %s\n", t.ID(), l.job, restackModel)
 	return nil
 }
 
