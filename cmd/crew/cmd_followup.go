@@ -359,6 +359,25 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 // rebase or a retarget, with the exact commands to run, needs no more.
 const restackModel = "sonnet"
 
+// restackPrompt opens a restack session's first message, before the note: the
+// task and project, then the task file and the worktree. implementer.md's one
+// exception to reading the whole task file first matches its opening.
+const restackPrompt = "You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs."
+
+// launchRestack is the launcher of a restack session: a worker on restackModel
+// that restackPrompt tells to run one restack and nothing else. Its fingerprint
+// takes in that prompt, since it's part of what the session loads. So the next
+// followup sees other instructions (changedSince) and starts a fresh worker on
+// the task's model, even when that model is restackModel too.
+func (c *Crew) launchRestack(p *Project) (launcher, error) {
+	l, err := c.launchWorker(p, restackModel)
+	if err != nil {
+		return l, err
+	}
+	l.fingerprint = c.fingerprint([]string{l.fingerprint, restackPrompt})
+	return l, nil
+}
+
 // startRestack starts a fresh session on restackModel to run note, a rebase or
 // a retarget, and makes it the task's worker. Resuming the worker's own
 // conversation would cost far more than the restack does, since it's long.
@@ -367,13 +386,12 @@ const restackModel = "sonnet"
 // retarget_sent (the PR's new base), leaving out an empty one.
 //
 // The session gets the restack and nothing else. Review rounds and word of a
-// pause wait for the next followup. That one starts a fresh session on the
-// task's own model, because the recorded worker_model is now restackModel
-// (changedSince), unless the task's model is restackModel too.
+// pause wait for the next followup, which starts a fresh worker on the task's
+// own model (launchRestack).
 func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) error {
 	// Building the launcher reads the worker settings, and a bad mcp.json would
 	// stop the launch: either stops here, before anything changes.
-	start, err := c.launchWorker(p, restackModel)
+	start, err := c.launchRestack(p)
 	if err != nil {
 		return err
 	}
@@ -396,11 +414,8 @@ func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) e
 		return err
 	}
 	wt := t.Worktree()
-	// fresh: never resume the worker's conversation. implementer.md's exception
-	// to reading the whole task file first matches this prompt's opening.
-	l, err := c.relaunch(start, t.Doc, wt, note, fmt.Sprintf(
-		"You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs.",
-		t.ID(), p.Name, t.Path, wt), true)
+	// fresh: never resume the worker's conversation.
+	l, err := c.relaunch(start, t.Doc, wt, note, fmt.Sprintf(restackPrompt, t.ID(), p.Name, t.Path, wt), true)
 	if err != nil {
 		return err
 	}

@@ -955,7 +955,11 @@ sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_launch) == *"git rebase --onto $T10b $T10\`"* ]] && restacked 11'
-(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; hand_over 11
+(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"
+s11=$(crew get 11 worker_session); setstate "done" null; crew followup 11 --note "go on" >/dev/null
+check "the next followup after a restack starts afresh even when the task's own model is Sonnet too" \
+  '[[ $(last_launch) == *" --model sonnet You are picking up task "* && $(last_launch) != *--resume* && $(crew get 11 worker_session) != "$s11" ]]'
+hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
 check "--on refuses a merged task" '! crew new "Too late" --on 9 2>/dev/null'
