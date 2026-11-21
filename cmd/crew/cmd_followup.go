@@ -250,15 +250,15 @@ func cmdRestack(c *Crew, args []string) error {
 		return fail("%s has no branch yet; dispatch it first", t.ID())
 	}
 	// Refuse a task there's nothing to send for before making its worktree.
-	switch st := t.Status(); {
-	case st.Finished():
+	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not restacking it", t.ID(), st)
-	case st != PROpen:
-		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
 	}
 	parent, stacked := idx.parentOf(t)
 	if !stacked && !idx.prOffBase(t) {
 		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
+	}
+	if st := t.Status(); st != PROpen {
+		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
 	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
