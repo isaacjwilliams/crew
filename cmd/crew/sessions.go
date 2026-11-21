@@ -502,7 +502,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 			fmt.Fprintln(os.Stderr, l)
 		}
 	}
-	started, ok := c.waitForLaunch(job, before)
+	started, ok := c.waitForLaunch(job, session, before)
 	switch {
 	case !ok:
 		warn("claude started job %s, but it failed straight away (see 'claude agents')", job)
@@ -535,10 +535,12 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 // session ID. A process that has just started can report a new session ID for a
 // moment, before it loads the one it resumes, so only one that starts with the job
 // ID counts. A resumed process also shows a moment before it writes its prompt to
-// the transcript, past the `before` bytes it held, and reads as idle until then;
-// returning sooner would let the next command take it for idle too. A resume of a
-// session that can't be found ends in failed: then ok is false.
-func (c *Crew) waitForLaunch(job string, before int64) (session string, ok bool) {
+// the transcript, and reads as idle until then; returning sooner would let the next
+// command take it for idle too. `before` is the size of `recorded`'s transcript at
+// the launch, so only a prompt past it counts there; any other session's transcript
+// is read from the start. A resume of a session that can't be found ends in failed:
+// then ok is false.
+func (c *Crew) waitForLaunch(job, recorded string, before int64) (session string, ok bool) {
 	for range 60 {
 		if a := c.agents().find(job); a != nil {
 			if a.State == "failed" {
@@ -546,7 +548,11 @@ func (c *Crew) waitForLaunch(job string, before int64) (session string, ok bool)
 			}
 			if a.open() && strings.HasPrefix(a.SessionID, job) {
 				session = a.SessionID
-				if a.turnStartedAfter(before) {
+				from := int64(0)
+				if session == recorded {
+					from = before
+				}
+				if a.turnStartedAfter(from) {
 					return session, true
 				}
 			}
