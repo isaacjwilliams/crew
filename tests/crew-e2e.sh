@@ -497,6 +497,10 @@ out=$(crew followup 1 --note "stop didn't take" 2>&1); code=$?
 check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job" \
   '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
 rm -f "$HOME/stop-noop"
+setstate "done" null; touch "$HOME/reopen-on-resume"
+out=$(crew followup 1 --note "reopened" 2>&1)
+copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
+check "a copy started anyway, by a process that opened again before the resume, is recorded, with a warning" '[[ $out == *"started a copy of session $sess"* && $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(crew get 1 worker_job) == "$(jq -r ".[-1].id" "$HOME/agents.json")" ]]'
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
 check "a resume whose process first reports a new session ID keeps the recorded session" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]]'

@@ -119,7 +119,8 @@ case ${1:-} in
       if [[ -n $resume ]]; then
         if ((flags)); then
           echo "note: background session $resume keeps its own saved options, so the flags you passed started a copy"
-        elif jq -e --arg s "$resume" 'any(.[]; .sessionId==$s and .pid != null)' "$HOME/agents.json" >/dev/null; then
+        elif [[ -f $HOME/reopen-on-resume ]] || jq -e --arg s "$resume" 'any(.[]; .sessionId==$s and .pid != null)' "$HOME/agents.json" >/dev/null; then
+          rm -f "$HOME/reopen-on-resume"
           echo "note: session $resume is already running in the background, so this started a copy"
         else
           session=$resume
