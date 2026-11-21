@@ -135,8 +135,8 @@ func (c *Crew) tickCleanup(p *Project, t Task, news *tickNews) {
 }
 
 // splitRefusal splits what a step wrote to stderr into everything before its
-// last line, and that line without the "crew: " that main puts before the
-// refusal it reports.
+// last line, and that line without the "crew: " that crew puts before its
+// messages.
 func splitRefusal(stderr string) (rest, why string) {
 	stderr = strings.TrimRight(stderr, "\n")
 	cut := strings.LastIndex(stderr, "\n") + 1
