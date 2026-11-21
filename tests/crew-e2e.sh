@@ -206,7 +206,7 @@ doctor_out=$(env -u CLAUDECODE crew doctor 2>&1); st=$?
 check "crew doctor fails its required checks for a signed-out codex" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex signed in — run '"'codex login'"'"* && $doctor_out == *"Some required checks failed."* ]]'
 rm "$HOME/codex-signed-out"
 mkdir -p "$SB/no-codex"
-for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex ]] || ln -sf "$s" "$SB/no-codex/"; done
+for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex || $s == */crew ]] || ln -sf "$s" "$SB/no-codex/"; done   # the stub crew would hide the home's
 no_codex_path=$SB/no-codex
 IFS=: read -ra dirs <<<"$PATH"
 for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done
@@ -1905,6 +1905,21 @@ err=$(crew tick 2>&1 >/dev/null); rc=$?
 check "crew tick brings mcp.local.json and the leads' servers up to date" \
   '[[ $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$MLJ") == https://docs.example/mcp && $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$L/lead/.mcp.json") == https://docs.example/mcp ]]'
 check "a project whose mcp.json is broken is reported, keeps the mcp.local.json it had, and the tick carries on" '[[ $rc == 0 && $err == *"$M2: server"*"\${NOT_SET} isn"*"set"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
+# A project with no clone on this machine holds up no other project's sync, whether
+# it's run by hand or by a tick. Its name sorts first, so it's met before the others.
+NC=$L/projects/0-no-clone; mkdir "$NC"; echo "REMOTE=\"$SB/nowhere.git\"" >"$NC/project.env"
+merged_task() {  # title: a dispatched task with a PR, which GitHub reads as merged
+  local f; f=$(crew new "$1" --project "$PJ"); fill "$f"; crew ready "$f" >/dev/null; setstate "done" null; crew dispatch "$f" >/dev/null 2>&1
+  crew set "$f" pr https://github.com/isaac/webapp/pull/12; echo "$f"; }
+FS=$(merged_task "Merged beside a broken project")
+out=$(crew sync --all 2>&1); st=$?
+check "sync --all syncs the other projects when one can't be loaded, names the one it skipped and why, and exits 1" \
+  '((st == 1)) && [[ $(crew get "$FS" status) == merged && $out == *"crew: no clone of 0-no-clone on this machine"* && $out == *"crew: 0-no-clone: skipped"* ]]'
+FT=$(merged_task "Merged beside a broken project, by a tick")
+err=$(crew tick 2>&1 >/dev/null)
+check "a tick records another project's merge while one can't be loaded, naming the one it skipped once, and not as a failed sync" \
+  '[[ $(crew get "$FT" status) == merged && $(grep -c "0-no-clone: skipped" <<<"$err") == 1 && $err != *"sync failed"* ]]'
+rm -r "$NC"; crew cleanup --merged --project "$PJ" >/dev/null 2>&1
 
 
 # Pausing: crew pause stops a project's work without losing any. Sessions mid-turn

@@ -433,4 +433,28 @@ mkdir -p "$RELEASES/v9.9.6"; printf '#!/bin/sh\necho 0.0.1\n' >"$RELEASES/v9.9.6
 rc=0; out=$("$H/bin/crew" version 2>&1) || rc=$?
 check "a download that isn't the version asked for is refused, and not kept" '[[ $rc == 1 && $out == *"couldn'"'"'t download crew 9.9.6"* ]] && ! compgen -G "$H/bin/release/crew-9.9.6*" >/dev/null'
 
+# 13. A suite reaches no crew home but the ones it makes: not the one a worker's
+#     session names, and not when it can't make its own. On 2026-11-20 a run from a
+#     copy of the repo with no .git made an empty home, so its crew calls fell
+#     through to the crew home it was started from, and wrote to it.
+SB=$(new_sandbox suites)
+isolate_home "$SB/home"
+CH=$SB/session/crew; make_home "$CH"
+# A worker's session: crew's settings in its environment and its home's bin/ first on PATH.
+session() { CREW_HOME=$CH CREW_PROJECT=webapp CREW_LEAD_FINGERPRINT=f1ngerpr1nt PATH="$CH/bin:$PATH" "$@"; }
+in_suite() {  # checkout 'commands': runs them as a suite in that checkout would, started from a worker's session
+  session bash -c 'checkout=$1 home=$2 commands=$3; . "$checkout/tests/lib.sh"; isolate_home "$home"; eval "$commands"' \
+    _ "$1" "$(mktemp -d "$SB/home.XXXXXX")" "$2" 2>&1
+}
+# The only CREW_ setting left is lib.sh's own, and with no home of the suite's own on
+# PATH, crew is the stub, which refuses rather than name the session's home.
+out=$(in_suite "$REPO_DIR" 'compgen -e | grep "^CREW_"; crew config CREW_HOME')
+check "a suite started from a worker's session keeps none of its crew settings, and can't run its crew" \
+  '[[ $(grep "^CREW_" <<<"$out") == CREW_TEST_RELEASES && $out != *"$CH"* ]]'
+# A copy with no .git: make_home stops the suite with exit 2 before any crew runs.
+COPY=$SB/copy; mkdir "$COPY"; git -C "$CH" archive HEAD | tar -x -C "$COPY"
+out=$(in_suite "$COPY" 'make_home "$HOME/crew"; PATH="$HOME/crew/bin:$PATH" crew config CREW_HOME'); rc=$?
+check "a suite run from a copy of the repo with no .git refuses to start, saying why, and reaches no crew home" \
+  '((rc == 2)) && [[ $out == *"isn'"'"'t a git checkout"* && $out != *"$CH"* ]]'
+
 summary host

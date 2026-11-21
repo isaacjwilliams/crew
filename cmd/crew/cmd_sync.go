@@ -8,7 +8,8 @@ import (
 // crew sync [--quiet] [--all]: finds missing PR URLs, records each PR's state, its
 // base and when it last changed, marks merged tasks, raises the risk of tasks that
 // touch a sensitive path, and reports tasks that need a restack, in the current
-// project or all of them.
+// project or all of them. A project it can't load, with no clone here say, holds
+// up no other: sync names it, skips it, and exits 1 once it has synced the rest.
 func cmdSync(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -40,11 +41,14 @@ func cmdSync(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	changed := false
+	changed, skipped := false, false
 	for _, name := range projects {
 		p, err := c.loadProject(name)
 		if err != nil {
-			return err
+			report(err)
+			warn("%s: skipped", name)
+			skipped = true
+			continue
 		}
 		for _, t := range c.tasks(name) {
 			st := t.Status()
@@ -137,6 +141,10 @@ func cmdSync(c *Crew, args []string) error {
 	}
 	if changed {
 		c.commit("sync")
+	}
+	// Each project it skipped is named already; exit 1 tells the caller the sync wasn't whole.
+	if skipped {
+		return exitQuietly(1)
 	}
 	say("sync done")
 	return nil
