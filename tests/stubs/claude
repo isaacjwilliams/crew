@@ -41,7 +41,8 @@
 # the process takes its prompt: status busy, and a user entry ends its transcript. A
 # session with no transcript reads busy from the start. The two listings are counted
 # across every caller, so a new `claude agents` call on a resume path moves the moment
-# a second command sees.
+# a second command sees. The resume itself writes a metadata entry to the transcript
+# straight away, as 2.1.328 does, so only the prompt shows the turn has started.
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
 echo "${CREW_PROJECT-unset} claude $*" >>"$HOME/claude-env.log"
@@ -134,6 +135,7 @@ case ${1:-} in
       if [[ -f $HOME/fail-resume-late && -n $resume ]]; then state=failed pid=null; fi
       if [[ $session == "$resume" && $state == working && -n $(transcript_of "$session") ]]; then
         status=""; echo "$id $session 2" >"$HOME/resume-starting"
+        echo '{"type":"file-history-snapshot"}' >>"$(transcript_of "$session")"
       fi
       agents 'def status: if $stat == "" then del(.status) else .status=$stat end;
               if any(.[]; .id==$id) then map(if .id==$id then .state=$st | .pid=$pid | status else . end)
