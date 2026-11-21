@@ -10,7 +10,8 @@ import (
 // removes the worktree, and deletes the local branch of a task that delivered
 // (merged, or a spike done). --merged cleans up every task that delivered.
 // A task it leaves alone is named on stderr, one line for all of them, and the
-// exit code is exitNotYet: crew tick reads that line to tell the leads why.
+// exit code is exitNotYet (tick runs it for one task, so its line is that task's;
+// --merged by hand joins the lines with "; "): crew tick reads that line to tell the leads why.
 func cmdCleanup(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -58,6 +59,9 @@ func cmdCleanup(c *Crew, args []string) error {
 		return err
 	}
 	var stays []string
+	stay := func(t Task, why string) {
+		stays = append(stays, t.ID()+": worktree stays: "+why)
+	}
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
 		if err != nil {
@@ -65,19 +69,19 @@ func cmdCleanup(c *Crew, args []string) error {
 		}
 		st, wt, job := t.Status(), t.Worktree(), t.WorkerJob()
 		if !st.Finished() && !force {
-			stays = append(stays, fmt.Sprintf("%s: worktree stays: it is '%s' (crew cleanup --force removes it)", t.ID(), st))
+			stay(t, fmt.Sprintf("it is '%s' (crew cleanup --force removes it)", st))
 			continue
 		}
 		if wt != "" && isDir(wt) && !force {
 			if out, _ := git(wt, "status", "--porcelain"); out != "" {
-				stays = append(stays, fmt.Sprintf("%s: worktree stays: %s has uncommitted changes (crew cleanup --force removes it)", t.ID(), wt))
+				stay(t, fmt.Sprintf("%s has uncommitted changes (crew cleanup --force removes it)", wt))
 				continue
 			}
 		}
 		// The worker goes first, so it doesn't carry on in a deleted directory, and
 		// the worktree tool's remove hooks run without it or the processes it left.
 		if !c.removeSession(job) {
-			stays = append(stays, fmt.Sprintf("%s: worktree stays: worker %s is still running (stop it in claude agents)", t.ID(), job))
+			stay(t, fmt.Sprintf("worker %s is still running (stop it in claude agents)", job))
 			continue
 		}
 		if wt != "" && isDir(wt) {
@@ -87,7 +91,7 @@ func cmdCleanup(c *Crew, args []string) error {
 				return err
 			}
 			if !removed {
-				stays = append(stays, fmt.Sprintf("%s: worktree stays: the worktree tool couldn't remove %s", t.ID(), wt))
+				stay(t, fmt.Sprintf("the worktree tool couldn't remove %s", wt))
 				continue
 			}
 		}
