@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -189,6 +190,38 @@ func (a Agent) quietFor() (time.Duration, bool) {
 	return time.Since(info.ModTime()), true
 }
 
+// transcriptSize is how many bytes a session's transcript holds, or 0 when it
+// has none.
+func transcriptSize(session string) int64 {
+	info, err := os.Stat(transcript(session))
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// turnStartedAfter: the session's transcript has a prompt or a reply past its
+// first `from` bytes, or there's no transcript to read, as a session just started
+// may not have. Other entries don't count: a resume writes metadata first.
+func (a Agent) turnStartedAfter(from int64) bool {
+	f, err := os.Open(transcript(a.SessionID))
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	if _, err := f.Seek(from, io.SeekStart); err != nil {
+		return true
+	}
+	b, _ := io.ReadAll(f)
+	for _, l := range strings.Split(string(b), "\n") {
+		var e struct{ Type string }
+		if json.Unmarshal([]byte(l), &e) == nil && (e.Type == "user" || e.Type == "assistant") {
+			return true
+		}
+	}
+	return false
+}
+
 // open: its process is running.
 func (a Agent) open() bool { return a.PID }
 
@@ -272,19 +305,24 @@ func (c *Crew) stopJobs(jobs []string) []string {
 	return open
 }
 
-// stopIdleSession stops the open process of a session that isn't busy. A
-// background session that ended its turn keeps its process open for about an
-// hour, and resuming it then starts a copy under a new session ("already running
-// in the background"), so it's stopped first, and the resume continues it in place.
-func (c *Crew) stopIdleSession(as Agents, session string) {
-	if session == "" {
-		return
-	}
-	for _, a := range as {
-		if a.SessionID == session && a.open() && !a.busy() {
-			c.stopJob(a.ID)
+// closeSession stops a session's process, if it's open and idle, so that a resume
+// continues the session in place: resuming a session whose process is open starts
+// a copy of it ("already running in the background"). A background session keeps
+// its process open for about an hour after its turn ends. It returns the job whose
+// process stays open, and then nothing should resume the session.
+func (c *Crew) closeSession(session string) (open string) {
+	for _, a := range c.agents() {
+		if a.SessionID != session || !a.open() {
+			continue
+		}
+		if a.busy() {
+			return a.ID // mid-turn, so it isn't stopped
+		}
+		if !c.stopJob(a.ID) {
+			return a.ID // idle, but it didn't close
 		}
 	}
+	return ""
 }
 
 // removeSession takes a session out of agent view, stopping it first: `claude rm`
@@ -424,7 +462,9 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	var cmd *exec.Cmd
 	if resume {
 		// A process that's still open would also make Claude Code start a copy.
-		c.stopIdleSession(c.agents(), session)
+		if job := c.closeSession(session); job != "" {
+			return launch{}, fail("job %s is still running, so crew sent it nothing: resuming its session now would start a copy of it", job)
+		}
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
@@ -436,6 +476,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 		cmd = c.claude(slices.Concat([]string{"--name", d.Get(start.prefix + "_name"), "--add-dir", c.Home, "--bg"}, mcp, start.flags, model, []string{prompt})...)
 	}
 	cmd.Dir = wt
+	before := transcriptSize(session)
 	raw, _ := cmd.CombinedOutput()
 	// The job ID can come wrapped in color codes, which would never match `claude agents`.
 	out := ansiCode.ReplaceAllString(string(raw), "")
@@ -461,7 +502,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 			fmt.Fprintln(os.Stderr, l)
 		}
 	}
-	started, ok := c.waitForLaunch(job)
+	started, ok := c.waitForLaunch(job, session, before)
 	switch {
 	case !ok:
 		warn("claude started job %s, but it failed straight away (see 'claude agents')", job)
@@ -469,6 +510,8 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	case started == "":
 		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
 	case resume && started != session:
+		// closeSession left no process open, but one can open again before the
+		// resume reaches it, and then Claude Code starts a copy.
 		warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
 	}
 	// A fresh session replaces the one the file records, so take that one out of
@@ -487,25 +530,38 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	return l, nil
 }
 
-// waitForLaunch waits for a job's own process to report the session it loaded,
-// and returns it, or nothing after 30 seconds. A job's ID is the first 8
-// characters of its session ID. A process that has just started can report a new
-// session ID for a moment, before it loads the one it resumes, so only a session
-// ID that starts with the job ID counts. A resume of a session that can't be
-// found shows up as a job that ends in failed: then ok is false.
-func (c *Crew) waitForLaunch(job string) (session string, ok bool) {
+// waitForLaunch waits for a job's process to report its session and take its
+// prompt, and returns that session. A job's ID is the first 8 characters of its
+// session ID. A process that has just started can report a new session ID for a
+// moment, before it loads the one it resumes, so only one that starts with the job
+// ID counts. A resumed process also shows a moment before it writes its prompt to
+// the transcript, and reads as idle until then; returning sooner would let the next
+// command take it for idle too. `before` is the size of `recorded`'s transcript at
+// the launch, so only a prompt past it counts there; any other session's transcript
+// is read from the start. A resume of a session that can't be found ends in failed:
+// then ok is false.
+func (c *Crew) waitForLaunch(job, recorded string, before int64) (session string, ok bool) {
 	for range 60 {
 		if a := c.agents().find(job); a != nil {
 			if a.State == "failed" {
 				return "", false
 			}
 			if a.open() && strings.HasPrefix(a.SessionID, job) {
-				return a.SessionID, true
+				session = a.SessionID
+				from := int64(0)
+				if session == recorded {
+					from = before
+				}
+				if a.turnStartedAfter(from) {
+					return session, true
+				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return "", true
+	// After 30 seconds: nothing if it never reported its session, and otherwise its
+	// session, though it hasn't written its prompt yet: it's slow, not failed.
+	return session, true
 }
 
 // relaunch resumes the session a file records as <prefix>_session, or starts a

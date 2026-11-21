@@ -80,6 +80,7 @@ evidence_commit() { sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p' "$(crew pat
 # What a worker does to put its task in pr-open: evidence for each acceptance criterion,
 # the first time, in the task and the PR body, then crew hand-over. A refusal fails the
 # suite, since the checks after it would run against a task that isn't pr-open.
+resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 hand_over() {  # task
   section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
   pr_body "$1"
@@ -498,11 +499,15 @@ transcript "$sess" ended
 out=$(crew followup 1 --note "turn over" 2>&1)
 check "followup continues a worker whose turn ended, though a shell it left running keeps it working" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]] && [[ $(grep -c "^claude stop" "$HOME/claude-calls.log") == 3 ]]'
 rm -f "$HOME/.claude/projects/stub/$sess.jsonl"
-setstate "done" 4242; touch "$HOME/stop-noop"
-out=$(crew followup 1 --note "stop didn't take" 2>&1)
-copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
-check "a copy started on resume is recorded, with a warning" '[[ $out == *"started a copy"* && $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(crew get 1 worker_job) == "$(jq -r ".[-1].id" "$HOME/agents.json")" ]]'
+setstate "done" 4242; touch "$HOME/stop-noop"; n=$(resumes)
+out=$(crew followup 1 --note "stop didn't take" 2>&1); code=$?
+check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job" \
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
 rm -f "$HOME/stop-noop"
+setstate "done" null; touch "$HOME/reopen-on-resume"
+out=$(crew followup 1 --note "reopened" 2>&1)
+copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
+check "a copy started anyway, by a process that opened again before the resume, is recorded, with a warning" '[[ $out == *"started a copy of session $sess"* && $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(crew get 1 worker_job) == "$(jq -r ".[-1].id" "$HOME/agents.json")" ]]'
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
 check "a resume whose process first reports a new session ID keeps the recorded session" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]]'
@@ -558,6 +563,13 @@ out=$(followup1 "still on sonnet")
 check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
 out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
 check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
+sess=$(crew get 1 worker_session); transcript "$sess" ended
+for _ in {1..40}; do echo '{"type":"system","subtype":"stop_hook_summary"}' >>"$HOME/.claude/projects/stub/$sess.jsonl"; done
+touch "$HOME/fresh-transcript"; SECONDS=0
+out=$(setstate "done" null; crew followup 1 --fresh --note "fresh over a long transcript" 2>&1)
+check "a fresh followup is confirmed once its new session takes its prompt, however long the replaced session's transcript" \
+  '((SECONDS < 10)) && [[ $out == *"(fresh)"* && $(crew get 1 worker_session) != "$sess" ]]'
+rm -f "$HOME/.claude/projects/stub/$sess.jsonl" "$HOME/.claude/projects/stub/$(crew get 1 worker_session).jsonl"
 crew set 1 model haiku; echo "# changed" >>"$L/agents/implementer.md"; install_agents; out=$(followup1 "both changed")
 check "a followup after the model and the instructions both change says both" \
   '[[ $out == *"(fresh: its model changed from sonnet to haiku, and its instructions or settings changed)"* && $(last_launch) == *" --model haiku "* && $(crew get 1 worker_model) == haiku ]]'
@@ -933,7 +945,6 @@ prompt every SessionStart >/dev/null; prompt held >/dev/null   # leads that hear
 PJ=$(basename "$PD")   # the project, which a lead for every project hears before each line
 crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
-resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13 >/dev/null
 crew set 13 model sonnet; crew dispatch 13 >/dev/null
 check "dispatch starts a sonnet task's worker on Sonnet" '[[ $(last_launch) == *" --model sonnet "* && $(crew get 13 worker_model) == sonnet ]]'
@@ -1118,6 +1129,32 @@ mkdir -p "$L/projects/zz-other"; printf 'REMOTE="%s"\nDEFAULT_BRANCH="main"\n' "
 out=$(crew tick 2>&1 >/dev/null)
 check "tick skips a project with no clone here, rather than using the previous project's" '[[ $out == *"zz-other: skipped"* && $out == *"no clone of zz-other on this machine"* ]]'
 rm -r "$L/projects/zz-other"
+# Two followups back to back: the second comes while the worker's resume from the first
+# is under way, its process up but its prompt not taken yet (see the stub).
+s13=$(crew get 13 worker_session); j13=$(crew get 13 worker_job); r=$(crew get 13 review_rounds)
+setstate "done" null; transcript "$s13" ended; n=$(resumes)
+crew followup 13 --note "first" >/dev/null 2>&1
+out=$(crew followup 13 --note "second" 2>&1)
+check "a followup note sent while the worker's resume is under way is refused as busy, without a copy" \
+  '[[ $out == *"worker $j13 is busy (working). Wait for it"* && $(resumes) == $((n + 1)) && $(crew get 13 worker_job) == "$j13" && $(crew get 13 worker_session) == "$s13" ]]'
+hand_over 13; crew set 13 feedback_since 1970-01-01T00:00:00Z
+out=$(crew tick 2>&1)
+check "a review round recorded while it's under way waits for crew tick" \
+  '[[ $out == *"013-tick-routing: round $((r + 1)) waiting for its worker (working)"* && $(crew get 13 last_round_sent) == "$r" && $(resumes) == $((n + 1)) ]]'
+transcript "$s13" ended; setstate "done" 4242
+out=$(crew tick 2>&1)
+check "crew tick sends that round once the worker's turn has ended, to the same session" \
+  '[[ $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(crew get 13 last_round_sent) == $((r + 1)) && $(resumes) == $((n + 2)) && $(crew get 13 worker_job) == "$j13" && $(crew get 13 worker_session) == "$s13" ]]'
+# An idle worker whose process won't close gets nothing, and no copy, until it does.
+hand_over 13; crew set 13 feedback_since 1970-01-01T00:00:00Z; transcript "$s13" ended; setstate "done" 4242; touch "$HOME/stop-noop"
+out=$(crew tick 2>&1)
+check "crew tick leaves a round unsent for an idle worker whose process won't close, starting no copy, and names the job" \
+  '[[ $out == *"013-tick-routing: review round $((r + 2)) recorded"* && $out == *"job $j13 is still running, so crew sent it nothing"* && $(crew get 13 last_round_sent) == $((r + 1)) && $(resumes) == $((n + 2)) && $(crew get 13 worker_session) == "$s13" ]]'
+rm -f "$HOME/stop-noop"
+out=$(crew tick 2>&1)
+check "a later crew tick sends the round once the process closes" \
+  '[[ $out == *"013-tick-routing: round $((r + 2)) sent to its worker"* && $(crew get 13 last_round_sent) == $((r + 2)) && $(resumes) == $((n + 3)) && $(crew get 13 worker_session) == "$s13" ]]'
+rm -f "$HOME/.claude/projects/stub/$s13.jsonl"
 
 # Nudges: crew tick resumes, once, a worker whose turn ended while its task still says
 # it's being worked on, and asks the lead when that doesn't move the task. Task 13's
@@ -1432,6 +1469,27 @@ check "tick says when input waits for a busy goal lead" '[[ $out == *"goal $G: i
 setstate "done" null
 out=$(crew tick 2>&1)
 check "tick sends the note once the goal lead is free" '[[ $out == *"goal $G: input sent to its goal lead"* && $(last_launch) == *"1 new note(s) from the user"* && $(last_launch) != *"$T1:"* && $(gget "$GF" unsent_notes) == 0 ]]'
+# Two notes back to back: the second comes while the goal lead's resume from the
+# first is under way, its process up but its prompt not taken yet (see the stub).
+gs=$(gget "$GF" lead_session); gj=$(gget "$GF" lead_job)
+setstate "done" 4242; transcript "$gs" ended; n=$(resumes)
+crew goal note 1 "Use style C for the footer" >/dev/null 2>&1
+out=$(crew goal note 1 "And style D for the nav" 2>&1)
+check "a note sent while the goal lead's resume is under way is recorded and counted, and waits, without a copy" \
+  '[[ $out == *"goal lead $gj is busy (working)"*"crew tick passes it to the goal lead"* && $(section "$GF" "## Decisions") == *"from the user: And style D for the nav"* && $(gget "$GF" unsent_notes) == 1 && $(gget "$GF" lead_job) == "$gj" && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 1)) ]]'
+transcript "$gs" ended; setstate "done" 4242
+out=$(crew tick 2>&1)
+check "crew tick sends that note once the goal lead's turn has ended, to the same session" \
+  '[[ $out == *"goal $G: input sent to its goal lead"* && $(gget "$GF" unsent_notes) == 0 && $(gget "$GF" lead_job) == "$gj" && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 2)) ]]'
+transcript "$gs" ended; setstate "done" 4242; touch "$HOME/stop-noop"
+out=$(crew goal note 1 "Use style E for the footer" 2>&1)
+check "a note to an idle goal lead whose process won't close is counted and not sent, starting no copy" \
+  '[[ $out == *"job $gj is still running, so crew sent it nothing"*"crew tick passes it to the goal lead"* && $(gget "$GF" unsent_notes) == 1 && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 2)) ]]'
+rm -f "$HOME/stop-noop"
+out=$(crew tick 2>&1)
+check "a later crew tick sends it once the process closes" \
+  '[[ $out == *"goal $G: input sent to its goal lead"* && $(gget "$GF" unsent_notes) == 0 && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 3)) ]]'
+rm -f "$STUB/$gs.jsonl"
 rm -rf "$CO"; setstate "done" null   # as on a machine the goal moved to
 crew goal note 1 "Keep the header small" >/dev/null 2>&1
 check "a goal followup brings back a goal lead's checkout that isn't here" '[[ -d $CO && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) && $(last_launch) == "claude --resume "*"New input for goal $G"* ]]'
