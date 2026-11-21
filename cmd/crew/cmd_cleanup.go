@@ -59,6 +59,13 @@ func cmdCleanup(c *Crew, args []string) error {
 	stay := func(t Task, why string) {
 		stays = append(stays, fmt.Sprintf("%s: worktree stays: %s", t.ID(), why))
 	}
+	// Warned of after the ledger commit, so these are the last lines of stderr;
+	// deferred, so an error on a later task doesn't hide them.
+	defer func() {
+		for _, line := range stays {
+			warn("%s", line)
+		}
+	}()
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
 		if err != nil {
@@ -105,10 +112,6 @@ func cmdCleanup(c *Crew, args []string) error {
 		fmt.Println("cleaned up " + t.ID())
 	}
 	c.commit("cleanup")
-	// Warned of after the ledger commit, so these are the last lines of stderr.
-	for _, line := range stays {
-		warn("%s", line)
-	}
 	if len(stays) > 0 {
 		return exitQuietly(exitNotYet)
 	}

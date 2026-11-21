@@ -2318,10 +2318,10 @@ SC1=$(crew new "Stays dirty" --branch stays-dirty --project "$PJ"); fill "$SC1";
 SW1=$(crew get "$SC1" worktree); echo x >"$SW1/uncommitted.txt"; crew set "$SC1" status merged >/dev/null
 stays_case "$SC1" "a merged task with uncommitted changes" "$SW1 has uncommitted changes (crew cleanup --force removes it)"
 # A failing ledger commit warns too; the reason must still be cleanup's last line
-ls -d "$L/.git" >/dev/null 2>&1 && touch "$L/.git/index.lock"
+touch "$L/.git/index.lock"
 out=$(crew cleanup "$SC1" 2>&1 >/dev/null); rc=$?; rm -f "$L/.git/index.lock"
 check "cleanup's reason is its last line of stderr even when the ledger commit warns" \
-  '[[ $rc == 4 && ${out##*$NL} == *"$(basename "$SC1" .md): worktree stays: $SW1 has uncommitted changes"* ]]'
+  '[[ $rc == 4 && $out == *"ledger commit failed"*"worktree stays"* && ${out##*$NL} == *"$(basename "$SC1" .md): worktree stays: $SW1 has uncommitted changes"* ]]'
 rm "$SW1/uncommitted.txt"; setstate "done" null; prompt stays-fixed SessionStart >/dev/null
 out=$(crew tick 2>&1)
 check "once the changes are gone, tick cleans the worktree up and says so, to the leads too" \
