@@ -685,18 +685,19 @@ const recordedForTheUser = "recorded under Open questions for the user"
 
 // SetStatus writes the task's status and logs the change. Every change of a
 // task's status goes through it, so the Log has a line for each. A go-ahead
-// lasts only while the task is ready, so any other status ends it.
+// lasts only while the task is ready, so any other status ends it. Its line
+// goes before the status line, which crew stats looks for just before
+// "dispatched" (dispatchedBeforeSetStatus).
 func (t Task) SetStatus(s Status) error {
-	if err := t.setStatus(string(s)); err != nil {
-		return err
-	}
 	if g := t.Get("go_ahead"); g != "" && s != Ready {
 		if err := t.Set("go_ahead", ""); err != nil {
 			return err
 		}
-		return t.Log(fmt.Sprintf("go-ahead (%s) ended: the task is %s now", g, s))
+		if err := t.Log(fmt.Sprintf("go-ahead (%s) ended: the task is %s now", g, s)); err != nil {
+			return err
+		}
 	}
-	return nil
+	return t.setStatus(string(s))
 }
 
 // setStatus writes the file's status and logs the change: a task's, or a
