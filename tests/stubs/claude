@@ -39,7 +39,9 @@
 # through the first part, so the stub models only the second: for two `claude agents`
 # listings the job shows working with no status, its transcript as it was, and then
 # the process takes its prompt: status busy, and a user entry ends its transcript. A
-# session with no transcript reads busy from the start.
+# session with no transcript reads busy from the start. The two listings are counted
+# across every caller, so a new `claude agents` call on a resume path moves the moment
+# a second command sees.
 set -u
 echo "claude $*" >>"$HOME/claude-calls.log"
 echo "${CREW_PROJECT-unset} claude $*" >>"$HOME/claude-env.log"
@@ -76,14 +78,13 @@ agents() {  # jq-filter [jq args...]: update agents.json in place
 }
 transcript_of() { compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/$1.jsonl" | head -n 1; }
 # A process that hasn't taken its prompt yet ($HOME/resume-starting: job, session, and
-# the listings left that show it so). Before a listing, one with none left takes it;
-# after a listing, one with some left has one fewer.
-starting() {  # before|after
+# the listings left that show it so). At each listing it has one fewer, and once it
+# has none, it takes its prompt.
+starting() {
   [[ -f $HOME/resume-starting ]] || return 0
   local id session left f
   read -r id session left <"$HOME/resume-starting"
-  if [[ $1 == after ]]; then echo "$id $session $((left - 1))" >"$HOME/resume-starting"; return 0; fi
-  ((left == 0)) || return 0
+  if ((left > 0)); then echo "$id $session $((left - 1))" >"$HOME/resume-starting"; return 0; fi
   rm "$HOME/resume-starting"
   agents 'map(if .id==$id then .status="busy" else . end)' --arg id "$id"
   f=$(transcript_of "$session")
@@ -96,15 +97,14 @@ case ${1:-} in
     if [[ -f $HOME/agents-fail ]]; then
       echo "Error: couldn't reach the supervisor" >&2; exit 1
     fi
-    starting before
+    starting
     if [[ -f $HOME/placeholder-pending ]]; then
       jq --arg id "$(cat "$HOME/placeholder-pending")" 'map(if .id==$id then .sessionId="0badf00d-placeholder" else . end)' "$HOME/agents.json"
       rm -f "$HOME/placeholder-pending"
     else
       cat "$HOME/agents.json"
       if [[ -f $HOME/agents-next ]]; then mv "$HOME/agents-next" "$HOME/agents.json"; fi
-    fi
-    starting after ;;
+    fi ;;
   stop)
     [[ -f $HOME/stop-noop ]] || agents 'map(if .id==$id then .pid=null | .state="stopped" | del(.status) else . end)' --arg id "${2:-}" ;;
   rm)

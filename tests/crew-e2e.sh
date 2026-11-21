@@ -80,6 +80,7 @@ evidence_commit() { sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p' "$(crew pat
 # What a worker does to put its task in pr-open: evidence for each acceptance criterion,
 # the first time, in the task and the PR body, then crew hand-over. A refusal fails the
 # suite, since the checks after it would run against a task that isn't pr-open.
+resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 hand_over() {  # task
   section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
   pr_body "$1"
@@ -491,10 +492,10 @@ transcript "$sess" ended
 out=$(crew followup 1 --note "turn over" 2>&1)
 check "followup continues a worker whose turn ended, though a shell it left running keeps it working" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]] && [[ $(grep -c "^claude stop" "$HOME/claude-calls.log") == 3 ]]'
 rm -f "$HOME/.claude/projects/stub/$sess.jsonl"
-setstate "done" 4242; touch "$HOME/stop-noop"; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
+setstate "done" 4242; touch "$HOME/stop-noop"; n=$(resumes)
 out=$(crew followup 1 --note "stop didn't take" 2>&1); code=$?
 check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job" \
-  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
 rm -f "$HOME/stop-noop"
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
@@ -924,7 +925,6 @@ rm -f "$HOME/gh-pr-state"
 for f in "$PD"/tasks/*.md; do has=$(crew get "$f" status); [[ $has == merged ]] || crew set "$f" status abandoned; done
 crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
-resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
 F13=$(crew new "Tick routing" --branch tick-routing); fill "$F13"; crew ready 13 >/dev/null
 crew set 13 model sonnet; crew dispatch 13 >/dev/null
 check "dispatch starts a sonnet task's worker on Sonnet" '[[ $(last_launch) == *" --model sonnet "* && $(crew get 13 worker_model) == sonnet ]]'
