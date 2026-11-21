@@ -324,7 +324,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			because = fmt.Sprintf("on its go-ahead: %s reached %s", g.After.ID(), g.Status)
 		}
 		var errs strings.Builder
-		switch c.step(&errs, "dispatch", t.Path) {
+		switch c.step(&errs, "dispatch", t.Path, "--tick") {
 		case 0:
 			news.did(project, "%s: dispatched %s", t.ID(), because)
 		case exitNotYet: // held back, by a cap say; the next tick tries again

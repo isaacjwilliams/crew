@@ -1504,9 +1504,16 @@ printf 'crew goal abandon %s >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$G3"
 setstate "done" null
 out=$(crew tick 2>&1)
 check "a goal abandoned during an earlier dispatch in the tick has none of its tasks dispatched" '[[ $out == *"$TR: dispatched for goal $G4"* && $(gget "$GF3" status) == abandoned && $out != *"$TC"* && $(crew get "$PC" status) == ready ]]'
+# A goal abandoned while the tick sets up one of its own tasks' worktrees gets
+# no worker for it.
+PS=$(goal_task "$GF4" "Promo popup"); TS=$(basename "$PS" .md)
+printf 'crew goal abandon %s >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$G4" >"$HOME/wt-hook-cmd"
+setstate "done" null
+out=$(crew tick 2>&1)
+check "a goal abandoned while tick sets up its task's worktree starts no worker for it, and says why" \
+  '[[ $out == *"$TS: dispatch held back: goal $G4 is abandoned now; leaving $TS ready"* && $(gget "$GF4" status) == abandoned && $(crew get "$PS" status) == ready ]]'
 sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
-crew goal abandon "$GF4" >/dev/null 2>&1
-for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$NG"; do crew set "$f" status abandoned; done
+for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$PS" "$NG"; do crew set "$f" status abandoned; done
 # crew status groups a goal's tasks by where they stand, in the order crew tick
 # dispatches them, and says what each one not yet dispatched waits for.
 num() { basename "$1" .md | cut -d- -f1; }
@@ -1629,6 +1636,10 @@ check "tick dispatches it once the task it waits for has been pr-open, though it
   '[[ $out == *"$TWB: dispatched on its go-ahead: $TWA reached pr-open"* && $(crew get "$WB" status) == working ]]'
 check "dispatching ends the go-ahead, and the Log says what it was" '[[ -z $(crew get "$WB" go_ahead) && $(section "$WB" "## Log") == *"go-ahead ($TWA pr-open) ended: the task is working now"* ]]'
 check "a lead hears that tick dispatched a task on its go-ahead" '[[ $(prompt go-ahead) == *"$DID"*"$PJ: $TWB: dispatched on its go-ahead: $TWA reached pr-open"* ]]'
+# A task tick dispatches here has no review rounds to pull, which would crowd a
+# lead's news (see "with its time, under one heading" below).
+no_feedback() { crew set "$1" feedback_since 2099-01-01T00:00:00Z; }
+no_feedback "$WB"
 # A go-ahead for a status the other task has reached and moved on from is met at once.
 WC=$(pr_task "Reviewed already"); TWC=$(basename "$WC" .md); hand_over "$WC"; crew set "$WC" status addressing-feedback
 WD=$(ready_task "Waits for a pr-open that's past"); TWD=$(basename "$WD" .md); crew set "$WD" go_ahead "$(num "$WC") pr-open"
@@ -1640,6 +1651,7 @@ check "leaving ready ends a go-ahead, with a Log line, and making the task ready
   '[[ -z $(crew get "$WE" go_ahead) && $(section "$WE" "## Log") == *"go-ahead ($TWC pr-open) ended: the task is draft now"* && -z $(crew get "$WG" go_ahead) ]]'
 setstate "done" null; out=$(crew tick 2>&1)
 check "tick dispatches a task whose go-ahead was met before it was recorded" '[[ $out == *"$TWD: dispatched on its go-ahead: $TWC reached pr-open"* && $(crew get "$WD" status) == working ]]'
+no_feedback "$WD"
 check "and not one made ready again after its go-ahead ended, or one whose go-ahead was withdrawn, or an abandoned one" \
   '[[ $(crew get "$WE" status) == ready && $(crew get "$WF" status) == ready && $(crew get "$WG" status) == abandoned && $out != *"$(basename "$WE" .md): dispatched"* && $out != *"$(basename "$WF" .md): dispatched"* ]]'
 st=$(crew status)
@@ -1658,6 +1670,17 @@ check "a paused project's met go-ahead waits, saying why" '[[ $out == *"$TWJ: di
 crew resume --project "$PJ" >/dev/null; setstate "done" null
 out=$(crew tick 2>&1)
 check "and tick dispatches it after crew resume" '[[ $out == *"$TWJ: dispatched on its go-ahead: $TWC reached pr-open"* && $(crew get "$WJ" status) == working ]]'
+no_feedback "$WJ"
+# A go-ahead withdrawn while the tick sets up the task's worktree (its Worktrunk
+# hooks running) starts no worker.
+WN=$(ready_task "Withdrawn during setup"); TWN=$(basename "$WN" .md); crew set "$WN" go_ahead "$(num "$WC") pr-open"
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PE"
+printf 'crew set %q go_ahead >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$WN" >"$HOME/wt-hook-cmd"
+setstate "done" null
+out=$(crew tick 2>&1)
+check "a go-ahead withdrawn while tick sets up the task's worktree starts no worker, and says why" \
+  '[[ $out == *"$TWN: dispatch held back: its go-ahead was withdrawn, or isn'"'"'t met any more; leaving $TWN ready"* && $(crew get "$WN" status) == ready && -z $(crew get "$WN" go_ahead) ]]'
+sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
 # What crew set refuses: a wait that can't end, or one for a task tick doesn't dispatch.
 WK=$(crew new "Not ready yet"); WS=$(crew new "A spike" --kind spike)
 GFG=$(crew goal new "Go-ahead goal"); WL=$(crew new "In a goal" --goal "$GFG"); fill "$WL"; crew ready "$WL" >/dev/null

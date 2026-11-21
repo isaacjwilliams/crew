@@ -74,9 +74,13 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    a Size and a risk tier, and nothing under
                                    Structure, Plan or Constraints and conventions. A
                                    fix also needs fixes and missed_by
-  crew dispatch TASK [--force]     Create worktree + branch and start an implementer.
+  crew dispatch TASK [--force|--tick]
+                                   Create worktree + branch and start an implementer.
                                    --force dispatches a task that isn't ready; a
-                                   brief with a plan is refused either way
+                                   brief with a plan is refused either way. crew
+                                   tick passes --tick: it holds the dispatch back
+                                   once its goal or go-ahead no longer lets tick
+                                   dispatch it
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
                                    collaborators' under Open questions for you
