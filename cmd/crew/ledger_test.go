@@ -708,6 +708,24 @@ func TestSetStatusToTheSameStatusLogsNothing(t *testing.T) {
 	}
 }
 
+// crew stats takes a task whose "dispatched" line doesn't follow a status line
+// for one dispatched before SetStatus, so the go-ahead's line goes first.
+func TestSetStatusEndsAGoAheadBeforeTheStatusLine(t *testing.T) {
+	task := Task{docWith(t, strings.Replace(sampleTask, "status: draft\n", "status: ready\ngo_ahead: 002-b pr-open\n", 1))}
+	if err := task.SetStatus(Working); err != nil {
+		t.Fatal(err)
+	}
+	if err := task.Log("dispatched: worker a"); err != nil {
+		t.Fatal(err)
+	}
+	if g := task.Get("go_ahead"); g != "" {
+		t.Errorf("go_ahead = %q after SetStatus(working), want it ended", g)
+	}
+	if dispatchedBeforeSetStatus(task.LogEntries()) {
+		t.Errorf("crew stats takes the task for one dispatched before SetStatus:\n%s", contents(t, task.Doc))
+	}
+}
+
 func TestLogEntries(t *testing.T) {
 	d := docWith(t, "---\nid: 1\n---\n## Log\n<!-- - 2026-11-01 08:00 — a comment -->\n"+
 		"- 2026-11-01 09:00 — created\n- 2026-11-01 09:05 — a message\n  that goes on\n- not dated — skipped\n"+

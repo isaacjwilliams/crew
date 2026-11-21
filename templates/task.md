@@ -14,6 +14,7 @@ restack_sent:
 retarget_sent:
 branch: {{BRANCH}}
 depends_on:
+go_ahead:
 goal:
 risk:
 pre_pr_review: {{PRE_PR_REVIEW}}

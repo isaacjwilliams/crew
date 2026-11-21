@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// crew dispatch TASK [--force]: makes the task's worktree and branch, and starts
-// its worker.
+// crew dispatch TASK [--force|--tick]: makes the task's worktree and branch, and
+// starts its worker.
 func cmdDispatch(c *Crew, args []string) error {
 	for _, tool := range []string{"git", "claude"} {
 		if err := need(tool); err != nil {
@@ -17,11 +17,14 @@ func cmdDispatch(c *Crew, args []string) error {
 	if err := c.requireHost(); err != nil {
 		return err
 	}
-	arg, force := "", false
+	arg, by := "", byHand
 	for _, a := range args {
-		if a == "--force" {
-			force = true
-		} else {
+		switch a {
+		case "--force":
+			by = byForce
+		case "--tick":
+			by = byTick
+		default:
 			arg = a
 		}
 	}
@@ -71,7 +74,7 @@ func cmdDispatch(c *Crew, args []string) error {
 		t.Log(parent.ID() + " has merged; based on " + base + " instead of its branch")
 		parent, stacked = idx.parentOf(t)
 	}
-	if err := c.dispatchChecks(p, t, force); err != nil {
+	if err := c.dispatchChecks(p, t, by); err != nil {
 		return err
 	}
 	// Setting up the worktree can take minutes when the project's Worktrunk hooks
@@ -96,7 +99,7 @@ func cmdDispatch(c *Crew, args []string) error {
 	if startSHA != "" {
 		t.Set("base_sha", startSHA)
 	}
-	if err := c.dispatchChecks(p, t, force); err != nil {
+	if err := c.dispatchChecks(p, t, by); err != nil {
 		return err
 	}
 
@@ -135,19 +138,36 @@ func orUnknown(s string) string {
 	return s
 }
 
+// dispatchBy is who asked for a dispatch, which decides what it checks.
+type dispatchBy int
+
+const (
+	byHand  dispatchBy = iota // crew dispatch: the task must be ready
+	byForce                   // crew dispatch --force: it may have any status
+	byTick                    // crew dispatch --tick: crew tick must still dispatch it
+)
+
 // dispatchChecks refuses a dispatch the user hasn't readied, one whose brief
 // says how to meet its objective (with --force too), or one stacked on an
-// abandoned task, and holds back (notYet) one for a paused project, one whose
-// dependencies haven't merged, or one that would go over MAX_WORKERS or its
-// goal's max_in_flight. The caps are counted only once the dependencies have
-// merged, since counting the workers running asks claude. Call it with the lock
-// held.
-func (c *Crew) dispatchChecks(p *Project, t Task, force bool) error {
+// abandoned task, and holds back (notYet) one for a paused project, one crew
+// tick no longer dispatches, one whose dependencies haven't merged, or one that
+// would go over MAX_WORKERS or its goal's max_in_flight. The caps are counted
+// only once the dependencies have merged, since counting the workers running
+// asks claude. Call it with the lock held.
+func (c *Crew) dispatchChecks(p *Project, t Task, by dispatchBy) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
-	if st := t.Status(); st != Ready && !force {
+	if st := t.Status(); st != Ready && by != byForce {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
+	}
+	// Its goal or go-ahead may have changed since tick chose it, while its
+	// worktree was set up, say.
+	if by == byTick && !c.tickDispatches(t) {
+		if g, ok := c.taskGoal(t); ok {
+			return notYet("goal %s is %s now; leaving %s ready", g.ID(), g.Status(), t.ID())
+		}
+		return notYet("its go-ahead was withdrawn, or isn't met any more; leaving %s ready", t.ID())
 	}
 	// --force or not: a ready task's brief may say how to meet its objective,
 	// having been readied before crew ready refused that, or edited since, and

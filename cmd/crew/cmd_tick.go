@@ -6,7 +6,7 @@ package main
 // mid-task, mark tasks that wait on the user, clean up those that delivered
 // (merged, or a spike done), pass goal leads their input and close finished
 // goals. Last, it dispatches the ready tasks of running goals, highest priority
-// first.
+// first, and those outside a goal whose go-ahead is met.
 // The crew-tick service runs it every few minutes; the lead runs it too. It
 // prints one line per thing it did, and one per thing it held back and why, and
 // keeps them as news for the leads (news.go).
@@ -303,17 +303,17 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *work
 	return nil, ""
 }
 
-// dispatchReady dispatches the ready tasks of running goals, across every
-// project but the paused ones, highest priority first and then in ledger order.
-// The goal lead marked each one ready, which is the go-ahead. It's the tick's
-// last step, so workers made busy by this tick's review rounds and restacks
-// count against MAX_WORKERS. A task waiting on other tasks is skipped without
-// running crew dispatch, which saves a process; one that dispatch holds back
-// (exit 4), by a cap say, is left for the next tick. Either way the next task is
-// tried: dependencies are per task, and caps per goal. Each task is checked
-// again just before its dispatch, since an earlier one can take minutes
-// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
-// abandoned or the task dispatched by hand.
+// dispatchReady dispatches the ready tasks tick dispatches (tickDispatches),
+// across every project but the paused ones, highest priority first and then in
+// ledger order. It's the tick's last step, so workers made busy by this tick's
+// review rounds and restacks count against MAX_WORKERS. A task waiting on other
+// tasks is skipped without running crew dispatch, which saves a process; one
+// that dispatch holds back (exit 4), by a cap say, is left for the next tick.
+// Either way the next task is tried: dependencies are per task, and caps per
+// goal. Each task is checked again just before its dispatch, since an earlier
+// one can take minutes (worktree hooks) while the ledger is unlocked. That's
+// time enough for someone to dispatch it by hand, abandon its goal or withdraw
+// its go-ahead.
 func (c *Crew) dispatchReady(news *tickNews) {
 	var ready []Task
 	for _, name := range c.projects("") {
@@ -324,7 +324,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		}
 		for _, t := range c.tasks(name) {
 			switch {
-			case !c.goalReady(t):
+			case !c.tickDispatches(t):
 			case p.Paused():
 				news.heldBack(name, "%s: dispatch waits: %s is paused", t.ID(), name)
 			default:
@@ -335,7 +335,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 	sortForDispatch(ready)
 	idx := c.branches("")
 	for _, t := range ready {
-		if !c.goalReady(t) {
+		if !c.tickDispatches(t) {
 			continue
 		}
 		project := taskProjectDir(t)
@@ -344,10 +344,16 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			news.heldBack(project, "%s: dispatch waits: it comes %s", t.ID(), after(deps))
 			continue
 		}
+		// Dispatching ends the go-ahead, so say what it was first. tickDispatches
+		// has read it without an error.
+		because := "for goal " + t.Goal()
+		if g, _ := t.GoAhead(); g != nil {
+			because = fmt.Sprintf("on its go-ahead: %s reached %s", g.After.ID(), g.Status)
+		}
 		var errs strings.Builder
-		switch c.step(&errs, "dispatch", t.Path) {
+		switch c.step(&errs, "dispatch", t.Path, "--tick") {
 		case 0:
-			news.did(project, "%s: dispatched for goal %s", t.ID(), t.Goal())
+			news.did(project, "%s: dispatched %s", t.ID(), because)
 		case exitNotYet: // held back, by a cap say; the next tick tries again
 			_, why := splitRefusal(errs.String())
 			news.heldBack(project, "%s: dispatch held back: %s", t.ID(), why)
@@ -372,10 +378,18 @@ func sortForDispatch(ts []Task) {
 	slices.SortStableFunc(ts, func(a, b Task) int { return cmp.Compare(priority[b.Path], priority[a.Path]) })
 }
 
-// goalReady: the task is ready and its goal running, so crew tick dispatches it.
-func (c *Crew) goalReady(t Task) bool {
-	g, ok := c.taskGoal(t)
-	return t.Status() == Ready && ok && g.Status() == GoalRunning
+// tickDispatches: the task is ready, and crew tick dispatches it: its goal is
+// running (the goal lead marked it ready, which is the go-ahead), or outside a
+// goal, the user's go-ahead is met.
+func (c *Crew) tickDispatches(t Task) bool {
+	if t.Status() != Ready {
+		return false
+	}
+	if g, ok := c.taskGoal(t); ok {
+		return g.Status() == GoalRunning
+	}
+	g, err := t.GoAhead()
+	return err == nil && g != nil && g.Met()
 }
 
 // prMayHaveNewComments: GitHub moves a PR's updatedAt (recorded as pr_updated by
