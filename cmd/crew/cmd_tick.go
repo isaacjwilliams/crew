@@ -112,6 +112,36 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 	return 0
 }
 
+// tickCleanup cleans up a delivered task's worktree. When cleanup leaves it
+// (uncommitted changes, say), cleanup warns why on its last stderr line. That
+// line is held back for the leads, who hear it once, and cleanup is tried again
+// next tick.
+func (c *Crew) tickCleanup(p *Project, t Task, news *tickNews) {
+	var errs strings.Builder
+	switch c.step(&errs, "cleanup", t.Path) {
+	case 0:
+		fmt.Fprint(os.Stderr, errs.String())
+		news.did(p.Name, "%s: %s; worktree cleaned up", t.ID(), t.Status())
+	case exitNotYet:
+		// The reason is held back, which prints it; what came before it is shown here.
+		rest, why := splitRefusal(errs.String())
+		fmt.Fprint(os.Stderr, rest)
+		news.heldBack(p.Name, "%s", why)
+	default:
+		fmt.Fprint(os.Stderr, errs.String())
+	}
+}
+
+// splitRefusal splits what a step wrote to stderr into everything before its
+// last line, and that line without the "crew: " that crew puts before its
+// messages.
+func splitRefusal(stderr string) (rest, why string) {
+	stderr = strings.TrimRight(stderr, "\n")
+	cut := strings.LastIndex(stderr, "\n") + 1
+	rest = stderr[:cut]
+	return rest, strings.TrimPrefix(stderr[cut:], "crew: ")
+}
+
 // tickTask is one task's share of a tick, for a task already under way: its
 // cleanup once it has delivered (Status.Delivered), or what its worker is sent
 // while it's in flight, which is nothing while its project is paused.
@@ -119,9 +149,8 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool, news *tickNews) {
 	id, st := t.ID(), t.Status()
 	if st.Delivered() {
-		// A cleanup that fails (uncommitted changes, say) warns, and is tried again next tick.
-		if t.Worktree() != "" && c.step(nil, "cleanup", t.Path) == 0 {
-			news.did(p.Name, "%s: %s; worktree cleaned up", id, st)
+		if t.Worktree() != "" {
+			c.tickCleanup(p, t, news)
 		}
 		return
 	}
@@ -320,9 +349,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		case 0:
 			news.did(project, "%s: dispatched for goal %s", t.ID(), t.Goal())
 		case exitNotYet: // held back, by a cap say; the next tick tries again
-			// main prints the refusal last, after "crew: ".
-			why := strings.TrimRight(errs.String(), "\n")
-			why = strings.TrimPrefix(why[strings.LastIndex(why, "\n")+1:], "crew: ")
+			_, why := splitRefusal(errs.String())
 			news.heldBack(project, "%s: dispatch held back: %s", t.ID(), why)
 		default:
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))

@@ -2317,4 +2317,39 @@ check "and tells the newest lines, up to the last" '[[ $out == *" $TNA: status â
 left=${out%% earlier lines left out*}; told=$(grep -c "^- " <<<"$out")
 check "and leaves out only what it doesn't tell" '[[ $left =~ ^[0-9]+$ ]] && ((left + told == 181))'
 
+# When crew tick's cleanup leaves a delivered task's worktree, the leads hear it stays and why,
+# once, and nothing says it was cleaned up. When the cause is gone, the next tick cleans up.
+stays_case() {  # task-file label reason: tick twice; what the output, the news and the held-back file say
+  local f=$1 label=$2 why=$3 id out1 out2 told again
+  id=$(basename "$f" .md); prompt "stays-$id" SessionStart >/dev/null
+  out1=$(crew tick 2>&1); told=$(prompt "stays-$id")
+  out2=$(crew tick 2>&1); again=$(prompt "stays-$id")
+  check "$label: tick says the worktree stays, and never that it was cleaned up" \
+    '[[ $out1 == *"$id: worktree stays: $why"* && $(grep -cF "$id: worktree stays: $why" <<<"$out1") == 1 && $out1 != *"$id: "*"worktree cleaned up"* && $out2 != *"$id: "*"worktree cleaned up"* && -d $(crew get "$f" worktree) ]] && ! grep -rq "$id: .*worktree cleaned up" "$L/news"'
+  check "$label: held-back keeps one item to a line, and a lead hears the reason after the first tick but not the second" \
+    '! grep -vP "^[^\t]+\t[^\t]+\$" "$L/news/held-back" && grep -qF "$PJ"$'"'"'\t'"'"'"$id: worktree stays: $why" "$L/news/held-back" && [[ $told == *"$HELD$NL- $PJ: $id: worktree stays: $why" && -z $again ]]'
+}
+SC1=$(crew new "Stays dirty" --branch stays-dirty --project "$PJ"); fill "$SC1"; crew ready "$SC1" >/dev/null; setstate "done" null; crew dispatch "$SC1" >/dev/null
+SW1=$(crew get "$SC1" worktree); echo x >"$SW1/uncommitted.txt"; crew set "$SC1" status merged >/dev/null
+stays_case "$SC1" "a merged task with uncommitted changes" "$SW1 has uncommitted changes (crew cleanup --force removes it)"
+# A failing ledger commit warns too; the reason must still be cleanup's last line
+touch "$L/.git/index.lock"
+out=$(crew cleanup "$SC1" 2>&1 >/dev/null); rc=$?; rm -f "$L/.git/index.lock"
+check "cleanup's reason is its last line of stderr even when the ledger commit warns" \
+  '[[ $rc == 4 && $out == *"ledger commit failed"*"worktree stays"* && ${out##*$NL} == *"$(basename "$SC1" .md): worktree stays: $SW1 has uncommitted changes"* ]]'
+rm "$SW1/uncommitted.txt"; setstate "done" null; prompt stays-fixed SessionStart >/dev/null
+out=$(crew tick 2>&1)
+check "once the changes are gone, tick cleans the worktree up and says so, to the leads too" \
+  '[[ $out == *"$(basename "$SC1" .md): merged; worktree cleaned up"* && ! -d $SW1 && -z $(crew get "$SC1" worktree) && $(prompt stays-fixed) == *"$(basename "$SC1" .md): merged; worktree cleaned up"* ]]'
+SC2=$(crew new "Stays running" --branch stays-running --project "$PJ"); fill "$SC2"; crew ready "$SC2" >/dev/null; setstate "done" null; crew dispatch "$SC2" >/dev/null
+SJ2=$(crew get "$SC2" worker_job); crew set "$SC2" status merged >/dev/null
+setstate working 4242; touch "$HOME/stop-noop"
+stays_case "$SC2" "a merged task whose worker won't stop" "worker $SJ2 is still running (stop it in claude agents)"
+rm -f "$HOME/stop-noop"; setstate "done" null
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PD/project.env"
+SC3=$(crew new "Stays locked" --branch stays-locked --project "$PJ"); fill "$SC3"; crew ready "$SC3" >/dev/null; setstate "done" null; crew dispatch "$SC3" >/dev/null
+SW3=$(crew get "$SC3" worktree); git -C "$SB/webapp" worktree lock "$SW3"; crew set "$SC3" status merged >/dev/null
+stays_case "$SC3" "a worktrunk task whose worktree won't remove" "the worktree tool couldn't remove $SW3"
+git -C "$SB/webapp" worktree unlock "$SW3"; sed -i '/^WORKTREE_TOOL=/d' "$PD/project.env"
+
 summary crew-e2e
