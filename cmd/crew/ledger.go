@@ -761,7 +761,9 @@ func newGoAhead(after Task, st Status) (*GoAhead, error) {
 }
 
 // GoAhead is the task's go-ahead, or nil when it has none. A task in a goal
-// has none: the goal is its go-ahead. A value crew set wouldn't have written is
+// has none: its goal decides when it's dispatched, so a go_ahead left from
+// before the task joined one is ignored. The value names a task by its ID, which
+// is its file's name beside this one. A value crew set wouldn't have written is
 // an error.
 func (t Task) GoAhead() (*GoAhead, error) {
 	v := t.Get("go_ahead")
@@ -776,9 +778,9 @@ func (t Task) GoAhead() (*GoAhead, error) {
 	return newGoAhead(after, Status(st))
 }
 
-// Met: the task the go-ahead waits on has reached its status, wherever it has
-// moved since. Its Log has the change, or it's delivered, which is past every
-// status a go-ahead waits for. An abandoned task meets none.
+// Met: the task the go-ahead waits on has reached its status at some point. Its
+// Log shows the change, or it's merged or done (Delivered), which comes after
+// every status a go-ahead can wait for. An abandoned task never meets one.
 func (g GoAhead) Met() bool {
 	switch st := g.After.Status(); {
 	case st == Abandoned:

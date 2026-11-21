@@ -278,15 +278,15 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *work
 
 // dispatchReady dispatches the ready tasks tick dispatches (tickDispatches),
 // across every project but the paused ones, highest priority first and then in
-// ledger order. It's the tick's
-// last step, so workers made busy by this tick's review rounds and restacks
-// count against MAX_WORKERS. A task waiting on other tasks is skipped without
-// running crew dispatch, which saves a process; one that dispatch holds back
-// (exit 4), by a cap say, is left for the next tick. Either way the next task is
-// tried: dependencies are per task, and caps per goal. Each task is checked
-// again just before its dispatch, since an earlier one can take minutes
-// (worktree hooks) while the ledger is unlocked, time enough for its goal to be
-// abandoned or the task dispatched by hand, or its go-ahead withdrawn.
+// ledger order. It's the tick's last step, so workers made busy by this tick's
+// review rounds and restacks count against MAX_WORKERS. A task waiting on other
+// tasks is skipped without running crew dispatch, which saves a process; one
+// that dispatch holds back (exit 4), by a cap say, is left for the next tick.
+// Either way the next task is tried: dependencies are per task, and caps per
+// goal. Each task is checked again just before its dispatch, since an earlier
+// one can take minutes (worktree hooks) while the ledger is unlocked. That's
+// time enough for someone to dispatch it by hand, abandon its goal or withdraw
+// its go-ahead.
 func (c *Crew) dispatchReady(news *tickNews) {
 	var ready []Task
 	for _, name := range c.projects("") {
@@ -317,15 +317,16 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			news.heldBack(project, "%s: dispatch waits: it comes %s", t.ID(), after(deps))
 			continue
 		}
-		// Dispatching ends the go-ahead, so say what it was first.
-		why := "for goal " + t.Goal()
+		// Dispatching ends the go-ahead, so say what it was first. tickDispatches
+		// has read it without an error.
+		because := "for goal " + t.Goal()
 		if g, _ := t.GoAhead(); g != nil {
-			why = fmt.Sprintf("on its go-ahead: %s reached %s", g.After.ID(), g.Status)
+			because = fmt.Sprintf("on its go-ahead: %s reached %s", g.After.ID(), g.Status)
 		}
 		var errs strings.Builder
 		switch c.step(&errs, "dispatch", t.Path) {
 		case 0:
-			news.did(project, "%s: dispatched %s", t.ID(), why)
+			news.did(project, "%s: dispatched %s", t.ID(), because)
 		case exitNotYet: // held back, by a cap say; the next tick tries again
 			// main prints the refusal last, after "crew: ".
 			why := strings.TrimRight(errs.String(), "\n")

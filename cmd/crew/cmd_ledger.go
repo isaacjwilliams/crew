@@ -206,7 +206,7 @@ func cmdSet(c *Crew, args []string) error {
 		return err
 	}
 	switch {
-	case key == "status" && isProposal(f):
+	case key == "status" && isProposal(f): // a proposal has no go-ahead to end
 		err = d.setStatus(value)
 	case key == "status":
 		err = Task{d}.SetStatus(Status(value))

@@ -528,8 +528,8 @@ func (s *statusView) notes(t Task) []string {
 	return notes
 }
 
-// goAheadNotes say whether crew tick dispatches a ready task outside a running
-// or draft goal: on a go-ahead, saying what it waits for, or else by hand.
+// goAheadNotes say whether crew tick dispatches a ready task that no goal will:
+// on a go-ahead, saying what it waits for, or else by hand.
 func goAheadNotes(t Task) []string {
 	g, err := t.GoAhead()
 	switch {
