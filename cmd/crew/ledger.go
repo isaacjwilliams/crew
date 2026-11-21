@@ -476,15 +476,6 @@ func linkRules(key string) (kindRules, bool) {
 	return kindRules{}, false
 }
 
-// goAheadWaits are the statuses a go-ahead can wait for a task of this kind to
-// reach: the one its hand-over moves it to, and merged for a kind that makes a PR.
-func (r kindRules) goAheadWaits() []Status {
-	if r.pr {
-		return []Status{r.handedOver, Merged}
-	}
-	return []Status{r.handedOver}
-}
-
 // kindNames lists the kinds as a sentence does: "build, spike, fix or refine".
 func kindNames() string {
 	names := make([]string, len(kinds))
@@ -752,13 +743,18 @@ type GoAhead struct {
 }
 
 // newGoAhead is a go-ahead waiting for after to reach st, or an error when
-// after's kind never reaches st.
+// after's kind never reaches st: the status its hand-over moves it to, and
+// merged for a kind that makes a PR.
 func newGoAhead(after Task, st Status) (*GoAhead, error) {
 	r, err := after.rules()
 	if err != nil {
 		return nil, err
 	}
-	if waits := r.goAheadWaits(); !slices.Contains(waits, st) {
+	waits := []Status{r.handedOver}
+	if r.pr {
+		waits = append(waits, Merged)
+	}
+	if !slices.Contains(waits, st) {
 		return nil, fmt.Errorf("a go-ahead can wait for %s to be %s, not '%s'", after.ID(), orList(waits), st)
 	}
 	return &GoAhead{after, st}, nil
@@ -790,10 +786,7 @@ func (g GoAhead) Met() bool {
 	case st.Delivered():
 		return true
 	}
-	return slices.ContainsFunc(g.After.LogEntries(), func(e logEntry) bool {
-		s, ok := e.status()
-		return ok && s == g.Status
-	})
+	return slices.ContainsFunc(g.After.LogEntries(), changedTo(g.Status))
 }
 
 // String is the go-ahead as go_ahead records it.
