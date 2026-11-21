@@ -714,8 +714,9 @@ func (d Doc) setStatus(s string) error {
 	return d.Log(statusLogged + s)
 }
 
-// Priority orders crew tick's dispatch of a running goal's ready tasks: higher
-// goes first. A task without one has priority 0.
+// Priority orders crew tick's dispatch of the ready tasks it dispatches (a
+// running goal's, and those whose go-ahead is met): higher goes first. A task
+// without one has priority 0.
 func (t Task) Priority() (int, error) {
 	v := t.Get("priority")
 	n, ok := parsePriority(v)

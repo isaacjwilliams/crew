@@ -1616,8 +1616,10 @@ WA=$(ready_task "Waited on"); TWA=$(basename "$WA" .md)
 WB=$(ready_task "Waits for pr-open"); TWB=$(basename "$WB" .md)
 crew set "$WB" go_ahead "$(num "$WA") pr-open"
 check "set go_ahead records the task it waits for by its ID, with the status" '[[ $(crew get "$WB" go_ahead) == "$TWA pr-open" ]]'
+crew set "$WB" priority 2; crew set "$WA" priority 2
 st=$(crew status)
 check "status says what a ready task's go-ahead waits for, where it said dispatch by hand" '[[ $(row "$TWB") == *"ready"*"  go-ahead once $(num "$WA") is pr-open" && $(row "$TWB") != *"by hand"* ]]'
+check "status shows the priority of a task with a go-ahead, which orders tick's dispatch, and not of one dispatched by hand" '[[ $(row "$TWB") == *"  priority 2"* && $(row "$TWA") != *priority* ]]'
 out=$(crew tick 2>&1)
 check "tick doesn't dispatch a task whose go-ahead isn't met yet" '[[ $out != *"$TWB: dispatched"* && $(crew get "$WB" status) == ready && $(crew get "$WA" status) == ready ]]'
 setstate "done" null; crew dispatch "$WA" >/dev/null 2>&1

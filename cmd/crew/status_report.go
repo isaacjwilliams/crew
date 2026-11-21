@@ -493,8 +493,8 @@ func (s *statusView) notes(t Task) []string {
 	if t.AutomatedReviewOff() {
 		notes = append(notes, "automated review off")
 	}
-	if st == Ready && t.Goal() != "" {
-		// Only a goal's ready tasks are dispatched in priority order.
+	if st == Ready && (t.Goal() != "" || t.Get("go_ahead") != "") {
+		// crew tick dispatches these in priority order; the rest go by hand.
 		if n, err := t.Priority(); err != nil {
 			notes = append(notes, "priority ?")
 		} else if n != 0 {
