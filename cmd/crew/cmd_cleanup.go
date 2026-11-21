@@ -6,9 +6,9 @@ import "fmt"
 // removes it from agent view, ends what it left running in the worktree,
 // removes the worktree, and deletes the local branch of a task that delivered
 // (merged, or a spike done). --merged cleans up every task that delivered.
-// A task it leaves alone is warned of, "<task>: worktree stays: <why>", and the
-// exit code is exitNotYet. crew tick runs it for one task and reads that warning,
-// the last line of stderr, to tell the leads why.
+// A task it leaves alone is warned of last, "<task>: worktree stays: <why>", and
+// the exit code is exitNotYet. crew tick runs it for one task and reads that
+// warning, the last line of stderr, to tell the leads why.
 func cmdCleanup(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -55,10 +55,9 @@ func cmdCleanup(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	stays := 0
+	var stays []string
 	stay := func(t Task, why string) {
-		warn("%s: worktree stays: %s", t.ID(), why)
-		stays++
+		stays = append(stays, fmt.Sprintf("%s: worktree stays: %s", t.ID(), why))
 	}
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
@@ -106,7 +105,11 @@ func cmdCleanup(c *Crew, args []string) error {
 		fmt.Println("cleaned up " + t.ID())
 	}
 	c.commit("cleanup")
-	if stays > 0 {
+	// Warned of after the ledger commit, so these are the last lines of stderr.
+	for _, line := range stays {
+		warn("%s", line)
+	}
+	if len(stays) > 0 {
 		return exitQuietly(exitNotYet)
 	}
 	return nil

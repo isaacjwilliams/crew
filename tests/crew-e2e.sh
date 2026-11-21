@@ -2310,13 +2310,18 @@ stays_case() {  # task-file label reason: tick twice; what the output, the news 
   out1=$(crew tick 2>&1); told=$(prompt "stays-$id")
   out2=$(crew tick 2>&1); again=$(prompt "stays-$id")
   check "$label: tick says the worktree stays, and never that it was cleaned up" \
-    '[[ $out1 == *"$id: worktree stays: $why"* && $out1 != *"$id: "*"worktree cleaned up"* && $out2 != *"$id: "*"worktree cleaned up"* && -d $(crew get "$f" worktree) ]] && ! grep -rq "$id: .*worktree cleaned up" "$L/news"'
+    '[[ $out1 == *"$id: worktree stays: $why"* && $(grep -cF "$id: worktree stays: $why" <<<"$out1") == 1 && $out1 != *"$id: "*"worktree cleaned up"* && $out2 != *"$id: "*"worktree cleaned up"* && -d $(crew get "$f" worktree) ]] && ! grep -rq "$id: .*worktree cleaned up" "$L/news"'
   check "$label: held-back keeps one item to a line, and a lead hears the reason after the first tick but not the second" \
     '! grep -vP "^[^\t]+\t[^\t]+\$" "$L/news/held-back" && grep -qF "$PJ"$'"'"'\t'"'"'"$id: worktree stays: $why" "$L/news/held-back" && [[ $told == *"$HELD$NL- $PJ: $id: worktree stays: $why" && -z $again ]]'
 }
 SC1=$(crew new "Stays dirty" --branch stays-dirty --project "$PJ"); fill "$SC1"; crew ready "$SC1" >/dev/null; setstate "done" null; crew dispatch "$SC1" >/dev/null
 SW1=$(crew get "$SC1" worktree); echo x >"$SW1/uncommitted.txt"; crew set "$SC1" status merged >/dev/null
 stays_case "$SC1" "a merged task with uncommitted changes" "$SW1 has uncommitted changes (crew cleanup --force removes it)"
+# A failing ledger commit warns too; the reason must still be cleanup's last line
+ls -d "$L/.git" >/dev/null 2>&1 && touch "$L/.git/index.lock"
+out=$(crew cleanup "$SC1" 2>&1 >/dev/null); rc=$?; rm -f "$L/.git/index.lock"
+check "cleanup's reason is its last line of stderr even when the ledger commit warns" \
+  '[[ $rc == 4 && ${out##*$NL} == *"$(basename "$SC1" .md): worktree stays: $SW1 has uncommitted changes"* ]]'
 rm "$SW1/uncommitted.txt"; setstate "done" null; prompt stays-fixed SessionStart >/dev/null
 out=$(crew tick 2>&1)
 check "once the changes are gone, tick cleans the worktree up and says so, to the leads too" \
