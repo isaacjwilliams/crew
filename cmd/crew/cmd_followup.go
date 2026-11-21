@@ -216,10 +216,12 @@ func cmdAttach(c *Crew, args []string) error {
 // targeting another branch, or both. crew only works out what to run; a fresh
 // worker (startRestack) does the rebase, the push and the retarget, and records a
 // new base when it has succeeded, so a failed restack still shows as one that's
-// needed. A restack waits until the task is pr-open, as crew tick's does: before
-// that, the worker is still making the branch. restack_sent
-// records the commit the last rebase was asked onto, and retarget_sent the base
-// the last retarget asked for, so neither is sent twice unless --again.
+// needed. restack_sent records the commit the last rebase was asked onto, and
+// retarget_sent the base the last retarget asked for, so neither is sent twice
+// unless --again.
+//
+// A restack waits until the task is pr-open, as crew tick's does: before that,
+// the worker is still making the branch.
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -358,12 +360,16 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 const restackModel = "sonnet"
 
 // startRestack starts a fresh session on restackModel to run note, a rebase or
-// a retarget, and makes it the task's worker. It records what it sent as
-// restack_sent (the commit to rebase onto) and retarget_sent (the PR's new base),
-// leaving out an empty one. The worker's own conversation is
-// long, and resuming it costs far more than the restack does. The session gets
-// the restack and nothing else: review rounds and word of a pause wait for the
-// next followup, which starts afresh on the task's model (changedSince).
+// a retarget, and makes it the task's worker. Resuming the worker's own
+// conversation would cost far more than the restack does, since it's long.
+//
+// It records what it sent as restack_sent (the commit to rebase onto) and
+// retarget_sent (the PR's new base), leaving out an empty one.
+//
+// The session gets the restack and nothing else. Review rounds and word of a
+// pause wait for the next followup. That one starts a fresh session on the
+// task's own model, because the recorded worker_model is now restackModel
+// (changedSince), unless the task's model is restackModel too.
 func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) error {
 	// Building the launcher reads the worker settings, and a bad mcp.json would
 	// stop the launch: either stops here, before anything changes.
@@ -390,6 +396,8 @@ func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) e
 		return err
 	}
 	wt := t.Worktree()
+	// fresh: never resume the worker's conversation. implementer.md's exception
+	// to reading the whole task file first matches this prompt's opening.
 	l, err := c.relaunch(start, t.Doc, wt, note, fmt.Sprintf(
 		"You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs.",
 		t.ID(), p.Name, t.Path, wt), true)
