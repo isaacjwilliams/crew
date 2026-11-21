@@ -493,8 +493,8 @@ func (s *statusView) notes(t Task) []string {
 	if t.AutomatedReviewOff() {
 		notes = append(notes, "automated review off")
 	}
-	if st == Ready && t.Goal() != "" {
-		// Only a goal's ready tasks are dispatched in priority order.
+	if st == Ready && (t.Goal() != "" || t.Get("go_ahead") != "") {
+		// crew tick dispatches these in priority order; the rest go by hand.
 		if n, err := t.Priority(); err != nil {
 			notes = append(notes, "priority ?")
 		} else if n != 0 {
@@ -511,10 +511,10 @@ func (s *statusView) notes(t Task) []string {
 			notes = append(notes, after(deps))
 		}
 	}
-	// crew tick dispatches only a goal's ready tasks, so someone has to run crew
-	// dispatch for the rest. A goal that's done or abandoned isn't listed without
-	// --done, but its cap still holds its tasks, so their rows say what its line
-	// would.
+	// crew tick dispatches a goal's ready tasks, and others on a go-ahead, so
+	// someone has to run crew dispatch for the rest. A goal that's done or
+	// abandoned isn't listed without --done, but its cap still holds its tasks,
+	// so their rows say what its line would.
 	if st == Ready && !s.goalDispatches(t) {
 		if g, ok := s.taskGoal(t); ok && !s.shown(g.Get("status")) {
 			if c, err := s.goalCap(g); err != nil {
@@ -523,9 +523,29 @@ func (s *statusView) notes(t Task) []string {
 				notes = append(notes, "goal "+g.ID()+" full")
 			}
 		}
-		notes = append(notes, "dispatch by hand")
+		notes = append(notes, goAheadNotes(t)...)
 	}
 	return notes
+}
+
+// goAheadNotes say whether crew tick dispatches a ready task that no goal will:
+// on a go-ahead, saying what it waits for, or else by hand.
+func goAheadNotes(t Task) []string {
+	g, err := t.GoAhead()
+	switch {
+	case err != nil:
+		return []string{err.Error(), "dispatch by hand"}
+	case g == nil:
+		return []string{"dispatch by hand"}
+	}
+	after := taskNumber(g.After)
+	switch {
+	case g.After.Status() == Abandoned:
+		return []string{"go-ahead never met: " + after + " abandoned", "dispatch by hand"}
+	case g.Met():
+		return []string{"go-ahead met: " + after + " reached " + string(g.Status)}
+	}
+	return []string{"go-ahead once " + after + " is " + string(g.Status)}
 }
 
 // prNotes is what a task that isn't pr-open says of its PR and its branch: the

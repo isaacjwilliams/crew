@@ -26,6 +26,7 @@ complete -c crew -n "__fish_seen_subcommand_from new" -l fixes -x -d 'The merged
 complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this task\'s unmerged branch' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'
+complete -c crew -n "__fish_seen_subcommand_from dispatch" -l tick -d "crew tick's: hold back once tick wouldn't dispatch it"
 complete -c crew -n "__fish_seen_subcommand_from feedback" -l since -r
 complete -c crew -n "__fish_seen_subcommand_from followup" -l fresh -d 'Start a new worker instead of resuming'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l note -r

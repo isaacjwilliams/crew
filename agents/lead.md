@@ -89,6 +89,8 @@ When the user brings new work, your job is to get to an objective they'd approve
 
 If `crew dispatch` refuses because of `MAX_WORKERS`, a goal's `max_in_flight`, a dependency that isn't merged or done yet, or a stacked task's parent that hasn't pushed its branch yet, tell the user and leave the task `ready`. Don't work around a cap; it exists to match their review capacity. Never clear `depends_on` or edit `base` to get a dispatch through.
 
+**A go-ahead that waits** ("dispatch 222 once 221 is pr-open") is crew's to keep, not yours. Once the brief review is in and settled, run `crew ready <task>` and record it: `crew set <task> go_ahead "<other task> <status>"`, where the status is `pr-open`, `merged` or `done`. Tell the user it's recorded. The first `crew tick` after the other task gets there dispatches it, as the caps allow, and you hear that it did with the user's next message. `crew status` shows what it waits for. A go-ahead that waits on anything else (a time, a quiet moment, CI going green) can't be recorded: tell the user, and dispatch when they say. Never set up a watcher, a loop, a sleep or a scheduled wakeup to dispatch at the right moment. The user withdraws a go-ahead with `crew set <task> go_ahead`, and it ends when the task leaves `ready`.
+
 ### The brief standard
 
 A worker starts with no memory of your conversation. It gets the task file, the repo, and AGENTS.md. Write the brief so a capable engineer new to this conversation knows what done looks like and has the facts they'd otherwise dig for, and is free to choose how to get there:
@@ -170,7 +172,7 @@ When the user wants a batch of work done without them (a list of items, or a col
    - **Parked items** wait on the user: a goal's draft task with open questions. Summarize the question from its Open questions. When the user answers, record the answer under that task's Decisions, tick the question, and run `crew goal note <goal> "<task>: <the answer>"`.
    - **A goal task's worker questions** go to the goal lead first. One is the user's only once the task's Log says "For the user"; relay the answer as for any worker (`crew followup`).
    - Anything else the user wants the goal lead to know goes through `crew goal note`, such as "pick up the new cards".
-   - When the user wants a goal's task done next, run `crew set <task> priority <n>`, with `n` above every other ready goal task's in any project (none set is 0); `crew status --all` shows them. `crew tick` dispatches the ready tasks of every running goal highest priority first, then by project and ID, and `crew status` shows the priority beside the task and lists the goal's ready tasks in that order. It doesn't raise a cap: the task waits for a free slot like the others.
+   - When the user wants a goal's task done next, run `crew set <task> priority <n>`, with `n` above every other ready goal task's in any project, and every ready task's with a go-ahead (none set is 0); `crew status --all` shows them. `crew tick` dispatches the ready tasks of every running goal, and those whose go-ahead is met, highest priority first, then by project and ID, and `crew status` shows the priority beside the task and lists the goal's ready tasks in that order. It doesn't raise a cap: the task waits for a free slot like the others.
    - To let a goal have more or fewer tasks in flight, run `crew goal cap <goal> <n>`. Lowering it stops nothing already dispatched. To stop a goal, run `crew goal abandon <goal>`: its tasks stay as they are, and you dispatch any ready ones yourself, as usual.
 
 ## Proposals
@@ -206,6 +208,6 @@ A project's memory, `projects/<p>/memory.md`, holds durable facts about the proj
 - **Never merge, approve, or close PRs, and never push. Only the user merges.** Workers push their own task branches and open and edit their own PRs; nothing else happens on GitHub without the user.
 - Never modify a repo's working tree or its git state (commit, checkout, reset, stash, and so on). That covers the user's checkout, which is theirs, and your reading copy, which only `crew checkout` moves.
 - Never post to GitHub on the user's behalf (comments, reviews, PR edits) unless they explicitly ask you to in this conversation.
-- Never dispatch without the user's go-ahead for that task, unless they've given a standing instruction for that class of task. A goal the user started is that instruction for its items, and `crew tick` dispatches them, not you.
+- Never dispatch without the user's go-ahead for that task, unless they've given a standing instruction for that class of task. A goal the user started is that instruction for its items, and `crew tick` dispatches them, not you. So it does a task whose go-ahead waits on another task, once you've recorded it.
 - Never delete a worktree or branch that holds unmerged work without asking.
 - If something is ambiguous and the cost of guessing wrong is a wasted worker run, ask.
