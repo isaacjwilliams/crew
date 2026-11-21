@@ -81,6 +81,17 @@ evidence_commit() { sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p' "$(crew pat
 # the first time, in the task and the PR body, then crew hand-over. A refusal fails the
 # suite, since the checks after it would run against a task that isn't pr-open.
 resumes() { grep -c -- "--resume" "$HOME/claude-calls.log"; }
+launches() { grep -c -- " --bg" "$HOME/claude-calls.log"; }
+prompt_of() {  # task-id: the prompt of the latest restack session started for it, every line of it
+  awk -v t="You are restacking task $1 " '/^claude / {on = index($0, t); if (on) c = substr($0, on); next} on {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
+# restacked TASK: crew's latest restack of the task started a fresh worker on Sonnet, resuming
+# nothing, and the task records that session as its worker.
+restacked() {
+  local l; l=$(grep -F "You are restacking task $(basename "$(crew path "$1")" .md) " "$HOME/claude-calls.log" | tail -1)
+  [[ $l == "claude --name "*" --model sonnet You are restacking task "* && $l == *" --agent implementer "* && $l != *--resume* &&
+    $(crew get "$1" worker_model) == sonnet &&
+    $(jq -r --arg j "$(crew get "$1" worker_job)" '.[] | select(.id == $j) | .sessionId' "$HOME/agents.json") == "$(crew get "$1" worker_session)" ]]
+}
 hand_over() {  # task
   section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
   pr_body "$1"
@@ -830,7 +841,7 @@ work() {  # worktree file — what a worker does: commit and push its branch
 }
 last_prompt() { grep -- "--resume" "$HOME/claude-calls.log" | tail -1; }
 restack_push() {  # worktree — runs the push the last restack note gives, as written
-  local cmd; read -ra cmd <<<"$(last_prompt | grep -o 'git push --force-with-lease=[^`]*')"
+  local cmd; read -ra cmd <<<"$(last_launch | grep -o 'git push --force-with-lease=[^`]*' | tail -1)"
   (cd "$1" && "${cmd[@]}" -q 2>/dev/null)
 }
 echo OPEN >"$HOME/gh-pr-state"
@@ -866,14 +877,26 @@ work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
 check "status shows the restack that's needed, once on the row" '[[ $(crew status | grep -c "needs restack: 009-season-model moved") == 1 ]]'
-setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); crew restack 10 >/dev/null
-check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_prompt) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
-check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_prompt) == *"git rebase --onto $T9b $T9\`"* && $(last_prompt) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
+setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); s10=$(crew get 10 worker_session); crew restack 10 >/dev/null
+check "restack starts a fresh worker on Sonnet for the rebase, never resuming the worker's conversation" 'restacked 10 && [[ $(crew get 10 worker_session) != "$s10" ]]'
+check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_launch) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
+check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_launch) == *"git rebase --onto $T9b $T9\`"* && $(last_launch) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
+check "a restack session is told to read only what its steps need, not the whole task file" \
+  '[[ $(last_launch) == *"Don'"'"'t read the whole task file or review the branch first; read only what a step of your restack workflow needs."* && $(last_launch) != *"Read the whole task file"* ]]'
 check "status shows the restack a working task needs, and no merge check" \
   '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
-setstate "done" null; n=$(grep -c -- "--resume" "$HOME/claude-calls.log")
-check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(grep -c -- "--resume" "$HOME/claude-calls.log") == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
-check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(grep -c -- "--resume" "$HOME/claude-calls.log") == $((n + 1)) ]]'
+setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
+check "restack by hand waits until the task is pr-open, and starts nothing" \
+  '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
+s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
+check "the next followup after a restack starts afresh on the task's model, the default here, and says why" \
+  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
+setstate "done" null; hand_over 10; n=$(launches)
+check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
+setstate working 4242; out=$(crew restack 10 --again 2>&1)
+check "restack starts nothing while the task's worker is busy" '[[ $out == *"is busy (working)"* && $(launches) == "$n" && $(crew get 10 status) == pr-open ]]'
+setstate "done" null
+check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(launches) == $((n + 1)) ]] && restacked 10'
 (cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; hand_over 10
 check "evidence stays current through a restack, though the rebased branch no longer holds the commit it ran on" \
   '[[ $(crew get 10 status) == pr-open ]] && ! git merge-base --is-ancestor "$(evidence_commit 10)" "$(tip season-admin)"'
@@ -882,7 +905,8 @@ check "sync sees the restack, moves base_sha to the parent's new tip and keeps t
   '[[ $out != *restack* && $(crew get 10 base_sha) == "$T9b" && $(crew get 10 earlier_base_shas) == "$T9" ]]'
 setstate "done" null
 check "restack has nothing to do for a task that's up to date" '[[ $(crew restack 10) == *"nothing to restack"* ]]'
-check "restack refuses a task that isn't stacked" '! crew restack 9 2>/dev/null'
+sed -i 's/^status: pr-open$/status: working/' "$F9"; out=$(crew restack 9 2>&1); st=$?; sed -i "s/^status: working$/status: pr-open/" "$F9"
+check "restack refuses a task that isn't stacked, before waiting for pr-open" '((st == 1)) && [[ $out == *"009-season-model has nothing to restack"* ]]'
 
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
 crew set 11 model sonnet; crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
@@ -913,10 +937,14 @@ check "a raise by sync turns the task's automated review back on, and logs why" 
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'
-crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
-check "after a merge, restack targets the default branch and has the worker retarget the PR" '[[ $(last_prompt) == *"git rebase --onto $M $T9b\`"* && $(last_prompt) == *"gh pr edit --base main"* && $(last_prompt) == *"crew set 010-season-admin base main"* ]]'
+crew set 10 model opus; crew restack 10 >/dev/null; M=$(git rev-parse origin/main)
+check "after a merge, restack targets the default branch and has the worker retarget the PR" '[[ $(last_launch) == *"git rebase --onto $M $T9b\`"* && $(last_launch) == *"gh pr edit --base main"* && $(last_launch) == *"crew set 010-season-admin base main"* ]]'
+check "a restack runs on Sonnet whatever the task's own model" 'restacked 10'
 check "crew leaves base alone until the worker has restacked" '[[ $(crew get 10 base) == agent/season-model ]]'
-(cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main; hand_over 10
+(cd "$WT10" && git rebase -q --onto "$M" "$T9b") && restack_push "$WT10"; crew set 10 base main
+setstate "done" null; crew followup 10 --note "go on" >/dev/null
+check "the next followup after a restack starts afresh on the task's own model" '[[ $(last_launch) == *" --model opus "* && $(last_launch) != *--resume* && $(crew get 10 worker_model) == opus ]]'
+crew set 10 model ""; hand_over 10
 check "and through a restack onto the default branch, after its parent was squashed into it" \
   '[[ $(crew get 10 status) == pr-open ]] && ! git merge-base --is-ancestor "$(evidence_commit 10)" "$(tip season-admin)"'
 T10b=$(tip season-admin)
@@ -927,9 +955,12 @@ check "sync raises a stacked task for its own changes, not its rebased parent's:
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low
 check "a restacked parent is done, and its own child is next" '[[ $out != *"010-season-admin: needs"* && $out == *"011-season-picker: needs a restack, 010-season-admin moved"* ]]'
 setstate "done" null; crew restack 11 >/dev/null
-check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_prompt) == *"git rebase --onto $T10b $T10\`"* ]]'
-check "a restack goes to a sonnet task's worker on Sonnet" 'runs_on 11 sonnet'
-(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"; hand_over 11
+check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_launch) == *"git rebase --onto $T10b $T10\`"* ]] && restacked 11'
+(cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"
+s11=$(crew get 11 worker_session); setstate "done" null; out=$(crew followup 11 --note "go on")
+check "the next followup after a restack starts afresh even when the task's own model is Sonnet too" \
+  '[[ $(last_launch) == *" --model sonnet You are picking up task "* && $(last_launch) != *--resume* && $(crew get 11 worker_session) != "$s11" && $out == *"(fresh: its last session only ran a restack)" ]]'
+hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
 check "--on refuses a merged task" '! crew new "Too late" --on 9 2>/dev/null'
@@ -1100,7 +1131,7 @@ check "a task abandoned while crew catch-up reads GitHub is sent nothing" '[[ $o
 rm "$HOME/gh-pr-view-hook"; crew set 13 status working; hand_over 13
 out=$(crew tick 2>/dev/null)
 check "once the PR is handed over, a tick records the conflict with main's tip on origin as a round of its own, and sends it to the idle worker" '[[ $out == *"013-tick-routing: catch-up round $((r + 1)) recorded: conflicts with main"* && $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(round "$F13" $((r + 1))) == "- [ ] Conflicts with main at $B1" && $(crew get 13 status) == addressing-feedback && $(resumes) == $((n + 1)) ]]'
-check "a catch-up round goes to a sonnet task's worker on Sonnet" 'runs_on 13 sonnet'
+check "a catch-up round resumes the worker's conversation, as any review round does" 'runs_on 13 sonnet && [[ $(last_launch) == "claude --resume $(crew get 13 worker_session) --bg New input for task 013-tick-routing ("* ]]'
 setstate "done" null; hand_over 13
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
 check "a second tick on the same base commit records nothing, and crew catch-up by hand says why and exits 3" '[[ -z $out && $byhand == "nothing to do: the conflict with main at $B1 is reported already" && $code == 3 && $(crew get 13 review_rounds) == $((r + 1)) ]]'
@@ -1249,17 +1280,31 @@ work "$WT14" p1.txt; crew set 14 pr https://github.com/isaac/webapp/pull/31; han
 F15=$(crew new "Tick child" --branch tick-child --on 14); fill "$F15"; crew ready 15 >/dev/null
 crew dispatch 15 >/dev/null; WT15=$(crew get 15 worktree)
 work "$WT15" c1.txt; crew set 15 pr https://github.com/isaac/webapp/pull/32; hand_over 15
-work "$WT14" p2.txt; setstate "done" null; n=$(resumes)
+work "$WT14" p2.txt; setstate "done" null; n=$(launches)
 out=$(crew tick)
-check "tick restacks a stacked task whose parent moved" '[[ $out == "015-tick-child: restack sent to its worker (014-tick-parent moved)" && $(last_prompt) == *"git rebase --onto $(tip tick-parent)"* && $(resumes) == $((n + 1)) ]]'
+check "tick restacks a stacked task whose parent moved, in a fresh worker on Sonnet" '[[ $out == "015-tick-child: restack sent to its worker (014-tick-parent moved)" && $(last_launch) == *"git rebase --onto $(tip tick-parent)"* && $(launches) == $((n + 1)) ]] && restacked 15'
 hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
-check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 1)) ]]'
+check "tick doesn't send the same restack again when the worker didn't manage it" '[[ -z $out && $(launches) == $((n + 1)) ]]'
+# A restack by hand sends the restack alone: a round, or word of a pause, waits for the next tick.
+r15=$(crew get 15 review_rounds); crew set 15 review_rounds $((r15 + 1)); n=$(launches); crew restack 15 --again >/dev/null
+check "a restack by hand holds back a review round its worker hasn't been sent" \
+  '[[ $(launches) == $((n + 1)) && $(last_launch) == *"Restack (014-tick-parent moved)"* && $(last_launch) != *"review feedback"* && $(crew get 15 last_round_sent) == "$r15" ]] && restacked 15'
+setstate "done" null; out=$(crew tick)
+check "and the next tick sends that round to the worker, afresh on the task's model" \
+  '[[ $out == "015-tick-child: round $((r15 + 1)) sent to its worker" && $(last_launch) == *"New review feedback is in round $((r15 + 1))"* && $(last_launch) != *--resume* && $(last_launch) != *--model* && $(crew get 15 last_round_sent) == $((r15 + 1)) ]]'
+hand_over 15; crew set 15 interrupted 2026-11-20T10:00:00Z; setstate "done" null; n=$(launches); crew restack 15 --again >/dev/null
+check "a restack by hand holds back word of a pause" \
+  '[[ $(launches) == $((n + 1)) && $(last_launch) == *"Restack (014-tick-parent moved)"* && $(last_launch) != *"crew was paused"* && -n $(crew get 15 interrupted) ]] && restacked 15'
+setstate "done" null; out=$(crew tick)
+check "and the next tick tells the worker to carry on after the pause" \
+  '[[ $out == "015-tick-child: its worker carries on after the pause" && $(last_launch) == *"crew was paused while you were working"* && -z $(crew get 15 interrupted) ]]'
+hand_over 15; n=$(launches)
 # 14 is abandoned after 15's restack onto it was sent, and its branch stays where it was.
 crew set 14 status abandoned >/dev/null; setstate "done" null
 out=$(crew tick 2>&1)
 check "tick holds back the restack of a task whose parent was abandoned since its last restack, saying why" \
-  '[[ $out == *"015-tick-child: restack held back: 014-tick-parent was abandoned; give it another base with '"'"'crew set 015-tick-child base <branch>'"'"'"* && $(resumes) == $((n + 1)) ]]'
+  '[[ $out == *"015-tick-child: restack held back: 014-tick-parent was abandoned; give it another base with '"'"'crew set 015-tick-child base <branch>'"'"'"* && $(launches) == "$n" ]]'
 crew set 14 status working >/dev/null; record_evidence 14; hand_over 14
 
 # Retargets: 15 moves onto 16, a new task stacked on 14 that holds all of 14's work, as a split's last
@@ -1278,18 +1323,20 @@ out=$(crew sync)
 check "sync reports each PR that targets a branch other than its task's base, stacked or not" \
   '[[ $out == *"015-tick-child: PR targets agent/tick-parent, not agent/tick-replacement (run '"'"'crew restack 015-tick-child'"'"')"* && $out == *"014-tick-parent: PR targets agent/tick-old, not main"* && $out != *"needs a restack"* ]]'
 check "status shows it" '[[ $(crew status) == *"PR targets agent/tick-parent, not agent/tick-replacement"* ]]'
-prompt_of() { grep -- "--resume" "$HOME/claude-calls.log" | grep -F "New input for task $1 (" | tail -1; }
-setstate "done" null; n=$(resumes)
+setstate "done" null; n=$(launches)
 out=$(crew tick)
-check "with nothing to rebase, tick sends a retarget alone, to a stacked task and an unstacked one" \
-  '[[ $out == *"015-tick-child: restack sent to its worker (PR targets agent/tick-parent, not agent/tick-replacement)"* && $out == *"014-tick-parent: restack sent to its worker (PR targets agent/tick-old, not main)"* && $(resumes) == $((n + 2)) ]]'
+check "with nothing to rebase, tick sends a retarget alone, to a stacked task and an unstacked one, each in a fresh worker on Sonnet" \
+  '[[ $out == *"015-tick-child: restack sent to its worker (PR targets agent/tick-parent, not agent/tick-replacement)"* && $out == *"014-tick-parent: restack sent to its worker (PR targets agent/tick-old, not main)"* && $(launches) == $((n + 2)) ]] && restacked 14 && restacked 15'
 p15=$(prompt_of 015-tick-child)
 check "a retarget note asks for gh pr edit --base and no rebase or push, and is recorded apart from restacks" \
   '[[ $p15 == *"Retarget (PR targets agent/tick-parent, not agent/tick-replacement)"*"\`gh pr edit --base agent/tick-replacement\`"* && $p15 != *"git rebase"* && $p15 != *"git push"* && $(crew get 15 retarget_sent) == agent/tick-replacement && $(crew get 15 restack_sent) == "$rs15" ]]'
 record_evidence 14; hand_over 14; hand_over 15; setstate "done" null
 out=$(crew tick 2>&1)
-check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(resumes) == $((n + 2)) ]]'
-check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(resumes) == $((n + 2)) ]]'
+check "tick doesn't send the same retarget again when the worker didn't manage it" '[[ -z $out && $(launches) == $((n + 2)) ]]'
+check "and crew restack won't without --again" '[[ $(crew restack 15 2>&1) == *"already asked to retarget its PR to agent/tick-replacement"* && $(launches) == $((n + 2)) ]]'
+setstate "done" null; crew restack 15 --again >/dev/null
+check "a retarget by hand starts a fresh worker on Sonnet too" '[[ $(launches) == $((n + 3)) && $(last_launch) == *"Retarget (PR targets agent/tick-parent"* ]] && restacked 15'
+hand_over 15
 # 14's worker retargeted its PR. 16 moves, and its own PR targets the wrong branch.
 echo main >"$HOME/gh-pr-base-31"; echo main >"$HOME/gh-pr-base-33"; work "$(crew get "$FR" worktree)" r1.txt
 setstate "done" null; out=$(crew tick)
@@ -1304,10 +1351,10 @@ rm -f "$HOME"/gh-pr-base-*
 
 # 14 and 16 move while 16's worker is still at work on it: 16's restack waits for it to be
 # pr-open, and 15's waits for 16's.
-work "$WT14" p3.txt; work "$(crew get "$FR" worktree)" r2.txt; crew set "$FR" status working; crew sync >/dev/null; setstate "done" null; n=$(resumes)
+work "$WT14" p3.txt; work "$(crew get "$FR" worktree)" r2.txt; crew set "$FR" status working; crew sync >/dev/null; setstate "done" null; n=$(launches)
 out=$(crew tick 2>&1)
 check "tick holds back the restack of a task that isn't pr-open, saying why" \
-  '[[ $out == *"016-tick-replacement: restack (014-tick-parent moved) waits until the task is pr-open; it'"'"'s working"* && $(resumes) == "$n" ]]'
+  '[[ $out == *"016-tick-replacement: restack (014-tick-parent moved) waits until the task is pr-open; it'"'"'s working"* && $(launches) == "$n" ]]'
 check "and a child's restack until its parent's, saying why" '[[ $out == *"015-tick-child: restack (016-tick-replacement moved) waits for 016-tick-replacement'"'"'s own restack"* ]]'
 out=$(prompt held)
 check "a lead hears each restack held back, and why" \
@@ -2098,7 +2145,6 @@ jobstate() {  # job state pid [status]: setstate, for one job
     "$HOME/agents.json" >"$HOME/a" && mv "$HOME/a" "$HOME/agents.json"; }
 calls() { wc -l <"$HOME/claude-calls.log"; }
 since() { tail -n "+$(($1 + 1))" "$HOME/claude-calls.log"; }  # the claude calls after the first $1
-launches() { grep -c -- " --bg" "$HOME/claude-calls.log"; }
 MARK=$L/projects/$PJ/paused
 CARRY="crew was paused while you were working. Carry on from where your Log says you stopped."
 GPF=$(crew goal new "Paused goal" --project "$PJ"); TGP=$(basename "$GPF" .md); sed -i '/^## Goal$/a "Keep going."' "$GPF"
@@ -2152,7 +2198,7 @@ check "crew pause takes over a pause crew upgrade made, so it outlasts the upgra
 # Nothing starts a session for a paused project.
 GPT=$(crew new "Paused goal task" --goal "$GPF" --project "$PJ"); fill "$GPT"; crew ready "$GPT" >/dev/null
 GDF=$(crew goal new "Not started" --project "$PJ"); sed -i '/^## Goal$/a "Later."' "$GDF"; crew commit >/dev/null
-PS=$(crew new "Stacked while paused" --project "$PJ" --on "$TPI"); crew set "$PS" worker_job s7ack3d0
+PS=$(crew new "Stacked while paused" --project "$PJ" --on "$TPI"); crew set "$PS" worker_job s7ack3d0; sed -i "s/^status: .*/status: pr-open/" "$PS"  # crew set refuses pr-open
 PM=$(crew new "Merged parent" --project "$PJ")
 PSM=$(crew new "Stacked on a merged task" --project "$PJ" --on "$(basename "$PM" .md)"); fill "$PSM"; crew ready "$PSM" >/dev/null
 crew set "$PM" status merged; psm_base=$(crew get "$PSM" base)
