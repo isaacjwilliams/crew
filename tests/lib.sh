@@ -51,7 +51,10 @@ isolate_home() {
   export MISE_CACHE_DIR=${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}
   export HOME=$1
   mkdir -p "$HOME"
-  unset CREW_HOME CREW_PROJECT CREW_LEAD_FINGERPRINT CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
+  # Drop every crew setting but the tests' own (CREW_TEST_*): a worker's session sets several.
+  local v
+  for v in "${!CREW_@}"; do [[ $v == CREW_TEST_* ]] || unset "$v"; done
+  unset CLAUDE_PROJECT_DIR CLAUDE_JOB_DIR CLAUDE_CONFIG_DIR
   export GIT_CONFIG_NOSYSTEM=1
   git config --global user.email test@example.com
   git config --global user.name test
@@ -62,6 +65,7 @@ isolate_home() {
   [[ $(command -v wt) == "$TESTS_DIR/stubs/wt" ]] || { echo "refusing to run: stub wt isn't first on PATH" >&2; exit 2; }
   [[ $(command -v curl) == "$TESTS_DIR/stubs/curl" ]] || { echo "refusing to run: stub curl isn't first on PATH" >&2; exit 2; }
   [[ $(command -v codex) == "$TESTS_DIR/stubs/codex" ]] || { echo "refusing to run: stub codex isn't first on PATH" >&2; exit 2; }
+  [[ $(command -v crew) == "$TESTS_DIR/stubs/crew" ]] || { echo "refusing to run: stub crew isn't first on PATH" >&2; exit 2; }
 }
 
 # make_home DIR — a crew home, as a clone of this repo would be once it has run:
@@ -69,6 +73,9 @@ isolate_home() {
 # a new git repo, with the binary for its VERSION in bin/release/.
 make_home() {
   local f v
+  # Only git can tell this checkout's files from what it ignores and the suites leave.
+  [[ -e $REPO_DIR/.git ]] ||
+    { echo "refusing to run: $REPO_DIR isn't a git checkout, so make_home can't tell which of its files are crew's (run git init in the copy first)" >&2; exit 2; }
   mkdir -p "$1"
   while IFS= read -r -d '' f; do
     if [[ -e $REPO_DIR/$f ]]; then mkdir -p "$1/$(dirname "$f")"; cp -p "$REPO_DIR/$f" "$1/$f"; fi

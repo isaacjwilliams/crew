@@ -206,7 +206,7 @@ doctor_out=$(env -u CLAUDECODE crew doctor 2>&1); st=$?
 check "crew doctor fails its required checks for a signed-out codex" '((st != 0)) && [[ $doctor_out == *"FAIL $P: codex signed in — run '"'codex login'"'"* && $doctor_out == *"Some required checks failed."* ]]'
 rm "$HOME/codex-signed-out"
 mkdir -p "$SB/no-codex"
-for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex ]] || ln -sf "$s" "$SB/no-codex/"; done
+for s in "$TESTS_DIR"/stubs/*; do [[ $s == */codex || $s == */crew ]] || ln -sf "$s" "$SB/no-codex/"; done   # the stub crew would hide the home's
 no_codex_path=$SB/no-codex
 IFS=: read -ra dirs <<<"$PATH"
 for d in "${dirs[@]}"; do [[ $d == "$TESTS_DIR/stubs" || -e $d/codex ]] || no_codex_path+=:$d; done
@@ -2004,6 +2004,21 @@ err=$(crew tick 2>&1 >/dev/null); rc=$?
 check "crew tick brings mcp.local.json and the leads' servers up to date" \
   '[[ $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$MLJ") == https://docs.example/mcp && $(jq -r ".mcpServers[\"${PJ}_docs\"].url" "$L/lead/.mcp.json") == https://docs.example/mcp ]]'
 check "a project whose mcp.json is broken is reported, keeps the mcp.local.json it had, and the tick carries on" '[[ $rc == 0 && $err == *"$M2: server"*"\${NOT_SET} isn"*"set"* && $(jq -c . "$ML2") == "{\"mcpServers\":{}}" ]]'
+# A project with no clone on this machine holds up no other project's sync, whether
+# it's run by hand or by a tick. Its name sorts first, so it's met before the others.
+NC=$L/projects/0-no-clone; mkdir "$NC"; echo "REMOTE=\"$SB/nowhere.git\"" >"$NC/project.env"
+merged_task() {  # title: a dispatched task with a PR, which GitHub reads as merged
+  local f; f=$(crew new "$1" --project "$PJ"); fill "$f"; crew ready "$f" >/dev/null; setstate "done" null; crew dispatch "$f" >/dev/null 2>&1
+  crew set "$f" pr https://github.com/isaac/webapp/pull/12; echo "$f"; }
+FS=$(merged_task "Merged beside a broken project")
+out=$(crew sync --all 2>&1); st=$?
+check "sync --all syncs the other projects when one can't be loaded, names the one it skipped and why, and exits 1" \
+  '((st == 1)) && [[ $(crew get "$FS" status) == merged && $out == *"crew: no clone of 0-no-clone on this machine"* && $out == *"crew: 0-no-clone: skipped"* ]]'
+FT=$(merged_task "Merged beside a broken project, by a tick")
+err=$(crew tick 2>&1 >/dev/null)
+check "a tick records another project's merge while one can't be loaded, naming the one it skipped once, and not as a failed sync" \
+  '[[ $(crew get "$FT" status) == merged && $(grep -c "0-no-clone: skipped" <<<"$err") == 1 && $err != *"sync failed"* ]]'
+rm -r "$NC"; crew cleanup --merged --project "$PJ" >/dev/null 2>&1
 
 
 # Pausing: crew pause stops a project's work without losing any. Sessions mid-turn
@@ -2400,5 +2415,40 @@ check "after a long gap, the prompt says how many earlier lines it left out and 
 check "and tells the newest lines, up to the last" '[[ $out == *" $TNA: status → draft$NL- "*" $TNA: status → needs-input" ]]'
 left=${out%% earlier lines left out*}; told=$(grep -c "^- " <<<"$out")
 check "and leaves out only what it doesn't tell" '[[ $left =~ ^[0-9]+$ ]] && ((left + told == 181))'
+
+# When crew tick's cleanup leaves a delivered task's worktree, the leads hear it stays and why,
+# once, and nothing says it was cleaned up. When the cause is gone, the next tick cleans up.
+stays_case() {  # task-file label reason: tick twice; what the output, the news and the held-back file say
+  local f=$1 label=$2 why=$3 id out1 out2 told again
+  id=$(basename "$f" .md); prompt "stays-$id" SessionStart >/dev/null
+  out1=$(crew tick 2>&1); told=$(prompt "stays-$id")
+  out2=$(crew tick 2>&1); again=$(prompt "stays-$id")
+  check "$label: tick says the worktree stays, and never that it was cleaned up" \
+    '[[ $out1 == *"$id: worktree stays: $why"* && $(grep -cF "$id: worktree stays: $why" <<<"$out1") == 1 && $out1 != *"$id: "*"worktree cleaned up"* && $out2 != *"$id: "*"worktree cleaned up"* && -d $(crew get "$f" worktree) ]] && ! grep -rq "$id: .*worktree cleaned up" "$L/news"'
+  check "$label: held-back keeps one item to a line, and a lead hears the reason after the first tick but not the second" \
+    '! grep -vP "^[^\t]+\t[^\t]+\$" "$L/news/held-back" && grep -qF "$PJ"$'"'"'\t'"'"'"$id: worktree stays: $why" "$L/news/held-back" && [[ $told == *"$HELD$NL- $PJ: $id: worktree stays: $why" && -z $again ]]'
+}
+SC1=$(crew new "Stays dirty" --branch stays-dirty --project "$PJ"); fill "$SC1"; crew ready "$SC1" >/dev/null; setstate "done" null; crew dispatch "$SC1" >/dev/null
+SW1=$(crew get "$SC1" worktree); echo x >"$SW1/uncommitted.txt"; crew set "$SC1" status merged >/dev/null
+stays_case "$SC1" "a merged task with uncommitted changes" "$SW1 has uncommitted changes (crew cleanup --force removes it)"
+# A failing ledger commit warns too; the reason must still be cleanup's last line
+touch "$L/.git/index.lock"
+out=$(crew cleanup "$SC1" 2>&1 >/dev/null); rc=$?; rm -f "$L/.git/index.lock"
+check "cleanup's reason is its last line of stderr even when the ledger commit warns" \
+  '[[ $rc == 4 && $out == *"ledger commit failed"*"worktree stays"* && ${out##*$NL} == *"$(basename "$SC1" .md): worktree stays: $SW1 has uncommitted changes"* ]]'
+rm "$SW1/uncommitted.txt"; setstate "done" null; prompt stays-fixed SessionStart >/dev/null
+out=$(crew tick 2>&1)
+check "once the changes are gone, tick cleans the worktree up and says so, to the leads too" \
+  '[[ $out == *"$(basename "$SC1" .md): merged; worktree cleaned up"* && ! -d $SW1 && -z $(crew get "$SC1" worktree) && $(prompt stays-fixed) == *"$(basename "$SC1" .md): merged; worktree cleaned up"* ]]'
+SC2=$(crew new "Stays running" --branch stays-running --project "$PJ"); fill "$SC2"; crew ready "$SC2" >/dev/null; setstate "done" null; crew dispatch "$SC2" >/dev/null
+SJ2=$(crew get "$SC2" worker_job); crew set "$SC2" status merged >/dev/null
+setstate working 4242; touch "$HOME/stop-noop"
+stays_case "$SC2" "a merged task whose worker won't stop" "worker $SJ2 is still running (stop it in claude agents)"
+rm -f "$HOME/stop-noop"; setstate "done" null
+echo 'WORKTREE_TOOL="worktrunk"' >>"$PD/project.env"
+SC3=$(crew new "Stays locked" --branch stays-locked --project "$PJ"); fill "$SC3"; crew ready "$SC3" >/dev/null; setstate "done" null; crew dispatch "$SC3" >/dev/null
+SW3=$(crew get "$SC3" worktree); git -C "$SB/webapp" worktree lock "$SW3"; crew set "$SC3" status merged >/dev/null
+stays_case "$SC3" "a worktrunk task whose worktree won't remove" "the worktree tool couldn't remove $SW3"
+git -C "$SB/webapp" worktree unlock "$SW3"; sed -i '/^WORKTREE_TOOL=/d' "$PD/project.env"
 
 summary crew-e2e
