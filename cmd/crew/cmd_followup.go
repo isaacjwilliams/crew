@@ -62,6 +62,13 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if err != nil {
 		return err
 	}
+	// A restack session ran one restack and nothing else, so the worker after it
+	// starts fresh, on the task's own model.
+	restack, err := c.launchRestack(p)
+	if err != nil {
+		return err
+	}
+	afterRestack := t.Get("worker_fingerprint") == restack.fingerprint
 	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
 	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
 		return err
@@ -128,9 +135,12 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), p.Name, t.Path, wt), with.fresh)
+		t.ID(), p.Name, t.Path, wt), with.fresh || afterRestack)
 	if err != nil {
 		return err
+	}
+	if afterRestack {
+		l.mode = "fresh: its last session only ran a restack"
 	}
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
@@ -366,9 +376,9 @@ const restackPrompt = "You are restacking task %s in project %s: this session ta
 
 // launchRestack is the launcher of a restack session: a worker on restackModel
 // that restackPrompt tells to run one restack and nothing else. Its fingerprint
-// takes in that prompt, since it's part of what the session loads. So the next
-// followup sees other instructions (changedSince) and starts a fresh worker on
-// the task's model, even when that model is restackModel too.
+// takes in that prompt, since it's part of what the session loads. That sets a
+// restack session's fingerprint apart from a worker's, so followup can tell one
+// and start a fresh worker after it, even on a task whose model is restackModel.
 func (c *Crew) launchRestack(p *Project) (launcher, error) {
 	l, err := c.launchWorker(p, restackModel)
 	if err != nil {

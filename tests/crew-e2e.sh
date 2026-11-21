@@ -888,9 +888,9 @@ check "status shows the restack a working task needs, and no merge check" \
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
-s10=$(crew get 10 worker_session); crew followup 10 --note "carry on" >/dev/null
-check "the next followup after a restack starts afresh on the task's model, the default here" \
-  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" ]]'
+s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
+check "the next followup after a restack starts afresh on the task's model, the default here, and says why" \
+  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
 setstate "done" null; hand_over 10; n=$(launches)
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 setstate working 4242; out=$(crew restack 10 --again 2>&1)
@@ -957,9 +957,9 @@ check "a restacked parent is done, and its own child is next" '[[ $out != *"010-
 setstate "done" null; crew restack 11 >/dev/null
 check "restack cuts at the parent's old tip after the parent was rebased" '[[ $(last_launch) == *"git rebase --onto $T10b $T10\`"* ]] && restacked 11'
 (cd "$WT11" && git rebase -q --onto "$T10b" "$T10") && restack_push "$WT11"
-s11=$(crew get 11 worker_session); setstate "done" null; crew followup 11 --note "go on" >/dev/null
+s11=$(crew get 11 worker_session); setstate "done" null; out=$(crew followup 11 --note "go on")
 check "the next followup after a restack starts afresh even when the task's own model is Sonnet too" \
-  '[[ $(last_launch) == *" --model sonnet You are picking up task "* && $(last_launch) != *--resume* && $(crew get 11 worker_session) != "$s11" ]]'
+  '[[ $(last_launch) == *" --model sonnet You are picking up task "* && $(last_launch) != *--resume* && $(crew get 11 worker_session) != "$s11" && $out == *"(fresh: its last session only ran a restack)" ]]'
 hand_over 11
 out=$(crew sync)
 check "the rebased stack holds only its own commits on top of main" '[[ $(git rev-list --count "$M..$(tip season-picker)") == 2 && $out != *restack* && $(crew get 11 base_sha) == "$T10b" ]]'
