@@ -1689,6 +1689,12 @@ GFG=$(crew goal new "Go-ahead goal"); WL=$(crew new "In a goal" --goal "$GFG"); 
 WM=$(ready_task "Refusals")
 check "set go_ahead refuses a task that isn't ready, or is in a goal" \
   '[[ $(crew set "$WK" go_ahead "$(num "$WC") pr-open" 2>&1) == *"a go-ahead is for a ready task"* && $(crew set "$WL" go_ahead "$(num "$WC") pr-open" 2>&1) == *"a go-ahead is for a task outside a goal"* && -z $(crew get "$WK" go_ahead) && -z $(crew get "$WL" go_ahead) ]]'
+# A go-ahead waiting for the ledger lock checks the task as it is once it has it
+# (-o: crew set mustn't inherit the lock flock holds).
+flock -o "$L/.crew.lock" bash -c 'crew set "$1" go_ahead "$2 pr-open" >"$HOME/set.out" 2>&1 & sleep 0.5; sed -i "s/^status: .*/status: draft/" "$1"' _ "$WM" "$(num "$WC")"
+check "a go-ahead waiting on the lock refuses a task moved back to draft meanwhile" \
+  'wait_for "grep -q \"a go-ahead is for a ready task\" \"\$HOME/set.out\"" && [[ -z $(crew get "$WM" go_ahead) ]]'
+crew ready "$WM" >/dev/null
 check "set go_ahead refuses the task itself, an abandoned task, and a task that doesn't exist" \
   '[[ $(crew set "$WM" go_ahead "$(num "$WM") pr-open" 2>&1) == *"not $(basename "$WM" .md) itself"* && $(crew set "$WM" go_ahead "$(num "$WH") pr-open" 2>&1) == *"is abandoned"* && $(crew set "$WM" go_ahead "9999 pr-open" 2>&1) == *"doesn'"'"'t match exactly one task"* ]]'
 check "set go_ahead refuses a status a go-ahead can't wait for, or the other task's kind never reaches, and a value without one" \

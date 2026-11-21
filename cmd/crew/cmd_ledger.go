@@ -193,6 +193,11 @@ func cmdSet(c *Crew, args []string) error {
 	}
 	// Trimmed once, so the checks see what Lookup will read back.
 	key, value := args[1], strings.TrimSpace(strings.Join(args[2:], " "))
+	// Checked with the lock held, so the task can't change between the checks
+	// and the write: a go-ahead is only for a task that is ready.
+	if err := c.lock(); err != nil {
+		return err
+	}
 	d := Doc{f}
 	if isProposal(f) {
 		err = Proposal{d}.CheckSet(key, value)
@@ -200,9 +205,6 @@ func cmdSet(c *Crew, args []string) error {
 		value, err = c.checkTaskSet(Task{d}, key, value)
 	}
 	if err != nil {
-		return err
-	}
-	if err := c.lock(); err != nil {
 		return err
 	}
 	switch {
