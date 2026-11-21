@@ -301,15 +301,7 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
-	if err := c.startRestack(p, t, note); err != nil {
-		return err
-	}
-	if err := c.lock(); err != nil {
-		return err
-	}
-	t.Set("retarget_sent", base)
-	c.commit("retarget " + p.Name + "/" + t.ID())
-	return nil
+	return c.startRestack(p, t, note, "", base)
 }
 
 // sendRebase has a fresh worker rebase a stacked task's branch onto its
@@ -358,18 +350,7 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		retargetTo = base
 		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
 	}
-	if err := c.startRestack(p, t, note); err != nil {
-		return err
-	}
-	if err := c.lock(); err != nil {
-		return err
-	}
-	t.Set("restack_sent", target)
-	if retargetTo != "" {
-		t.Set("retarget_sent", retargetTo)
-	}
-	c.commit("restack " + p.Name + "/" + t.ID())
-	return nil
+	return c.startRestack(p, t, note, target, retargetTo)
 }
 
 // restackModel is the model a restack runs on, whatever the task's own: a
@@ -377,11 +358,13 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 const restackModel = "sonnet"
 
 // startRestack starts a fresh session on restackModel to run note, a rebase or
-// a retarget, and makes it the task's worker. The worker's own conversation is
+// a retarget, and makes it the task's worker. It records what it sent as
+// restack_sent (the commit to rebase onto) and retarget_sent (the PR's new base),
+// leaving out an empty one. The worker's own conversation is
 // long, and resuming it costs far more than the restack does. The session gets
 // the restack and nothing else: review rounds and word of a pause wait for the
 // next followup, which starts afresh on the task's model (changedSince).
-func (c *Crew) startRestack(p *Project, t Task, note string) error {
+func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) error {
 	// Building the launcher reads the worker settings, and a bad mcp.json would
 	// stop the launch: either stops here, before anything changes.
 	start, err := c.launchWorker(p, restackModel)
@@ -407,20 +390,23 @@ func (c *Crew) startRestack(p *Project, t Task, note string) error {
 		return err
 	}
 	wt := t.Worktree()
-	prompt := fmt.Sprintf("You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs.\n%s",
-		t.ID(), p.Name, t.Path, wt, note)
-	l, err := c.launchSession(start, t.Doc, wt, prompt, false)
-	if err == errNotStarted {
-		return fail("could not start a session (see output above)")
-	}
+	l, err := c.relaunch(start, t.Doc, wt, note, fmt.Sprintf(
+		"You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs.",
+		t.ID(), p.Name, t.Path, wt), true)
 	if err != nil {
 		return err
 	}
 	l.record(t.Doc)
+	if onto != "" {
+		t.Set("restack_sent", onto)
+	}
+	if retargetTo != "" {
+		t.Set("retarget_sent", retargetTo)
+	}
 	t.SetStatus(Working)
 	t.Touch()
 	t.Log(fmt.Sprintf("restack: fresh worker %s on %s — %s", l.job, restackModel, note))
-	c.commit("restack worker " + p.Name + "/" + t.ID())
+	c.commit("restack " + p.Name + "/" + t.ID())
 	fmt.Printf("restack sent to %s → fresh worker %s on %s\n", t.ID(), l.job, restackModel)
 	return nil
 }

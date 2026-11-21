@@ -841,7 +841,7 @@ work() {  # worktree file — what a worker does: commit and push its branch
 }
 last_prompt() { grep -- "--resume" "$HOME/claude-calls.log" | tail -1; }
 restack_push() {  # worktree — runs the push the last restack note gives, as written
-  local cmd; read -ra cmd <<<"$(grep -o 'git push --force-with-lease=[^`]*' "$HOME/claude-calls.log" | tail -1)"
+  local cmd; read -ra cmd <<<"$(last_launch | grep -o 'git push --force-with-lease=[^`]*' | tail -1)"
   (cd "$1" && "${cmd[@]}" -q 2>/dev/null)
 }
 echo OPEN >"$HOME/gh-pr-state"

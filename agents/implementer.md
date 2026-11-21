@@ -196,7 +196,7 @@ Your first message says so when your task is stacked: its `base` is another task
 
 ## Workflow: restack
 
-When your prompt says to restack, the parent's branch has moved or merged, or your PR targets a branch that isn't your base. crew starts a fresh session for each restack, which takes over as the task's worker: the note is all it needs to begin. A restack note gives you the exact rebase and push commands. The rebase names two commits: the new base commit to move onto, and the last of the parent's commits in your branch, where the cut goes.
+When your prompt says to restack, the parent's branch has moved or merged, or your PR targets a branch that isn't your base. A restack note gives you the exact rebase and push commands. The rebase names two commits: the new base commit to move onto, and the last of the parent's commits in your branch, where the cut goes.
 
 A retarget note, one that starts "Retarget", has nothing to rebase or push: run the `gh pr edit --base` command it gives, make "Stacked on #…" in the PR body match your base as step 5 says, then do steps 6 and 7.
 
