@@ -252,6 +252,8 @@ check "implementer may change its PR's base only when a restack says so" \
   "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
 check "implementer has the sections crew's stack prompts name" \
   "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' <<<\"\$SRC\" && grep -q 'Stacked tasks.. in your instructions' <<<\"\$SRC\""
+check "a restack session's prompt opens the way the implementer's one exception to reading the whole task file names it" \
+  "grep -qF 'prompt := fmt.Sprintf(\"You are restacking task %s in project %s: ' <<<\"\$SRC\" && grep -q 'The one exception is a restack session, whose first message starts \"You are restacking task\": go straight to \"Workflow: restack\"' $A/implementer.md"
 check "implementer records the new base only after pushing the restack" \
   "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease=/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
 check "a retarget note is one the implementer's restack workflow knows: gh pr edit alone, and nothing to rebase" \
