@@ -189,6 +189,13 @@ func (a Agent) quietFor() (time.Duration, bool) {
 	return time.Since(info.ModTime()), true
 }
 
+// wroteSince: the session has written to its transcript since t, or has no
+// transcript to read, as a session just started may not.
+func (a Agent) wroteSince(t time.Time) bool {
+	info, err := os.Stat(transcript(a.SessionID))
+	return err != nil || info.ModTime().After(t)
+}
+
 // open: its process is running.
 func (a Agent) open() bool { return a.PID }
 
@@ -274,14 +281,19 @@ func (c *Crew) stopJobs(jobs []string) []string {
 
 // closeSession stops a session's process, if it's open and idle, so that a resume
 // continues the session in place: resuming a session whose process is open starts
-// a copy of it under a new session ("already running in the background"). A
-// background session keeps its process open for about an hour after its turn
-// ends. It returns the job whose process stays open, busy or refusing to stop, and
-// then nothing should resume the session.
+// a copy of it ("already running in the background"). A background session keeps
+// its process open for about an hour after its turn ends. It returns the job whose
+// process stays open, and then nothing should resume the session.
 func (c *Crew) closeSession(session string) (open string) {
 	for _, a := range c.agents() {
-		if a.SessionID == session && a.open() && (a.busy() || !c.stopJob(a.ID)) {
-			return a.ID
+		if a.SessionID != session || !a.open() {
+			continue
+		}
+		if a.busy() {
+			return a.ID // mid-turn, so it isn't stopped
+		}
+		if !c.stopJob(a.ID) {
+			return a.ID // idle, but it didn't close
 		}
 	}
 	return ""
@@ -472,7 +484,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	case started == "":
 		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
 	case resume && started != session:
-		// closeSession closed its process, but one can open again before the
+		// closeSession left no process open, but one can open again before the
 		// resume reaches it, and then Claude Code starts a copy.
 		warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
 	}
@@ -492,16 +504,14 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	return l, nil
 }
 
-// waitForLaunch waits for a job's own process to report the session it loaded and
-// to take its prompt, and returns that session, or nothing if it doesn't report
-// one within 30 seconds. A job's ID is the first 8 characters of its session ID. A
-// process that has just started can report a new session ID for a moment, before
-// it loads the one it resumes, so only a session ID that starts with the job ID
-// counts. A resumed process shows a moment before it writes its prompt to the
-// transcript, and reads as idle until then, so the next command would take it for
-// idle too: crew waits until the transcript has changed since the launch. A
-// resume of a session that can't be found shows up as a job that ends in failed:
-// then ok is false.
+// waitForLaunch waits for a job's process to report its session and take its
+// prompt, and returns that session. A job's ID is the first 8 characters of its
+// session ID. A process that has just started can report a new session ID for a
+// moment, before it loads the one it resumes, so only one that starts with the job
+// ID counts. A resumed process also shows a moment before it writes its prompt to
+// the transcript, and reads as idle until then; returning sooner would let the
+// next command take it for idle too. A resume of a session that can't be found
+// ends in failed: then ok is false.
 func (c *Crew) waitForLaunch(job string, launched time.Time) (session string, ok bool) {
 	for range 60 {
 		if a := c.agents().find(job); a != nil {
@@ -510,13 +520,15 @@ func (c *Crew) waitForLaunch(job string, launched time.Time) (session string, ok
 			}
 			if a.open() && strings.HasPrefix(a.SessionID, job) {
 				session = a.SessionID
-				if quiet, ok := a.quietFor(); !ok || quiet < time.Since(launched) {
+				if a.wroteSince(launched) {
 					return session, true
 				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	// After 30 seconds: nothing if it never reported its session, and otherwise its
+	// session, though it hasn't written its prompt yet: it's slow, not failed.
 	return session, true
 }
 
