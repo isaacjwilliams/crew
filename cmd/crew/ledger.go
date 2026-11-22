@@ -604,12 +604,11 @@ func (t Task) AutoReviews(project string) string {
 	return project
 }
 
-// AwaitsAutomatedReview: the task's automated review was off, and is back on
-// now the task is high risk, but no review is recorded yet. A task without a PR
-// (pr_mode none) has nothing to review.
+// AwaitsAutomatedReview: the task has a PR and automated review should run on
+// it (project is the project's AUTO_REVIEWS), but no review is recorded yet. A
+// task without a PR (pr_mode none) has nothing to review.
 func (t Task) AwaitsAutomatedReview(project string) bool {
-	return t.Get("auto_review") == autoReviewOff && t.Risk() == RiskHigh && atoiOr0(project) > 0 &&
-		t.PR() != "" && t.NewestReview() == 0
+	return atoiOr0(t.AutoReviews(project)) > 0 && t.PR() != "" && t.NewestReview() == 0
 }
 
 // Kind is the task's kind. A task without one, made before kinds, is a build.
