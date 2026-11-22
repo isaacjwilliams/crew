@@ -41,6 +41,7 @@ func TestCodexStopsAStalledCodex(t *testing.T) {
 func TestWithoutMCPServersKeepsTheRest(t *testing.T) {
 	config := `model_provider = "proxy"
 mcp_servers.inline = { command = "inline" }
+"mcp_servers".quotedroot = { command = "quotedroot" }
 keptlist = [
   ["a"],
   ["b"],
@@ -88,6 +89,13 @@ command = "escaped"
 quotes = ["""ends in quotes"""", '''and so''''']
 literal = 'it\'
 single = "a \" [b"
+escaped = """x\"[y\\"""
+
+[mcp_servers.after_the_quotes]
+command = "after"
+
+[projects."/after"]
+trust_level = "trusted"
 
 [tui]
 theme = "dark"
@@ -116,6 +124,7 @@ instructions = """
 quotes = ["""ends in quotes"""", '''and so''''']
 literal = 'it\'
 single = "a \" [b"
+escaped = """x\"[y\\"""
 
 [tui]
 theme = "dark"
