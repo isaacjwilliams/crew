@@ -83,7 +83,7 @@ func (w waitingOnUser) String() string {
 type goalReport struct {
 	Goal          Goal
 	Lead          Agent // the goal lead, as claude agents lists it; zero when it isn't
-	Merged, Total int   // of the goal's tasks that make a PR
+	Merged, Total int   // of the goal's tasks that can still merge
 	InFlight      slots // against the goal's max_in_flight
 	CapErr        error
 	Groups        []taskGroup // only the groups that have tasks, in groupKind order
