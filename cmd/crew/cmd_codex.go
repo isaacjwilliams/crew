@@ -118,7 +118,7 @@ func runCodex(argv []string, home reviewCodexHome, root, prompt, events string) 
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, in, notifyingWriter{log, wrote}, os.Stderr
 	// Codex isn't part of the Claude Code session that runs crew: a claude that
 	// Codex ran would otherwise take itself for a nested session and refuse.
-	cmd.Env = append(environWithout("CLAUDECODE", "CODEX_HOME"), "CODEX_HOME="+home.dir)
+	cmd.Env = home.environ("CLAUDECODE")
 	// Once Codex has exited, don't wait long for a process it started that still
 	// holds its output open.
 	cmd.WaitDelay = 5 * time.Second
@@ -223,7 +223,7 @@ func codexSignedIn() bool {
 	}
 	defer home.remove()
 	cmd := exec.Command("codex", "login", "status")
-	cmd.Env = append(environWithout("CODEX_HOME"), "CODEX_HOME="+home.dir)
+	cmd.Env = home.environ()
 	return cmd.Run() == nil
 }
 
@@ -267,6 +267,12 @@ func newReviewCodexHome() (reviewCodexHome, error) {
 	return home, nil
 }
 
+// environ is the environment Codex runs in: crew's, without the named
+// variables, and with this home as its Codex home.
+func (h reviewCodexHome) environ(without ...string) []string {
+	return append(environWithout(append(without, "CODEX_HOME")...), "CODEX_HOME="+h.dir)
+}
+
 // remove deletes the home. Codex may replace the sign-in link with a refreshed
 // token, so a token that's no longer a link goes back to the user's home first.
 func (h reviewCodexHome) remove() {
@@ -289,7 +295,7 @@ func withoutMCPServers(config string) []byte {
 	for _, line := range strings.Split(config, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if open > 0 {
-			open += strings.Count(trimmed, "{") + strings.Count(trimmed, "[") - strings.Count(trimmed, "}") - strings.Count(trimmed, "]")
+			open += openBrackets(trimmed)
 			continue
 		}
 		if strings.HasPrefix(trimmed, "[") {
@@ -299,7 +305,7 @@ func withoutMCPServers(config string) []byte {
 				continue
 			}
 		} else if root && tableDropped(trimmed) {
-			open = strings.Count(trimmed, "{") + strings.Count(trimmed, "[") - strings.Count(trimmed, "}") - strings.Count(trimmed, "]")
+			open = openBrackets(trimmed)
 			continue
 		}
 		if !dropping {
@@ -307,6 +313,11 @@ func withoutMCPServers(config string) []byte {
 		}
 	}
 	return []byte(strings.Join(kept, "\n"))
+}
+
+// openBrackets is how many more brackets and braces line opens than it closes.
+func openBrackets(line string) int {
+	return strings.Count(line, "{") + strings.Count(line, "[") - strings.Count(line, "}") - strings.Count(line, "]")
 }
 
 // tableDropped: a table name or a key starts with one of the names
