@@ -173,6 +173,27 @@ sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
 check "a worker asks to split a branch past 1000 lines by default, and crew config lists it" '[[ $(crew config MAX_PR_LINES) == 1000 ]] && crew config | grep -qx MAX_PR_LINES=1000'
 check "Codex is off in automated review by default, with 2 rounds between the reviewers when it's on" '[[ $(crew config CODEX_REVIEW) == no && $(crew config AUTO_REVIEW_REBUTTALS) == 2 ]] && crew config | grep -qx CODEX_MODEL_EFFORT=xhigh'
 # crew codex: one read-only review by Codex, through tests/stubs/codex.
+mkdir -p "$HOME/.codex"
+cat >"$HOME/.codex/config.toml" <<'TOML'
+model_provider = "proxy"
+mcp_servers.inline = { command = "inline" }
+
+[model_providers.proxy]
+base_url = "http://proxy.invalid/v1"
+
+[mcp_servers.sentry]
+command = "sentry"
+
+[mcp_servers.sentry.env]
+TOKEN = "x"
+
+[projects."/home/x/repo"]
+trust_level = "trusted"
+
+[tui]
+theme = "dark"
+TOML
+echo '{"token":"signed-in"}' >"$HOME/.codex/auth.json"
 mkdir -p "$SB/rev" && echo "Adversarially review the briefing." >"$SB/rev/prompt.md"
 out=$(cd "$SB" && crew codex webapp rev/prompt.md rev/answer-0 2>&1); st=$?
 check "crew codex runs codex exec read-only with approvals off, in a new session in the review root, from paths relative to the caller" \
@@ -196,6 +217,11 @@ mkdir -p "$SB/rev/answer-3.cost"
 out=$(crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-3" 2>&1); st=$?
 check "a cost crew codex can't write leaves Codex's report and status as they were, with a warning" \
   '((st == 0)) && [[ $(cat "$SB/rev/answer-3.md") == "stub review" && $out == *"can'"'"'t keep what the run cost"* && $out == *"final message: $SB/rev/answer-3.md"* ]]'
+crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-4" >/dev/null 2>&1
+check "crew codex runs Codex in a home with the user's config and sign-in but no MCP server and no repo trust, under any name" \
+  'grep -q "base_url = \"http://proxy.invalid/v1\"" "$HOME/codex-home.last" && grep -q "theme = \"dark\"" "$HOME/codex-home.last" && grep -q signed-in "$HOME/codex-home.last" && ! grep -Eq "mcp_servers|sentry|inline|projects|trust_level" "$HOME/codex-home.last"'
+check "crew codex leaves the user's own Codex home as it was" \
+  'grep -q "mcp_servers.sentry" "$HOME/.codex/config.toml" && grep -q signed-in "$HOME/.codex/auth.json"'
 check "CLAUDECODE never reaches codex" '! grep -q LEAK "$HOME/codex-calls.log"'
 # crew review-cost: what a Claude reviewer's run cost, from its transcript.
 mkdir -p "$HOME/.claude/projects/-sb-webapp/5058aa63/subagents"

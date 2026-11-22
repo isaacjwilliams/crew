@@ -65,7 +65,12 @@ func cmdCodex(c *Crew, args []string) error {
 		"--skip-git-repo-check", "--json", "-o", out+".md", "-C", root, "-")
 	events := out + ".events.jsonl"
 	began := time.Now()
-	status, stalled, err := runCodex(argv, root, prompt, events)
+	home, err := newReviewCodexHome()
+	if err != nil {
+		return err
+	}
+	defer home.remove()
+	status, stalled, err := runCodex(argv, home, root, prompt, events)
 	if err != nil {
 		return err
 	}
@@ -93,7 +98,7 @@ func cmdCodex(c *Crew, args []string) error {
 // runCodex runs codex with argv in root, the prompt file on its stdin and its
 // events written to the events file, and returns its exit status. It stops
 // Codex, and says it stalled, when codexStallLimit passes without an event.
-func runCodex(argv []string, root, prompt, events string) (status int, stalled bool, err error) {
+func runCodex(argv []string, home reviewCodexHome, root, prompt, events string) (status int, stalled bool, err error) {
 	in, err := os.Open(prompt)
 	if err != nil {
 		return 0, false, err
@@ -113,7 +118,7 @@ func runCodex(argv []string, root, prompt, events string) (status int, stalled b
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, in, notifyingWriter{log, wrote}, os.Stderr
 	// Codex isn't part of the Claude Code session that runs crew: a claude that
 	// Codex ran would otherwise take itself for a nested session and refuse.
-	cmd.Env = environWithout("CLAUDECODE")
+	cmd.Env = append(environWithout("CLAUDECODE", "CODEX_HOME"), "CODEX_HOME="+home.dir)
 	// Once Codex has exited, don't wait long for a process it started that still
 	// holds its output open.
 	cmd.WaitDelay = 5 * time.Second
@@ -210,7 +215,108 @@ func (n notifyingWriter) Write(p []byte) (int, error) {
 	return n.w.Write(p)
 }
 
-// codexSignedIn: Codex is signed in, so a review can run.
+// codexSignedIn: Codex is signed in the way a review runs it, so a review can run.
 func codexSignedIn() bool {
-	return exec.Command("codex", "login", "status").Run() == nil
+	home, err := newReviewCodexHome()
+	if err != nil {
+		return false
+	}
+	defer home.remove()
+	cmd := exec.Command("codex", "login", "status")
+	cmd.Env = append(environWithout("CODEX_HOME"), "CODEX_HOME="+home.dir)
+	return cmd.Run() == nil
+}
+
+// reviewCodexHome is the Codex home a review runs in: the user's own with no
+// MCP server in it, so a server that can't start never stalls a review. Codex
+// merges its config layers and `-c` can't empty a table, so crew leaves the
+// servers out of the config it hands Codex. It also leaves out the `projects`
+// trust entries, so a repo's own `.codex/config.toml` isn't loaded, and
+// everything else in the user's home (plugins, skills, AGENTS.md, memories),
+// since a plugin can declare servers too. The sign-in and the rest of the
+// config, the model provider's among it, are the user's.
+type reviewCodexHome struct {
+	dir, real string
+}
+
+func newReviewCodexHome() (reviewCodexHome, error) {
+	real := os.Getenv("CODEX_HOME")
+	if real == "" {
+		user, err := os.UserHomeDir()
+		if err != nil {
+			return reviewCodexHome{}, err
+		}
+		real = filepath.Join(user, ".codex")
+	}
+	dir, err := os.MkdirTemp("", "crew-codex-home-")
+	if err != nil {
+		return reviewCodexHome{}, err
+	}
+	home := reviewCodexHome{dir, real}
+	config, err := os.ReadFile(filepath.Join(real, "config.toml"))
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		err = os.WriteFile(filepath.Join(dir, "config.toml"), withoutMCPServers(string(config)), 0o600)
+	}
+	if err == nil {
+		err = os.Symlink(filepath.Join(real, "auth.json"), filepath.Join(dir, "auth.json"))
+	}
+	if err != nil {
+		home.remove()
+		return reviewCodexHome{}, fmt.Errorf("can't set up a Codex home for the review: %w", err)
+	}
+	return home, nil
+}
+
+// remove deletes the home. Codex may replace the sign-in link with a refreshed
+// token, so a token that's no longer a link goes back to the user's home first.
+func (h reviewCodexHome) remove() {
+	mine, theirs := filepath.Join(h.dir, "auth.json"), filepath.Join(h.real, "auth.json")
+	if info, err := os.Lstat(mine); err == nil && info.Mode().IsRegular() {
+		if b, err := os.ReadFile(mine); err == nil {
+			os.WriteFile(theirs, b, 0o600)
+		}
+	}
+	os.RemoveAll(h.dir)
+}
+
+// withoutMCPServers is a Codex config without its `mcp_servers` and `projects`
+// tables and keys. It reads only what it needs of TOML: table headers, and a
+// dropped key's value running over lines while its brackets are open. Such a
+// key is only looked for before the first table, where Codex users write it.
+func withoutMCPServers(config string) []byte {
+	var kept []string
+	dropping, root, open := false, true, 0
+	for _, line := range strings.Split(config, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if open > 0 {
+			open += strings.Count(trimmed, "{") + strings.Count(trimmed, "[") - strings.Count(trimmed, "}") - strings.Count(trimmed, "]")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			root = false
+			dropping = tableDropped(strings.Trim(trimmed, "[] \t"))
+			if dropping {
+				continue
+			}
+		} else if root && tableDropped(trimmed) {
+			open = strings.Count(trimmed, "{") + strings.Count(trimmed, "[") - strings.Count(trimmed, "}") - strings.Count(trimmed, "]")
+			continue
+		}
+		if !dropping {
+			kept = append(kept, line)
+		}
+	}
+	return []byte(strings.Join(kept, "\n"))
+}
+
+// tableDropped: a table name or a key starts with one of the names
+// withoutMCPServers leaves out.
+func tableDropped(name string) bool {
+	for _, dropped := range []string{"mcp_servers", "projects"} {
+		rest, ok := strings.CutPrefix(name, dropped)
+		if ok && (rest == "" || strings.ContainsRune(". =\t", rune(rest[0]))) {
+			return true
+		}
+	}
+	return false
 }
