@@ -151,6 +151,19 @@ func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
 	}
 }
 
+func TestBuildReportCountsOnlyTasksThatCanStillMerge(t *testing.T) {
+	c := statusLedger(t)
+	goal := []string{"goal: 001-launch", "base: main"}
+	reportTask(t, c, "p", "016-merged", false, slices.Concat(goal, []string{"status: merged"})...)
+	reportTask(t, c, "p", "017-abandoned", false, slices.Concat(goal, []string{"status: abandoned"})...)
+	reportTask(t, c, "p", "018-spike", false, slices.Concat(goal, []string{"status: done", "kind: spike"})...)
+	g := buildReport(c, []string{"p"}, false).Projects[0].Goals[0]
+	// The fixture's nine tasks, and the merged one; not the abandoned task or the spike.
+	if g.Total != 10 || g.Merged != 1 {
+		t.Errorf("goal counts: %d of %d merged, want 1 of 10", g.Merged, g.Total)
+	}
+}
+
 func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 	p := buildReport(statusLedger(t), []string{"p"}, false).Projects[0]
 	if got, want := rowIDs(p.Rows), []string{"010-parent", "012-idea", "013-risky", "014-later", "015-earlier"}; !slices.Equal(got, want) {
