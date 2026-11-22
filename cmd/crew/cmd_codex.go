@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -216,6 +217,8 @@ func (n notifyingWriter) Write(p []byte) (int, error) {
 }
 
 // codexSignedIn: Codex is signed in the way a review runs it, so a review can run.
+// It uses a review's home, not the user's, so it checks the sign-in as that home
+// sees it, through the link to auth.json.
 func codexSignedIn() bool {
 	home, err := newReviewCodexHome()
 	if err != nil {
@@ -253,62 +256,80 @@ func newReviewCodexHome() (reviewCodexHome, error) {
 		return reviewCodexHome{}, err
 	}
 	home := reviewCodexHome{dir, real}
-	config, err := os.ReadFile(filepath.Join(real, "config.toml"))
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		err = os.WriteFile(filepath.Join(dir, "config.toml"), withoutMCPServers(string(config)), 0o600)
-	}
-	if err == nil {
-		err = os.Symlink(filepath.Join(real, "auth.json"), filepath.Join(dir, "auth.json"))
-	}
-	if err != nil {
+	if err := home.fill(); err != nil {
 		home.remove()
 		return reviewCodexHome{}, fmt.Errorf("can't set up a Codex home for the review: %w", err)
 	}
 	return home, nil
 }
 
-// environ is the environment Codex runs in: crew's, without the named
-// variables, and with this home as its Codex home.
-func (h reviewCodexHome) environ(without ...string) []string {
-	return append(environWithout(append(without, "CODEX_HOME")...), "CODEX_HOME="+h.dir)
+// fill writes the filtered config, and links the sign-in when there is one. A
+// user with no config.toml gets an empty one.
+func (h reviewCodexHome) fill() error {
+	config, err := os.ReadFile(filepath.Join(h.real, "config.toml"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(h.dir, "config.toml"), withoutMCPServers(string(config)), 0o600); err != nil {
+		return err
+	}
+	if !isFile(filepath.Join(h.real, "auth.json")) {
+		return nil
+	}
+	return os.Symlink(filepath.Join(h.real, "auth.json"), filepath.Join(h.dir, "auth.json"))
 }
 
-// remove deletes the home. Codex may replace the sign-in link with a refreshed
-// token, so a token that's no longer a link goes back to the user's home first.
+// environ is crew's environment, without the named variables, with this home
+// as the Codex home.
+func (h reviewCodexHome) environ(without ...string) []string {
+	return append(environWithout(slices.Concat(without, []string{"CODEX_HOME"})...), "CODEX_HOME="+h.dir)
+}
+
+// remove deletes the home, after saving the sign-in.
 func (h reviewCodexHome) remove() {
-	mine, theirs := filepath.Join(h.dir, "auth.json"), filepath.Join(h.real, "auth.json")
-	if info, err := os.Lstat(mine); err == nil && info.Mode().IsRegular() {
-		if b, err := os.ReadFile(mine); err == nil {
-			os.WriteFile(theirs, b, 0o600)
-		}
-	}
+	h.saveSignIn()
 	os.RemoveAll(h.dir)
 }
 
+// saveSignIn puts a refreshed token back in the user's home. Codex may replace
+// the link to auth.json with a file of its own when it refreshes the token, and
+// the old token may stop working. It's best effort: a token that can't be saved
+// leaves the user to run `codex login` again.
+func (h reviewCodexHome) saveSignIn() {
+	mine := filepath.Join(h.dir, "auth.json")
+	if info, err := os.Lstat(mine); err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	if b, err := os.ReadFile(mine); err == nil {
+		os.WriteFile(filepath.Join(h.real, "auth.json"), b, 0o600)
+	}
+}
+
 // withoutMCPServers is a Codex config without its `mcp_servers` and `projects`
-// tables and keys. It reads only what it needs of TOML: table headers, and a
-// dropped key's value running over lines while its brackets are open. Such a
-// key is only looked for before the first table, where Codex users write it.
+// tables and keys. It reads only what it needs of TOML: table headers at the
+// start of a line, and a value that runs over lines while its brackets are open.
+// It doesn't look for quoted keys or brackets inside strings. A key is only
+// looked for before the first table, where Codex users write it.
 func withoutMCPServers(config string) []byte {
 	var kept []string
-	dropping, root, open := false, true, 0
+	// Where a line is: in the root keys, in a table that's kept or in one that's
+	// dropped. open is how many brackets a value running over lines still has
+	// open, and skipping says whether that value is dropped.
+	root, dropping, skipping, open := true, false, false, 0
 	for _, line := range strings.Split(config, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if open > 0 {
+		switch {
+		case open > 0:
 			open += openBrackets(trimmed)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "[") {
+		case strings.HasPrefix(trimmed, "["):
 			root = false
-			dropping = tableDropped(strings.Trim(trimmed, "[] \t"))
-			if dropping {
-				continue
-			}
-		} else if root && tableDropped(trimmed) {
+			dropping = isDroppedName(strings.Trim(trimmed, "[] \t"))
+			skipping = dropping
+		default:
+			skipping = dropping || (root && isDroppedName(trimmed))
 			open = openBrackets(trimmed)
-			continue
 		}
-		if !dropping {
+		if !skipping {
 			kept = append(kept, line)
 		}
 	}
@@ -320,9 +341,9 @@ func openBrackets(line string) int {
 	return strings.Count(line, "{") + strings.Count(line, "[") - strings.Count(line, "}") - strings.Count(line, "]")
 }
 
-// tableDropped: a table name or a key starts with one of the names
-// withoutMCPServers leaves out.
-func tableDropped(name string) bool {
+// isDroppedName: a table name or a key is one of the names withoutMCPServers
+// leaves out, or starts with one, up to a dot, a space, `=` or a tab.
+func isDroppedName(name string) bool {
 	for _, dropped := range []string{"mcp_servers", "projects"} {
 		rest, ok := strings.CutPrefix(name, dropped)
 		if ok && (rest == "" || strings.ContainsRune(". =\t", rune(rest[0]))) {

@@ -41,6 +41,10 @@ func TestCodexStopsAStalledCodex(t *testing.T) {
 func TestWithoutMCPServersKeepsTheRest(t *testing.T) {
 	config := `model_provider = "proxy"
 mcp_servers.inline = { command = "inline" }
+keptlist = [
+  ["a"],
+  ["b"],
+]
 projects = {
   "/a" = { trust_level = "trusted" },
 }
@@ -66,6 +70,10 @@ trust_level = "trusted"
 theme = "dark"
 `
 	want := `model_provider = "proxy"
+keptlist = [
+  ["a"],
+  ["b"],
+]
 projects_note = "kept"
 
 [model_providers.proxy]
