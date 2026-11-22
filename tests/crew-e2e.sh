@@ -53,6 +53,7 @@ runs_on() {
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
+clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
 # criterion, on its branch as it is now, here or on origin. Recording it again names
@@ -92,8 +93,9 @@ restacked() {
     $(crew get "$1" worker_model) == sonnet &&
     $(jq -r --arg j "$(crew get "$1" worker_job)" '.[] | select(.id == $j) | .sessionId' "$HOME/agents.json") == "$(crew get "$1" worker_session)" ]]
 }
-hand_over() {  # task
+hand_over() {  # task: records evidence and, unless it has one, an automated review, since hand-over needs both
   section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
+  grep -q '^### Automated review ' "$(crew path "$1")" || review "$(crew path "$1")" 1
   pr_body "$1"
   crew hand-over "$1" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: hand_over %s refused at line %s\n' "$1" "${BASH_LINENO[0]}"; }
 }
@@ -366,6 +368,25 @@ out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t check SENSITIVE_PATHS (:(nosuchmagic)db): git diff failed"* && $(crew get 1 status) == needs-input ]]'
 sed -i 's/^SENSITIVE_PATHS=.*/SENSITIVE_PATHS="db\/migrate :(glob)**\/auth*"/' "$PE"
+# Automated review has to have run first, wherever the task's PR is and whatever its tier.
+refused=0
+for r in low medium; do
+  crew set 1 risk "$r"
+  [[ $(crew hand-over 1 2>&1) == *"automated review hasn't run for this task: run a pass of automated review, then hand over again"* && $(crew get 1 status) == needs-input ]] && refused=$((refused + 1))
+done
+check "hand-over refuses a low- and a medium-risk task with a PR until an automated review is recorded, and leaves its status" '((refused == 2))'
+# Where no review is due, the same hand-over goes through. Each case then puts the task back to needs-input.
+echo AUTO_REVIEWS=0 >>"$PE"; crew hand-over 1 >/dev/null; project_off=$(crew get 1 status); crew set 1 status needs-input
+sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
+crew set 1 auto_review no; crew hand-over 1 >/dev/null; task_off=$(crew get 1 status); crew set 1 status needs-input
+crew set 1 auto_review ""
+pr=$(crew get 1 pr); mode=$(crew get 1 pr_mode); crew set 1 pr_mode none; crew set 1 pr ""
+crew hand-over 1 >/dev/null; no_pr=$(crew get 1 status); crew set 1 status needs-input
+crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
+check "hand-over needs no automated review when the project's AUTO_REVIEWS is 0, the task's is off, or it has no PR" \
+  '[[ $project_off == pr-open && $task_off == pr-open && $no_pr == pr-open ]]'
+crew set 1 risk low
+review "$F1" 1   # what the worker's automated review leaves
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew get 1 risk) == low && $(section "$F1" "## Log" | tail -1) == *" — handed over" ]]'
 check "hand-over refuses a task handed over already, and so does crew set" \
@@ -395,9 +416,10 @@ git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-ove
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
+clear_review "$F1"   # the review recorded before the raise
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses a task whose automated review was turned back on until a review is recorded" \
-  '((st == 1)) && [[ $out == *"high risk: automated review is back on for this task, but none is recorded: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
+  '((st == 1)) && [[ $out == *"automated review hasn'"'"'t run for this task: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
 review "$F1" 1
 check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran" ]]'
@@ -438,8 +460,8 @@ for st in needs-input working; do
   crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
 done
 check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
-# Back as it was, for the automated-review summaries below.
-sed -i '/^### Automated review 1$/,+1d' "$F1"; crew set 1 auto_review ""
+# Back to the project's automated review setting.
+crew set 1 auto_review ""
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 # A merge of the base leaves the branch's own work as it was, so its evidence stays
 # current; a merge whose conflict the worker resolved changes it.
@@ -628,6 +650,7 @@ check "react refuses someone else's review, and reacts to none of the IDs" '[[ $
 check "react refuses an ID that isn't a number, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 abc 2>&1) == *"comment id must be a number"* && $(reactions) == "$n" ]]'
 check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
 check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'
+clear_review "$F1"   # hand_over recorded one
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
 check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
 review "$F1" 1

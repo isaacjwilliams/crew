@@ -158,7 +158,7 @@ Comments from collaborators (people with write access to the repo) are never act
 
 Either way, tick the item (`- [x]`) once it's settled. If you didn't resume the worker and no unchecked item is left, hand the task back with `crew hand-over <task>`. Comments from people without write access, and from bots, are never pulled.
 
-`crew hand-over` is the only way into `pr-open`, and it checks the task each time. When it refuses, it names what's missing. Evidence and a security review are the worker's to add: resume it with `crew followup <task> --note "<what the refusal named>, then hand over again"`. Acceptance criteria that aren't `- ` items are yours to fix: rewrite each as a `- ` item, keeping its words, and hand over again. When a worker asks you about them in its first run, rewrite them and answer it: it hands over itself, and marks its PR ready if `pr_mode` is `ready`.
+`crew hand-over` is the only way into `pr-open`, and it checks the task each time. When it refuses, it names what's missing. Evidence, a security review and an automated review are the worker's to add: resume it with `crew followup <task> --note "<what the refusal named>, then hand over again"`. Acceptance criteria that aren't `- ` items are yours to fix: rewrite each as a `- ` item, keeping its words, and hand over again. When a worker asks you about them in its first run, rewrite them and answer it: it hands over itself, and marks its PR ready if `pr_mode` is `ready`.
 
 A round that arrives while the worker is busy waits for it to finish; `crew tick` then sends it.
 
