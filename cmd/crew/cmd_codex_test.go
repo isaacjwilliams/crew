@@ -81,6 +81,14 @@ instructions = """
 [mcp_servers.in_a_string]
 """
 
+["mcp\u005fservers".escaped]
+command = "escaped"
+
+[notice.more]
+quotes = ["""ends in quotes"""", '''and so''''']
+literal = 'it\'
+single = "a \" [b"
+
 [tui]
 theme = "dark"
 `
@@ -104,10 +112,21 @@ instructions = """
 [mcp_servers.in_a_string]
 """
 
+[notice.more]
+quotes = ["""ends in quotes"""", '''and so''''']
+literal = 'it\'
+single = "a \" [b"
+
 [tui]
 theme = "dark"
 `
 	if got := string(withoutMCPServers(config)); got != want {
 		t.Errorf("withoutMCPServers gave:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestWithoutMCPServersSurvivesAConfigThatIsNotClosed(t *testing.T) {
+	if got := withoutMCPServers("\"\n"); string(got) != "\"\n" {
+		t.Errorf("got %q", got)
 	}
 }

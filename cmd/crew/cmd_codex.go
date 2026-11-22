@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -363,8 +364,12 @@ func (t *tomlScan) line(line string) {
 			if t.multi == `"""` && line[i] == '\\' {
 				i++
 			} else if strings.HasPrefix(rest, t.multi) {
+				// The string's own last one or two characters may be quotes too.
 				t.multi = ""
 				i += 2
+				for extra := 0; extra < 2 && i+1 < len(line) && line[i+1] == rest[0]; extra++ {
+					i++
+				}
 			}
 		case line[i] == '#':
 			return
@@ -396,11 +401,20 @@ func quotedLength(rest string) int {
 }
 
 // firstKey is the first part of the key a statement sets or the table it opens,
-// without its quotes: `mcp_servers` in `["mcp_servers".x] # a comment`.
+// without its quotes or escapes: `mcp_servers` in `["mcp_servers".x] # a comment`.
 func firstKey(statement string) string {
 	text := strings.TrimLeft(strings.TrimSpace(statement), "[ \t")
 	if text != "" && (text[0] == '"' || text[0] == '\'') {
-		return text[1 : quotedLength(text)-1]
+		quoted := text[:quotedLength(text)]
+		if len(quoted) < 2 || quoted[len(quoted)-1] != text[0] {
+			return quoted // not closed: a broken config, which Codex will refuse
+		}
+		if text[0] == '"' {
+			if decoded, err := strconv.Unquote(quoted); err == nil {
+				return decoded
+			}
+		}
+		return quoted[1 : len(quoted)-1]
 	}
 	end := strings.IndexAny(text, ". =\t]#")
 	if end < 0 {
