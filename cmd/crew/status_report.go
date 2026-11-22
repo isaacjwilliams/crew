@@ -83,7 +83,7 @@ func (w waitingOnUser) String() string {
 type goalReport struct {
 	Goal          Goal
 	Lead          Agent // the goal lead, as claude agents lists it; zero when it isn't
-	Merged, Total int   // of the goal's tasks that make a PR
+	Merged, Total int   // of the goal's tasks that can still merge
 	InFlight      slots // against the goal's max_in_flight
 	CapErr        error
 	Groups        []taskGroup // only the groups that have tasks, in groupKind order
@@ -312,13 +312,17 @@ func toReview(tasks []Task) []Task {
 	return open
 }
 
-// goal works out one goal: its lead, how many of its tasks have merged, its
-// tasks in flight against its max_in_flight, and its tasks in groups.
+// goal works out one goal: its lead, how many of its tasks have merged out of
+// those that can (spikes and abandoned tasks never will), its tasks in flight
+// against its max_in_flight, and its tasks in groups.
 func (s *statusView) goal(g Goal, tasks []Task) goalReport {
 	r := goalReport{Goal: g, Lead: s.agent(g.LeadJob())}
 	for _, t := range s.goalTasks(g) {
 		if rules, err := t.rules(); err == nil && !rules.pr {
 			continue // a spike's PR is never merged
+		}
+		if t.Status() == Abandoned {
+			continue // it can no longer merge
 		}
 		r.Total++
 		if t.Status() == Merged {
