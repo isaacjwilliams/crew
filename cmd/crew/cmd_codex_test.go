@@ -18,6 +18,8 @@ func TestCodexStopsAStalledCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", dir)
+	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CREW_PROJECT", allProjects)
 	prompt := filepath.Join(dir, "prompt.md")
 	os.WriteFile(prompt, []byte("Review this.\n"), 0o644)
@@ -33,5 +35,107 @@ func TestCodexStopsAStalledCodex(t *testing.T) {
 	var exit *exitError
 	if !errors.As(err, &exit) || exit.code != exitCodexStalled {
 		t.Errorf("crew codex returned %v; want exit %d for a stall", err, exitCodexStalled)
+	}
+}
+
+func TestWithoutMCPServersKeepsTheRest(t *testing.T) {
+	config := `model_provider = "proxy"
+mcp_servers.inline = { command = "inline" }
+"mcp_servers".quotedroot = { command = "quotedroot" }
+keptlist = [
+  ["a"],
+  ["b"],
+]
+projects = {
+  "/a" = { trust_level = "trusted" },
+}
+projects_note = "kept"
+
+[model_providers.proxy]
+base_url = "http://proxy.invalid/v1"
+projects = "kept: only the root table's keys are dropped"
+
+[mcp_servers.sentry]
+command = "sentry"
+
+[[mcp_servers_extra]]
+name = "kept"
+
+[mcp_servers.sentry.env]
+TOKEN = "x"
+
+[projects."/a"]
+trust_level = "trusted"
+
+["mcp_servers".quoted]
+command = "quoted"
+
+[mcp_servers] # review tools
+sentry = { command = "sentry" }
+
+["projects"."/b"]
+trust_level = "trusted"
+
+[notice]
+note = "see [this, and {that"  # a [comment
+instructions = """
+[mcp_servers.in_a_string]
+"""
+
+["mcp\u005fservers".escaped]
+command = "escaped"
+
+[notice.more]
+quotes = ["""ends in quotes"""", '''and so''''']
+literal = 'it\'
+single = "a \" [b"
+escaped = """x\"[y\\"""
+
+[mcp_servers.after_the_quotes]
+command = "after"
+
+[projects."/after"]
+trust_level = "trusted"
+
+[tui]
+theme = "dark"
+`
+	want := `model_provider = "proxy"
+keptlist = [
+  ["a"],
+  ["b"],
+]
+projects_note = "kept"
+
+[model_providers.proxy]
+base_url = "http://proxy.invalid/v1"
+projects = "kept: only the root table's keys are dropped"
+
+[[mcp_servers_extra]]
+name = "kept"
+
+[notice]
+note = "see [this, and {that"  # a [comment
+instructions = """
+[mcp_servers.in_a_string]
+"""
+
+[notice.more]
+quotes = ["""ends in quotes"""", '''and so''''']
+literal = 'it\'
+single = "a \" [b"
+escaped = """x\"[y\\"""
+
+[tui]
+theme = "dark"
+`
+	if got := string(withoutMCPServers(config)); got != want {
+		t.Errorf("withoutMCPServers gave:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestWithoutMCPServersSurvivesAConfigThatIsNotClosed(t *testing.T) {
+	if got := withoutMCPServers("\"\n"); string(got) != "\"\n" {
+		t.Errorf("got %q", got)
 	}
 }

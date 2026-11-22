@@ -5,10 +5,15 @@
 #   $HOME/codex-stdin.last   what the latest `exec` read on stdin (its prompt)
 #   $HOME/codex-signed-out   if present, `login status` fails, like a signed-out Codex
 #   $HOME/codex-fail         if present, `exec` exits 3 before its turn completes
+#   $HOME/codex-home.last    the config.toml and auth.json in the CODEX_HOME of the latest call
 # `exec` prints Codex's events and writes "stub review" to its -o file. It records
 # LEAK CLAUDECODE if crew left that variable set.
 set -u
 echo "codex $* (in $PWD)" >>"$HOME/codex-calls.log"
+{
+  echo "--- config.toml"; cat "${CODEX_HOME:-/nonexistent}/config.toml" 2>&1
+  echo "--- auth.json"; cat "${CODEX_HOME:-/nonexistent}/auth.json" 2>&1
+} >"$HOME/codex-home.last"
 [[ -n ${CLAUDECODE:-} ]] && echo "LEAK CLAUDECODE" >>"$HOME/codex-calls.log"
 
 case "${1:-} ${2:-}" in
