@@ -66,6 +66,21 @@ TOKEN = "x"
 [projects."/a"]
 trust_level = "trusted"
 
+["mcp_servers".quoted]
+command = "quoted"
+
+[mcp_servers] # review tools
+sentry = { command = "sentry" }
+
+["projects"."/b"]
+trust_level = "trusted"
+
+[notice]
+note = "see [this, and {that"  # a [comment
+instructions = """
+[mcp_servers.in_a_string]
+"""
+
 [tui]
 theme = "dark"
 `
@@ -82,6 +97,12 @@ projects = "kept: only the root table's keys are dropped"
 
 [[mcp_servers_extra]]
 name = "kept"
+
+[notice]
+note = "see [this, and {that"  # a [comment
+instructions = """
+[mcp_servers.in_a_string]
+"""
 
 [tui]
 theme = "dark"

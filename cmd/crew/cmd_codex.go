@@ -306,49 +306,110 @@ func (h reviewCodexHome) saveSignIn() {
 }
 
 // withoutMCPServers is a Codex config without its `mcp_servers` and `projects`
-// tables and keys. It reads only what it needs of TOML: table headers at the
-// start of a line, and a value that runs over lines while its brackets are open.
-// It doesn't look for quoted keys or brackets inside strings. A key is only
-// looked for before the first table, where Codex users write it.
+// tables and keys. It reads TOML only as far as it needs to: it splits the file
+// into statements (a table header, or a key with its value, which may run over
+// lines), and names each one by its first key. A key is only looked for before
+// the first table, where Codex users write it.
 func withoutMCPServers(config string) []byte {
-	var kept []string
-	// Where a line is: in the root keys, in a table that's kept or in one that's
-	// dropped. open is how many brackets a value running over lines still has
-	// open, and skipping says whether that value is dropped.
-	root, dropping, skipping, open := true, false, false, 0
+	var kept, statement []string
+	root, dropping := true, false
+	var scan tomlScan
 	for _, line := range strings.Split(config, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case open > 0:
-			open += openBrackets(trimmed)
-		case strings.HasPrefix(trimmed, "["):
+		if text := strings.TrimSpace(line); len(statement) == 0 && (text == "" || strings.HasPrefix(text, "#")) {
+			if !dropping {
+				kept = append(kept, line)
+			}
+			continue
+		}
+		statement = append(statement, line)
+		if scan.line(line); scan.unfinished() {
+			continue
+		}
+		text := strings.Join(statement, "\n")
+		statement, scan = nil, tomlScan{}
+		drop := dropping
+		if strings.HasPrefix(strings.TrimSpace(text), "[") {
 			root = false
-			dropping = isDroppedName(strings.Trim(trimmed, "[] \t"))
-			skipping = dropping
-		default:
-			skipping = dropping || (root && isDroppedName(trimmed))
-			open = openBrackets(trimmed)
+			dropping = isDroppedName(firstKey(text))
+			drop = dropping
+		} else if root && isDroppedName(firstKey(text)) {
+			drop = true
 		}
-		if !skipping {
-			kept = append(kept, line)
+		if !drop {
+			kept = append(kept, text)
 		}
+	}
+	if len(statement) > 0 && !dropping {
+		kept = append(kept, statement...)
 	}
 	return []byte(strings.Join(kept, "\n"))
 }
 
-// openBrackets is how many more brackets and braces line opens than it closes.
-func openBrackets(line string) int {
-	return strings.Count(line, "{") + strings.Count(line, "[") - strings.Count(line, "}") - strings.Count(line, "]")
+// tomlScan follows a statement over its lines: the brackets and braces it has
+// open, and the multi-line string it's in, if any. Brackets inside strings and
+// comments don't count.
+type tomlScan struct {
+	depth int
+	multi string // `"""` or `'''` while inside a multi-line string
 }
 
-// isDroppedName: a table name or a key is one of the names withoutMCPServers
-// leaves out, or starts with one, up to a dot, a space, `=` or a tab.
-func isDroppedName(name string) bool {
-	for _, dropped := range []string{"mcp_servers", "projects"} {
-		rest, ok := strings.CutPrefix(name, dropped)
-		if ok && (rest == "" || strings.ContainsRune(". =\t", rune(rest[0]))) {
-			return true
+func (t *tomlScan) unfinished() bool { return t.depth > 0 || t.multi != "" }
+
+func (t *tomlScan) line(line string) {
+	for i := 0; i < len(line); i++ {
+		rest := line[i:]
+		switch {
+		case t.multi != "":
+			if t.multi == `"""` && line[i] == '\\' {
+				i++
+			} else if strings.HasPrefix(rest, t.multi) {
+				t.multi = ""
+				i += 2
+			}
+		case line[i] == '#':
+			return
+		case strings.HasPrefix(rest, `"""`), strings.HasPrefix(rest, `'''`):
+			t.multi = rest[:3]
+			i += 2
+		case line[i] == '"' || line[i] == '\'':
+			i += quotedLength(rest) - 1
+		case line[i] == '[' || line[i] == '{':
+			t.depth++
+		case line[i] == ']' || line[i] == '}':
+			t.depth--
 		}
 	}
-	return false
+}
+
+// quotedLength is the length of the one-line string rest starts with, or all of
+// rest when the string isn't closed.
+func quotedLength(rest string) int {
+	for i := 1; i < len(rest); i++ {
+		switch {
+		case rest[0] == '"' && rest[i] == '\\':
+			i++
+		case rest[i] == rest[0]:
+			return i + 1
+		}
+	}
+	return len(rest)
+}
+
+// firstKey is the first part of the key a statement sets or the table it opens,
+// without its quotes: `mcp_servers` in `["mcp_servers".x] # a comment`.
+func firstKey(statement string) string {
+	text := strings.TrimLeft(strings.TrimSpace(statement), "[ \t")
+	if text != "" && (text[0] == '"' || text[0] == '\'') {
+		return text[1 : quotedLength(text)-1]
+	}
+	end := strings.IndexAny(text, ". =\t]#")
+	if end < 0 {
+		return text
+	}
+	return text[:end]
+}
+
+// isDroppedName: a key is one of the names withoutMCPServers leaves out.
+func isDroppedName(key string) bool {
+	return key == "mcp_servers" || key == "projects"
 }
