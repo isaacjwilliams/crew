@@ -161,7 +161,7 @@ func TestNewestReview(t *testing.T) {
 
 // A task's auto_review turns its automated review off only while it isn't high
 // risk, and hand-over waits for a review whenever one should have run.
-func TestAutomatedReviewOffUntilHighRisk(t *testing.T) {
+func TestAutomatedReviewOffAndAwaited(t *testing.T) {
 	reviewed := "## Automated reviews\n### Automated review 1\n\n## Log\n"
 	for _, c := range []struct {
 		front, body, project string // the task's front matter and body, and the project's AUTO_REVIEWS

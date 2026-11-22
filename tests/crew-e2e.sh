@@ -53,6 +53,7 @@ runs_on() {
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
+clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
 # criterion, on its branch as it is now, here or on origin. Recording it again names
@@ -92,7 +93,7 @@ restacked() {
     $(crew get "$1" worker_model) == sonnet &&
     $(jq -r --arg j "$(crew get "$1" worker_job)" '.[] | select(.id == $j) | .sessionId' "$HOME/agents.json") == "$(crew get "$1" worker_session)" ]]
 }
-hand_over() {  # task
+hand_over() {  # task: records evidence and, unless it has one, an automated review, since hand-over needs both
   section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
   grep -q '^### Automated review ' "$(crew path "$1")" || review "$(crew path "$1")" 1
   pr_body "$1"
@@ -374,12 +375,16 @@ for r in low medium; do
   [[ $(crew hand-over 1 2>&1) == *"automated review hasn't run for this task: run a pass of automated review, then hand over again"* && $(crew get 1 status) == needs-input ]] && refused=$((refused + 1))
 done
 check "hand-over refuses a low- and a medium-risk task with a PR until an automated review is recorded, and leaves its status" '((refused == 2))'
-# Where none is due, the same hand-over goes through; the task goes back to needs-input after each.
-echo AUTO_REVIEWS=0 >>"$PE"; crew hand-over 1 >/dev/null; a=$(crew get 1 status); crew set 1 status needs-input; sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
-crew set 1 auto_review no; crew hand-over 1 >/dev/null; b=$(crew get 1 status); crew set 1 status needs-input; crew set 1 auto_review ""
+# Where no review is due, the same hand-over goes through. Each case then puts the task back to needs-input.
+echo AUTO_REVIEWS=0 >>"$PE"; crew hand-over 1 >/dev/null; project_off=$(crew get 1 status); crew set 1 status needs-input
+sed -i '/^AUTO_REVIEWS=0$/d' "$PE"
+crew set 1 auto_review no; crew hand-over 1 >/dev/null; task_off=$(crew get 1 status); crew set 1 status needs-input
+crew set 1 auto_review ""
 pr=$(crew get 1 pr); mode=$(crew get 1 pr_mode); crew set 1 pr_mode none; crew set 1 pr ""
-crew hand-over 1 >/dev/null; c=$(crew get 1 status); crew set 1 status needs-input; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
-check "hand-over needs no automated review when the project's AUTO_REVIEWS is 0, the task's is off, or it has no PR" '[[ $a == pr-open && $b == pr-open && $c == pr-open ]]'
+crew hand-over 1 >/dev/null; no_pr=$(crew get 1 status); crew set 1 status needs-input
+crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
+check "hand-over needs no automated review when the project's AUTO_REVIEWS is 0, the task's is off, or it has no PR" \
+  '[[ $project_off == pr-open && $task_off == pr-open && $no_pr == pr-open ]]'
 crew set 1 risk low
 review "$F1" 1   # what the worker's automated review leaves
 check "hand-over sets pr-open from any status in flight, and logs it, once every acceptance criterion has evidence, and leaves the tier of a branch that touches no sensitive path" \
@@ -411,7 +416,7 @@ git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-ove
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
-sed -i '/^### Automated review 1$/,+1d' "$F1"   # the worker's review, from before the raise
+clear_review "$F1"   # the review recorded before the raise
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses a task whose automated review was turned back on until a review is recorded" \
   '((st == 1)) && [[ $out == *"automated review hasn'"'"'t run for this task: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
@@ -645,7 +650,7 @@ check "react refuses someone else's review, and reacts to none of the IDs" '[[ $
 check "react refuses an ID that isn't a number, and reacts to none of the IDs" '[[ $(crew react 1 eyes 111 abc 2>&1) == *"comment id must be a number"* && $(reactions) == "$n" ]]'
 check "react refuses any reaction but eyes and rocket" '[[ $(crew react 1 heart 111 2>&1) == *"must be eyes or rocket"* && $(reactions) == "$n" ]]'
 check "react refuses a task without a PR" '[[ -z $(crew get 2 pr) ]] && ! crew react 2 eyes 111 2>/dev/null && [[ $(reactions) == "$n" ]]'
-sed -i '/^### Automated review 1$/,+1d' "$F1"   # hand_over recorded one
+clear_review "$F1"   # hand_over recorded one
 printf 'Automated review\n\nNothing found.\n' >"$HOME/summary.md"
 check "review-summary refuses a task that records no automated review" '[[ $(crew review-summary 1 "$HOME/summary.md" 2>&1) == *"records no automated review"* && ! -e $HOME/gh-last-body ]]'
 review "$F1" 1
