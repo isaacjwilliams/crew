@@ -1508,6 +1508,7 @@ out=$(crew dispatch "$GS" 2>&1); code=$?
 check "a task stacked on one of its goal's counts against the goal's max_in_flight" '[[ $code == 4 && $out == *"goal $G already has 1 task(s) in flight (max_in_flight 1)"* && $(crew get "$GS" status) == ready ]]'
 check "status shows a goal's tasks in flight against its max_in_flight" '[[ $(crew status) == *"goal $G"*"0 of 3 task(s) merged, 1/1 in flight"* ]]'
 crew set "$GS" status abandoned >/dev/null; crew goal cap 1 3 >/dev/null
+check "status leaves a goal's abandoned task out of its task count" '[[ $(crew status) == *"goal $G"*"0 of 2 task(s) merged, 1/3 in flight"* ]]'
 # The stub's PR has comments of its own; none of these tests are about them.
 crew set "$GT1" feedback_since 2099-01-01T00:00:00Z
 stall "$GT1" "done" null; n=$(resumes)

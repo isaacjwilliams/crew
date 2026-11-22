@@ -312,13 +312,16 @@ func toReview(tasks []Task) []Task {
 	return open
 }
 
-// goal works out one goal: its lead, how many of its tasks have merged, its
+// goal works out one goal: its lead, how many of its tasks that can merge have merged, its
 // tasks in flight against its max_in_flight, and its tasks in groups.
 func (s *statusView) goal(g Goal, tasks []Task) goalReport {
 	r := goalReport{Goal: g, Lead: s.agent(g.LeadJob())}
 	for _, t := range s.goalTasks(g) {
 		if rules, err := t.rules(); err == nil && !rules.pr {
 			continue // a spike's PR is never merged
+		}
+		if t.Status() == Abandoned {
+			continue // it can no longer merge
 		}
 		r.Total++
 		if t.Status() == Merged {
