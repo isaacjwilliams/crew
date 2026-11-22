@@ -973,6 +973,23 @@ rm -f "$HOME/gh-pr-state"
 # crew tick, starting from a ledger with nothing in flight.
 for f in "$PD"/tasks/*.md; do has=$(crew get "$f" status); [[ $has == merged ]] || crew set "$f" status abandoned; done
 prompt every SessionStart >/dev/null; prompt held >/dev/null   # leads that hear what the ticks below do, and hold back
+# The lead for every project hears the news after each crew command that adds some, and keeps it in
+# $HOME/news-heard, so the news a prompt carries never nears the hook's cap however much the ticks record.
+news_size=0
+hear_news() {
+  local size; size=$(cat "$L"/news/*.log 2>/dev/null | wc -c)
+  [[ $size != "$news_size" ]] || return 0
+  news_size=$size
+  # A worker's command runs with an empty fingerprint, and the lead's hook says nothing to a worker.
+  (unset CREW_LEAD_FINGERPRINT; prompt every) >>"$HOME/news-heard"; echo >>"$HOME/news-heard"
+}
+# From here to the end of the file, every crew command is followed by hear_news. The lead's own hook is
+# left alone: prompt runs it, and it would recurse.
+crew() {
+  local st; command crew "$@"; st=$?
+  [[ $1 == lead ]] || hear_news
+  return $st
+}
 PJ=$(basename "$PD")   # the project, which a lead for every project hears before each line
 crew cleanup --merged >/dev/null 2>&1
 echo OPEN >"$HOME/gh-pr-state"
@@ -2255,7 +2272,7 @@ out=$(crew tick 2>&1)
 check "tick tells an idle worker whose turn a pause cut short to carry on" '[[ $out == *"$TPI: its worker carries on after the pause"* && $(since "$n") == *"New input for task $TPI ("*"$CARRY"* ]]'
 as_worker set "$PI" status needs-input
 # Every kind of thing crew tick did since the lead's previous prompt, and the statuses a worker set.
-out=$(prompt every)
+out=$(<"$HOME/news-heard")
 for heard in "merged; worktree cleaned up" "review round 1 recorded" "comment(s) from collaborators, for you" "recorded: red on" \
   " CI rounds, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
   "restack sent to its worker (014-tick-parent moved)" "restack sent to its worker (PR targets agent/tick-old, not main)" "waiting on you (1 open question(s))" \
@@ -2263,7 +2280,11 @@ for heard in "merged; worktree cleaned up" "review round 1 recorded" "comment(s)
   "nudged it" "can't be nudged, for the lead" "$TPI: handed over (pr-open)" "$TPI: status → needs-input"; do
   check "a lead hears what crew did since its previous prompt: $heard" '[[ $out == *"$NL- "????-??-??" "??:??" "*$heard* ]]'
 done
-check "with its time, under one heading, and nothing a lead set itself" '[[ $out == "$DID$NL- "* && $out != *"status → abandoned"* ]]'
+# Each time it heard anything, the lead got one paragraph: crew's lines under the heading, each with its time.
+check "each time a lead hears news, it's under one heading, with each line timed, and nothing a lead set itself" \
+  '[[ $out != *"status → abandoned"* ]] && awk -v did="$DID" -v held="$HELD" '"'"'BEGIN { RS = ""; FS = "\n" }
+    index($0, did "\n") != 1 && index($0, held "\n") != 1 { exit 1 }
+    index($0, did) == 1 { for (i = 2; i <= NF && $i != held; i++) if ($i !~ /^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} /) exit 1 }'"'"' "$HOME/news-heard"'
 setstate "done" null; jobstate "$(crew get "$PT" worker_job)" working 4242 busy; touch "$HOME/stop-noop"; log=$(section "$PT" "## Log")
 out=$(crew pause --project "$PJ" 2>&1); st=$?
 check "crew pause fails when a session doesn't stop, names it, and logs nothing on its file" \
