@@ -460,7 +460,7 @@ for st in needs-input working; do
   crew set 1 status "$st"; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]] && returned=$((returned + 1))
 done
 check "hand-over takes a task back to pr-open from needs-input and working too, as after a question or a restack" '((returned == 2))'
-# Back as it was, for the automated-review summaries below.
+# Back to the project's automated review setting.
 crew set 1 auto_review ""
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; git -C "$SB/other-clone" checkout -q main
 # A merge of the base leaves the branch's own work as it was, so its evidence stays
