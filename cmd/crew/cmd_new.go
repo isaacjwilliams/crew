@@ -353,7 +353,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		// Before the PR check: a worker whose parent merged can't open its PR on
 		// the parent's branch once GitHub has deleted it.
 		if first {
-			if err := refuseOffParentsTip(c.branches(p.Name), t, p.Repo()); err != nil {
+			if err := c.refuseOffParentsTip(p, t); err != nil {
 				return err
 			}
 		}
@@ -397,11 +397,17 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 // branch doesn't hold its parent's latest commit, or what the parent merged
 // into, and gives the worker the rebase that moves it there. Before the first hand-over the worker's
 // own session is still making the branch, so it runs the rebase itself; after
-// it, crew tick restacks the task (crew restack).
-func refuseOffParentsTip(idx Branches, t Task, repo string) error {
+// it, crew tick restacks the task (crew restack). Call it with the lock held.
+func (c *Crew) refuseOffParentsTip(p *Project, t Task) error {
+	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
 	if !stacked {
 		return nil
+	}
+	// An earlier refusal's rebase may have moved the branch since crew sync last
+	// looked, so cut where it leaves the parent now, as crew restack does.
+	if noteBaseSHA(t, parent, repo) {
+		c.commit("base_sha " + p.Name + "/" + t.ID())
 	}
 	if parent.Status() == Abandoned {
 		return fail("%s, the task your branch is stacked on, was abandoned, so your branch has nowhere to move before its first hand-over: ask what its base should be", parent.ID())

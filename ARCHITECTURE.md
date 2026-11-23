@@ -243,7 +243,8 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
         → converged: crew hand-over TASK
               ├─ before the lock: git fetch origin; gh pr view --json body (PREvidence), unless pr_mode is none
               ├─ first hand-over of a stacked task (refuseOffParentsTip): refuses while the branch doesn't hold its
-              │    parent's latest commit, with the rebase (rebaseFor) and, after a merge, the new base to record
+              │    parent's latest commit, with the rebase (rebaseFor, cut at base_sha as noteBaseSHA moves it
+              │    first, as crew restack does) and, after a merge, the new base to record
               ├─ refuses until every acceptance criterion has an entry and a PR-body item (Evidence.Gaps)
               │    naming the commit it ran on (Evidence.Unnamed), and that commit holds the branch's own
               │    work at each tip, here and on origin (ownWork, branchWork.unchangedSince: its work,

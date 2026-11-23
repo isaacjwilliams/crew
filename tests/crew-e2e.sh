@@ -1585,9 +1585,9 @@ check "tick nudges a first run that went idle after its parent moved, in its own
 out=$(crew hand-over "$FA" 2>&1); st=$?
 check "a first hand-over off the parent's latest commit is refused with the rebase onto it, the cut and the lease" \
   '((st == 1)) && [[ $out == *"your branch has to move before its first hand-over ($(tid "$FP") moved): rebase your branch with \`git fetch origin && git rebase --onto $(tip first-parent) $(crew get "$FA" base_sha)\`, then follow \"Stacked tasks\" in your instructions."*"\`git push --force-with-lease=agent/idle-child:$(git rev-parse origin/agent/idle-child) origin agent/idle-child\`"* && $out != *"base main"* && $(crew get "$FA" status) == working ]]'
-run_given "$WTA" "$out"; out=$(crew hand-over "$FA" 2>&1); st=$?
+bs=$(crew get "$FA" base_sha); run_given "$WTA" "$out"; out=$(crew hand-over "$FA" 2>&1); st=$?
 check "after the rebase, hand-over refuses the automated review that read the parent's old commits" \
-  '((st == 1)) && [[ $out == *"automated review 1 $STALE: it read from $(cut -c1-12 <<<"$(crew get "$FA" base_sha)"), and your branch now leaves origin/agent/first-parent at $(tip first-parent | cut -c1-12). Run a pass of automated review, then hand over again"* && $(crew get "$FA" status) == working ]]'
+  '((st == 1)) && [[ $out == *"automated review 1 $STALE: it read from $(cut -c1-12 <<<"$bs"), and your branch now leaves origin/agent/first-parent at $(tip first-parent | cut -c1-12). Run a pass of automated review, then hand over again"* && $(crew get "$FA" status) == working ]]'
 ranged_review "$FA" 2; out=$(crew hand-over "$FA" 2>&1); st=$?
 check "and hands over once a review has read the rebased branch: on the parent's tip, with only the child's commits" \
   '((st == 0)) && [[ $(crew get "$FA" status) == pr-open && $(git rev-parse origin/agent/idle-child) == $(tip idle-child) && $(git log --format=%s "$(own "$(tip first-parent)" idle-child)" -1) == "add $(tid "$FA").txt" && $(own "$(tip first-parent)" idle-child | wc -l) == 1 ]]'
@@ -1621,6 +1621,15 @@ out=$(crew hand-over "$FE" 2>&1); run_given "$(crew get "$FE" worktree)" "$out";
 check "once answered, it reaches pr-open on the parent's tip with the answer's followup the only one sent" \
   'crew hand-over "$FE" >/dev/null && [[ $(crew get "$FE" status) == pr-open && $(own "$(tip first-parent)" asking-child | wc -l) == 1 && $(resumes_of "$FE") == $((r + 1)) && $(fresh_launches) == "$n" && $(restacks_of "$FE") == 0 ]]'
 crew set "$FB" status abandoned >/dev/null; crew set "$FE" status abandoned >/dev/null
+
+# The parent is rewritten, and then gets a new commit, with no crew sync in between.
+FG=$(crew new "Moved twice before a sync" --branch twice-child --on "$(tid "$FP")"); fill "$FG"; crew ready "$FG" >/dev/null; setstate "done" null; crew dispatch "$FG" >/dev/null
+first_run "$FG" 67; WTG=$(crew get "$FG" worktree)
+(cd "$WTP" && git commit -q --amend -m "add p3.txt, reworded" && git push -q -f origin HEAD 2>/dev/null)
+run_given "$WTG" "$(crew hand-over "$FG" 2>&1)"; work "$WTP" p4.txt; out=$(crew hand-over "$FG" 2>&1); run_given "$WTG" "$out"
+check "a second rebase before a sync cuts where the first one left the branch, so the branch keeps only its own commits" \
+  '[[ $out == *"git rebase --onto $(tip first-parent) $(git -C "$WTP" rev-parse HEAD~1)"* ]] && ranged_review "$FG" 2 && crew hand-over "$FG" >/dev/null && [[ $(crew get "$FG" status) == pr-open && $(own "$(tip first-parent)" twice-child | wc -l) == 1 ]]'
+crew set "$FG" status abandoned >/dev/null
 
 # The parent merges while one child has its PR open and another has none yet.
 FC=$(crew new "PR open when its parent merged" --branch merged-child --on "$(tid "$FP")"); fill "$FC"; crew ready "$FC" >/dev/null; setstate "done" null; crew dispatch "$FC" >/dev/null
