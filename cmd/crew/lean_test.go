@@ -121,6 +121,30 @@ func TestAProjectKeepsWhatKeepLoadedNames(t *testing.T) {
 	}
 }
 
+// A lead keeps what its projects' KEEP_LOADED name. A project whose settings are
+// broken doesn't stop the lead for every project, only a lead for that one.
+func TestALeadKeepsWhatItsProjectsKeepLoadedName(t *testing.T) {
+	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	writeFile(t, c, "KEEP_LOADED=chrome-devtools\n", "projects/ninja/project.env")
+	writeFile(t, c, "not a setting\n", "projects/broken/project.env")
+
+	flags, err := c.leadFlags("")
+	if err != nil {
+		t.Fatalf("a lead for every project: %v", err)
+	}
+	settings, err := parseJSON([]byte(flags[3]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := leanOf(t, settings.(*object)); got.servers != nil {
+		t.Errorf("the lead denies %v, want chrome-devtools kept for ninja", got.servers)
+	}
+	if _, err := c.leadFlags("broken"); err == nil {
+		t.Error("a lead for a project with broken settings started")
+	}
+}
+
 // Claude Code turns a plugin, skill or server off by its name, so one of yours
 // that shares a name with one the session gets from crew, the project or the
 // repo stays on, or theirs would go too.

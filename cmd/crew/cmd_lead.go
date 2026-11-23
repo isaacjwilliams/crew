@@ -65,6 +65,11 @@ func (c *Crew) leadFlags(proj string) ([]string, error) {
 	for _, p := range c.projects(proj) {
 		s, err := c.projectSettings(p)
 		if err != nil {
+			// A lead for every project starts without one whose settings are
+			// broken, as syncMCP does, which reports them.
+			if p != proj {
+				continue
+			}
 			return nil, err
 		}
 		keep = append(keep, strings.Fields(s["KEEP_LOADED"])...)
