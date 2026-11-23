@@ -418,10 +418,10 @@ What each step of crew's process cost over those days, at Anthropic's API rates,
                                                       median
   step                         total  share  tasks  per task
   Brief review                   $97   5.8%     57     $0.74
-  Worker sessions             $1,016  60.6%     73     $8.93
+  Worker sessions             $1,016    61%     73     $8.93
   Exhale                        $104   6.2%     45     $1.60
   …
-  Lead sessions                 $193  11.5%
+  Lead sessions                 $193    12%
   …
   All                         $1,675   100%     73       $13
 ```

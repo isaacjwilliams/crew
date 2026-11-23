@@ -626,12 +626,17 @@ func (r costReport) print(w io.Writer) {
 	fmt.Fprintln(w, "A cache write costs 1.25 times input when it's kept for five minutes, and twice input for an hour.")
 }
 
-// share is the part of all spend that dollars is, as a percentage.
+// share is the part of all spend that dollars is, as a person needs it: "61%",
+// or "5.8%" under 10%.
 func (r costReport) share(dollars float64) string {
 	if r.total == 0 {
 		return "-"
 	}
-	return decimal(100*dollars/r.total) + "%"
+	percent := 100 * dollars / r.total
+	if percent < 10 {
+		return decimal(percent) + "%"
+	}
+	return strconv.Itoa(int(math.Round(percent))) + "%"
 }
 
 // dollars is an amount as a person needs it: "$1,675", or "$4.27" under $10.

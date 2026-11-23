@@ -277,7 +277,7 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 
                                           median
   step             total  share  tasks  per task
-  Worker sessions   $380  99.2%      2       $50
+  Worker sessions   $380    99%      2       $50
   Exhale           $3.00   0.8%      1     $3.00
 
   All               $383   100%      2       $52
