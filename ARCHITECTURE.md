@@ -244,12 +244,13 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
               ├─ before the lock: gh pr view --json body (PREvidence), unless pr_mode is none; at the first
               │    hand-over, the PR and its parent's as crew sync reads them (readPR); then git fetch origin,
               │    so the refs hold whatever those PRs say merged
-              ├─ first hand-over (refuseOffBase): records both PRs (gitHubPR.record), and the parent's merge
-              │    (noteMerge), and moves base_sha (noteBaseSHA), as crew sync and crew restack do, then refuses while a stacked branch doesn't
-              │    hold its parent's latest commit, with the rebase (rebaseFor) and, after a merge, the new base
-              │    to record (afterPush), or while the PR targets another branch (retargetReason), with the
-              │    gh pr edit --base to run: with the rebase, alone (onBase), or, for an unstacked branch that
-              │    doesn't start on its base, a word to ask
+              ├─ first hand-over (refuseOffBase): records each PR in its own task (gitHubPR.record), and the
+              │    parent's merge (noteMerge), as crew sync does, and moves base_sha (noteBaseSHA), as crew sync
+              │    and crew restack do, then refuses while a stacked branch doesn't hold its parent's latest
+              │    commit, with the rebase (rebaseFor) and, after a merge, the new base to record (afterPush), or
+              │    while the PR targets another branch (retargetReason), with the gh pr edit --base to run: with
+              │    the rebase, alone (onBase), or, for an unstacked branch that doesn't start on its base, a word
+              │    to ask
               ├─ refuses until every acceptance criterion has an entry and a PR-body item (Evidence.Gaps)
               │    naming the commit it ran on (Evidence.Unnamed), and that commit holds the branch's own
               │    work at each tip, here and on origin (ownWork, branchWork.unchangedSince: its work,
