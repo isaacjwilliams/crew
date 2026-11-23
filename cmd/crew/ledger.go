@@ -493,6 +493,10 @@ var missedBy = []string{"brief-review", "tests", "pre-pr-review", "security-revi
 // task without one runs on the session's default.
 var models = []string{"opus", "sonnet", "haiku"}
 
+// efforts are Claude Code's effort levels, which a task's worker can run at. A
+// task without one runs at the user's own setting.
+var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string { return listJoin(items, " or ") }
 
@@ -583,6 +587,7 @@ func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 func (t Task) Model() string     { return t.Get("model") }
+func (t Task) Effort() string    { return t.Get("effort") }
 
 // autoReviewOff, as a task's auto_review, turns its automated review off, while
 // the task isn't high risk: a high-risk PR is always reviewed. It's the only
@@ -1269,12 +1274,19 @@ func (t Task) AwaitsSecurityReview() bool { return t.Risk() == RiskHigh && !t.Se
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
 // user once the worker has had MAX_CI_FIXES rounds of them. They are the only
-// record of what was reported: crew ci-fix writes them, the Task methods below
-// read them back, and the worker ticks them, so their wording is a contract.
+// record of what was reported: crew ci-fix writes them, crew ci-summary marks a
+// round's (ciNotTheBranch), the Task methods below read them back, and the
+// worker ticks them, so their wording is a contract.
 const (
 	ciFailedOn   = "CI failed on "       // - [ ] CI failed on <sha>: <check>, <check>
 	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
 )
+
+// ciNotTheBranch ends a round's CI line once the worker has found that its
+// branch didn't cause the red CI (crew ci-summary --not-the-branch). Such a
+// round doesn't count toward MAX_CI_FIXES. lead.md quotes it, for the lead
+// reading a task file.
+const ciNotTheBranch = " (the branch didn't cause it)"
 
 // The line that reports a PR's conflict with its base branch, at a commit of
 // the base (its short SHA), in a review round that sends it to the worker. Like
@@ -1320,6 +1332,50 @@ func (t Task) CIFailures() []string {
 		}
 	}
 	return heads
+}
+
+// CIFixes counts the CI rounds that count toward MAX_CI_FIXES: every one but
+// those the worker found its branch didn't cause (ciNotTheBranch).
+func (t Task) CIFixes() int {
+	n := 0
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		if _, ok := ciLineHead(l, ciFailedOn); ok && !strings.HasSuffix(l, ciNotTheBranch) {
+			n++
+		}
+	}
+	return n
+}
+
+// RecordCICause marks the review round's CI line for head as not caused by the
+// branch, or takes the mark off when the branch caused it, so the worker's
+// latest account of that red CI is the one MAX_CI_FIXES counts. It reports
+// whether it changed the file: a head only an open question reports (past
+// MAX_CI_FIXES) has no round line to mark.
+func (t Task) RecordCICause(head string, branchCaused bool) (bool, error) {
+	ls, err := t.read()
+	if err != nil {
+		return false, err
+	}
+	changed, inRounds := false, false
+	for i, l := range ls {
+		if strings.HasPrefix(l, "## ") {
+			inRounds = l == "## Review rounds"
+		}
+		if h, ok := ciLineHead(l, ciFailedOn); !inRounds || !ok || h != head {
+			continue
+		}
+		// The line may carry the mark already, from an earlier account.
+		marked := strings.TrimSuffix(l, ciNotTheBranch)
+		if !branchCaused {
+			marked += ciNotTheBranch
+		}
+		changed = changed || marked != l
+		ls[i] = marked
+	}
+	if !changed {
+		return false, nil
+	}
+	return true, t.writeLines(ls)
 }
 
 // ConflictReported: a review round sent the worker the PR's conflict with

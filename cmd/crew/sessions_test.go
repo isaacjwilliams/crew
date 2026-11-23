@@ -60,7 +60,7 @@ echo '[{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"li
 	}
 }
 
-func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
+func TestAWorkerWithoutAModelOrEffortLaunchesAsBefore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	c := &Crew{Home: t.TempDir()}
 	if err := os.MkdirAll(c.path("config"), 0o755); err != nil {
@@ -70,11 +70,11 @@ func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_PERMISSION_MODE": "auto", "WORKER_AUTOCOMPACT_WINDOW": "400k"}}
-	unset, err := c.launchWorker(p, "")
+	unset, err := c.launchWorker(p, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sonnet, err := c.launchWorker(p, "sonnet")
+	sonnet, err := c.launchWorker(p, "sonnet", "medium")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +84,8 @@ func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
 	if want := c.fingerprint(unset.flags, c.agentFiles("implementer")...); unset.fingerprint != want {
 		t.Errorf("fingerprint = %s, want %s: only the flags and agent files count", unset.fingerprint, want)
 	}
-	// The model is recorded and compared on its own, so it changes neither.
-	if !slices.Equal(sonnet.flags, unset.flags) || sonnet.fingerprint != unset.fingerprint || sonnet.model != "sonnet" {
-		t.Errorf("a model changed the flags or fingerprint: %q %s, want %q %s", sonnet.flags, sonnet.fingerprint, unset.flags, unset.fingerprint)
+	// The model and effort are recorded and compared on their own, so they change neither.
+	if !slices.Equal(sonnet.flags, unset.flags) || sonnet.fingerprint != unset.fingerprint || sonnet.model != "sonnet" || sonnet.effort != "medium" {
+		t.Errorf("a model or effort changed the flags or fingerprint: %q %s, want %q %s", sonnet.flags, sonnet.fingerprint, unset.flags, unset.fingerprint)
 	}
 }
