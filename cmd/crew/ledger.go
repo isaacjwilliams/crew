@@ -1161,7 +1161,8 @@ const (
 
 // ciNotTheBranch ends a round's CI line once the worker has found that its
 // branch didn't cause the red CI (crew ci-summary --not-the-branch). Such a
-// round doesn't count toward MAX_CI_FIXES.
+// round doesn't count toward MAX_CI_FIXES. lead.md quotes it, for the lead
+// reading a task file.
 const ciNotTheBranch = " (the branch didn't cause it)"
 
 // The line that reports a PR's conflict with its base branch, at a commit of
@@ -1240,6 +1241,7 @@ func (t Task) RecordCICause(head string, branchCaused bool) (bool, error) {
 		if h, ok := ciLineHead(l, ciFailedOn); !inRounds || !ok || h != head {
 			continue
 		}
+		// The line may carry the mark already, from an earlier account.
 		marked := strings.TrimSuffix(l, ciNotTheBranch)
 		if !branchCaused {
 			marked += ciNotTheBranch

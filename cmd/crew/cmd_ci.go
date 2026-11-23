@@ -110,7 +110,8 @@ type redCI struct {
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
 // once for each head commit. After MAX_CI_FIXES rounds the branch caused
-// (Task.CIFixes), it asks the user under Open questions instead. Exits 3 when there's nothing to do.
+// (Task.CIFixes), it asks the user under Open questions instead. Exits 3 when
+// there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -212,12 +213,11 @@ func cmdCISummary(c *Crew, args []string) error {
 	}
 	branchCaused := true
 	var rest []string
-	for len(args) > 0 {
-		switch {
-		case args[0] == "--not-the-branch":
-			branchCaused, args = false, args[1:]
-		default:
-			rest, args = append(rest, args[0]), args[1:]
+	for _, a := range args {
+		if a == "--not-the-branch" {
+			branchCaused = false
+		} else {
+			rest = append(rest, a)
 		}
 	}
 	args = rest
@@ -257,6 +257,9 @@ func cmdCISummary(c *Crew, args []string) error {
 	} else {
 		fmt.Printf("posted the CI summary for %s on PR #%s\n", head, num)
 	}
+	// The round's line records what the worker found, for crew ci-fix's count.
+	// If this fails after the post, running the command again edits the same
+	// comment and records it then.
 	if err := c.lock(); err != nil {
 		return err
 	}
