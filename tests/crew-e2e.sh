@@ -815,7 +815,7 @@ echo 'flock -n "$CREW_HOME/.crew.lock" true && echo ledger-unlocked' >"$HOME/wt-
 out=$(crew dispatch 4 2>&1)
 check "worktrunk dispatch starts a worker" '[[ $(crew get 4 status) == working && -n $(crew get 4 worker_job) ]]'
 check "the dispatch after that cleanup starts the branch at origin's current tip, and records it" '[[ $(git -C "$WT4" rev-parse HEAD) == $(git rev-parse origin/main) && $(crew get 4 base_sha) == $(git rev-parse origin/main) ]]'
-git -C "$SB/webapp" merge -q --ff-only origin/main
+git -C "$SB/webapp" merge -q --ff-only origin/main   # later steps push from main
 check "wt creates the worktree under WORK_ROOT on the task branch" '[[ $(crew get 4 worktree) == "$WT4" && $(git -C "$WT4" branch --show-current) == agent/instance-per-worktree ]]'
 check "wt switch gets --create, the base and the path" 'grep -F -- "switch --no-cd --format json --config-set worktree-path=\"$WT4\" --create --base origin/main agent/instance-per-worktree" "$HOME/wt-calls.log" >/dev/null'
 check "the pre-start hook ran" '[[ -f $WT4/.instance.yml ]] && grep -qx "pre-start agent/instance-per-worktree" "$HOME/wt-hooks.log"'
@@ -1466,10 +1466,11 @@ crew set "$F17" status abandoned >/dev/null
 # A forced cleanup reports a worktree it leaves, and changes nothing for a task with none.
 LEFT=$(crew new "Leftover directory" --branch leftover-dir); fill "$LEFT"; crew ready "$LEFT" >/dev/null
 WLEFT="$HOME/agent-work/$(basename "$PD")/$(basename "$LEFT" .md)"
-before=$(cksum <"$LEFT"; ls -R "$HOME/agent-work/$(basename "$PD")" | cksum; git -C "$SB/webapp" branch --list | cksum)
+snapshot() { cksum <"$LEFT"; ls -R "$HOME/agent-work/$(basename "$PD")" | cksum; git -C "$SB/webapp" branch --list | cksum; }
+before=$(snapshot)
 out=$(crew cleanup "$LEFT" --force 2>&1); st=$?
 check "a forced cleanup of a ready task with no worktree anywhere changes nothing and logs nothing" \
-  '((st == 0)) && [[ $out != *"cleaned up"* && $before == $(cksum <"$LEFT"; ls -R "$HOME/agent-work/$(basename "$PD")" | cksum; git -C "$SB/webapp" branch --list | cksum) ]]'
+  '((st == 0)) && [[ $out != *"cleaned up"* && $before == $(snapshot) ]]'
 mkdir -p "$WLEFT"
 out=$(crew cleanup "$LEFT" --force 2>&1); st=$?
 check "a forced cleanup doesn't report cleaning up while something that isn't a worktree is at the task's path" \

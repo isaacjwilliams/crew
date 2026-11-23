@@ -88,9 +88,11 @@ func cmdCleanup(c *Crew, args []string) error {
 			stay(t, fmt.Sprintf("it is '%s' (crew cleanup --force removes it)", st))
 			continue
 		}
-		if dir := firstDirty(dirs); dir != "" && !force {
-			stay(t, fmt.Sprintf("%s has uncommitted changes (crew cleanup --force removes it)", dir))
-			continue
+		if !force {
+			if dir := firstDirty(dirs); dir != "" {
+				stay(t, fmt.Sprintf("%s has uncommitted changes (crew cleanup --force removes it)", dir))
+				continue
+			}
 		}
 		// The worker goes first, so it doesn't carry on in a deleted directory, and
 		// the worktree tool's remove hooks run without it or the processes it left.
@@ -98,6 +100,7 @@ func cmdCleanup(c *Crew, args []string) error {
 			stay(t, fmt.Sprintf("worker %s is still running (stop it in claude agents)", job))
 			continue
 		}
+		// A sentinel, not a stay in the loop: stay and continue must move on to the next task.
 		stuck := ""
 		for _, dir := range dirs {
 			stopProcessesIn(dir)
@@ -117,12 +120,14 @@ func cmdCleanup(c *Crew, args []string) error {
 		if st.Delivered() && t.Branch() != "" {
 			gitOK(p.Repo(), "branch", "-D", t.Branch())
 		}
+		// No recorded worktree: either a dispatch failed while making one, or the task
+		// was never dispatched and there is nothing to clean up.
 		if wt == "" {
 			if len(dirs) == 0 {
 				fmt.Println(t.ID() + " has no worktree to clean up")
 				continue
 			}
-			p.dropUnstartedBranch(t)
+			p.dropBranchWithoutCommits(t)
 		}
 		t.Set("worktree", "")
 		t.Touch()
@@ -140,10 +145,10 @@ func cmdCleanup(c *Crew, args []string) error {
 	return nil
 }
 
-// dropUnstartedBranch deletes the branch a failed dispatch's setup created, so
-// that the next dispatch starts a new one at the base's current tip. A branch
-// with commits of its own stays.
-func (p *Project) dropUnstartedBranch(t Task) {
+// dropBranchWithoutCommits deletes the branch a failed dispatch's setup created.
+// Left alone, it would pin the next dispatch to the base's old tip. A branch with
+// commits of its own stays. It compares with the last fetched origin/<base>.
+func (p *Project) dropBranchWithoutCommits(t Task) {
 	base := t.Base()
 	if base == "" {
 		base = p.DefaultBranch()
