@@ -811,6 +811,10 @@ func TestLiveStatusClaimsNothingBeforeTheFirstReads(t *testing.T) {
 			t.Errorf("before the first branch read, %s doesn't say its branches aren't read yet", id)
 		}
 	}
+	// git is never asked about 020-lower: it isn't stacked, and has no PR.
+	if got := lineOf(m, "020-lower"); got < 0 || strings.Contains(m.shown[got].tail, "branches not read yet") {
+		t.Errorf("before the first branch read, 020-lower is shown as %q", m.shown[got].tail)
+	}
 
 	close(hold) // the reads come back, and with them what they say
 	tail := func(id string) string { return m.shown[lineOf(m, id)].tail }

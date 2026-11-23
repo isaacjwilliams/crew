@@ -659,8 +659,13 @@ func (s *statusView) prNotes(t Task) []string {
 
 // branchesOf is what git last said of t's branches, and false when that no
 // longer holds: before the first read, for a task that went in flight since the
-// last one, and for one whose place in its stack has changed since.
+// last one, and for one whose place in its stack has changed since. Git is only
+// asked about a stacked task or one whose PR is off its base; for any other,
+// there's nothing to wait for.
 func (s *statusView) branchesOf(t Task) (branchRead, bool) {
+	if _, stacked := s.branches.parentOf(t); !stacked && !s.branches.prOffBase(t) {
+		return branchRead{}, true
+	}
 	b, read := s.reads.branches[t.Path]
 	return b, read && b.on == s.branches.placeOf(t)
 }
