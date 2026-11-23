@@ -349,11 +349,11 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
       3  150-todo-doc-triage         ready                      -
       4  151-recaptcha-create-assess ready                      -
       5  153-drop-stale-secondary-sa ready                      -
-         … (5 more)
+      … (5 more)
     waiting on other tasks
          158-division-results-versio ready                      -      priority 2  after 146
          160-retire-course-leader-bo ready                      -      after 11 tasks
-         └ 165-remove-course-leader- ready                      -
+        └ 165-remove-course-leader-b ready                      -
     parked
          154-final-invoice-on-cancel draft                      -      1 open question(s)
 ```
@@ -368,6 +368,8 @@ Ask the lead "what's going on?", or from a shell:
 crew status        # the project whose repo you're in, or all of them elsewhere (--project P, --all)
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
+
+In a terminal, `crew status` stays open and keeps itself up to date. It shows the same lines as the text, as a tree: ↑↓ move, ← closes the line you're on (or goes up to the one it's under), → opens it, and enter or space does either. Drafts with nothing to ask, and a running goal's next tasks after the fifth, start closed. It builds the report again every 3 seconds. It reads your PRs on GitHub every 30 seconds and, on a machine that doesn't run the crew, pulls the ledger every minute; `r` does both now. q quits. `crew status --plain`, or `crew status` piped or run by a script, prints the text and exits.
 
 Outside a goal, a ready task says `dispatch by hand`, unless it has a go-ahead: `crew tick` dispatches a goal's tasks and those whose go-ahead is met, so you or the lead run `crew dispatch` for the rest. A go-ahead waits for another task: tell the lead "dispatch 222 once 221 is pr-open", and it records `crew set 222 go_ahead "221 pr-open"`. The task then says `go-ahead once 221 is pr-open`, and the first `crew tick` after 221 gets there dispatches 222, as `MAX_WORKERS` and its dependencies allow, and the lead hears it did. A go-ahead can wait for `pr-open`, `merged` or `done`. One waiting on a task that's since been abandoned is never met, and says so. It's withdrawn with `crew set 222 go_ahead`, and ends when 222 leaves `ready`. Drafts with nothing to ask or learn are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you, and so is one with something still to learn, with its spikes (see [Spikes](#spikes-try-a-path-before-planning-on-it)). `--done` adds merged and abandoned tasks, and done spikes.
 
@@ -556,8 +558,8 @@ crew status              # a stack is listed bottom first, each task under its p
 
 ```
   044-separate-season-management     pr-open        #311   (open)
-  └ 045-season-admin                 pr-open        #312   (draft)
-    └ 046-season-picker              working        -
+    └ 045-season-admin               pr-open        #312   (draft)
+      └ 046-season-picker            working        -
 ```
 
 - **Trying a stack locally.** The top task's branch contains everything below it. Its worktree is `crew get 046 worktree`, or check out `crew get 046 branch` yourself.
