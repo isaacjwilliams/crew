@@ -4,6 +4,7 @@ package main
 // running claude itself.
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -114,6 +115,14 @@ func claudeConfigDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
+}
+
+// claudeGlobalConfig is Claude Code's own config file, which holds your
+// user-scope MCP servers: .claude.json in CLAUDE_CONFIG_DIR, or in your home
+// beside ~/.claude.
+func claudeGlobalConfig() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(cmp.Or(os.Getenv("CLAUDE_CONFIG_DIR"), home), ".claude.json")
 }
 
 // claudeTranscripts is where Claude Code keeps its sessions' transcripts, one

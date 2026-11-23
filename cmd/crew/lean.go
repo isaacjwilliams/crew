@@ -16,24 +16,25 @@ package main
 // settings file, which don't depend on what you've installed.
 
 import (
-	"cmp"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 )
 
 // bundledSkills are the skills Claude Code ships (as of 2.1.328), each with the
-// roles that use it. Every other crew session has it off. A skill Claude Code
-// adds later stays on until it's listed here.
+// roles that use it; nil means no role does. Every other crew session has it
+// off. A skill Claude Code adds later stays on until it's listed here.
 var bundledSkills = map[string][]string{
+	// The implementer's exhale and its security review.
 	"simplify":        {"implementer"},
 	"security-review": {"implementer"},
-	// Only leads publish artifacts.
-	"artifact-capabilities":    {"lead"},
-	"artifact-design":          {"lead"},
-	"artifact-diagramming":     {"lead"},
-	"dataviz":                  {"lead"},
+	// Only leads publish artifacts, so only they keep the Artifact tool too
+	// (enableArtifact in leanSettings).
+	"artifact-capabilities": {"lead"},
+	"artifact-design":       {"lead"},
+	"artifact-diagramming":  {"lead"},
+	"dataviz":               {"lead"},
+	// No role uses these.
 	"claude-api":               nil,
 	"code-review":              nil,
 	"fewer-permission-prompts": nil,
@@ -53,7 +54,8 @@ const connectorsKeep = "claude.ai"
 
 // leanSettings is settings, the --settings of a session of role, with what
 // turns off everything of yours the role doesn't use and keep doesn't name.
-// Any value settings already has wins.
+// It only adds (addOnly): a value settings already has wins, and a list or map
+// settings already has gains these entries.
 func leanSettings(settings *object, role string, keep []string) *object {
 	kept := func(name string) bool { return slices.Contains(keep, name) }
 	yours := readYourSetup()
@@ -99,7 +101,7 @@ func leanSettings(settings *object, role string, keep []string) *object {
 	if !kept(connectorsKeep) {
 		lean.set("disableClaudeAiConnectors", true)
 	}
-	if role != "lead" {
+	if role != "lead" { // see bundledSkills' artifact skills
 		lean.set("enableArtifact", false)
 	}
 	return addOnly(settings, lean).(*object)
@@ -126,6 +128,7 @@ func readYourSetup() yourSetup {
 					yours.plugins = append(yours.plugins, id)
 				}
 			}
+			slices.Sort(yours.plugins)
 		}
 	}
 	// Personal skills are folders in ~/.claude/skills; synced ones sit two folders
@@ -136,10 +139,7 @@ func readYourSetup() yourSetup {
 	for _, f := range append(personal, synced...) {
 		yours.skills = append(yours.skills, filepath.Base(filepath.Dir(f)))
 	}
-	// Claude Code's own config sits in CLAUDE_CONFIG_DIR too, but in your home
-	// without it, beside ~/.claude rather than in it.
-	home, _ := os.UserHomeDir()
-	if config, _ := readSettings(filepath.Join(cmp.Or(os.Getenv("CLAUDE_CONFIG_DIR"), home), ".claude.json")); config != nil {
+	if config, _ := readSettings(claudeGlobalConfig()); config != nil {
 		if servers, ok := config.vals["mcpServers"].(*object); ok {
 			yours.servers = slices.Sorted(slices.Values(servers.keys))
 		}

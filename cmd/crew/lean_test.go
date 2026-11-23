@@ -64,7 +64,7 @@ func leanOf(t *testing.T, settings *object) lean {
 func TestLeanSettingsTurnOffWhatAWorkerDoesntUseOfYours(t *testing.T) {
 	fakeYourSetup(t)
 	got := leanOf(t, leanSettings(newObject(), "implementer", nil))
-	if want := []string{"stripe@claude-plugins-official", "frontend-design@claude-plugins-official"}; !slices.Equal(got.plugins, want) {
+	if want := []string{"frontend-design@claude-plugins-official", "stripe@claude-plugins-official"}; !slices.Equal(got.plugins, want) {
 		t.Errorf("plugins off = %v, want %v: only the ones your settings enable", got.plugins, want)
 	}
 	for _, skill := range []string{"codex-review", "docx", "claude-api", "artifact-design", "loop"} {

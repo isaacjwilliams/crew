@@ -56,9 +56,10 @@ func cmdLead(c *Crew, args []string) error {
 // leadFlags is the flags a lead for proj ("" for every project) starts with,
 // besides its name: its permission mode, and --settings that turn off the other
 // projects' servers (leadMCPSettings) and what a lead doesn't use of yours
-// (leanSettings). A lead keeps what its projects' KEEP_LOADED name.
+// (leanSettings). A lead keeps what its projects' KEEP_LOADED name; it loads no
+// repo's .mcp.json, so it has no repo's servers to keep as a worker does.
 func (c *Crew) leadFlags(proj string) ([]string, error) {
-	settings, lead := c.Settings, newObject()
+	settings, flagSettings := c.Settings, newObject()
 	var keep []string
 	for _, p := range c.projects(proj) {
 		s, err := c.projectSettings(p)
@@ -73,16 +74,18 @@ func (c *Crew) leadFlags(proj string) ([]string, error) {
 	}
 	if proj != "" {
 		var err error
-		if lead, err = c.leadMCPSettings(proj); err != nil {
+		if flagSettings, err = c.leadMCPSettings(proj); err != nil {
 			return nil, err
 		}
 	}
-	lead = leanSettings(lead, "lead", keep)
-	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(lead, false)}, nil
+	flagSettings = leanSettings(flagSettings, "lead", keep)
+	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(flagSettings, false)}, nil
 }
 
 // leadFingerprint is the fingerprint of what a lead started with flags loads:
-// its flags, its settings file and its agent files (see fingerprint).
+// its flags, its settings file and its agent files (see fingerprint). The flags
+// list what the lead turns off of yours, so installing a plugin or skill changes
+// it too, and the hook asks for a new lead that leaves the new one off.
 func (c *Crew) leadFingerprint(flags []string) string {
 	return c.fingerprint(flags, append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
