@@ -70,7 +70,10 @@ updated: {{NOW}}
 <!-- The gates: checkable statements that show the objective is met, each with how to check it.
      A gate measures the outcome, never a way to reach it. When the objective is about how code
      is organised, the shape is the outcome, so a gate checks it. One "- " item each, any detail
-     indented under it: the worker records evidence for each one, by its number. -->
+     indented under it: the worker records evidence for each one, by its number. The worker runs
+     every check but a user check: a gate the user makes themselves, a live smoke test say. It
+     starts "User check:", or a Decision of the user's makes it one later: "- <date> — Criterion
+     <n> is a user check: <why> (user)". -->
 
 ## Size
 <!-- "About <n> lines: <areas>": your estimate of the lines the PR will add plus remove, tests
@@ -94,12 +97,12 @@ updated: {{NOW}}
      entry for each top-level item of Acceptance criteria, numbered in order, naming the commit it
      ran on. Each holds the command that shows the criterion holds and its output, in a fenced
      block trimmed to what shows the result; or, where only a look would show it, what you saw and
-     how (the page, the steps, the tool); or, for a check only the user can make, what to try and
-     why you couldn't. Indent any output line that starts with "## ", or it ends this section. A
+     how (the page, the steps, the tool); or, for a user check, why you can't run it, then "To try:"
+     and what to try. Indent any output line that starts with "## ", or it ends this section. A
      high-risk task also has a "### Security review" entry: what /security-review found and what
      you did about it. `crew hand-over` refuses until every criterion has an entry, and a
-     high-risk task this one, and refuses an entry that ran on other work than the branch has
-     now. -->
+     high-risk task this one. It refuses an entry that ran on other work than the branch has now,
+     and one that says its check wasn't run unless it's a user check. -->
 
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker

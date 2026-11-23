@@ -998,31 +998,87 @@ func (t Task) AcceptanceCriteria() []string {
 	return criteria
 }
 
+// userCheck starts a criterion the brief leaves to the user to check, such as
+// a live smoke test: "- User check: …".
+const userCheck = "User check:"
+
+// userCheckDecision is a Decision that makes a criterion the user's to check
+// after the brief was approved: "- <date> — Criterion 5 is a user check: …
+// (user)". Only a line that ends "(user)" counts: it records the user's call.
+var userCheckDecision = regexp.MustCompile(`(?i)\bcriterion (\d+) is a user check\b`)
+
+// UserChecks is the numbers of the criteria the user checks themselves, which
+// a worker may leave to them: the brief's "User check:" criteria, and those a
+// Decision of the user's names.
+func (t Task) UserChecks() map[int]bool {
+	checks := map[int]bool{}
+	for i, c := range t.AcceptanceCriteria() {
+		if strings.HasPrefix(c, userCheck) {
+			checks[i+1] = true
+		}
+	}
+	for _, l := range t.UserDecisions() {
+		if m := userCheckDecision.FindStringSubmatch(l); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			checks[n] = true
+		}
+	}
+	return checks
+}
+
+// UserDecisions is the items under ## Decisions that record the user's own
+// call: the "- " lines that end "(user)".
+func (t Task) UserDecisions() []string {
+	var lines []string
+	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
+		if strings.HasPrefix(l, "- ") && strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
 // Evidence is what one place the user reads, the task's ## Evidence or its PR
-// body's, shows for each acceptance criterion, by its number: the commit the
-// item names as the one it ran on, or "" when it names none.
-type Evidence map[int]string
+// body's, shows for each acceptance criterion, by its number.
+type Evidence map[int]EvidenceItem
+
+// EvidenceItem is one criterion's evidence: the commit it names as the one it
+// ran on, or "" when it names none, and what it says after that.
+type EvidenceItem struct {
+	Commit, Text string
+}
 
 // evidenceCommit finds the commit an evidence item names, as "(on <sha>)".
 var evidenceCommit = regexp.MustCompile(`\(on ([0-9a-f]{7,40})\)`)
 
-// add records the item that starts with line, "<n>. …", for criterion n, and
-// the commit named by the first "(on <sha>)" after its number.
-func (e Evidence) add(line string) {
+// itemNumber is the criterion number a "<n>. …" line starts with, and the rest
+// of the line after "<n>.", or 0 when it starts none.
+func itemNumber(line string) (int, string) {
 	num, rest, _ := strings.Cut(line, ".")
 	if n, err := strconv.Atoi(num); err == nil && n > 0 {
-		e[n] = ""
-		if m := evidenceCommit.FindStringSubmatch(rest); m != nil {
-			e[n] = m[1]
-		}
+		return n, rest
 	}
+	return 0, ""
+}
+
+// evidenceItem is the item whose numbered line goes on with rest, with the
+// lines under it: the commit named by the first "(on <sha>)" in rest, and as
+// Text what follows that, the lines under it included. The line up to there is
+// the criterion's words, not evidence; with no "(on <sha>)" the whole line is.
+func evidenceItem(rest, under string) EvidenceItem {
+	m := evidenceCommit.FindStringSubmatchIndex(rest)
+	if m == nil {
+		return EvidenceItem{Text: under}
+	}
+	afterSHA, shaStart, shaEnd := m[1], m[2], m[3]
+	return EvidenceItem{Commit: rest[shaStart:shaEnd], Text: rest[afterSHA:] + "\n" + under}
 }
 
 // Within is the items for the first n criteria: one numbered past them is no
 // criterion's evidence. It's nil when e is.
 func (e Evidence) Within(n int) Evidence {
 	w := maps.Clone(e)
-	maps.DeleteFunc(w, func(i int, _ string) bool { return i > n })
+	maps.DeleteFunc(w, func(i int, _ EvidenceItem) bool { return i > n })
 	return w
 }
 
@@ -1041,7 +1097,7 @@ func (e Evidence) Gaps(n int) []int {
 func (e Evidence) Unnamed() []int {
 	var unnamed []int
 	for _, n := range slices.Sorted(maps.Keys(e)) {
-		if e[n] == "" {
+		if e[n].Commit == "" {
 			unnamed = append(unnamed, n)
 		}
 	}
@@ -1053,69 +1109,131 @@ func (e Evidence) Unnamed() []int {
 func (e Evidence) Naming(commits map[string]bool) string {
 	var items []string
 	for _, n := range slices.Sorted(maps.Keys(e)) {
-		if commits[e[n]] {
-			items = append(items, fmt.Sprintf("%d (on %s)", n, e[n]))
+		if commits[e[n].Commit] {
+			items = append(items, fmt.Sprintf("%d (on %s)", n, e[n].Commit))
 		}
 	}
 	return strings.Join(items, ", ")
+}
+
+// NotRun is the items, other than the user's checks, whose words say their
+// check wasn't run, each as "<n> ('<the words>')", in order, or "" when there
+// are none.
+func (e Evidence) NotRun(userChecks map[int]bool) string {
+	var items []string
+	for _, n := range slices.Sorted(maps.Keys(e)) {
+		if sign := notRunSign(e[n].Text); sign != "" && !userChecks[n] {
+			items = append(items, fmt.Sprintf("%d ('%s')", n, sign))
+		}
+	}
+	return strings.Join(items, ", ")
+}
+
+// notRunWords are the words with which evidence leaves its check undone, or
+// to someone else: "Not done. To try: …", "Only the user can check this", "I
+// can't run a real session", "Live check for Isaac". Tuned on every entry of
+// the ledgers' merged tasks: none that ran its check uses them. They are broad
+// on purpose, a capitalized word counting as a name: a false match refuses the
+// hand-over and names the words, so the worker can reword what it ran, while a
+// missed one would reach the user unchecked.
+var notRunWords = regexp.MustCompile(`(?i)\b(` +
+	`to try|not done|not run|(was|is)n['’]t run|no \w+ was possible|` +
+	`(can['’]t|cannot|couldn['’]t|could not) (run|check|make (this|that|the) check)|` +
+	`(couldn['’]t|could not) be (run|read|checked)|` +
+	`(user|lead) check|check for ` + someone + `|` +
+	`only ` + someone + ` can (run|check|make|try)|` +
+	`for ` + someone + ` (only|to (try|check|run))` +
+	`)\b`)
+
+// someone is who a check can be left to: the user, the lead, "you" in a PR
+// body, or someone named, which is any capitalized word.
+const someone = `(the user|the lead|you|(?-i:[A-Z])\w*)`
+
+// inlineCode is a code span, such as `go test ./...`.
+var inlineCode = regexp.MustCompile("`[^`]*`")
+
+// notRunSign is the first of the notRunWords in text's prose, or "". What's
+// in fenced blocks and code spans is output and commands, not what the worker
+// says about the check. The prose is read as single-spaced words, so a phrase
+// wrapped onto an indented line still matches.
+func notRunSign(text string) string {
+	var prose []string
+	for l, fenced := range markdownLines(text) {
+		if !fenced {
+			prose = append(prose, strings.Fields(inlineCode.ReplaceAllString(l, ""))...)
+		}
+	}
+	return notRunWords.FindString(strings.Join(prose, " "))
 }
 
 // Evidence is the task's evidence: for criterion n, a "### n. …" entry under
 // ## Evidence (evidenceEntries), whose heading names the commit it ran on.
 func (t Task) Evidence() Evidence {
 	e := Evidence{}
-	for _, h := range t.evidenceEntries() {
-		e.add(strings.TrimPrefix(h, "### "))
+	for _, entry := range t.evidenceEntries() {
+		if n, rest := itemNumber(strings.TrimPrefix(entry.heading, "### ")); n > 0 {
+			e[n] = evidenceItem(rest, entry.body())
+		}
 	}
 	return e
 }
 
 // PREvidence is the evidence in a PR's body: for criterion n, a top-level
 // "n. …" item under its ## Evidence that names the commit it ran on, as
-// templates/pr-body.md has them.
+// templates/pr-body.md has them, and the lines under it, up to the next item.
 func PREvidence(body string) Evidence {
 	e := Evidence{}
-	for l, fenced := range markdownLines(section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")) {
-		if !fenced {
-			e.add(l)
-		}
+	evidence := section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")
+	for _, entry := range splitEntries(evidence, func(l string) bool { n, _ := itemNumber(l); return n > 0 }) {
+		n, rest := itemNumber(entry.heading)
+		e[n] = evidenceItem(rest, entry.body())
 	}
 	return e
 }
 
-// evidenceEntries is the heading of each entry under ## Evidence that has
-// something under it, such as "### 1. the criterion". A heading inside a fenced
-// block is output, not an entry.
-func (t Task) evidenceEntries() []string {
-	var entries []string
-	heading, filled := "", false
-	for l, fenced := range markdownLines(t.Section("## Evidence")) {
-		if strings.HasPrefix(l, "### ") && !fenced {
-			if filled {
-				entries = append(entries, heading)
-			}
-			heading, filled = strings.TrimRight(l, " \t"), false
-		} else if heading != "" {
-			filled = true
+// evidenceEntry is an entry of evidence: the line it starts on, such as
+// "### 1. the criterion (on <sha>)", and the lines under it.
+type evidenceEntry struct {
+	heading string
+	lines   []string
+}
+
+func (e evidenceEntry) body() string { return strings.Join(e.lines, "\n") }
+
+// splitEntries splits text into entries, each from an unfenced line that starts
+// one up to the next. A line inside a fenced block is output, never a start.
+func splitEntries(text string, starts func(string) bool) []evidenceEntry {
+	var entries []evidenceEntry
+	for l, fenced := range markdownLines(text) {
+		if starts(l) && !fenced {
+			entries = append(entries, evidenceEntry{heading: strings.TrimRight(l, " \t")})
+		} else if len(entries) > 0 {
+			last := &entries[len(entries)-1]
+			last.lines = append(last.lines, l)
 		}
-	}
-	if filled {
-		entries = append(entries, heading)
 	}
 	return entries
 }
 
+// evidenceEntries is each "### " entry under ## Evidence that has something
+// under it.
+func (t Task) evidenceEntries() []evidenceEntry {
+	entries := splitEntries(t.Section("## Evidence"), func(l string) bool { return strings.HasPrefix(l, "### ") })
+	return slices.DeleteFunc(entries, func(e evidenceEntry) bool { return len(e.lines) == 0 })
+}
+
 // markdownLines yields each line of text, and whether it's inside a fenced
 // block: after the line that opens one, up to and including the line that
-// closes it.
+// closes it. A fence may be indented, as one in a list item is.
 func markdownLines(text string) iter.Seq2[string, bool] {
 	return func(yield func(string, bool) bool) {
 		fence := "" // the fence the line is inside, or "" outside one
 		for _, l := range strings.Split(text, "\n") {
 			inFence := fence != ""
+			code := strings.TrimLeft(l, " \t")
 			if !inFence {
-				fence = fenceOpening(l)
-			} else if strings.HasPrefix(l, fence) && strings.Trim(l, fence[:1]+" ") == "" {
+				fence = fenceOpening(code)
+			} else if strings.HasPrefix(code, fence) && strings.Trim(code, fence[:1]+" ") == "" {
 				fence = ""
 			}
 			if !yield(l, inFence) {
@@ -1146,7 +1264,7 @@ const securityReview = "### Security review"
 // it, which a high-risk task needs before its hand-over. The entry isn't
 // numbered, so it's no criterion's evidence.
 func (t Task) SecurityReviewed() bool {
-	return slices.Contains(t.evidenceEntries(), securityReview)
+	return slices.ContainsFunc(t.evidenceEntries(), func(e evidenceEntry) bool { return e.heading == securityReview })
 }
 
 // AwaitsSecurityReview: the task is high risk and its security review isn't
