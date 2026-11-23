@@ -73,8 +73,11 @@ type job struct {
 	every   time.Duration
 	running bool
 	last    time.Time // when it last started; zero before the first time
-	asked   bool      // wanted before its time: the user asked for a refresh, or new reads came in
+	asked   bool      // wanted before its time (see ask)
 }
+
+// ask has the job start as soon as it isn't running: once it's done, if it is.
+func (j *job) ask() { j.asked = true }
 
 // starts says whether the job starts now, and marks it running if it does.
 // One that's asked for while it runs starts once it's done.
@@ -89,9 +92,12 @@ func (j *job) starts(now time.Time) bool {
 // liveStatus is the live view: the latest report's lines, which of them are on
 // show, and the line the cursor is on.
 type liveStatus struct {
-	feed  statusFeed
-	now   func() time.Time
-	reads prReads // the PRs as GitHub last answered; nil before the first read
+	feed statusFeed
+	now  func() time.Time
+	// reads is the PRs as GitHub last answered. It's nil before the first read
+	// ends, so the first report says the PRs aren't read yet, until the read
+	// that ends builds another.
+	reads prReads
 
 	building, reading, pulling job
 
@@ -148,6 +154,8 @@ func (m *liveStatus) startDue() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Update starts a build as soon as a pull or a read ends, so what they brought
+// in shows at once; the beat starts each job again when it's due.
 func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -157,12 +165,12 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startDue()
 	case ledgerPulled:
 		m.pulling.running = false
-		m.building.asked = true
+		m.building.ask()
 		return m, m.startDue()
 	case prsRead:
 		m.reading.running = false
 		m.reads = msg.reads
-		m.building.asked = true
+		m.building.ask()
 		return m, m.startDue()
 	case reportBuilt:
 		m.building.running = false
@@ -216,8 +224,9 @@ func (m *liveStatus) press(key string) tea.Cmd {
 		}
 	case "r":
 		// A read or pull under way may have started before what the user
-		// wants to see, so another follows it.
-		m.reading.asked, m.pulling.asked = true, true
+		// wants to see, so another follows it. Each builds when it ends.
+		m.reading.ask()
+		m.pulling.ask()
 		return m.startDue()
 	}
 	return nil
@@ -277,11 +286,7 @@ func (m *liveStatus) layOut() {
 	var add func(lines []statusLine, depth int)
 	add = func(lines []statusLine, depth int) {
 		for _, l := range lines {
-			open, ok := m.open[l.key]
-			if !ok {
-				open = !l.folded
-			}
-			open = open && len(l.kids) > 0
+			open := m.isOpen(l)
 			m.shown = append(m.shown, shownLine{l, depth, open})
 			if open {
 				add(l.kids, depth+1)
@@ -289,6 +294,16 @@ func (m *liveStatus) layOut() {
 		}
 	}
 	add(m.lines, 0)
+}
+
+// isOpen is whether the lines under l are on show: as the user left it, or
+// unless the plain text folds it. A line with nothing under it is never open.
+func (m *liveStatus) isOpen(l statusLine) bool {
+	open, ok := m.open[l.key]
+	if !ok {
+		open = !l.folded
+	}
+	return open && len(l.kids) > 0
 }
 
 // bodyHeight is how many lines of the report fit on screen, above the bar.
