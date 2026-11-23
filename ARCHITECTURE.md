@@ -64,7 +64,7 @@ These are invariants. Breaking one changes the design, not just the implementati
    - A new concept gets a word a newcomer would guess right, not a coined term or a metaphor that needs a glossary.
    - Existing terms stay, crew's own among them (ledger, brief, gardener, stack and restack, crew home, goal lead, host). This principle is for what's added.
 10. **Small and quiet.**
-    - crew is one Go binary on the standard library, the agent files, and plain text. The one exception is Charm's bubbletea, lipgloss and bubbles, for `crew status`'s live view. There's no database. The dependency rules are in `CLAUDE.md`, under Conventions.
+    - crew is one Go binary on the standard library, the agent files, and plain text. The one exception is Charm's modules for `crew status`'s live view: it uses bubbletea and lipgloss, and may add bubbles. There's no database. The dependency rules are in `CLAUDE.md`, under Conventions.
     - Plain `crew` commands on timers coordinate the work, not agents supervising agents. crew starts a worker, a goal lead, the gardener or the misses agent only when there's work for it: see [`crew tick`](#crew-tick) and [Gardener](#gardener) for when. The [review eval](#review-eval) runs only when the user runs it. So a crew with no work sends no model requests of its own. For the gardener, new commits on the default branch are work, whoever made them; for the misses agent, a newly merged task with the user's comments after an automated review.
     - Two processes stay up while the crew is idle, and both are Claude Code's. One is the lead's Remote Control server (`crew serve`, the `crew-lead` service), which waits for you to open the lead from your phone. The other is the daemon that `claude --bg` hands workers and goal leads to, which outlives them. Claude Code's docs don't say either one uses the model while it waits (see [Assumptions](#assumptions-to-re-check-when-claude-code-updates)).
 
@@ -674,7 +674,7 @@ A home moves only from release to release, so its agent prompts and its binary a
 
 ## `crew` internals (`cmd/crew/`)
 
-Go, in one package, on the standard library and, for `crew status`'s live view only, Charm's bubbletea, lipgloss and bubbles. Each area has a file of its own; each command is a `cmd…` function in a `cmd_*.go` file.
+Go, in one package, on the standard library and, for `crew status`'s live view only, Charm's bubbletea and lipgloss. Each area has a file of its own; each command is a `cmd…` function in a `cmd_*.go` file.
 
 - **The launcher (`bin/crew`):** a POSIX `sh` script, the only `crew` on `PATH`. It finds itself through symlinks, reads `VERSION` from its own checkout (or takes `CREW_VERSION` from the environment), and runs `bin/release/crew-<version>` with `CREW_HOME` set to that checkout, unless it's set already.
   - A missing binary is downloaded once with `curl` from the public repo's release `v<version>` (`crew-<uname -s>-<uname -m>`), to a temporary file that is run with `version` to check it, then renamed into place. `bin/release/` is gitignored, so a fresh clone works on a machine without Go.
