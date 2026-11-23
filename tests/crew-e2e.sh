@@ -470,6 +470,11 @@ check "a PR merged or closed on GitHub never says merge now, though crew sync ha
 check "only pr-open rows have a merge check" '[[ $(crew status | grep -v " pr-open " | grep -cE "merge now|not yet:|on GitHub") == 0 ]]'
 before=$(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD); crew status --all >/dev/null; crew status --done >/dev/null
 check "status writes nothing" '[[ $(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD) == "$before" ]]'
+plain=$(script -qec "crew status --plain" /dev/null </dev/null 2>&1)
+check "in a terminal, status --plain prints the text and exits" '[[ $plain == "workers running:"* ]]'
+(sleep 3; printf q) | timeout 30 script -qec "crew status" /dev/null >"$HOME/live-status.out" 2>&1; live=$?
+check "in a terminal, status opens the live view, which q quits, and it writes nothing" \
+  '[[ $live == 0 && $(<"$HOME/live-status.out") == *"q quit"* && $(git -C "$L" status --porcelain; git -C "$L" rev-parse HEAD) == "$before" ]]'
 check "on a machine that doesn't run the crew, the merge check says the worker can't be seen there" \
   '[[ $(CREW_HOST=laptop crew status | grep "^  001-saved-search-filters ") == *" not yet: worker can'"'"'t be seen from this machine  high"* ]]'
 touch "$HOME/agents-fail"; a=$(merge_note); rm "$HOME/agents-fail"
