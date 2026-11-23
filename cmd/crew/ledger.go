@@ -1057,15 +1057,16 @@ func itemNumber(line string) (int, string) {
 }
 
 // evidenceItem is the item whose numbered line goes on with rest, with the
-// lines under it: the commit named by the first "(on <sha>)" in rest, and what
-// the item says after it. What comes before is the criterion, not evidence, and
-// so is all of rest when it names no commit.
+// lines under it: the commit named by the first "(on <sha>)" in rest, and as
+// Text what follows that, the lines under it included. The line up to there is
+// the criterion's words, not evidence; with no "(on <sha>)" the whole line is.
 func evidenceItem(rest, under string) EvidenceItem {
 	m := evidenceCommit.FindStringSubmatchIndex(rest)
 	if m == nil {
 		return EvidenceItem{Text: under}
 	}
-	return EvidenceItem{Commit: rest[m[2]:m[3]], Text: rest[m[1]:] + "\n" + under}
+	afterSHA, shaStart, shaEnd := m[1], m[2], m[3]
+	return EvidenceItem{Commit: rest[shaStart:shaEnd], Text: rest[afterSHA:] + "\n" + under}
 }
 
 // Within is the items for the first n criteria: one numbered past them is no
@@ -1126,7 +1127,10 @@ func (e Evidence) NotRun(userChecks map[int]bool) string {
 // notRunWords are the words with which evidence leaves its check undone, or
 // to someone else: "Not done. To try: …", "Only the user can check this", "I
 // can't run a real session", "Live check for Isaac". Tuned on every entry of
-// the ledgers' merged tasks: none that ran its check uses them.
+// the ledgers' merged tasks: none that ran its check uses them. They are broad
+// on purpose, a capitalized word counting as a name: a false match refuses the
+// hand-over and names the words, so the worker can reword what it ran, while a
+// missed one would reach the user unchecked.
 var notRunWords = regexp.MustCompile(`(?i)\b(` +
 	`to try|not done|not run|(was|is)n['’]t run|no \w+ was possible|` +
 	`(can['’]t|cannot|couldn['’]t|could not) (run|check|make (this|that|the) check)|` +

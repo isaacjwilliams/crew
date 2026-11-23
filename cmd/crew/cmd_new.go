@@ -372,12 +372,14 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	}, nil
 }
 
-// checkEvidence refuses evidence that can't reach the user: an acceptance
-// criterion with no item in the task's ## Evidence or in the PR body (pr, nil
-// without a PR), an item that doesn't name the commit it ran on, one that says
-// its check wasn't run when it isn't the user's to check (Task.UserChecks), or
-// one that ran on other work than the branch has now. A restack or a merge of the base
-// that git made on its own keeps evidence current (branchWork.unchangedSince).
+// checkEvidence refuses evidence that can't reach the user. In the task's
+// ## Evidence or the PR body (pr, nil without a PR), it refuses:
+//   - an acceptance criterion with no item;
+//   - an item that doesn't name the commit it ran on;
+//   - one that says its check wasn't run, unless it's a user check (Task.UserChecks);
+//   - one that ran on other work than the branch has now. A restack, or a merge
+//     of the base that git made on its own, keeps evidence current
+//     (branchWork.unchangedSince).
 func checkEvidence(t Task, repo string, pr Evidence) error {
 	n := len(t.AcceptanceCriteria())
 	if n == 0 {
@@ -449,13 +451,13 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 
 // evidencePlaces says where the items a check found are, in the task's
 // ## Evidence and in the PR body, or "" when it found none.
-func evidencePlaces(task, pr string) string {
+func evidencePlaces(taskItems, prItems string) string {
 	var places []string
-	if task != "" {
-		places = append(places, "## Evidence: "+task)
+	if taskItems != "" {
+		places = append(places, "## Evidence: "+taskItems)
 	}
-	if pr != "" {
-		places = append(places, "the PR body: "+pr)
+	if prItems != "" {
+		places = append(places, "the PR body: "+prItems)
 	}
 	return strings.Join(places, "; ")
 }
