@@ -1,8 +1,7 @@
 package main
 
 import (
-	"io"
-	"os"
+	"strings"
 	"testing"
 )
 
@@ -19,22 +18,10 @@ func fullStatusLedger(t *testing.T) *Crew {
 }
 
 // plainText is what printReport prints for r.
-func plainText(t *testing.T, r statusReport) string {
-	t.Helper()
-	stdout := os.Stdout
-	read, write, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = write
-	printReport(r)
-	os.Stdout = stdout
-	write.Close()
-	b, err := io.ReadAll(read)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
+func plainText(r statusReport) string {
+	var b strings.Builder
+	printReport(&b, r)
+	return b.String()
 }
 
 func TestPrintReport(t *testing.T) {
@@ -70,13 +57,13 @@ waiting on you in other projects  (crew status --all)
   q: 1 task(s) with open questions, 1 PR(s) to review, 1 memory suggestion(s)
   r: 1 task(s) with open questions
 `
-	if got := plainText(t, r); got != want {
+	if got := plainText(r); got != want {
 		t.Errorf("plain text:\n%s\nwant:\n%s", got, want)
 	}
 }
 
 func TestPrintReportWithoutProjects(t *testing.T) {
-	got := plainText(t, statusReport{ReadOnlyOn: "no machine"})
+	got := plainText(statusReport{ReadOnlyOn: "no machine"})
 	if want := "read-only: crew runs on no machine\nNo projects registered. Run 'crew project add' in a repo.\n"; got != want {
 		t.Errorf("plain text = %q, want %q", got, want)
 	}
