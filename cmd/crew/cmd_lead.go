@@ -84,7 +84,7 @@ func (c *Crew) leadFlags(proj string) ([]string, error) {
 			return nil, err
 		}
 	}
-	keep = append(keep, c.theirs(c.path(leadMCPFile), "")...)
+	keep = append(keep, c.theirs(serversIn(c.path(leadMCPFile)), "")...)
 	flagSettings = leanSettings(flagSettings, "lead", keep)
 	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(flagSettings, false)}, nil
 }

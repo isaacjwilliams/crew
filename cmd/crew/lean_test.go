@@ -222,7 +222,9 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 		"projects": {"`+repo+`": {"mcpServers": {"figma": {}}}}}`, ".claude.json")
 	writeFile(t, &Crew{Home: home}, "", ".claude/skills/pr-review/SKILL.md")
 	writeFile(t, c, "", ".claude/skills/pr-review/SKILL.md")
-	writeFile(t, c, `{"mcpServers": {"p_trello": {}}}`, "projects/p/mcp.local.json")
+	// Only the project's mcp.json: a launch writes mcp.local.json from it after it
+	// has built the session's settings.
+	writeFile(t, c, `{"mcpServers": {"trello": {}}}`, "projects/p/mcp.json")
 	writeFile(t, c, `{"mcpServers": {"p_trello": {}, "q_sentry": {}}}`, leadMCPFile)
 	repoFiles := map[string]string{
 		".claude/skills/docx/SKILL.md": "",

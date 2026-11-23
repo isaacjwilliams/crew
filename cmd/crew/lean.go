@@ -136,34 +136,33 @@ func readYourSetup() yourSetup {
 
 // keepLoaded is what a worker or goal lead for p keeps of yours: what the
 // project's KEEP_LOADED names, and what shares a name with what the session gets
-// from crew, the project and the repo.
+// from crew, the project and the repo. The project's servers come from its
+// mcp.json, since the launch writes them to mcp.local.json only after this.
 func (c *Crew) keepLoaded(p *Project) []string {
 	keep := strings.Fields(p.Settings["KEEP_LOADED"])
-	return append(keep, c.theirs(c.path("projects", p.Name, "mcp.local.json"), p.Repo())...)
+	var servers []string
+	if mcp, err := c.projectMCPServers(p.Name, p.Settings); err == nil {
+		servers = mcp.keys
+	}
+	return append(keep, c.theirs(servers, p.Repo())...)
 }
 
 // theirs is the names of what a session gets from crew and from repo, the repo
 // it works in ("" for a lead, which has none): crew's skills, the servers crew
-// gives it from servers (an mcp.json), and the repo's skills, the plugins its
-// settings enable, and its .mcp.json and local-scope servers. Claude Code turns
-// a plugin, skill or server off by its name, so turning off one of yours by one
-// of these names would turn theirs off too.
-func (c *Crew) theirs(servers, repo string) []string {
-	names := skillsIn(c.path(".claude", "skills"))
-	files := []string{servers}
+// gives it, and the repo's skills, the plugins its settings enable, and its
+// .mcp.json and local-scope servers. Claude Code turns a plugin, skill or server
+// off by its name, so turning off one of yours by one of these names would turn
+// theirs off too.
+func (c *Crew) theirs(servers []string, repo string) []string {
+	names := slices.Concat(skillsIn(c.path(".claude", "skills")), servers)
 	if repo != "" {
 		names = append(names, skillsIn(filepath.Join(repo, ".claude", "skills"))...)
 		for _, f := range []string{"settings.json", "settings.local.json"} {
 			names = append(names, enabledPlugins(filepath.Join(repo, ".claude", f))...)
 		}
-		files = append(files, filepath.Join(repo, ".mcp.json"))
+		names = append(names, serversIn(filepath.Join(repo, ".mcp.json"))...)
 		if config, _ := readSettings(claudeGlobalConfig()); config != nil {
 			names = append(names, config.child("projects").child(repo).child("mcpServers").keys...)
-		}
-	}
-	for _, f := range files {
-		if mcp, err := readMCPFile(f); err == nil {
-			names = append(names, mcp.keys...)
 		}
 	}
 	return names
@@ -177,6 +176,15 @@ func skillsIn(dir string) []string {
 		names = append(names, filepath.Base(filepath.Dir(f)))
 	}
 	return names
+}
+
+// serversIn is the names of the servers in the MCP file f, or none when f is
+// broken.
+func serversIn(f string) []string {
+	if mcp, err := readMCPFile(f); err == nil {
+		return mcp.keys
+	}
+	return nil
 }
 
 // enabledPlugins is the ids of the plugins the settings file f turns on.
