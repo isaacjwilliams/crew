@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -50,7 +51,8 @@ func TestMergeCheck(t *testing.T) {
 		fields   map[string]string // over clearTask's; an empty value removes the key
 		body     string            // in place of clearBody
 		pr       func(*gitHubPR)   // changes clearPR
-		unread   bool              // GitHub couldn't be read
+		unread   bool              // GitHub didn't answer
+		unasked  bool              // GitHub wasn't asked for the PR
 		worker   Agent
 		unseen   string            // why the workers can't be seen
 		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
@@ -96,6 +98,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "GitHub unread, behind when last synced", unread: true, fields: map[string]string{"merge_state": "behind"}, want: "not yet: behind main (couldn't read GitHub; as of the last sync)"},
 		{name: "GitHub unread, blocked when last synced", unread: true, fields: map[string]string{"merge_state": "blocked"}, want: "not yet: blocked by a branch rule on GitHub (couldn't read GitHub; as of the last sync)"},
 		{name: "GitHub unread, never synced", unread: true, fields: map[string]string{"pr_state": ""}, want: "not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet"},
+		{name: "GitHub not asked for the PR yet", unasked: true, want: "not yet: PR not read on GitHub yet"},
 		{name: "no PR", fields: map[string]string{"pr": ""}, want: "not yet: no PR"},
 		{name: "not pr-open", fields: map[string]string{"status": "working"}, want: ""},
 	} {
@@ -120,10 +123,13 @@ func TestMergeCheck(t *testing.T) {
 			if tc.pr != nil {
 				tc.pr(&pr)
 			}
-			s := &statusView{Crew: &Crew{Home: dir}, workersUnseen: tc.unseen, repo: repo, settings: settings, prs: map[string]gitHubPR{}}
+			s := &statusView{Crew: &Crew{Home: dir}, workersUnseen: tc.unseen, repo: repo, settings: settings, prs: map[string]prRead{}}
 			s.branches = s.Crew.branches("p")
-			if !tc.unread {
-				s.prs[task.Path] = pr
+			switch {
+			case tc.unread:
+				s.prs[task.PR()] = prRead{err: errors.New("gh: no answer")}
+			case !tc.unasked:
+				s.prs[task.PR()] = prRead{pr: pr}
 			}
 			got := ""
 			if m := s.mergeCheck(task, tc.worker); m != nil {
