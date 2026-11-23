@@ -325,9 +325,9 @@ func cmdHandOver(c *Crew, args []string) error {
 // code they would merge (checkEvidence), a high-risk task has a security
 // review (which a branch that touches a sensitive path needs), and automated
 // review has run, while it's on for the task. At the first hand-over, a
-// stacked task's branch also holds its parent's latest commit (onParentsTip),
-// and the automated review read the branch's own commits as they are now
-// (staleReview). It reads the branch and the PR body first, before crew
+// stacked task's branch also holds its parent's latest commit
+// (refuseOffParentsTip), and the automated review read the branch's own
+// commits as they are now (staleReview). It reads the branch and the PR body first, before crew
 // hand-over takes the lock, so a slow network doesn't hold up other crew
 // commands.
 func handOverPR(c *Crew, t Task) (func() error, error) {
@@ -353,7 +353,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		// Before the PR check: a worker whose parent merged can't open its PR on
 		// the parent's branch once GitHub has deleted it.
 		if first {
-			if err := onParentsTip(c.branches(p.Name), t, p.Repo()); err != nil {
+			if err := refuseOffParentsTip(c.branches(p.Name), t, p.Repo()); err != nil {
 				return err
 			}
 		}
@@ -379,6 +379,11 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		if t.AwaitsAutomatedReview(p.Settings["AUTO_REVIEWS"]) {
 			return fail("automated review hasn't run for this task: run a pass of automated review, then hand over again")
 		}
+		// Any rebase before the first hand-over, onto a parent that moved or onto
+		// a base the branch conflicted with, leaves the last review on commits the
+		// PR no longer holds. Later hand-overs skip this: a review round's commits
+		// aren't automated review's to read, and a restack changes no work of the
+		// task's own.
 		if first && atoiOr0(t.AutoReviews(p.Settings["AUTO_REVIEWS"])) > 0 {
 			if why := staleReview(t, p.Repo()); why != "" {
 				return fail("automated review %d no longer covers your branch: %s. Run a pass of automated review, then hand over again", t.NewestReview(), why)
@@ -388,12 +393,12 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	}, nil
 }
 
-// onParentsTip refuses a stacked task's first hand-over while its branch doesn't
-// hold its parent's latest commit, or what the parent merged into, and gives the
-// worker the rebase that moves it there. Before the first hand-over the worker's
+// refuseOffParentsTip refuses a stacked task's first hand-over while its
+// branch doesn't hold its parent's latest commit, or what the parent merged
+// into, and gives the worker the rebase that moves it there. Before the first hand-over the worker's
 // own session is still making the branch, so it runs the rebase itself; after
 // it, crew tick restacks the task (crew restack).
-func onParentsTip(idx Branches, t Task, repo string) error {
+func refuseOffParentsTip(idx Branches, t Task, repo string) error {
 	parent, stacked := idx.parentOf(t)
 	if !stacked {
 		return nil
@@ -416,7 +421,7 @@ func onParentsTip(idx Branches, t Task, repo string) error {
 // branch's own commits as they are now, or nothing: it read from another fork
 // point than the branch has on its base now, or up to a commit the branch no
 // longer holds. A rebase after the review does both. A review whose range crew
-// can't read isn't judged.
+// can't read, or a branch with no fork point on origin's base, isn't judged.
 func staleReview(t Task, repo string) string {
 	reviews := t.AutomatedReviews()
 	if len(reviews) == 0 {
@@ -427,6 +432,9 @@ func staleReview(t Task, repo string) string {
 		return ""
 	}
 	fork, _ := git(repo, "merge-base", "refs/remotes/origin/"+t.Base(), branch)
+	if fork == "" {
+		return ""
+	}
 	if read, _ := git(repo, "rev-parse", "--verify", "--quiet", r.Fork+"^{commit}"); read == "" || read != fork {
 		return fmt.Sprintf("it read from %s, and your branch now leaves origin/%s at %s", cut(r.Fork, 12), t.Base(), cut(fork, 12))
 	}

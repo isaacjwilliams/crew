@@ -231,7 +231,7 @@ func cmdAttach(c *Crew, args []string) error {
 // unless --again.
 //
 // A restack waits until the task is pr-open, as crew tick's does. Before its
-// first hand-over, the task's own worker runs the rebase (onParentsTip).
+// first hand-over, the task's own worker runs the rebase (refuseOffParentsTip).
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err

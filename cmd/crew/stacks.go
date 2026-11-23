@@ -338,7 +338,8 @@ func (idx Branches) rebaseFor(t, parent Task, repo string) (rebase, error) {
 }
 
 // steps tells a worker to run the rebase, then what it does next, and how to
-// push the result.
+// push the result. then is a clause that follows "then", such as
+// `follow your restack workflow`.
 func (r rebase) steps(then string) string {
 	return fmt.Sprintf("rebase your branch with `git fetch origin && git rebase --onto %s %s`, then %s. %s is origin/%s now; %s is the last of %s's commits in your branch. Push the result with `git push --force-with-lease=%s:%s origin %s`, exactly as written and as a command on its own.",
 		r.onto, r.baseSHA, then, r.onto, r.newBase, r.baseSHA, r.parent, r.branch, r.lease, r.branch)
@@ -357,7 +358,7 @@ func (r rebase) newBaseSteps(t Task) string {
 
 // rebasesBeforeHandOver is why crew doesn't restack a task that hasn't been
 // handed over: crew hand-over refuses its first hand-over off its parent's
-// latest commit (onParentsTip), and gives its worker the rebase to run.
+// latest commit (refuseOffParentsTip), and gives its worker the rebase to run.
 const rebasesBeforeHandOver = "its own worker runs the rebase before its first hand-over; crew hand-over tells it how"
 
 // parentNeedsRestack: a stack restacks bottom-up, and a parent that is about to
