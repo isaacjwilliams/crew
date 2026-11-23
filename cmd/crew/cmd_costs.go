@@ -229,7 +229,7 @@ func (s *costScan) charge(o owner, l transcriptLine) {
 	if m.Usage == nil || m.Model == "<synthetic>" {
 		return
 	}
-	if c, ok := s.byID[m.ID]; ok && m.ID != "" {
+	if c, ok := s.byID[m.ID]; ok {
 		c.usage = *m.Usage
 		return
 	}
@@ -300,6 +300,9 @@ type toolUse struct {
 
 // toolUses is the tool calls an assistant line holds.
 func (l transcriptLine) toolUses() []toolUse {
+	if !bytes.Contains(l.Message.Content, []byte(`"tool_use"`)) {
+		return nil // most lines are text or thinking: no need to decode them
+	}
 	var blocks []struct {
 		Type string
 		toolUse
@@ -349,7 +352,10 @@ func (r *skillRun) follow(u toolUse, agents map[string]string) {
 func subagentOwner(path string, o owner, skillAgents map[string]string) (owner, error) {
 	meta := subagentOf(path)
 	switch {
-	case meta.AgentType == "brief-reviewer" || meta.AgentType == "plan-reviewer": // plan-reviewer is its old name
+	// plan-reviewer is the brief reviewer's name before 2026-11-17. Drop it
+	// after 2026-12-17, when Claude Code's 30-day cleanup has removed those
+	// transcripts.
+	case meta.AgentType == "brief-reviewer" || meta.AgentType == "plan-reviewer":
 		prompt, err := firstPrompt(path)
 		if m := briefTask.FindStringSubmatch(prompt); m != nil {
 			return owner{stepBriefReview, m[1] + "/" + m[2]}, err
@@ -441,8 +447,8 @@ func costsIn(charges []*charge, tasks map[string]Task, from, to time.Time) costR
 		}
 	}
 	for _, c := range charges {
-		inTask := finished[c.task] != nil
-		if !inRange(c.at) && !inTask {
+		sent, inTask := inRange(c.at), finished[c.task] != nil
+		if !sent && !inTask {
 			continue
 		}
 		rt, priced := apiRates[c.model]
@@ -454,7 +460,7 @@ func costsIn(charges []*charge, tasks map[string]Task, from, to time.Time) costR
 			r.rated = append(r.rated, c.model)
 		}
 		dollars := rt.dollars(c.usage)
-		if inRange(c.at) {
+		if sent {
 			r.step(c.step).dollars += dollars
 			r.total += dollars
 		}
@@ -514,17 +520,20 @@ func (r costReport) print(w io.Writer) {
 		}
 	}
 	slices.Sort(agents)
+	// A row's median and how many tasks it's over show only when there are any.
+	row := func(name string, total float64, perTask []float64) []string {
+		cells := []string{name, dollars(total), r.share(total)}
+		if len(perTask) > 0 {
+			cells = append(cells, strconv.Itoa(len(perTask)), dollars(median(perTask)))
+		}
+		return cells
+	}
 	var rows [][]string
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
 		for _, name := range group {
-			s := r.steps[name]
-			switch {
-			case s != nil && len(s.perTask) > 0:
-				groupRows = append(groupRows, []string{name, dollars(s.dollars), r.share(s.dollars),
-					strconv.Itoa(len(s.perTask)), dollars(median(s.perTask))})
-			case s != nil:
-				groupRows = append(groupRows, []string{name, dollars(s.dollars), r.share(s.dollars)})
+			if s := r.steps[name]; s != nil {
+				groupRows = append(groupRows, row(name, s.dollars, s.perTask))
 			}
 		}
 		if len(rows) > 0 && len(groupRows) > 0 {
@@ -532,11 +541,7 @@ func (r costReport) print(w io.Writer) {
 		}
 		rows = append(rows, groupRows...)
 	}
-	all := []string{"All", dollars(r.total), r.share(r.total)}
-	if len(r.perTask) > 0 {
-		all = append(all, strconv.Itoa(len(r.perTask)), dollars(median(r.perTask)))
-	}
-	rows = append(rows, nil, all)
+	rows = append(rows, nil, row("All", r.total, r.perTask))
 	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}, {"", "tasks"}, {"median", "per task"}}, rows)
 
 	fmt.Fprintf(w, "\nMedians are of whole tasks, over the %d that merged or were done in the range: each step's over the tasks that ran it.", len(r.perTask))
