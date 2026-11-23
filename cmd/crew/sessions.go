@@ -696,7 +696,8 @@ func addPauseHook(settings *object) {
 // workerSettings is the --settings value workers run with:
 // config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
 // when it has one (allow rules or env for that project's test commands, say),
-// with the pause hook, as sessionSettings. The project file can only add:
+// without what a worker doesn't use of yours (leanSettings), with the pause
+// hook, as sessionSettings. The project file can only add:
 // objects are merged and arrays appended, but any value the shipped file sets
 // wins, so a project can't drop a deny rule. It also checks
 // WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its
@@ -716,13 +717,15 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 		}
 		settings = addOnly(settings, more).(*object)
 	}
+	settings = leanSettings(settings, "implementer", p.keepLoaded())
 	addPauseHook(settings)
 	return c.sessionSettings(settings, p), nil
 }
 
 // goalLeadSettings is the --settings value goal leads run with: the lead's
-// settings, lead/.claude/settings.json, all but their "agent", with the pause
-// hook, as sessionSettings. The lead's session takes its agent from that file, a goal lead
+// settings, lead/.claude/settings.json, all but their "agent", without what a
+// goal lead doesn't use of yours (leanSettings), with the pause hook, as
+// sessionSettings. The lead's session takes its agent from that file, a goal lead
 // from --agent. Not the lead's settings.local.json: a goal lead works in its own
 // checkout.
 func (c *Crew) goalLeadSettings(p *Project) (string, error) {
@@ -731,6 +734,7 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 		return "", err
 	}
 	lead.del("agent")
+	lead = leanSettings(lead, "goal-lead", p.keepLoaded())
 	addPauseHook(lead)
 	return c.sessionSettings(lead, p), nil
 }

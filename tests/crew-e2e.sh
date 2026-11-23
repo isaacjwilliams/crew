@@ -105,9 +105,10 @@ hand_over() {  # task: records evidence and, unless it has one, an automated rev
 session_env() { jq -e --arg p "$1" --arg h "$L" '.env.CREW_PROJECT == $p and .env.CREW_HOME == $h and .env.CREW_LEAD_FINGERPRINT == ""' "$HOME/claude-settings.last" >/dev/null; }
 # The latest --settings run crew pause --hook after every tool call.
 has_pause_hook() { jq -e '.hooks.PostToolUse | any(.matcher == "*" and .hooks == [{type: "command", command: "\"${CREW_HOME:-$HOME/crew}/bin/crew\" pause --hook"}])' "$HOME/claude-settings.last" >/dev/null; }
-# The latest --settings without what crew adds: its env and, for a worker or goal lead, the pause hook.
+# The latest --settings without what crew adds: its env and, for a worker or goal lead, the pause hook
+# and what turns off the parts of your own setup it doesn't use (lean.go).
 given_settings() {
-  jq -c 'del(.env) | if .hooks.PostToolUse == null then . else
+  jq -c 'del(.env, .enabledPlugins, .skillOverrides, .deniedMcpServers, .disableClaudeAiConnectors, .enableArtifact) | if .hooks.PostToolUse == null then . else
            .hooks.PostToolUse |= map(select(.hooks[0].command | endswith(" pause --hook") | not))
            | if .hooks.PostToolUse == [] then del(.hooks.PostToolUse) else . end end' "$HOME/claude-settings.last"; }
 
@@ -2634,7 +2635,7 @@ as_worker set "$NA" status needs-input
 prompt turns-1 SessionStart >/dev/null
 check "a new session hears nothing from before it started, at its start or its first prompt" '[[ -z $(prompt turns-1) && -z $(prompt turns-2) ]]'
 CREW_PROJECT=$PJ prompt here >/dev/null; CREW_PROJECT=$P2 prompt there >/dev/null
-crew lead hello >/dev/null 2>&1; fp=$(tail -1 "$HOME/claude-fingerprint.log" | cut -d" " -f1)
+crew lead --project all hello >/dev/null 2>&1; fp=$(tail -1 "$HOME/claude-fingerprint.log" | cut -d" " -f1)
 CREW_LEAD_FINGERPRINT=$fp prompt lead >/dev/null; CREW_LEAD_FINGERPRINT='' prompt goal-lead SessionStart >/dev/null
 check "a prompt with nothing new since the previous one gets nothing added" '[[ -z $(prompt turns-1) ]]'
 as_worker set "$NA" status draft; crew set "$NB" status needs-input

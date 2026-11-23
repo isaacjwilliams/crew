@@ -39,29 +39,46 @@ func cmdLead(c *Crew, args []string) error {
 	// lead's --settings switch off the other projects' servers as it lists them.
 	// A project's problem is reported and doesn't stop the lead.
 	c.syncMCP()
-	name, sessionProject, settings, mcp := "lead", allProjects, c.Settings, []string{}
+	name, sessionProject, settings := "lead", allProjects, c.Settings
 	if proj != "" {
 		name, sessionProject = "lead-"+proj, proj
 		if settings, err = c.projectSettings(proj); err != nil {
 			return err
 		}
-		off, err := c.leadMCPSettings(proj)
-		if err != nil {
-			return err
-		}
-		mcp = []string{"--settings", off}
 	}
-	flags := append([]string{"--name", name, "--permission-mode", settings["LEAD_PERMISSION_MODE"]}, mcp...)
-	cmd := c.claude(append(flags, claudeArgs...)...)
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(settings))
+	flags, err := c.leadFlags(proj, settings)
+	if err != nil {
+		return err
+	}
+	cmd := c.claude(slices.Concat([]string{"--name", name}, flags, claudeArgs)...)
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(flags))
 	return c.execLead(cmd)
 }
 
-// leadFingerprint is the fingerprint of what a lead started with settings loads:
-// its permission mode, its settings file and its agent files (see fingerprint).
-func (c *Crew) leadFingerprint(settings Settings) string {
-	return c.fingerprint([]string{"--permission-mode", settings["LEAD_PERMISSION_MODE"]},
-		append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
+// leadFlags is the flags a lead for proj ("" for every project) starts with,
+// besides its name: the permission mode from settings, and --settings that turn
+// off the other projects' servers (leadMCPSettings) and what a lead doesn't use
+// of yours (leanSettings).
+func (c *Crew) leadFlags(proj string, settings Settings) ([]string, error) {
+	lead := newObject()
+	if proj != "" {
+		var err error
+		if lead, err = c.leadMCPSettings(proj); err != nil {
+			return nil, err
+		}
+	}
+	keep, err := c.leadKeeps(proj)
+	if err != nil {
+		return nil, err
+	}
+	lead = leanSettings(lead, "lead", keep)
+	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(lead, false)}, nil
+}
+
+// leadFingerprint is the fingerprint of what a lead started with flags loads:
+// its flags, its settings file and its agent files (see fingerprint).
+func (c *Crew) leadFingerprint(flags []string) string {
+	return c.fingerprint(flags, append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
 
 // crew lead --hook, the lead's SessionStart and UserPromptSubmit hook: Claude
@@ -96,7 +113,11 @@ func (c *Crew) leadHook(in io.Reader) error {
 				return err
 			}
 		}
-		if started != c.leadFingerprint(settings) {
+		flags, err := c.leadFlags(proj, settings)
+		if err != nil {
+			return err
+		}
+		if started != c.leadFingerprint(flags) {
 			out = fmt.Sprintf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
 		}
 	}
