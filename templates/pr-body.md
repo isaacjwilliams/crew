@@ -15,7 +15,8 @@
      - Evidence: one item per gate (acceptance criterion), numbered as in the task's Evidence section.
        The criterion in a line, the commit it ran on as "(on <sha>)", as the task's entry has it,
        and the command that shows it, then its output in a <details> block. Where only a look
-       shows it, say what you saw and how; where only a person can check it, what to try.
+       shows it, say what you saw and how; for a check the task leaves to the user, why it
+       can't run here, then "To try:" and what to try.
        A published screenshot or file goes in the item it shows, as the
        Markdown line printed when it was published; never give a path on someone's disk.
      - Notes for reviewers: only for a trade-off or an open question. Leave it out otherwise. -->
