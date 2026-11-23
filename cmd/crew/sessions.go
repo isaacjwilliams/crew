@@ -354,7 +354,8 @@ type launcher struct {
 	// kept out of the fingerprint, so a restart can say which of them changed.
 	model string
 	// effort is the effort level a fresh session runs at, or "" for the user's
-	// own setting. Like model, it stays out of the fingerprint.
+	// own setting. Like model, it stays out of the fingerprint, so changedSince
+	// can say which of them changed.
 	effort string
 	// fingerprint is what a fresh session loads now: its flags, which carry its
 	// settings as a JSON string, and its agent files.
@@ -434,11 +435,13 @@ func (l launch) record(d Doc) {
 	if l.mode != "resume" {
 		d.Set(l.by.prefix+"_fingerprint", l.by.fingerprint)
 		// An unset model or effort clears one the file records, but adds no empty key.
-		for key, value := range map[string]string{"_model": l.by.model, "_effort": l.by.effort} {
-			if _, ok := d.Lookup(l.by.prefix + key); ok || value != "" {
-				d.Set(l.by.prefix+key, value)
+		setUnlessNew := func(key, value string) {
+			if _, ok := d.Lookup(key); ok || value != "" {
+				d.Set(key, value)
 			}
 		}
+		setUnlessNew(l.by.prefix+"_model", l.by.model)
+		setUnlessNew(l.by.prefix+"_effort", l.by.effort)
 	}
 }
 
@@ -475,6 +478,7 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
 		// before the prompt. The MCP flags go first: see refreshMCPConfig.
+		// --model and --effort take one value each, so they're safe before the prompt.
 		var options []string
 		if start.model != "" {
 			options = append(options, "--model", start.model)
