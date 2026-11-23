@@ -1662,8 +1662,10 @@ FD=$(crew new "No PR when its parent merged" --branch merged-child-no-pr --on "$
 first_run "$FC" 64; first_run "$FD" ""
 echo agent/first-parent >"$HOME/gh-pr-base-64"
 git merge -q --squash origin/agent/first-parent >/dev/null && git commit -qm "First-run parent (#61)" && git push -q origin main
-git push -q origin --delete agent/first-parent; crew set "$FP" status merged
+git push -q origin --delete agent/first-parent; echo MERGED >"$HOME/gh-pr-state-61"  # crew sync hasn't seen it yet
 e=$(edits main); out=$(crew hand-over "$FC" 2>&1); run_given "$(crew get "$FC" worktree)" "$out"
+check "a first hand-over notes the merge of a parent that crew sync hasn't seen" \
+  '[[ $(crew get "$FP" status) == merged && $(crew get "$FP" pr_state) == merged ]] && section "$FP" "## Log" | grep -q "PR merged"'
 (($(edits main) > e)) && echo main >"$HOME/gh-pr-base-64"  # GitHub moves the PR
 check "after a merge, the refusal has the worker rebase onto the default branch, retarget its PR and record its base" \
   '[[ $out == *"($(tid "$FP") merged)"*"git rebase --onto $(git rev-parse origin/main) "*"Your base is now main: after pushing, run \`gh pr edit --base main\` and \`crew set $(tid "$FC") base main\`."* && $(crew get "$FC" base) == main && $(cat "$HOME/gh-pr-base-64") == main ]]'
@@ -1676,7 +1678,7 @@ run_given "$(crew get "$FD" worktree)" "$out"; crew set "$FD" pr https://github.
 check "then opens its PR on the default branch and hands over, with only its own commits" \
   'crew hand-over "$FD" >/dev/null && [[ $(crew get "$FD" status) == pr-open && $(crew get "$FD" base) == main && $(git log --format=%s origin/main..origin/agent/merged-child-no-pr) == "add $(tid "$FD").txt" ]]'
 crew set "$FC" status abandoned >/dev/null; crew set "$FD" status abandoned >/dev/null
-crew cleanup "$FP" >/dev/null; rm -f "$HOME/gh-pr-state" "$HOME"/gh-pr-base-6?
+crew cleanup "$FP" >/dev/null; rm -f "$HOME/gh-pr-state" "$HOME/gh-pr-state-61" "$HOME"/gh-pr-base-6?
 
 # Goals: a goal lead plans every item; crew tick dispatches the ready tasks, passes
 # the goal lead its input, and closes the goal once every task is done.

@@ -79,10 +79,7 @@ func cmdSync(c *Crew, args []string) error {
 			if onGitHub.record(t) {
 				changed = true
 			}
-			if onGitHub.State == "MERGED" && st != Merged {
-				t.SetStatus(Merged)
-				t.Touch()
-				t.Log("PR merged")
+			if onGitHub.noteMerge(t) {
 				changed = true
 				fmt.Printf("%s: merged (run 'crew cleanup %s')\n", t.ID(), t.ID())
 			} else if onGitHub.State == "CLOSED" && st != Abandoned {

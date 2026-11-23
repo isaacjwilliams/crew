@@ -81,6 +81,19 @@ func (pr gitHubPR) record(t Task) bool {
 	return changed
 }
 
+// noteMerge marks the task merged when its PR is, and says whether it did.
+// crew sync does it for every task, and crew hand-over for a first run's
+// parent, which may have merged since sync last looked.
+func (pr gitHubPR) noteMerge(t Task) bool {
+	if pr.State != "MERGED" || t.Status() == Merged {
+		return false
+	}
+	t.SetStatus(Merged)
+	t.Touch()
+	t.Log("PR merged")
+	return true
+}
+
 // label words the PR's state for pr_state: merged, closed, draft or open, and,
 // while it's open, GitHub's review decision, as in "open, approved". syncedPR
 // reads it back, so the two change together.

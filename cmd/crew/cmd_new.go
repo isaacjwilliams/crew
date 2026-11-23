@@ -348,19 +348,30 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		pr = PREvidence(string(body))
 	}
 	first := !t.HandedOver()
-	var onGitHub *gitHubPR // the PR as GitHub has it now, which a first hand-over places
-	if first && t.PR() != "" {
-		read, err := readPR(p.Repo(), t.PR())
-		if err != nil {
-			return nil, fail("couldn't read the PR: gh pr view %s failed", t.PR())
+	// The PRs as GitHub has them now, which a first hand-over places the task by:
+	// its own, and its parent's, which may have merged since crew sync looked.
+	var onGitHub, parentOnGitHub *gitHubPR
+	if first {
+		if t.PR() != "" {
+			read, err := readPR(p.Repo(), t.PR())
+			if err != nil {
+				return nil, fail("couldn't read the PR: gh pr view %s failed", t.PR())
+			}
+			onGitHub = &read
 		}
-		onGitHub = &read
+		if parent, ok := c.branches(p.Name).parentOf(t); ok && parent.Status().InFlight() && parent.PR() != "" {
+			read, err := readPR(p.Repo(), parent.PR())
+			if err != nil {
+				return nil, fail("couldn't read %s's PR: gh pr view %s failed", parent.ID(), parent.PR())
+			}
+			parentOnGitHub = &read
+		}
 	}
 	return func() error {
 		// Before the PR check: a worker whose parent merged can't open its PR on
 		// the parent's branch once GitHub has deleted it.
 		if first {
-			if err := c.refuseOffBase(p, t, onGitHub); err != nil {
+			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub); err != nil {
 				return err
 			}
 		}
@@ -406,14 +417,20 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 // its parent's latest commit, or on what the parent merged into, and every
 // task's PR targets its base. Before the first hand-over the worker's own
 // session is still making the branch, so it moves them itself; after it, crew
-// tick restacks the task. onGitHub is the task's PR as GitHub has it now, or
-// nil when it has none. Call it with the lock held.
-func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub *gitHubPR) error {
+// tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
+// and of its parent as GitHub has them now, or nil when crew didn't read one.
+// Call it with the lock held.
+func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR) error {
 	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
-	// crew sync may not have looked since the worker opened or moved its PR, or
-	// since an earlier refusal's rebase moved the branch off base_sha.
+	// crew sync may not have looked since the worker opened or moved its PR,
+	// since the parent merged, or since an earlier refusal's rebase moved the
+	// branch off base_sha.
 	changed := onGitHub != nil && onGitHub.record(t)
+	if stacked && parentOnGitHub != nil {
+		recorded, merged := parentOnGitHub.record(parent), parentOnGitHub.noteMerge(parent)
+		changed = changed || recorded || merged
+	}
 	if stacked && noteBaseSHA(t, parent, repo) {
 		changed = true
 	}
