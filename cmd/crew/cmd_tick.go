@@ -175,11 +175,11 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	if st == PROpen && t.Get("ci_state") == string(ciFailing) {
 		rounds := t.Get("review_rounds")
 		if c.step(nil, "ci-fix", t.Path) == 0 {
-			failures := t.CIFailures()
 			if now := t.Get("review_rounds"); now != rounds {
+				failures := t.CIFailures()
 				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, now, failures[len(failures)-1])
 			} else {
-				news.did(p.Name, "%s: CI still red after %d CI rounds, for you", id, len(failures))
+				news.did(p.Name, "%s: CI still red after %d CI rounds, for you", id, t.CIFixes())
 			}
 		}
 	}

@@ -109,8 +109,9 @@ type redCI struct {
 
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
-// once for each head commit. After MAX_CI_FIXES such rounds, it asks the user
-// under Open questions instead. Exits 3 when there's nothing to do.
+// once for each head commit. After MAX_CI_FIXES such rounds that the worker
+// didn't find were outside its branch (Task.CIFixes), it asks the user under
+// Open questions instead. Exits 3 when there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -173,7 +174,7 @@ func cmdCIFix(c *Crew, args []string) error {
 		return nothingToDo("the red CI on %s is reported already", head)
 	}
 	checks := strings.Join(failed, ", ")
-	if fixes := len(t.CIFailures()); fixes < maxFixes {
+	if fixes := t.CIFixes(); fixes < maxFixes {
 		n, _ := reviewRound{redCI: &redCI{head, failed}}.add(t, t.PRNumber())
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
@@ -199,16 +200,23 @@ func ciSummaryMarker(head string) string {
 	return fmt.Sprintf("<!-- crew ci-summary: %s -->", head)
 }
 
-// crew ci-summary TASK SHA FILE: posts FILE on the task's PR as the worker's
-// account of the red CI the task file reports on commit SHA: why it was red, and
-// what was done. Each commit gets a comment of its own: when this GitHub
-// account's comment for SHA is there already, it is edited to FILE.
+// crew ci-summary [--not-the-branch] TASK SHA FILE: posts FILE on the task's PR
+// as the worker's account of the red CI the task file reports on commit SHA: why
+// it was red, and what was done. Each commit gets a comment of its own: when
+// this GitHub account's comment for SHA is there already, it is edited to FILE.
+// --not-the-branch says the branch didn't cause it, which the round's CI line
+// then records, so that round doesn't count toward MAX_CI_FIXES; without it,
+// the round counts.
 func cmdCISummary(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
 	}
+	branchCaused := true
+	if i := slices.Index(args, "--not-the-branch"); i >= 0 {
+		args, branchCaused = slices.Delete(args, i, i+1), false
+	}
 	if len(args) != 3 {
-		return usage("crew ci-summary TASK SHA FILE")
+		return usage("crew ci-summary [--not-the-branch] TASK SHA FILE")
 	}
 	t, err := c.resolveTask(args[0])
 	if err != nil {
@@ -243,5 +251,13 @@ func cmdCISummary(c *Crew, args []string) error {
 	} else {
 		fmt.Printf("posted the CI summary for %s on PR #%s\n", head, num)
 	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if changed, err := t.RecordCICause(head, branchCaused); err != nil || !changed {
+		return err
+	}
+	t.Touch()
+	c.commit("ci-summary " + p.Name + "/" + t.ID())
 	return nil
 }
