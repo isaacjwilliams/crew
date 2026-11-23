@@ -640,6 +640,24 @@ check "a followup after the model and the instructions both change says both" \
 git -C "$L" checkout -q -- agents; install_agents; crew set 1 model ""; out=$(followup1 "back to the default")
 check "a followup after the model is cleared starts the worker fresh on the default, without --model" \
   '[[ $out == *"(fresh: its model changed from haiku to the default, and its instructions or settings changed)"* && $(last_launch) != *--model* && -z $(crew get 1 worker_model) ]]'
+# A task's effort works the same way: a fresh worker runs at it, and a change of effort, in
+# either direction, starts the worker fresh.
+check "set refuses an effort that isn't one of Claude Code's levels, naming them" \
+  '[[ $(crew set 1 effort extreme 2>&1) == *"effort must be low, medium, high, xhigh or max, not '"'"'extreme'"'"'"* && -z $(crew get 1 effort) ]]'
+check "no launch so far, for a task without an effort, passes --effort" '! grep -q -- "--effort" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_effort) ]]'
+crew set 1 effort medium; out=$(followup1 "now at medium")
+check "a followup after an effort is set starts the worker fresh at it, says so, and records the effort" \
+  '[[ $out == *"(fresh: its effort changed from the default to medium)"* && $(last_launch) == *" --effort medium You are picking up task"* && $(crew get 1 worker_effort) == medium ]]'
+out=$(followup1 "still at medium")
+check "the next followup resumes it in place, passing no --effort" '[[ $out == *"(resume)"* && $(last_launch) != *--effort* ]] && resumed'
+crew set 1 effort xhigh; out=$(followup1 "now at xhigh")
+check "a followup after the effort changes starts the worker fresh at the new one" \
+  '[[ $out == *"(fresh: its effort changed from medium to xhigh)"* && $(last_launch) == *" --effort xhigh "* && $(crew get 1 worker_effort) == xhigh ]]'
+crew set 1 effort ""; out=$(followup1 "back to the default")
+check "a followup after the effort is cleared starts the worker fresh without --effort" \
+  '[[ $out == *"(fresh: its effort changed from xhigh to the default)"* && $(last_launch) != *--effort* && -z $(crew get 1 worker_effort) ]]'
+sed -i '/^worker_effort:/d' "$F1"; out=$(followup1 "recorded before efforts")
+check "a worker recorded before crew kept efforts resumes when its task names none" '[[ $out == *"(resume)"* ]] && resumed'
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
@@ -937,20 +955,22 @@ work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
 check "status shows the restack that's needed, once on the row" '[[ $(crew status | grep -c "needs restack: 009-season-model moved") == 1 ]]'
+crew set 10 effort medium
 setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); s10=$(crew get 10 worker_session); crew restack 10 >/dev/null
 check "restack starts a fresh worker on Sonnet for the rebase, never resuming the worker's conversation" 'restacked 10 && [[ $(crew get 10 worker_session) != "$s10" ]]'
+check "a restack on a task with an effort starts as it would without, and records none" '[[ $(last_launch) != *--effort* && -z $(crew get 10 worker_effort) ]]'
 check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_launch) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_launch) == *"git rebase --onto $T9b $T9\`"* && $(last_launch) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
 check "a restack session is told to read only what its steps need, not the whole task file" \
   '[[ $(last_launch) == *"Don'"'"'t read the whole task file or review the branch first; read only what a step of your restack workflow needs."* && $(last_launch) != *"Read the whole task file"* ]]'
 check "status shows the restack a working task needs, and no merge check" \
-  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved  effort medium" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
 s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
-check "the next followup after a restack starts afresh on the task's model, the default here, and says why" \
-  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
+check "the next followup after a restack starts afresh on the task's model, the default here, and at its effort, and says why" \
+  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && $(last_launch) == *" --effort medium "* && $(crew get 10 worker_effort) == medium && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
 setstate "done" null; hand_over 10; n=$(launches)
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 setstate working 4242; out=$(crew restack 10 --again 2>&1)

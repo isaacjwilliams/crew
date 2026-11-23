@@ -353,6 +353,10 @@ type launcher struct {
 	// model is the model a fresh session runs on, or "" for the default. It's
 	// kept out of the fingerprint, so a restart can say which of them changed.
 	model string
+	// effort is the effort level a fresh session runs at, or "" for the user's
+	// own setting. Like model, it stays out of the fingerprint, so changedSince
+	// can say which of them changed.
+	effort string
 	// fingerprint is what a fresh session loads now: its flags, which carry its
 	// settings as a JSON string, and its agent files.
 	fingerprint string
@@ -422,17 +426,22 @@ type launch struct {
 
 // record notes the session in d, the ledger file it was launched for: its job
 // and session, and for a fresh session, the fingerprint of what it loaded and
-// the model it runs on. A file whose sessions never had a model, a goal's say,
-// gets no key for one. It's the only place a session's keys are set.
+// the model and effort it runs with. A file whose sessions never had a model or
+// effort, a goal's say, gets no key for it. It's the only place a session's keys
+// are set.
 func (l launch) record(d Doc) {
 	d.Set(l.by.prefix+"_job", l.job)
 	d.Set(l.by.prefix+"_session", l.session)
 	if l.mode != "resume" {
 		d.Set(l.by.prefix+"_fingerprint", l.by.fingerprint)
-		// An unset model clears one the file records, but adds no empty key.
-		if _, ok := d.Lookup(l.by.prefix + "_model"); ok || l.by.model != "" {
-			d.Set(l.by.prefix+"_model", l.by.model)
+		// An unset model or effort clears one the file records, but adds no empty key.
+		setUnlessNew := func(key, value string) {
+			if _, ok := d.Lookup(key); ok || value != "" {
+				d.Set(key, value)
+			}
 		}
+		setUnlessNew(l.by.prefix+"_model", l.by.model)
+		setUnlessNew(l.by.prefix+"_effort", l.by.effort)
 	}
 }
 
@@ -446,13 +455,13 @@ var (
 
 // launchSession starts a background session for a ledger file in wt, or resumes
 // the one it records as <prefix>_session, and confirms it started. A fresh
-// session gets the launcher's flags and model, the file's <prefix>_name and the
-// ledger as an extra directory. A resume passes only the session and the prompt:
-// a background session keeps the options it was started with (agent, model,
-// permission mode, settings, --add-dir), and passing any launch flag again makes
-// Claude Code start a copy under a new session instead of continuing this one.
-// A fresh session takes the one it replaces out of agent view once it has
-// started. Both refresh the project's MCP config first (refreshMCPConfig).
+// session gets the launcher's flags, model and effort, the file's <prefix>_name
+// and the ledger as an extra directory. A resume passes only the session and
+// the prompt: a background session keeps the options it was started with
+// (agent, model, effort, permission mode, settings, --add-dir), and passing any
+// launch flag again makes Claude Code start a copy under a new session instead
+// of continuing this one. A fresh session takes the one it replaces out of agent
+// view once it has started. Both refresh the project's MCP config first (refreshMCPConfig).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {
@@ -469,11 +478,15 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
 		// before the prompt. The MCP flags go first: see refreshMCPConfig.
-		var model []string
+		// --model and --effort take one value each, so they're safe before the prompt.
+		var options []string
 		if start.model != "" {
-			model = []string{"--model", start.model}
+			options = append(options, "--model", start.model)
 		}
-		cmd = c.claude(slices.Concat([]string{"--name", d.Get(start.prefix + "_name"), "--add-dir", c.Home, "--bg"}, mcp, start.flags, model, []string{prompt})...)
+		if start.effort != "" {
+			options = append(options, "--effort", start.effort)
+		}
+		cmd = c.claude(slices.Concat([]string{"--name", d.Get(start.prefix + "_name"), "--add-dir", c.Home, "--bg"}, mcp, start.flags, options, []string{prompt})...)
 	}
 	cmd.Dir = wt
 	before := transcriptSize(session)
@@ -566,8 +579,8 @@ func (c *Crew) waitForLaunch(job, recorded string, before int64) (session string
 
 // relaunch resumes the session a file records as <prefix>_session, or starts a
 // fresh one when it records none, when fresh is set, when the resume fails, or
-// when the session would run on another model or on old instructions or
-// settings (changedSince). A fresh session gets freshPrompt and then prompt.
+// when the session would run on another model or effort or on old instructions
+// or settings (changedSince). A fresh session gets freshPrompt and then prompt.
 func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, fresh bool) (launch, error) {
 	session := d.Get(start.prefix + "_session")
 	resume, why := !fresh && session != "", ""
@@ -593,14 +606,18 @@ func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, f
 }
 
 // changedSince says what start would launch differently from the session d
-// records, or "" when nothing: its model, from the recorded <prefix>_model, and
-// its instructions or settings, from the recorded <prefix>_fingerprint. A
-// session recorded before crew kept fingerprints has none, so it counts as
-// changed.
+// records, or "" when nothing: its model and effort, from the recorded
+// <prefix>_model and <prefix>_effort (a session recorded before crew kept
+// efforts has none, which is no effort), and its instructions or settings, from
+// the recorded <prefix>_fingerprint. A session recorded before crew kept
+// fingerprints has none, so it counts as changed.
 func (start launcher) changedSince(d Doc) string {
 	var changed []string
 	if was := d.Get(start.prefix + "_model"); was != start.model {
-		changed = append(changed, fmt.Sprintf("its model changed from %s to %s", modelName(was), modelName(start.model)))
+		changed = append(changed, fmt.Sprintf("its model changed from %s to %s", orDefault(was), orDefault(start.model)))
+	}
+	if was := d.Get(start.prefix + "_effort"); was != start.effort {
+		changed = append(changed, fmt.Sprintf("its effort changed from %s to %s", orDefault(was), orDefault(start.effort)))
 	}
 	if d.Get(start.prefix+"_fingerprint") != start.fingerprint {
 		changed = append(changed, "its instructions or settings changed")
@@ -608,12 +625,12 @@ func (start launcher) changedSince(d Doc) string {
 	return strings.Join(changed, ", and ")
 }
 
-// modelName names a launcher's model in a sentence.
-func modelName(model string) string {
-	if model == "" {
+// orDefault names a launcher's model or effort in a sentence.
+func orDefault(value string) string {
+	if value == "" {
 		return "the default"
 	}
-	return model
+	return value
 }
 
 var autocompactWindow = regexp.MustCompile(`^(auto|[0-9]+[kKmM]?)$`)
@@ -718,15 +735,16 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 	return c.sessionSettings(lead, p), nil
 }
 
-// launchWorker is the launcher of project p's workers that run on model, or on
-// the default when it's "". It fails when their settings do (workerSettings).
-func (c *Crew) launchWorker(p *Project, model string) (launcher, error) {
+// launchWorker is the launcher of project p's workers that run on model at
+// effort, or on the defaults when they're "". It fails when their settings do
+// (workerSettings).
+func (c *Crew) launchWorker(p *Project, model, effort string) (launcher, error) {
 	settings, err := c.workerSettings(p)
 	if err != nil {
 		return launcher{}, err
 	}
 	l := c.newLauncher(p, "worker", "implementer", "--permission-mode", p.Settings["WORKER_PERMISSION_MODE"],
 		"--autocompact", p.Settings["WORKER_AUTOCOMPACT_WINDOW"], "--settings", settings)
-	l.model = model
+	l.model, l.effort = model, effort
 	return l, nil
 }
