@@ -115,15 +115,19 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    task's PR, or edit the one there (used by workers)
   crew ci-fix TASK                 If CI is red on the head of the task's open PR, and
                                    the worker handed it over, send it the failure as a
-                                   review round, once a commit; past MAX_CI_FIXES,
-                                   ask you instead (run by crew tick)
+                                   review round, once a commit; past MAX_CI_FIXES
+                                   rounds the branch caused, ask you instead (run
+                                   by crew tick)
   crew catch-up TASK               If the task's open PR conflicts with its base, the
                                    task isn't stacked, and the worker handed it over,
                                    send it the conflict as a review round, once a
                                    commit of the base, to merge it in (run by crew tick)
-  crew ci-summary TASK SHA FILE    Post FILE on the task's PR as why CI was red on
+  crew ci-summary [--not-the-branch] TASK SHA FILE
+                                   Post FILE on the task's PR as why CI was red on
                                    commit SHA, which the task reports, or edit the
-                                   one there (used by workers)
+                                   one there; --not-the-branch: the branch didn't
+                                   cause it, so its round doesn't count toward
+                                   MAX_CI_FIXES (used by workers)
   crew evidence TASK FILE...       Publish screenshots and other files to the task's
                                    folder in the project's EVIDENCE_REPO, in one
                                    commit, and print a Markdown link to each, pinned

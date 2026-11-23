@@ -555,14 +555,14 @@ func TestAnswer(t *testing.T) {
 	}
 }
 
-// Two CI rounds, one of them ticked, a round of comments with a CI line, a
-// question about a head that stayed red, and two rounds that report a conflict
-// with main, one of them ticked. A line quoted in a comment, or in the brief,
-// reports nothing.
+// Two CI rounds, one of them ticked and marked as not the branch's doing, a
+// round of comments with a CI line, a question about a head that stayed red,
+// and two rounds that report a conflict with main, one of them ticked. A line
+// quoted in a comment, or in the brief, reports nothing.
 const reportsTask = "## Context\n- [ ] CI failed on 0000000: brief\n- [ ] Conflicts with main at 0000000\n\n" +
 	"## Open questions\n- [ ] CI is still red on ccc3333 after 2 CI rounds (MAX_CI_FIXES=2): test. Look at it yourself.\n\n" +
 	"## Review rounds\n" +
-	"### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test, lint\n\n" +
+	"### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test, lint (the branch didn't cause it)\n\n" +
 	"### Round 2 — 2026-11-11 11:00 (PR #12)\n\n- [ ] CI failed on bbb2222: test\n\n**Conversation comments**\n- [ ] comment 5 — [link](u5)\n  > - [ ] CI failed on 9999999: quoted\n  > - [ ] Conflicts with main at 9999999\n\n" +
 	"### Round 3 — 2026-11-11 12:00 (PR #12)\n\n- [ ] Automated review requested (crew review)\n\n" +
 	"### Round 4 — 2026-11-11 13:00 (PR #12)\n\n- [x] Conflicts with main at eee5555\n\n" +
@@ -576,6 +576,41 @@ func TestCIFailures(t *testing.T) {
 	}
 	if got := (Task{docWith(t, sampleTask)}).CIFailures(); got != nil {
 		t.Errorf("a task without review rounds: CIFailures = %q", got)
+	}
+}
+
+func TestCIFixes(t *testing.T) {
+	if got := (Task{docWith(t, reportsTask)}).CIFixes(); got != 1 {
+		t.Errorf("CIFixes = %d, want 1: a round the branch didn't cause doesn't count", got)
+	}
+	if got := (Task{docWith(t, sampleTask)}).CIFixes(); got != 0 {
+		t.Errorf("a task without review rounds: CIFixes = %d", got)
+	}
+}
+
+func TestRecordCICause(t *testing.T) {
+	task := Task{docWith(t, reportsTask)}
+	record := func(head string, branchCaused, wantChanged bool, wantFixes int) {
+		t.Helper()
+		changed, err := task.RecordCICause(head, branchCaused)
+		if err != nil || changed != wantChanged || task.CIFixes() != wantFixes {
+			t.Errorf("RecordCICause(%s, %v) = %v, %v with CIFixes %d; want %v with CIFixes %d", head, branchCaused, changed, err, task.CIFixes(), wantChanged, wantFixes)
+		}
+	}
+	record("bbb2222", false, true, 0)
+	if !strings.Contains(contents(t, task.Doc), "\n- [ ] CI failed on bbb2222: test (the branch didn't cause it)\n") {
+		t.Errorf("the round's line isn't marked:\n%s", contents(t, task.Doc))
+	}
+	record("bbb2222", false, false, 0) // marked already
+	record("aaa1111", true, true, 1)   // the worker's later account wins
+	if !strings.Contains(contents(t, task.Doc), "\n- [x] CI failed on aaa1111: test, lint\n") {
+		t.Errorf("the mark isn't taken off:\n%s", contents(t, task.Doc))
+	}
+	record("ccc3333", false, false, 1) // only an open question reports it
+	record("0000000", false, false, 1) // only the brief mentions it
+	record("9999999", false, false, 1) // only a quote in a comment mentions it
+	if got := task.CIFailures(); !slices.Equal(got, []string{"aaa1111", "bbb2222"}) {
+		t.Errorf("CIFailures after marking = %q", got)
 	}
 }
 

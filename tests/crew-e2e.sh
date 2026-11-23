@@ -1185,7 +1185,7 @@ check "red CI on a PR closed without merging is left alone, by tick and by hand"
 echo OPEN >"$HOME/gh-pr-state"
 crew tick >/dev/null 2>&1; setstate "done" null; hand_over 13; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
-check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
+check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds the branch caused, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
 hand_over 13; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
 out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
@@ -2389,7 +2389,7 @@ as_worker set "$PI" status needs-input
 # Every kind of thing crew tick did since the lead's previous prompt, and the statuses a worker set.
 out=$(<"$HOME/news-heard")
 for heard in "merged; worktree cleaned up" "review round 1 recorded" "comment(s) from collaborators, for you" "recorded: red on" \
-  " CI rounds, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
+  " CI rounds the branch caused, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
   "restack sent to its worker (014-tick-parent moved)" "restack sent to its worker (PR targets agent/tick-old, not main)" "waiting on you (1 open question(s))" \
   "dispatched for goal" "goal $G: input sent to its goal lead" "goal $G: done, every task finished" "$TPI: its worker carries on after the pause" \
   "nudged it" "can't be nudged, for the lead" "$TPI: handed over (pr-open)" "$TPI: status → needs-input"; do
@@ -2696,5 +2696,42 @@ SC3=$(crew new "Stays locked" --branch stays-locked --project "$PJ"); fill "$SC3
 SW3=$(crew get "$SC3" worktree); git -C "$SB/webapp" worktree lock "$SW3"; crew set "$SC3" status merged >/dev/null
 stays_case "$SC3" "a worktrunk task whose worktree won't remove" "the worktree tool couldn't remove $SW3"
 git -C "$SB/webapp" worktree unlock "$SW3"; sed -i '/^WORKTREE_TOOL=/d' "$PD/project.env"
+
+# Red CI the worker finds its branch didn't cause (a flaky test, the CI service, a red base), and
+# hands back without asking, doesn't count toward MAX_CI_FIXES; red CI its branch caused does.
+# Each case is a task of its own; they come last, so the tasks they add renumber nothing above.
+echo OPEN >"$HOME/gh-pr-state"
+ci_round() { ci "$1" test:FAILURE; setstate "done" null; crew tick 2>/dev/null; }   # head: CI goes red on it, and a tick acts
+# What the worker does with a CI round, as implementer.md "Workflow: review rounds" step 4 says:
+# it posts its comment for the head, with --not-the-branch when its branch didn't cause the red
+# CI, ticks the line, and hands the PR over. A refused comment fails the suite.
+answer_ci() {  # task short-sha [--not-the-branch]
+  local f; f=$(crew path "$1"); printf 'CI was red\n' >"$HOME/ci.md"
+  crew ci-summary ${3:+"$3"} "$1" "$2" "$HOME/ci.md" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: ci-summary %s %s refused at line %s\n' "$1" "$2" "${BASH_LINENO[0]}"; }
+  sed -i "s/^- \[ \] CI failed on $2:/- [x] CI failed on $2:/" "$f"; hand_over "$1"
+}
+CO=$(pr_task "Red CI outside the branch"); TCO=$(basename "$CO" .md); hand_over "$CO"
+o1=$(ci_round 1111aaaffff0); answer_ci "$CO" 1111aaa --not-the-branch
+o2=$(ci_round 2222bbbffff0); answer_ci "$CO" 2222bbb --not-the-branch
+o3=$(ci_round 3333cccffff0); answer_ci "$CO" 3333ccc --not-the-branch
+check "three red heads the worker hands back as not its branch's each get a round and no question, and leave the task pr-open" '[[ $o1 == *"$TCO: CI round 1 recorded: red on 1111aaa"* && $o2 == *"$TCO: CI round 2 recorded: red on 2222bbb"* && $o3 == *"$TCO: CI round 3 recorded: red on 3333ccc"* && $o3 != *"for you"* && $(crew get "$CO" status) == pr-open ]] && ! grep -q "CI is still red" "$CO"'
+check "ci-summary --not-the-branch marks the head's round line, which the worker then ticks" '[[ $(round "$CO" 3) == "- [x] CI failed on 3333ccc: test (the branch didn'"'"'t cause it)" && $(cat "$HOME/gh-summaries/"*) == *"<!-- crew ci-summary: 3333ccc -->"* ]]'
+o4=$(setstate "done" null; crew tick 2>/dev/null); o5=$(crew tick 2>/dev/null)
+check "a handed-back red head still gets exactly one round across repeated ticks" '[[ $o4 != *"$TCO"* && $o5 != *"$TCO"* && $(crew get "$CO" review_rounds) == 3 && $(grep -c "^- \[.\] CI failed on 3333ccc" "$CO") == 1 && $(crew get "$CO" status) == pr-open ]]'
+crew set "$CO" status abandoned
+CB=$(pr_task "Red CI from the branch"); TCB=$(basename "$CB" .md); hand_over "$CB"
+ci_round 4444dddffff0 >/dev/null; answer_ci "$CB" 4444ddd
+ci_round 5555eeeffff0 >/dev/null; answer_ci "$CB" 5555eee
+out=$(ci_round 6666fffaaaa0)
+check "three red heads the branch caused: the third is a question for the user, as before" '[[ $out == *"$TCB: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CB" status) == needs-input && $(crew get "$CB" review_rounds) == 2 ]] && [[ $(section "$CB" "## Open questions") == *"- [ ] CI is still red on 6666fff after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
+crew set "$CB" status abandoned
+CM=$(pr_task "Red CI from both"); TCM=$(basename "$CM" .md); hand_over "$CM"
+ci_round 7777aaaffff0 >/dev/null; answer_ci "$CM" 7777aaa
+ci_round 8888bbbffff0 >/dev/null; answer_ci "$CM" 8888bbb --not-the-branch
+ci_round 9999cccffff0 >/dev/null; answer_ci "$CM" 9999ccc
+out=$(ci_round 0000dddffff0)
+check "branch caused, handed back, branch caused: a new red head is a question, after 2 CI rounds" '[[ $out == *"$TCM: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CM" status) == needs-input && $(crew get "$CM" review_rounds) == 3 ]] && [[ $(section "$CM" "## Open questions") == *"- [ ] CI is still red on 0000ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
+crew set "$CM" status abandoned
+rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
 summary crew-e2e
