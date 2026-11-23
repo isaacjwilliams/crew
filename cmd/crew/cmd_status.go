@@ -32,14 +32,18 @@ func cmdStatus(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.holder() != c.Host {
-		// Another machine runs the crew and pushes the ledger; catch up with it. No
-		// crew command changes the ledger here, so this needs no lock.
-		gitOK(c.Home, "pull", "-q", "--ff-only")
-	}
+	c.catchUpLedger()
 	inScope := c.projects(scope)
 	printReport(os.Stdout, buildReport(c, inScope, doneToo, c.readPRs(inScope)))
 	return nil
+}
+
+// catchUpLedger pulls the ledger when another machine runs the crew and pushes
+// it. No crew command changes the ledger here, so this needs no lock.
+func (c *Crew) catchUpLedger() {
+	if c.holder() != c.Host {
+		gitOK(c.Home, "pull", "-q", "--ff-only")
+	}
 }
 
 // printReport prints a status report as plain text: the projects in scope,
