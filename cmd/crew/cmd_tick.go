@@ -274,6 +274,9 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *work
 	}
 	repo, st := p.Repo(), t.Status()
 	restack := func(reason string) (*workerSend, string) {
+		if !t.HandedOver() {
+			return nil, fmt.Sprintf("restack (%s) isn't crew's to send: %s", reason, rebasesBeforeHandOver)
+		}
 		if st != PROpen {
 			return nil, fmt.Sprintf("restack (%s) waits until the task is %s; it's %s", reason, PROpen, st)
 		}

@@ -354,6 +354,11 @@ func (r rebase) newBaseSteps(t Task) string {
 	return fmt.Sprintf(" Your base is now %s: after pushing, run `gh pr edit --base %s` and `crew set %s base %s`.", r.newBase, r.newBase, t.ID(), r.newBase)
 }
 
+// rebasesBeforeHandOver is why crew doesn't restack a task that hasn't been
+// handed over: crew hand-over refuses its first hand-over off its parent's
+// latest commit (onParentsTip), and gives its worker the rebase to run.
+const rebasesBeforeHandOver = "its worker rebases before its first hand-over, which crew hand-over gives it"
+
 // parentNeedsRestack: a stack restacks bottom-up, and a parent that is about to
 // be rebased would only move this task again.
 func (idx Branches) parentNeedsRestack(t Task, repo string) bool {

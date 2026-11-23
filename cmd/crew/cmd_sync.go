@@ -127,7 +127,11 @@ func cmdSync(c *Crew, args []string) error {
 					changed = true
 				}
 				if reason := idx.restackReason(t, p.Repo()); reason != "" {
-					say("%s: needs a restack, %s (run 'crew restack %s')", t.ID(), reason, t.ID())
+					hint := fmt.Sprintf("run 'crew restack %s'", t.ID())
+					if !t.HandedOver() {
+						hint = rebasesBeforeHandOver
+					}
+					say("%s: needs a restack, %s (%s)", t.ID(), reason, hint)
 				}
 			}
 			// The branch it should target may be new, and not fetched yet.

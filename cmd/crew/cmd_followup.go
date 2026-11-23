@@ -230,8 +230,8 @@ func cmdAttach(c *Crew, args []string) error {
 // retarget_sent the base the last retarget asked for, so neither is sent twice
 // unless --again.
 //
-// A restack waits until the task is pr-open, as crew tick's does: before that,
-// the worker is still making the branch.
+// A restack waits until the task is pr-open, as crew tick's does. Before its
+// first hand-over, the task's own worker runs the rebase (onParentsTip).
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -266,6 +266,9 @@ func cmdRestack(c *Crew, args []string) error {
 	parent, stacked := idx.parentOf(t)
 	if !stacked && !idx.prOffBase(t) {
 		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
+	}
+	if !t.HandedOver() {
+		return notYet("%s hasn't been handed over: %s", t.ID(), rebasesBeforeHandOver)
 	}
 	if st := t.Status(); st != PROpen {
 		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
