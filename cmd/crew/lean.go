@@ -16,6 +16,7 @@ package main
 // settings file, which don't depend on what you've installed.
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -65,14 +66,15 @@ func leanSettings(settings *object, role string, keep []string) *object {
 			plugins.set(id, false)
 		}
 	}
-	skills := newObject()
+	off := slices.Clone(yours.skills)
 	for skill, roles := range bundledSkills {
 		if !slices.Contains(roles, role) {
-			yours.skills = append(yours.skills, skill)
+			off = append(off, skill)
 		}
 	}
-	slices.Sort(yours.skills)
-	for _, skill := range yours.skills {
+	slices.Sort(off)
+	skills := newObject()
+	for _, skill := range off {
 		if !kept(skill) {
 			skills.set(skill, "off")
 		}
@@ -88,7 +90,9 @@ func leanSettings(settings *object, role string, keep []string) *object {
 	if len(plugins.keys) > 0 {
 		lean.set("enabledPlugins", plugins)
 	}
-	lean.set("skillOverrides", skills)
+	if len(skills.keys) > 0 {
+		lean.set("skillOverrides", skills)
+	}
 	if len(servers) > 0 {
 		lean.set("deniedMcpServers", servers)
 	}
@@ -109,12 +113,13 @@ type yourSetup struct {
 }
 
 // readYourSetup reads your setup from ~/.claude and ~/.claude.json, the files
-// your own sessions start from. A file that's missing or broken has nothing in
-// it: Claude Code reports a broken one itself.
+// your own sessions start from (both in CLAUDE_CONFIG_DIR, when it's set). A
+// file that's missing or broken has nothing in it: Claude Code reports a broken
+// one itself.
 func readYourSetup() yourSetup {
-	home, _ := os.UserHomeDir()
+	dir := claudeConfigDir()
 	var yours yourSetup
-	if settings, _ := readSettings(filepath.Join(home, ".claude", "settings.json")); settings != nil {
+	if settings, _ := readSettings(filepath.Join(dir, "settings.json")); settings != nil {
 		if enabled, ok := settings.vals["enabledPlugins"].(*object); ok {
 			for _, id := range enabled.keys {
 				if enabled.vals[id] == true {
@@ -125,13 +130,16 @@ func readYourSetup() yourSetup {
 	}
 	// Personal skills are folders in ~/.claude/skills; synced ones sit two folders
 	// down in its synced/.
-	skills := filepath.Join(home, ".claude", "skills")
+	skills := filepath.Join(dir, "skills")
 	personal, _ := filepath.Glob(filepath.Join(skills, "*", "SKILL.md"))
 	synced, _ := filepath.Glob(filepath.Join(skills, "synced", "*", "*", "SKILL.md"))
 	for _, f := range append(personal, synced...) {
 		yours.skills = append(yours.skills, filepath.Base(filepath.Dir(f)))
 	}
-	if config, _ := readSettings(filepath.Join(home, ".claude.json")); config != nil {
+	// Claude Code's own config sits in CLAUDE_CONFIG_DIR too, but in your home
+	// without it, beside ~/.claude rather than in it.
+	home, _ := os.UserHomeDir()
+	if config, _ := readSettings(filepath.Join(cmp.Or(os.Getenv("CLAUDE_CONFIG_DIR"), home), ".claude.json")); config != nil {
 		if servers, ok := config.vals["mcpServers"].(*object); ok {
 			yours.servers = slices.Sorted(slices.Values(servers.keys))
 		}
@@ -149,22 +157,4 @@ func (p *Project) keepLoaded() []string {
 		keep = append(keep, repo.keys...)
 	}
 	return keep
-}
-
-// leadKeeps is what a lead for proj keeps of yours: the project's KEEP_LOADED,
-// or each project's, for a lead for every project.
-func (c *Crew) leadKeeps(proj string) ([]string, error) {
-	projects := []string{proj}
-	if proj == "" {
-		projects = c.projects("")
-	}
-	var keep []string
-	for _, p := range projects {
-		s, err := c.projectSettings(p)
-		if err != nil {
-			return nil, err
-		}
-		keep = append(keep, strings.Fields(s["KEEP_LOADED"])...)
-	}
-	return keep, nil
 }

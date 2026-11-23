@@ -15,6 +15,7 @@ import (
 func fakeYourSetup(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	files := map[string]string{
 		".claude/settings.json": `{"enabledPlugins": {"stripe@claude-plugins-official": true,
 			"frontend-design@claude-plugins-official": true, "ruby-lsp@claude-plugins-official": false}}`,
@@ -23,13 +24,7 @@ func fakeYourSetup(t *testing.T) string {
 		".claude.json": `{"mcpServers": {"chrome-devtools": {"command": "npx"}}}`,
 	}
 	for name, body := range files {
-		f := filepath.Join(home, name)
-		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeFile(t, &Crew{Home: home}, body, name)
 	}
 	return home
 }
@@ -82,6 +77,23 @@ func TestLeanSettingsTurnOffWhatAWorkerDoesntUseOfYours(t *testing.T) {
 	}
 	if !slices.Equal(got.servers, []string{"chrome-devtools"}) || !got.connectorsOff || !got.noArtifact {
 		t.Errorf("lean = %+v, want chrome-devtools denied, the connectors and Artifact off", got)
+	}
+}
+
+func TestLeanSettingsReadYourSetupFromClaudeConfigDir(t *testing.T) {
+	setup := fakeYourSetup(t)
+	config := t.TempDir()
+	if err := os.Rename(filepath.Join(setup, ".claude"), filepath.Join(config, "settings")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(setup, ".claude.json"), filepath.Join(config, "settings", ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(config, "settings"))
+
+	got := leanOf(t, leanSettings(newObject(), "implementer", nil))
+	if len(got.plugins) != 2 || !slices.Contains(got.skills, "codex-review") || !slices.Equal(got.servers, []string{"chrome-devtools"}) {
+		t.Errorf("lean = %+v, want your plugins, skills and servers from CLAUDE_CONFIG_DIR turned off", got)
 	}
 }
 
@@ -170,17 +182,13 @@ func TestEachRoleKeepsWhatItsInstructionsUse(t *testing.T) {
 	fakeYourSetup(t)
 	settingsFile := map[string]string{"lead": "lead/.claude/settings.json", "goal-lead": "lead/.claude/settings.json", "implementer": "config/worker-settings.json"}
 	for role, uses := range roleUses {
-		agent, err := os.ReadFile(filepath.Join("../../agents", role+".md"))
-		if err != nil {
-			t.Fatal(err)
+		list := Doc{filepath.Join("../../agents", role+".md")}.Get("disallowedTools")
+		if list == "" {
+			t.Fatalf("agents/%s.md has no disallowedTools", role)
 		}
 		var disallowed []string
-		for line := range strings.Lines(string(agent)) {
-			if list, ok := strings.CutPrefix(line, "disallowedTools:"); ok {
-				for tool := range strings.SplitSeq(list, ",") {
-					disallowed = append(disallowed, strings.TrimSpace(tool))
-				}
-			}
+		for tool := range strings.SplitSeq(list, ",") {
+			disallowed = append(disallowed, strings.TrimSpace(tool))
 		}
 		settings, err := readSettings(filepath.Join("../..", settingsFile[role]))
 		if err != nil {
@@ -234,12 +242,7 @@ func TestLaunchingASessionLeavesYourSetupAsItWas(t *testing.T) {
 
 	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
 	for _, f := range []string{"config/worker-settings.json", "lead/.claude/settings.json"} {
-		if err := os.MkdirAll(filepath.Dir(c.path(f)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(c.path(f), []byte("{}"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeFile(t, c, "{}", f)
 	}
 	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir()}}
 	if _, err := c.workerSettings(p); err != nil {
@@ -248,7 +251,7 @@ func TestLaunchingASessionLeavesYourSetupAsItWas(t *testing.T) {
 	if _, err := c.goalLeadSettings(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.leadFlags("", c.Settings); err != nil {
+	if _, err := c.leadFlags(""); err != nil {
 		t.Fatal(err)
 	}
 

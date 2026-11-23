@@ -106,15 +106,20 @@ func (c *Crew) listAgents() (Agents, error) {
 	return as, nil
 }
 
+// claudeConfigDir is where Claude Code keeps your settings, skills and
+// transcripts: CLAUDE_CONFIG_DIR, or ~/.claude.
+func claudeConfigDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
 // claudeTranscripts is where Claude Code keeps its sessions' transcripts, one
 // directory per working directory.
 func claudeTranscripts() string {
-	dir := os.Getenv("CLAUDE_CONFIG_DIR")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".claude")
-	}
-	return filepath.Join(dir, "projects")
+	return filepath.Join(claudeConfigDir(), "projects")
 }
 
 // transcript is the path of a session's transcript, or "" when there's none.

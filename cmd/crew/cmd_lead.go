@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -39,14 +40,11 @@ func cmdLead(c *Crew, args []string) error {
 	// lead's --settings switch off the other projects' servers as it lists them.
 	// A project's problem is reported and doesn't stop the lead.
 	c.syncMCP()
-	name, sessionProject, settings := "lead", allProjects, c.Settings
+	name, sessionProject := "lead", allProjects
 	if proj != "" {
 		name, sessionProject = "lead-"+proj, proj
-		if settings, err = c.projectSettings(proj); err != nil {
-			return err
-		}
 	}
-	flags, err := c.leadFlags(proj, settings)
+	flags, err := c.leadFlags(proj)
 	if err != nil {
 		return err
 	}
@@ -56,20 +54,28 @@ func cmdLead(c *Crew, args []string) error {
 }
 
 // leadFlags is the flags a lead for proj ("" for every project) starts with,
-// besides its name: the permission mode from settings, and --settings that turn
-// off the other projects' servers (leadMCPSettings) and what a lead doesn't use
-// of yours (leanSettings).
-func (c *Crew) leadFlags(proj string, settings Settings) ([]string, error) {
-	lead := newObject()
+// besides its name: its permission mode, and --settings that turn off the other
+// projects' servers (leadMCPSettings) and what a lead doesn't use of yours
+// (leanSettings). A lead keeps what its projects' KEEP_LOADED name.
+func (c *Crew) leadFlags(proj string) ([]string, error) {
+	settings, lead := c.Settings, newObject()
+	var keep []string
+	for _, p := range c.projects(proj) {
+		s, err := c.projectSettings(p)
+		if err != nil {
+			return nil, err
+		}
+		keep = append(keep, strings.Fields(s["KEEP_LOADED"])...)
+		// A lead for one project takes its permission mode from that project.
+		if p == proj {
+			settings = s
+		}
+	}
 	if proj != "" {
 		var err error
 		if lead, err = c.leadMCPSettings(proj); err != nil {
 			return nil, err
 		}
-	}
-	keep, err := c.leadKeeps(proj)
-	if err != nil {
-		return nil, err
 	}
 	lead = leanSettings(lead, "lead", keep)
 	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(lead, false)}, nil
@@ -107,13 +113,7 @@ func (c *Crew) leadHook(in io.Reader) error {
 	starting := input.Event == "SessionStart"
 	var out string
 	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && !starting {
-		settings := c.Settings
-		if proj != "" {
-			if settings, err = c.projectSettings(proj); err != nil {
-				return err
-			}
-		}
-		flags, err := c.leadFlags(proj, settings)
+		flags, err := c.leadFlags(proj)
 		if err != nil {
 			return err
 		}
