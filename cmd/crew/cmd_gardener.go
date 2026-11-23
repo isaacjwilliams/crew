@@ -55,6 +55,12 @@ func cmdGardener(c *Crew, args []string) error {
 	return nil
 }
 
+// gardenerCheckout is the working directory the gardener and the misses agent
+// share: a detached checkout of origin/DEFAULT_BRANCH.
+func gardenerCheckout(p *Project) string {
+	return filepath.Join(p.WorkRoot(), p.Name, "_gardener")
+}
+
 // garden runs the gardener and the misses agent over one project, unless it's
 // paused.
 func (c *Crew) garden(name string) error {
@@ -66,7 +72,7 @@ func (c *Crew) garden(name string) error {
 		fmt.Printf("%s: paused; skipped\n", name)
 		return nil
 	}
-	wt := filepath.Join(p.WorkRoot(), name, "_gardener")
+	wt := gardenerCheckout(p)
 	if err := p.detachedCheckout(wt); err != nil {
 		return err
 	}
