@@ -18,8 +18,8 @@ package main
 // settings file, which don't depend on what you've installed.
 
 import (
-	"io/fs"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -175,17 +175,36 @@ func skillsOf(dir string) []string {
 	return append(skillsIn(filepath.Join(dir, "skills")), commandsIn(filepath.Join(dir, "commands"))...)
 }
 
-// commandsIn is the names of the command files in dir and its folders, as
-// Claude Code names them: a/b.md is the skill a:b.
+// commandsIn is the names of the skills in dir, a commands folder, as Claude
+// Code names them: a/b.md is the skill a:b, and so is a/b/SKILL.md. Like Claude
+// Code, it follows links, but not into a folder it's already inside.
 func commandsIn(dir string) []string {
 	var names []string
-	filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && filepath.Ext(f) == ".md" {
-			rel, _ := filepath.Rel(dir, strings.TrimSuffix(f, ".md"))
-			names = append(names, strings.ReplaceAll(filepath.ToSlash(rel), "/", ":"))
+	inside := map[string]bool{}
+	var walk func(dir, prefix string)
+	walk = func(dir, prefix string) {
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil || inside[real] {
+			return
 		}
-		return nil
-	})
+		inside[real] = true
+		defer delete(inside, real)
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			name := e.Name()
+			info, err := os.Stat(filepath.Join(dir, name))
+			switch {
+			case err != nil:
+			case info.IsDir():
+				walk(filepath.Join(dir, name), prefix+name+":")
+			case strings.EqualFold(name, "SKILL.md") && prefix != "":
+				names = append(names, strings.TrimSuffix(prefix, ":"))
+			case strings.EqualFold(filepath.Ext(name), ".md"):
+				names = append(names, prefix+strings.TrimSuffix(name, filepath.Ext(name)))
+			}
+		}
+	}
+	walk(dir, "")
 	return names
 }
 

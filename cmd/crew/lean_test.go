@@ -227,28 +227,42 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 	writeFile(t, c, `{"mcpServers": {"trello": {}}}`, "projects/p/mcp.json")
 	writeFile(t, c, `{"mcpServers": {"p_trello": {}, "q_sentry": {}}}`, leadMCPFile)
 	repoFiles := map[string]string{
-		".claude/skills/docx/SKILL.md": "",
-		".claude/skills/run/SKILL.md":  "",
-		".claude/commands/loop.md":     "",
-		".claude/commands/ci/init.md":  "",
-		".claude/settings.json":        `{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}`,
-		".mcp.json":                    `{"mcpServers": {"chrome-devtools": {}}}`,
+		".claude/skills/docx/SKILL.md":       "",
+		".claude/skills/run/SKILL.md":        "",
+		".claude/commands/loop.md":           "",
+		".claude/commands/schedule/SKILL.md": "",
+		".claude/settings.json":              `{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}`,
+		".mcp.json":                          `{"mcpServers": {"chrome-devtools": {}}}`,
 	}
 	for name, body := range repoFiles {
 		writeFile(t, &Crew{Home: repo}, body, name)
+	}
+	// Claude Code follows links in a commands folder: crew's whole folder may be
+	// one, and so may a folder in the repo's, even one that leads back up.
+	crewCommands, shared := t.TempDir(), t.TempDir()
+	writeFile(t, &Crew{Home: crewCommands}, "", "claude-api.md")
+	writeFile(t, &Crew{Home: shared}, "", "init.md")
+	for link, target := range map[string]string{
+		c.path(".claude", "commands"):                    crewCommands,
+		filepath.Join(repo, ".claude", "commands", "ci"): shared,
+		filepath.Join(shared, "again"):                   shared,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	got := leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(p)))
 	if !slices.Equal(got.servers, []string{"sentry"}) {
 		t.Errorf("a worker denies %v, want only sentry: chrome-devtools is the repo's, p_trello the project's, figma local to the repo", got.servers)
 	}
-	for _, skill := range []string{"pr-review", "docx", "run", "loop"} {
+	for _, skill := range []string{"pr-review", "docx", "run", "loop", "schedule", "claude-api"} {
 		if slices.Contains(got.skills, skill) {
 			t.Errorf("a worker turns off %s, which crew or the repo has too", skill)
 		}
 	}
 	if names := c.theirs(nil, repo); !slices.Contains(names, "ci:init") {
-		t.Errorf("theirs = %v, want the repo's command ci/init.md as the skill ci:init", names)
+		t.Errorf("theirs = %v, want the repo's command ci/init.md, through a link, as the skill ci:init", names)
 	}
 	if !slices.Equal(got.plugins, []string{"stripe@claude-plugins-official"}) {
 		t.Errorf("a worker turns off plugins %v, want only Stripe: the repo enables frontend-design", got.plugins)
