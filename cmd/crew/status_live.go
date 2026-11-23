@@ -29,7 +29,9 @@ const (
 type statusFeed struct {
 	pullLedger func()
 	readPRs    func() prReads
-	build      func(prReads) statusReport
+	// build's error says the shared settings couldn't be read again, so the
+	// report went by the ones crew started with.
+	build func(prReads) (statusReport, error)
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -39,16 +41,15 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	return statusFeed{
 		pullLedger: c.catchUpLedger,
 		readPRs:    func() prReads { return c.readPRs(c.projects(scope)) },
-		build: func(reads prReads) statusReport {
+		build: func(reads prReads) (statusReport, error) {
 			// The shared settings are read again for each report, so a change
-			// to crew.env shows while the view is open. Settings that can't be
-			// read (crew.env half saved, say) leave the report on the ones crew
-			// started with, and the next report tries again.
+			// to crew.env shows while the view is open.
 			now := *c
-			if s, err := sharedSettings(c.Home); err == nil {
+			s, err := sharedSettings(c.Home)
+			if err == nil {
 				now.Settings = s
 			}
-			return buildReport(&now, c.projects(scope), doneToo, reads)
+			return buildReport(&now, c.projects(scope), doneToo, reads), err
 		},
 	}
 }
@@ -113,6 +114,9 @@ type liveStatus struct {
 
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
+	// settingsErr is why the latest report went by the settings crew started
+	// with: the shared settings couldn't be read again.
+	settingsErr error
 	// open is whether the user left a line open, by its key. A line the user
 	// hasn't opened or closed is open unless the plain text folds it.
 	open          map[string]bool
@@ -134,7 +138,10 @@ type (
 	beat         struct{}
 	ledgerPulled struct{}
 	prsRead      struct{ reads prReads }
-	reportBuilt  struct{ report statusReport }
+	reportBuilt  struct {
+		report      statusReport
+		settingsErr error
+	}
 )
 
 func newLiveStatus(feed statusFeed) *liveStatus {
@@ -159,7 +166,10 @@ func (m *liveStatus) startDue() tea.Cmd {
 	}
 	if m.building.starts(now) {
 		reads := m.reads
-		cmds = append(cmds, func() tea.Msg { return reportBuilt{feed.build(reads)} })
+		cmds = append(cmds, func() tea.Msg {
+			r, err := feed.build(reads)
+			return reportBuilt{r, err}
+		})
 	}
 	return tea.Batch(cmds...)
 }
@@ -184,6 +194,7 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startDue()
 	case reportBuilt:
 		m.building.running = false
+		m.settingsErr = msg.settingsErr
 		m.show(msg.report, m.building.last)
 		return m, m.startDue()
 	case tea.KeyPressMsg:
@@ -369,6 +380,9 @@ func (m *liveStatus) bar() string {
 	}
 	if m.reading.running {
 		state += ", reading GitHub…"
+	}
+	if m.settingsErr != nil {
+		state += ", on the settings crew started with: " + m.settingsErr.Error()
 	}
 	return state + "   ↑↓ move  ←→ fold  r refresh  q quit"
 }

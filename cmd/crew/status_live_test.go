@@ -17,7 +17,7 @@ import (
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
 	m := newLiveStatus(statusFeed{})
-	m.Update(reportBuilt{r})
+	m.Update(reportBuilt{report: r})
 	return m
 }
 
@@ -265,7 +265,7 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	build := feed.build
 	feed.pullLedger = func() { pulls.Add(1); <-hang }
 	feed.readPRs = func() prReads { reads.Add(1); <-hang; return nil }
-	feed.build = func(r prReads) statusReport { <-letBuild; return build(r) }
+	feed.build = func(r prReads) (statusReport, error) { <-letBuild; return build(r) }
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }
@@ -362,6 +362,27 @@ func TestLiveStatusReadsTheSharedSettingsForEachReport(t *testing.T) {
 	settle(m, press(m, "r"))
 	if l := m.shown[0].head; !strings.Contains(l, "1/6") {
 		t.Errorf("after MAX_WORKERS went from 3 to 6 in crew.env, the view says %q", l)
+	}
+}
+
+func TestLiveStatusSaysWhenItCantReadTheSharedSettings(t *testing.T) {
+	c := statusLedger(t)
+	writeFile(t, c, "MAX_WORKERS=3\nGOAL_MAX_IN_FLIGHT=2\n", "config", "defaults.env")
+	feed := feedOf(c, "p", false)
+	feed.pullLedger = func() {}
+	feed.readPRs = func() prReads { return nil }
+	m := newLiveStatus(feed)
+	m.width = 200
+	settle(m, m.Init())
+	writeFile(t, c, "MAX_WORKERS = 6\n", "config", "crew.env")
+	settle(m, press(m, "r"))
+	if got := m.bar(); !strings.Contains(got, "crew.env:1") {
+		t.Errorf("with a line crew.env can't parse, the bar says %q, want it to name crew.env:1", got)
+	}
+	writeFile(t, c, "MAX_WORKERS=6\n", "config", "crew.env")
+	settle(m, press(m, "r"))
+	if got := m.bar(); strings.Contains(got, "crew.env") {
+		t.Errorf("once crew.env parses again, the bar still says %q", got)
 	}
 }
 
