@@ -575,6 +575,9 @@ func (s *statusView) notes(t Task) []string {
 	if m := t.Model(); m != "" {
 		notes = append(notes, "model "+m)
 	}
+	if e := t.Effort(); e != "" {
+		notes = append(notes, "effort "+e)
+	}
 	if t.AutomatedReviewOff() {
 		notes = append(notes, "automated review off")
 	}

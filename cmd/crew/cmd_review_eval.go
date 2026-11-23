@@ -302,20 +302,16 @@ func splitQuote(text string) (quote, rest string) {
 	return strings.Join(quoted, "\n"), strings.TrimSpace(strings.Join(other, "\n"))
 }
 
-// userDecisionsBefore is the task's decisions that are the user's own, the
-// lines ending "(user)", dated before the day of at. A decision starts with
+// userDecisionsBefore is the task's decisions that are the user's own
+// (UserDecisions), dated before the day of at. A decision starts with
 // its date, "- 2026-11-14 — …", and most have no time, so one made on at's day
 // may have come after it: only earlier days are sure.
 func userDecisionsBefore(t Task, at time.Time) []string {
 	y, m, d := at.Date()
 	day := time.Date(y, m, d, 0, 0, 0, 0, at.Location())
 	var lines []string
-	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
-		item, ok := strings.CutPrefix(l, "- ")
-		if !ok || !strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
-			continue
-		}
-		stamp, _, _ := strings.Cut(item, " ")
+	for _, l := range t.UserDecisions() {
+		stamp, _, _ := strings.Cut(strings.TrimPrefix(l, "- "), " ")
 		if date, err := time.ParseInLocation("2006-01-02", stamp, at.Location()); err == nil && date.Before(day) {
 			lines = append(lines, l)
 		}

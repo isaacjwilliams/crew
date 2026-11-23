@@ -28,6 +28,7 @@ complete -c crew -n "__fish_seen_subcommand_from new" -l on -x -d 'Stack on this
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l force -d 'Dispatch even if not marked ready'
 complete -c crew -n "__fish_seen_subcommand_from dispatch" -l tick -d "crew tick's: hold back once tick wouldn't dispatch it"
 complete -c crew -n "__fish_seen_subcommand_from feedback" -l since -r
+complete -c crew -n "__fish_seen_subcommand_from ci-summary" -l not-the-branch -d 'The branch didn\'t cause it: the round doesn\'t count toward MAX_CI_FIXES'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l fresh -d 'Start a new worker instead of resuming'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l note -r
 complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a restack the worker already has'

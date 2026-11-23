@@ -389,6 +389,23 @@ pr_body 1; commit_in "$WT" src/filters.ts
 check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
   '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
 record_evidence 1; pr_body 1
+# Only the user's checks may be left to them: the brief marks one "User check:", or the
+# user makes one theirs later, in a Decision. Criterion 1 is marked; 3 isn't, until then.
+cp "$F1" "$SB/f1-before-user-checks"
+not_run='Not done: it needs a real terminal. To try: run it.'
+sed -i 's/^- z2$/- User check: z2/' "$F1"
+sed -i "/^### [13]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
+sed -i "/^[13]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
+out=$(crew hand-over 1 2>&1); st=$?
+check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless the brief marks it a user check" \
+  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
+sed -i '/^## Decisions$/a - 2026-11-24 — Criterion 3 is a user check: only a real terminal shows it (lead)' "$F1"
+check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 3 ("* ]]'
+sed -i 's/^\(- 2026-11-24 — Criterion 3 is a user check: .*\) (lead)$/\1 (user)/' "$F1"
+out=$(crew hand-over 1 2>&1)
+check "hand-over accepts evidence that leaves a check to the user once a Decision of theirs makes it a user check" \
+  '[[ $out != *"wasn'"'"'t run"* && $out == *"automated review hasn'"'"'t run"* ]]'
+cp "$SB/f1-before-user-checks" "$F1"; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \
@@ -640,6 +657,24 @@ check "a followup after the model and the instructions both change says both" \
 git -C "$L" checkout -q -- agents; install_agents; crew set 1 model ""; out=$(followup1 "back to the default")
 check "a followup after the model is cleared starts the worker fresh on the default, without --model" \
   '[[ $out == *"(fresh: its model changed from haiku to the default, and its instructions or settings changed)"* && $(last_launch) != *--model* && -z $(crew get 1 worker_model) ]]'
+# A task's effort works the same way: a fresh worker runs at it, and a change of effort, in
+# either direction, starts the worker fresh.
+check "set refuses an effort that isn't one of Claude Code's levels, naming them" \
+  '[[ $(crew set 1 effort extreme 2>&1) == *"effort must be low, medium, high, xhigh or max, not '"'"'extreme'"'"'"* && -z $(crew get 1 effort) ]]'
+check "no launch so far, for a task without an effort, passes --effort" '! grep -q -- "--effort" "$HOME/claude-calls.log" && [[ -z $(crew get 1 worker_effort) ]]'
+crew set 1 effort medium; out=$(followup1 "now at medium")
+check "a followup after an effort is set starts the worker fresh at it, says so, and records the effort" \
+  '[[ $out == *"(fresh: its effort changed from the default to medium)"* && $(last_launch) == *" --effort medium You are picking up task"* && $(crew get 1 worker_effort) == medium ]]'
+out=$(followup1 "still at medium")
+check "the next followup resumes it in place, passing no --effort" '[[ $out == *"(resume)"* && $(last_launch) != *--effort* ]] && resumed'
+crew set 1 effort xhigh; out=$(followup1 "now at xhigh")
+check "a followup after the effort changes starts the worker fresh at the new one" \
+  '[[ $out == *"(fresh: its effort changed from medium to xhigh)"* && $(last_launch) == *" --effort xhigh "* && $(crew get 1 worker_effort) == xhigh ]]'
+crew set 1 effort ""; out=$(followup1 "back to the default")
+check "a followup after the effort is cleared starts the worker fresh without --effort" \
+  '[[ $out == *"(fresh: its effort changed from xhigh to the default)"* && $(last_launch) != *--effort* && -z $(crew get 1 worker_effort) ]]'
+sed -i '/^worker_effort:/d' "$F1"; out=$(followup1 "recorded before efforts")
+check "a worker recorded before crew kept efforts resumes when its task names none" '[[ $out == *"(resume)"* ]] && resumed'
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
@@ -937,20 +972,22 @@ work "$WT9" model2.txt; T9b=$(tip season-model)
 out=$(crew sync)
 check "sync reports a child whose parent's branch moved, without restacking it" '[[ $out == *"010-season-admin: needs a restack, 009-season-model moved"* && $(crew get 10 base_sha) == "$T9" && $(git rev-parse "$(tip season-admin)~1") == "$T9" ]]'
 check "status shows the restack that's needed, once on the row" '[[ $(crew status | grep -c "needs restack: 009-season-model moved") == 1 ]]'
+crew set 10 effort medium
 setstate "done" null; L10=$(git rev-parse origin/agent/season-admin); s10=$(crew get 10 worker_session); crew restack 10 >/dev/null
 check "restack starts a fresh worker on Sonnet for the rebase, never resuming the worker's conversation" 'restacked 10 && [[ $(crew get 10 worker_session) != "$s10" ]]'
+check "a restack on a task with an effort starts as it would without, and records none" '[[ $(last_launch) != *--effort* && -z $(crew get 10 worker_effort) ]]'
 check "restack gives the worker a push with the branch's origin commit as the lease" '[[ $(last_launch) == *"\`git push --force-with-lease=agent/season-admin:$L10 origin agent/season-admin\`"* ]]'
 check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(last_launch) == *"git rebase --onto $T9b $T9\`"* && $(last_launch) != *"gh pr edit --base"* && $(crew get 10 status) == working ]]'
 check "a restack session is told to read only what its steps need, not the whole task file" \
   '[[ $(last_launch) == *"Don'"'"'t read the whole task file or review the branch first; read only what a step of your restack workflow needs."* && $(last_launch) != *"Read the whole task file"* ]]'
 check "status shows the restack a working task needs, and no merge check" \
-  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved  effort medium" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
 s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
-check "the next followup after a restack starts afresh on the task's model, the default here, and says why" \
-  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
+check "the next followup after a restack starts afresh on the task's model, the default here, and at its effort, and says why" \
+  '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && $(last_launch) == *" --effort medium "* && $(crew get 10 worker_effort) == medium && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
 setstate "done" null; hand_over 10; n=$(launches)
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 setstate working 4242; out=$(crew restack 10 --again 2>&1)
@@ -1165,7 +1202,7 @@ check "red CI on a PR closed without merging is left alone, by tick and by hand"
 echo OPEN >"$HOME/gh-pr-state"
 crew tick >/dev/null 2>&1; setstate "done" null; hand_over 13; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
-check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
+check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds the branch caused, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
 hand_over 13; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
 out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
@@ -2540,7 +2577,7 @@ as_worker set "$PI" status needs-input
 # Every kind of thing crew tick did since the lead's previous prompt, and the statuses a worker set.
 out=$(<"$HOME/news-heard")
 for heard in "merged; worktree cleaned up" "review round 1 recorded" "comment(s) from collaborators, for you" "recorded: red on" \
-  " CI rounds, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
+  " CI rounds the branch caused, for you" "recorded: conflicts with main" "a fresh worker picks it up" "round 1 sent to its worker" \
   "restack sent to its worker (014-tick-parent moved)" "restack sent to its worker (PR targets agent/tick-old, not main)" "waiting on you (1 open question(s))" \
   "dispatched for goal" "goal $G: input sent to its goal lead" "goal $G: done, every task finished" "$TPI: its worker carries on after the pause" \
   "nudged it" "can't be nudged, for the lead" "$TPI: handed over (pr-open)" "$TPI: status → needs-input"; do
@@ -2847,5 +2884,42 @@ SC3=$(crew new "Stays locked" --branch stays-locked --project "$PJ"); fill "$SC3
 SW3=$(crew get "$SC3" worktree); git -C "$SB/webapp" worktree lock "$SW3"; crew set "$SC3" status merged >/dev/null
 stays_case "$SC3" "a worktrunk task whose worktree won't remove" "the worktree tool couldn't remove $SW3"
 git -C "$SB/webapp" worktree unlock "$SW3"; sed -i '/^WORKTREE_TOOL=/d' "$PD/project.env"
+
+# Red CI the worker finds its branch didn't cause (a flaky test, the CI service, a red base), and
+# hands back without asking, doesn't count toward MAX_CI_FIXES; red CI its branch caused does.
+# Each case is a task of its own; they come last, so the tasks they add renumber nothing above.
+echo OPEN >"$HOME/gh-pr-state"
+ci_round() { ci "$1" test:FAILURE; setstate "done" null; crew tick 2>/dev/null; }   # head: CI goes red on it, and a tick acts
+# What the worker does with a CI round, as implementer.md "Workflow: review rounds" step 4 says:
+# it posts its comment for the head, with --not-the-branch when its branch didn't cause the red
+# CI, ticks the line, and hands the PR over. A refused comment fails the suite.
+answer_ci() {  # task short-sha [--not-the-branch]
+  local f; f=$(crew path "$1"); printf 'CI was red\n' >"$HOME/ci.md"
+  crew ci-summary ${3:+"$3"} "$1" "$2" "$HOME/ci.md" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: ci-summary %s %s refused at line %s\n' "$1" "$2" "${BASH_LINENO[0]}"; }
+  sed -i "s/^- \[ \] CI failed on $2:/- [x] CI failed on $2:/" "$f"; hand_over "$1"
+}
+CO=$(pr_task "Red CI outside the branch"); TCO=$(basename "$CO" .md); hand_over "$CO"
+o1=$(ci_round 1111aaaffff0); answer_ci "$CO" 1111aaa --not-the-branch
+o2=$(ci_round 2222bbbffff0); answer_ci "$CO" 2222bbb --not-the-branch
+o3=$(ci_round 3333cccffff0); answer_ci "$CO" 3333ccc --not-the-branch
+check "three red heads the worker hands back as not its branch's each get a round and no question, and leave the task pr-open" '[[ $o1 == *"$TCO: CI round 1 recorded: red on 1111aaa"* && $o2 == *"$TCO: CI round 2 recorded: red on 2222bbb"* && $o3 == *"$TCO: CI round 3 recorded: red on 3333ccc"* && $o3 != *"for you"* && $(crew get "$CO" status) == pr-open ]] && ! grep -q "CI is still red" "$CO"'
+check "ci-summary --not-the-branch marks the head's round line, which the worker then ticks" '[[ $(round "$CO" 3) == "- [x] CI failed on 3333ccc: test (the branch didn'"'"'t cause it)" && $(cat "$HOME/gh-summaries/"*) == *"<!-- crew ci-summary: 3333ccc -->"* ]]'
+o4=$(setstate "done" null; crew tick 2>/dev/null); o5=$(crew tick 2>/dev/null)
+check "a handed-back red head still gets exactly one round across repeated ticks" '[[ $o4 != *"$TCO"* && $o5 != *"$TCO"* && $(crew get "$CO" review_rounds) == 3 && $(grep -c "^- \[.\] CI failed on 3333ccc" "$CO") == 1 && $(crew get "$CO" status) == pr-open ]]'
+crew set "$CO" status abandoned
+CB=$(pr_task "Red CI from the branch"); TCB=$(basename "$CB" .md); hand_over "$CB"
+ci_round 4444dddffff0 >/dev/null; answer_ci "$CB" 4444ddd
+ci_round 5555eeeffff0 >/dev/null; answer_ci "$CB" 5555eee
+out=$(ci_round 6666fffaaaa0)
+check "three red heads the branch caused: the third is a question for the user, as before" '[[ $out == *"$TCB: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CB" status) == needs-input && $(crew get "$CB" review_rounds) == 2 ]] && [[ $(section "$CB" "## Open questions") == *"- [ ] CI is still red on 6666fff after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
+crew set "$CB" status abandoned
+CM=$(pr_task "Red CI from both"); TCM=$(basename "$CM" .md); hand_over "$CM"
+ci_round 7777aaaffff0 >/dev/null; answer_ci "$CM" 7777aaa
+ci_round 8888bbbffff0 >/dev/null; answer_ci "$CM" 8888bbb --not-the-branch
+ci_round 9999cccffff0 >/dev/null; answer_ci "$CM" 9999ccc
+out=$(ci_round 0000dddffff0)
+check "branch caused, handed back, branch caused: a new red head is a question, after 2 CI rounds" '[[ $out == *"$TCM: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CM" status) == needs-input && $(crew get "$CM" review_rounds) == 3 ]] && [[ $(section "$CM" "## Open questions") == *"- [ ] CI is still red on 0000ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
+crew set "$CM" status abandoned
+rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
 summary crew-e2e

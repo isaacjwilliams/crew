@@ -40,7 +40,7 @@ func cmdDispatch(c *Crew, args []string) error {
 	}
 	// Building the launcher reads the worker settings, so a bad one stops here,
 	// before anything changes.
-	start, err := c.launchWorker(p, t.Model())
+	start, err := c.launchWorker(p, t.Model(), t.Effort())
 	if err != nil {
 		return err
 	}

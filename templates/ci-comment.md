@@ -1,7 +1,8 @@
 <!-- Why CI was red on a worker's PR, and what was done about it.
      - One comment for each commit a review round's "CI failed on <sha>" line reports.
-     - Fill it in when you're done with that line: CI is green again, or you're about to ask the
-       user. Post it with `crew ci-summary <task> <sha> <file>`.
+     - Fill it in when you're done with that line: CI is green again, or it's waiting on a person.
+       Post it with `crew ci-summary <task> <sha> <file>`, adding `--not-the-branch` before <task>
+       when your branch didn't cause it.
      - Leave out this comment and the <…> placeholders. Keep each part to a sentence or two.
      - It's for the user's collaborators too: never mention the ledger, tasks, review rounds or agents.
 
@@ -12,7 +13,9 @@
      - It didn't, and the rerun failed again: "Nothing in this PR caused it. The rerun failed again,
        so it's waiting on a person."
      - It didn't, and it couldn't be rerun from here: "Nothing in this PR caused it. It needs someone
-       to rerun it." -->
+       to rerun it."
+     - It didn't: the base branch fails the same way: "Nothing in this PR caused it: <base> fails the
+       same way, so it needs a fix there." -->
 ## CI was red
 
 **What failed:** <check>, <check> on <short sha>.

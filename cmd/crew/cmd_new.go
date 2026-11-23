@@ -548,11 +548,14 @@ func staleReview(t Task, repo string) string {
 	return ""
 }
 
-// checkEvidence refuses evidence that can't reach the user: an acceptance
-// criterion with no item in the task's ## Evidence or in the PR body (pr, nil
-// without a PR), an item that doesn't name the commit it ran on, or one that
-// ran on other work than the branch has now. A restack or a merge of the base
-// that git made on its own keeps evidence current (branchWork.unchangedSince).
+// checkEvidence refuses evidence that can't reach the user. In the task's
+// ## Evidence or the PR body (pr, nil without a PR), it refuses:
+//   - an acceptance criterion with no item;
+//   - an item that doesn't name the commit it ran on;
+//   - one that says its check wasn't run, unless it's a user check (Task.UserChecks);
+//   - one that ran on other work than the branch has now. A restack, or a merge
+//     of the base that git made on its own, keeps evidence current
+//     (branchWork.unchangedSince).
 func checkEvidence(t Task, repo string, pr Evidence) error {
 	n := len(t.AcceptanceCriteria())
 	if n == 0 {
@@ -576,6 +579,10 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 			return fail("the PR body's Evidence for acceptance criteria %s doesn't name the commit it ran on: put '(on <sha>)' after each item's criterion, with gh pr edit", numberList(unnamed))
 		}
 	}
+	userChecks := t.UserChecks()
+	if notRun := evidencePlaces(task.NotRun(userChecks), pr.NotRun(userChecks)); notRun != "" {
+		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", notRun)
+	}
 	work, err := ownWork(t, repo)
 	if err != nil {
 		return fail("couldn't check the evidence: %v", err)
@@ -586,7 +593,8 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	stale := map[string]bool{}
 	staleHere := false
 	for _, e := range []Evidence{task, pr} {
-		for _, sha := range e {
+		for _, item := range e {
+			sha := item.Commit
 			if _, checked := stale[sha]; checked {
 				continue
 			}
@@ -607,20 +615,27 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 			}
 		}
 	}
-	var places []string
-	if items := task.Naming(stale); items != "" {
-		places = append(places, "## Evidence: "+items)
+	places := evidencePlaces(task.Naming(stale), pr.Naming(stale))
+	if places != "" && !staleHere && slices.ContainsFunc(work, branchWork.here) {
+		return fail("evidence ran on work the branch on origin doesn't have yet, in %s. Push the branch, then hand over again", places)
 	}
-	if items := pr.Naming(stale); items != "" {
-		places = append(places, "the PR body: "+items)
-	}
-	if len(places) > 0 && !staleHere && slices.ContainsFunc(work, branchWork.here) {
-		return fail("evidence ran on work the branch on origin doesn't have yet, in %s. Push the branch, then hand over again", strings.Join(places, "; "))
-	}
-	if len(places) > 0 {
-		return fail("evidence ran on other work than the branch has now, here and on origin, in %s. Push the branch, run the evidence again, and record it with the commit it ran on", strings.Join(places, "; "))
+	if places != "" {
+		return fail("evidence ran on other work than the branch has now, here and on origin, in %s. Push the branch, run the evidence again, and record it with the commit it ran on", places)
 	}
 	return nil
+}
+
+// evidencePlaces says where the items a check found are, in the task's
+// ## Evidence and in the PR body, or "" when it found none.
+func evidencePlaces(taskItems, prItems string) string {
+	var places []string
+	if taskItems != "" {
+		places = append(places, "## Evidence: "+taskItems)
+	}
+	if prItems != "" {
+		places = append(places, "the PR body: "+prItems)
+	}
+	return strings.Join(places, "; ")
 }
 
 // numberList is the numbers ns, comma-separated.

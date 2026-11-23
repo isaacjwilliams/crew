@@ -336,6 +336,9 @@ func (c *Crew) checkValue(proj, key, value string) (string, error) {
 	case "model":
 		ok = slices.Contains(models, value)
 		takes = orList(models)
+	case "effort":
+		ok = slices.Contains(efforts, value)
+		takes = orList(efforts)
 	case "auto_review":
 		ok = value == autoReviewOff
 		takes = autoReviewOff
