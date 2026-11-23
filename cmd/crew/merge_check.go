@@ -1,7 +1,7 @@
 package main
 
 // Whether the user can merge a pr-open task's PR now. crew status judges it from
-// the PR as GitHub has it when status runs, and from what crew knows of the task.
+// the PR as GitHub answered when last asked, and from what crew knows of the task.
 
 import (
 	"fmt"
