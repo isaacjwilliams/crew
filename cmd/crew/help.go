@@ -136,7 +136,7 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review-cost AGENT_ID        What the run of Claude subagent AGENT_ID cost:
                                    tokens, time, model and effort, from its
                                    transcript (used by pr-review)
-  crew status [--done] [--all|--project P]
+  crew status [--done] [--plain] [--all|--project P]
                                    Tasks with worker state, and what each one not yet
                                    dispatched waits for. A goal's tasks are grouped,
                                    the next ones in dispatch order; stacked tasks are
@@ -144,7 +144,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    the look it needs, and each project ends with its
                                    PRs to review, cheapest look first. For one
                                    project, it ends with what's waiting on you in the
-                                   others
+                                   others. In a terminal it stays open, as a tree
+                                   you can fold, and keeps itself up to date;
+                                   --plain prints the text instead
   crew stats [--since YYYY-MM-DD] [--all|--project P]
                                    For each task merged since the date (default 30
                                    days ago): your review rounds and comments, how
