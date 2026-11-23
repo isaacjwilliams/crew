@@ -302,6 +302,58 @@ func (idx Branches) restackTarget(t Task, repo string) string {
 	return sha
 }
 
+// rebase is what moves a stacked task's branch onto its parent's latest commit,
+// or onto the branch the parent merged into, and how a worker is told to run it.
+type rebase struct {
+	reason  string // why it's needed: restackReason's answer
+	onto    string // origin's tip of newBase
+	cut     string // base_sha: the last of the parent's commits in the branch
+	newBase string // the branch the task belongs on now (effectiveBase)
+	parent  string // the parent's ID
+	branch  string // the task's branch
+	lease   string // where origin has the branch now; empty when it has none
+}
+
+// rebaseFor is t's rebase onto its parent, or why there's none to run. It's the
+// zero rebase when t's branch already holds its parent's latest commit.
+func (idx Branches) rebaseFor(t, parent Task, repo string) (rebase, error) {
+	r := rebase{reason: idx.restackReason(t, repo), newBase: idx.effectiveBase(t), parent: parent.ID(), branch: t.Branch()}
+	if r.reason == "" {
+		return rebase{}, nil
+	}
+	if r.onto = idx.restackTarget(t, repo); r.onto == "" {
+		return rebase{}, fail("origin/%s doesn't exist, so there's nothing to restack %s onto", r.newBase, t.ID())
+	}
+	if r.cut = t.Get("base_sha"); r.cut == "" {
+		return rebase{}, fail("%s has no base_sha (it was dispatched before crew recorded one). Find the last commit of %s's in %s and run 'crew set %s base_sha <sha>'", t.ID(), r.parent, r.branch, t.ID())
+	}
+	if !gitOK(repo, "merge-base", "--is-ancestor", r.cut, "refs/heads/"+r.branch) {
+		return rebase{}, fail("%s no longer contains %s's commits (base_sha %s), so it looks restacked already. If it is, record it with 'crew set %s base %s'", r.branch, r.parent, cut(r.cut, 12), t.ID(), r.newBase)
+	}
+	// The push's lease is where origin has the branch now, so the push fails if
+	// anyone else moved it. A branch that was never pushed gets an empty lease,
+	// which tells git it must not exist on origin yet.
+	r.lease, _ = git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+r.branch+"^{commit}")
+	return r, nil
+}
+
+// steps tells a worker to run the rebase, then what it does next, and how to
+// push the result.
+func (r rebase) steps(then string) string {
+	return fmt.Sprintf("rebase your branch with `git fetch origin && git rebase --onto %s %s`, then %s. %s is origin/%s now; %s is the last of %s's commits in your branch. Push the result with `git push --force-with-lease=%s:%s origin %s`, exactly as written and as a command on its own.",
+		r.onto, r.cut, then, r.onto, r.newBase, r.cut, r.parent, r.branch, r.lease, r.branch)
+}
+
+// newBaseSteps tells the worker of t, whose parent merged, how to move the task
+// to what the parent merged into once it has pushed: its PR, when it has one,
+// and its base.
+func (r rebase) newBaseSteps(t Task) string {
+	if t.PR() == "" {
+		return fmt.Sprintf(" Your base is now %s: after pushing, run `crew set %s base %s`.", r.newBase, t.ID(), r.newBase)
+	}
+	return fmt.Sprintf(" Your base is now %s: after pushing, run `gh pr edit --base %s` and `crew set %s base %s`.", r.newBase, r.newBase, t.ID(), r.newBase)
+}
+
 // parentNeedsRestack: a stack restacks bottom-up, and a parent that is about to
 // be rebased would only move this task again.
 func (idx Branches) parentNeedsRestack(t Task, repo string) bool {
