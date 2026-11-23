@@ -154,8 +154,10 @@ func (c *Crew) readPRs(projects []string) map[string]prRead {
 				prs[url] = prRead{pr, err}
 				mu.Unlock()
 			}
+			// A project crew can't read GitHub for here is as if GitHub didn't
+			// answer: its checks go by the last sync.
 			if projectErr != nil {
-				keep(gitHubPR{}, projectErr) // other projects' reads may still be running
+				keep(gitHubPR{}, projectErr)
 				continue
 			}
 			wg.Go(func() { keep(readPR(p.Repo(), url)) })

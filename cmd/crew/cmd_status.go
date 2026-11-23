@@ -75,7 +75,7 @@ const idColumn = 2 + 4 + 3 + 32
 // statusLine is one line of crew status (a project, a goal, a group of a goal's
 // tasks, a task, or a count), with the lines that belong under it, its kids.
 type statusLine struct {
-	key    string // names the line from one report to the next
+	key    string // names the line from one report to the next, so a view can keep its place
 	head   string // what the line says; for a task or a goal, its ID
 	tail   string // a task's or goal's columns, lined up after its ID
 	kids   []statusLine
@@ -301,7 +301,8 @@ func (k groupKind) heading() string {
 // groupLines is a goal's group under its heading. The rows it leaves out are
 // counted in a folded line under it.
 func groupLines(goalKey string, g taskGroup) statusLine {
-	// A goal's ready tasks become its next ones when it starts: still one group.
+	// A goal's ready tasks become its next ones when it starts. It's still one
+	// group, so its key stays the same though its heading changes.
 	kind := g.Kind
 	if kind == groupNext {
 		kind = groupReady
@@ -356,10 +357,10 @@ func rowsLines(rows []taskRow, number func(taskRow) string) []statusLine {
 // noNumber is the number column of a row outside a goal: there's none.
 func noNumber(taskRow) string { return "" }
 
-// rowLines is a task's line, with the tasks stacked on it under it. The number
-// is its group's number column.
-func rowLines(r taskRow, number string) statusLine {
-	l := statusLine{key: "task " + r.Task.Path, head: number + r.Task.ID(), tail: rowColumns(r)}
+// rowLines is a task's line, with the tasks stacked on it under it. before is
+// what goes before its ID: its group's number column, or └ for a stacked task.
+func rowLines(r taskRow, before string) statusLine {
+	l := statusLine{key: "task " + r.Task.Path, head: before + r.Task.ID(), tail: rowColumns(r)}
 	for _, k := range r.Kids {
 		l.kids = append(l.kids, rowLines(k, "└ "))
 	}
