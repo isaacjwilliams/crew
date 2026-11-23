@@ -193,8 +193,26 @@ func (c *Crew) listWorkers() *workerList {
 }
 
 // branchRead is what git said of a task's branches: why it needs a restack, and
-// why its PR needs a retarget, when it does.
-type branchRead struct{ restack, retarget string }
+// why its PR needs a retarget, when it does. Git's answer holds only for the
+// place in its stack the task had when git was asked.
+type branchRead struct {
+	restack, retarget string
+	on                stackPlace
+}
+
+// stackPlace is where a task sits in its stack, as the ledger says: its base,
+// and the status of the task it's stacked on, if any. A parent that merges
+// changes why the task needs a restack, before git has anything new to say.
+type stackPlace struct {
+	base   string
+	parent Status
+}
+
+// placeOf is where t sits in its stack now.
+func (idx Branches) placeOf(t Task) stackPlace {
+	p, _ := idx.parentOf(t)
+	return stackPlace{t.Base(), p.Status()}
+}
 
 // branchReads are what git said of the branches of each task in flight, by the
 // task's file.
@@ -215,9 +233,9 @@ func (c *Crew) readBranches(projects []string) branchReads {
 			if !t.Status().InFlight() {
 				continue
 			}
-			var b branchRead
+			b := branchRead{on: idx.placeOf(t)}
 			if repo != "" {
-				b = branchRead{idx.restackReason(t, repo), idx.retargetReason(t, repo)}
+				b.restack, b.retarget = idx.restackReason(t, repo), idx.retargetReason(t, repo)
 			}
 			reads[t.Path] = b
 		}
@@ -639,12 +657,12 @@ func (s *statusView) prNotes(t Task) []string {
 	return notes
 }
 
-// branchesOf is what git last said of t's branches, and false when they haven't
-// been read yet: before the first read, or for a task that went in flight
-// since the last one.
+// branchesOf is what git last said of t's branches, and false when that no
+// longer holds: before the first read, for a task that went in flight since the
+// last one, and for one whose place in its stack has changed since.
 func (s *statusView) branchesOf(t Task) (branchRead, bool) {
 	b, read := s.reads.branches[t.Path]
-	return b, read
+	return b, read && b.on == s.branches.placeOf(t)
 }
 
 // learning is what a draft is still learning: how many items under Still to

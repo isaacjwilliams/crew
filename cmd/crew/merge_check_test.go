@@ -58,6 +58,7 @@ func TestMergeCheck(t *testing.T) {
 		unbranch bool              // the branches haven't been read yet
 		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
 		parent   string            // the status of 020-parent, on branch agent/parent
+		reparent string            // 020-parent's status by the time the report is built, after the branches were read
 		want     string
 	}{
 		{name: "nothing in the way", want: "merge now"},
@@ -69,6 +70,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "automated review off for the task", fields: map[string]string{"auto_review": "no"}, body: "## Log\n", want: "merge now"},
 		{name: "automated review off for the project", settings: map[string]string{"AUTO_REVIEWS": "0"}, body: "## Log\n", want: "merge now"},
 		{name: "parent merged, still the base", fields: map[string]string{"base": "agent/parent"}, parent: "merged", want: "not yet: needs restack: 020-parent merged"},
+		{name: "parent merged since the branches were read", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", reparent: "merged", want: "not yet: branches not read yet"},
 		{name: "PR targets another branch", pr: func(p *gitHubPR) { p.Base = "agent/old" }, want: "not yet: PR targets agent/old, not main"},
 		{name: "stacked on an unmerged task", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: stacked on 020"},
 		{name: "based on another branch", fields: map[string]string{"base": "release"}, pr: func(p *gitHubPR) { p.Base = "release" }, want: "not yet: based on release, not main"},
@@ -129,6 +131,9 @@ func TestMergeCheck(t *testing.T) {
 			c := &Crew{Home: dir}
 			writeFile(t, c, "REPO="+repo+"\n", "projects", "p", "project.env")
 			reads := statusReads{workers: &workerList{}, branches: c.readBranches([]string{"p"})}
+			if tc.reparent != "" {
+				mergeTask(t, dir, "020-parent", map[string]string{"status": tc.reparent, "base": "main", "branch": "agent/parent"}, "## Log\n")
+			}
 			if tc.unbranch {
 				reads.branches = nil
 			}
