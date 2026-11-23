@@ -151,7 +151,7 @@ func (p *Project) setupWorktree(t Task, wt, branch, base string) (from worktreeF
 			return "", "", fail("%s exists but isn't a git worktree", wt)
 		}
 		if p.Settings["WORKTREE_TOOL"] == "worktrunk" && t.Worktree() == "" {
-			return "", "", fail("%s is left over from a dispatch whose Worktrunk setup failed; remove it with 'wt -C %s remove %s' and dispatch again", wt, repo, wt)
+			return "", "", fail("%s is left over from a dispatch whose Worktrunk setup failed; run 'crew cleanup %s --force' and dispatch again", wt, t.ID())
 		}
 	} else {
 		startRef := ""
@@ -182,6 +182,12 @@ func (p *Project) setupWorktree(t Task, wt, branch, base string) (from worktreeF
 	return from, startSHA, nil
 }
 
+// taskWorktree is where this machine keeps a task's worktree, whatever path the
+// task file records.
+func (p *Project) taskWorktree(t Task) string {
+	return filepath.Join(p.WorkRoot(), p.Name, t.ID())
+}
+
 func (p *Project) worktreeLog(t Task) string {
 	return filepath.Join(p.Home, "logs", "worktree-"+p.Name+"-"+t.ID()+".log")
 }
@@ -193,7 +199,7 @@ func (p *Project) worktreeLog(t Task) string {
 // path when it changes, and logs how a missing worktree came back. Run it without
 // the ledger lock.
 func (c *Crew) ensureWorktree(p *Project, t Task) error {
-	wt := filepath.Join(p.WorkRoot(), p.Name, t.ID())
+	wt := p.taskWorktree(t)
 	base := t.Base()
 	if base == "" {
 		base = p.DefaultBranch()

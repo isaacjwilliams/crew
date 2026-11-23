@@ -805,11 +805,17 @@ rm -f "$HOME/wt-elsewhere"; touch "$HOME/wt-hook-fail"
 check "a failing setup hook stops the dispatch" '! crew dispatch 4 >/dev/null 2>&1 && [[ -d $WT4 && -z $(crew get 4 worktree) ]]'
 rm -f "$HOME/wt-hook-fail"
 out=$(crew dispatch 4 2>&1)
-check "a half-set-up worktree isn't reused" '[[ $out == *"left over"* && $(crew get 4 status) == ready ]]'
-wt -C "$SB/webapp" remove "$WT4" >/dev/null; git branch -q -D agent/instance-per-worktree; : >"$HOME/wt-hooks.log"
+check "a half-set-up worktree isn't reused, and the refusal names the crew command that clears it" \
+  '[[ $out == *"left over"* && $out == *"crew cleanup $(basename "$F4" .md) --force"* && $out != *"wt "* && $(crew get 4 status) == ready ]]'
+(cd "$SB/other-clone" && git fetch -q origin && git checkout -q -B main origin/main && echo moved >>AGENTS.md && git commit -qam "origin moves on" && git push -q origin main)
+crew cleanup 4 --force >/dev/null 2>&1; : >"$HOME/wt-hooks.log"
+check "cleanup --force removes the worktree a failed dispatch left, and the branch it started" \
+  '[[ ! -d $WT4 ]] && ! git show-ref --verify --quiet refs/heads/agent/instance-per-worktree && grep -q "cleaned up worktree" "$F4"'
 echo 'flock -n "$CREW_HOME/.crew.lock" true && echo ledger-unlocked' >"$HOME/wt-hook-cmd"
 out=$(crew dispatch 4 2>&1)
 check "worktrunk dispatch starts a worker" '[[ $(crew get 4 status) == working && -n $(crew get 4 worker_job) ]]'
+check "the dispatch after that cleanup starts the branch at origin's current tip, and records it" '[[ $(git -C "$WT4" rev-parse HEAD) == $(git rev-parse origin/main) && $(crew get 4 base_sha) == $(git rev-parse origin/main) ]]'
+git -C "$SB/webapp" merge -q --ff-only origin/main   # later steps push from main
 check "wt creates the worktree under WORK_ROOT on the task branch" '[[ $(crew get 4 worktree) == "$WT4" && $(git -C "$WT4" branch --show-current) == agent/instance-per-worktree ]]'
 check "wt switch gets --create, the base and the path" 'grep -F -- "switch --no-cd --format json --config-set worktree-path=\"$WT4\" --create --base origin/main agent/instance-per-worktree" "$HOME/wt-calls.log" >/dev/null'
 check "the pre-start hook ran" '[[ -f $WT4/.instance.yml ]] && grep -qx "pre-start agent/instance-per-worktree" "$HOME/wt-hooks.log"'
@@ -1457,6 +1463,33 @@ crew set "$F16" status abandoned >/dev/null; crew set "$F16" worktree "/elsewher
 out=$(crew cleanup "$F16" 2>&1)
 check "cleanup of a task whose worktree isn't here just clears it" '[[ $out == *"cleaned up"* && -z $(crew get "$F16" worktree) ]]'
 crew set "$F17" status abandoned >/dev/null
+# A forced cleanup reports a worktree it leaves, and changes nothing for a task with none.
+LEFT=$(crew new "Leftover directory" --branch leftover-dir); fill "$LEFT"; crew ready "$LEFT" >/dev/null
+WLEFT="$HOME/agent-work/$(basename "$PD")/$(basename "$LEFT" .md)"
+snapshot() { cksum <"$LEFT"; ls -R "$HOME/agent-work/$(basename "$PD")" | cksum; git -C "$SB/webapp" branch --list | cksum; }
+before=$(snapshot)
+out=$(crew cleanup "$LEFT" --force 2>&1); st=$?
+check "a forced cleanup of a ready task with no worktree anywhere changes nothing and logs nothing" \
+  '((st == 0)) && [[ $out != *"cleaned up"* && $before == $(snapshot) ]]'
+mkdir -p "$WLEFT"
+out=$(crew cleanup "$LEFT" --force 2>&1); st=$?
+check "a forced cleanup doesn't report cleaning up while something that isn't a worktree is at the task's path" \
+  '((st == 4)) && [[ $out == *"$(basename "$LEFT" .md): worktree stays: "* && $out != *"cleaned up"* && -d $WLEFT ]] && ! grep -q "cleaned up worktree" "$LEFT"'
+rmdir "$WLEFT"
+# A leftover whose branch has commits of its own keeps the branch, and one reached by two spellings of its path is removed once.
+KEEP=$(crew new "Leftover with work" --branch leftover-work); fill "$KEEP"; crew ready "$KEEP" >/dev/null; setstate "done" null; crew dispatch "$KEEP" >/dev/null
+WKEEP=$(crew get "$KEEP" worktree); (cd "$WKEEP" && echo x >w.txt && git add w.txt && git commit -qm "work")
+crew set "$KEEP" worktree "" >/dev/null; crew set "$KEEP" status abandoned >/dev/null
+out=$(crew cleanup "$KEEP" --force 2>&1)
+check "a forced cleanup of a leftover removes it but keeps a branch that has commits of its own" \
+  '[[ $out == *"cleaned up"* && ! -d $WKEEP ]] && git -C "$SB/webapp" show-ref --verify --quiet refs/heads/agent/leftover-work'
+ALIAS=$(crew new "Aliased path" --branch aliased-path); fill "$ALIAS"; crew ready "$ALIAS" >/dev/null; setstate "done" null; crew dispatch "$ALIAS" >/dev/null
+WALIAS=$(crew get "$ALIAS" worktree); ln -s "$WALIAS" "$SB/alias-link"
+crew set "$ALIAS" worktree "$SB/alias-link" >/dev/null; crew set "$ALIAS" status abandoned >/dev/null
+out=$(crew cleanup "$ALIAS" --force 2>&1); st=$?
+check "a forced cleanup reached by two spellings of one worktree path removes it once and succeeds" \
+  '((st == 0)) && [[ $out == *"cleaned up"* && ! -d $WALIAS && -z $(crew get "$ALIAS" worktree) ]]'
+rm -f "$SB/alias-link"
 # A PR's new base that only another clone has pushed, with no stack in flight for sync to fetch
 # for (12 steps aside): sync fetches for the PR itself.
 crew set 12 status abandoned >/dev/null

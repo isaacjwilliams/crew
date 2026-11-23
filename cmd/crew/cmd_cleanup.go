@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // crew cleanup TASK|--merged [--force]: stops a finished task's worker and
 // removes it from agent view, ends what it left running in the worktree,
@@ -66,19 +69,29 @@ func cmdCleanup(c *Crew, args []string) error {
 			warn("%s", line)
 		}
 	}()
+tasks:
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
 		if err != nil {
 			return err
 		}
 		st, wt, job := t.Status(), t.Worktree(), t.WorkerJob()
+		// A dispatch that failed while setting up its worktree left one at the
+		// task's own path without recording it, and a task moved from another
+		// machine records that machine's path.
+		var dirs []string
+		for _, dir := range []string{wt, p.taskWorktree(t)} {
+			if isDir(dir) && !slices.Contains(dirs, dir) {
+				dirs = append(dirs, dir)
+			}
+		}
 		if !st.Finished() && !force {
 			stay(t, fmt.Sprintf("it is '%s' (crew cleanup --force removes it)", st))
 			continue
 		}
-		if wt != "" && isDir(wt) && !force {
-			if out, _ := git(wt, "status", "--porcelain"); out != "" {
-				stay(t, fmt.Sprintf("%s has uncommitted changes (crew cleanup --force removes it)", wt))
+		if !force {
+			if dir := firstDirty(dirs); dir != "" {
+				stay(t, fmt.Sprintf("%s has uncommitted changes (crew cleanup --force removes it)", dir))
 				continue
 			}
 		}
@@ -88,19 +101,32 @@ func cmdCleanup(c *Crew, args []string) error {
 			stay(t, fmt.Sprintf("worker %s is still running (stop it in claude agents)", job))
 			continue
 		}
-		if wt != "" && isDir(wt) {
-			stopProcessesIn(wt)
-			removed, err := p.worktreeRemove(wt, force, p.worktreeLog(t))
+		for _, dir := range dirs {
+			// Gone already when two spellings of one path were both found.
+			if !isDir(dir) {
+				continue
+			}
+			stopProcessesIn(dir)
+			removed, err := p.worktreeRemove(dir, force, p.worktreeLog(t))
 			if err != nil {
 				return err
 			}
 			if !removed {
-				stay(t, fmt.Sprintf("the worktree tool couldn't remove %s", wt))
-				continue
+				stay(t, fmt.Sprintf("the worktree tool couldn't remove %s", dir))
+				continue tasks
 			}
 		}
 		if st.Delivered() && t.Branch() != "" {
 			gitOK(p.Repo(), "branch", "-D", t.Branch())
+		}
+		// No recorded worktree: either a dispatch failed while making one, or the task
+		// has none to clean up (never dispatched, or cleaned up before).
+		if wt == "" {
+			if len(dirs) == 0 {
+				fmt.Println(t.ID() + " has no worktree to clean up")
+				continue
+			}
+			p.dropBranchWithoutCommits(t)
 		}
 		t.Set("worktree", "")
 		t.Touch()
@@ -116,4 +142,27 @@ func cmdCleanup(c *Crew, args []string) error {
 		return exitQuietly(exitNotYet)
 	}
 	return nil
+}
+
+// dropBranchWithoutCommits deletes the branch a failed dispatch's setup created.
+// Left alone, it would pin the next dispatch to the base's old tip. A branch with
+// commits of its own stays. It compares with the last fetched origin/<base>.
+func (p *Project) dropBranchWithoutCommits(t Task) {
+	base := t.Base()
+	if base == "" {
+		base = p.DefaultBranch()
+	}
+	if t.Branch() != "" && gitOK(p.Repo(), "merge-base", "--is-ancestor", "refs/heads/"+t.Branch(), "origin/"+base) {
+		gitOK(p.Repo(), "branch", "-D", t.Branch())
+	}
+}
+
+// firstDirty is the first of the worktrees that has uncommitted changes.
+func firstDirty(dirs []string) string {
+	for _, dir := range dirs {
+		if out, _ := git(dir, "status", "--porcelain"); out != "" {
+			return dir
+		}
+	}
+	return ""
 }
