@@ -179,7 +179,7 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 				failures := t.CIFailures()
 				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, now, failures[len(failures)-1])
 			} else {
-				news.did(p.Name, "%s: CI still red after %d CI rounds, for you", id, t.CIFixes())
+				news.did(p.Name, "%s: CI still red after %d CI rounds the branch caused, for you", id, t.CIFixes())
 			}
 		}
 	}

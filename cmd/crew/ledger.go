@@ -1253,7 +1253,7 @@ func (t Task) RecordCICause(head string, branchCaused bool) (bool, error) {
 	return true, t.writeLines(ls)
 }
 
-// ConflictReported:a review round sent the worker the PR's conflict with
+// ConflictReported: a review round sent the worker the PR's conflict with
 // its base at the base commit sha.
 func (t Task) ConflictReported(sha string) bool {
 	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {

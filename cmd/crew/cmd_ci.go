@@ -109,9 +109,8 @@ type redCI struct {
 
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
-// once for each head commit. After MAX_CI_FIXES such rounds that the worker
-// didn't find were outside its branch (Task.CIFixes), it asks the user under
-// Open questions instead. Exits 3 when there's nothing to do.
+// once for each head commit. After MAX_CI_FIXES rounds the branch caused
+// (Task.CIFixes), it asks the user under Open questions instead. Exits 3 when there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -179,9 +178,9 @@ func cmdCIFix(c *Crew, args []string) error {
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {
-		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d CI rounds (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
-		t.Log(fmt.Sprintf("CI still red on %s after %d CI rounds; %s", head, fixes, recordedForTheUser))
-		fmt.Printf("CI is still red on %s after %d CI rounds (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
+		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d CI rounds the branch caused (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
+		t.Log(fmt.Sprintf("CI still red on %s after %d CI rounds the branch caused; %s", head, fixes, recordedForTheUser))
+		fmt.Printf("CI is still red on %s after %d CI rounds the branch caused (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
 	}
 	t.Touch()
 	c.commit("ci-fix " + p.Name + "/" + t.ID())
@@ -212,9 +211,16 @@ func cmdCISummary(c *Crew, args []string) error {
 		return err
 	}
 	branchCaused := true
-	if i := slices.Index(args, "--not-the-branch"); i >= 0 {
-		args, branchCaused = slices.Delete(args, i, i+1), false
+	var rest []string
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--not-the-branch":
+			branchCaused, args = false, args[1:]
+		default:
+			rest, args = append(rest, args[0]), args[1:]
+		}
 	}
+	args = rest
 	if len(args) != 3 {
 		return usage("crew ci-summary [--not-the-branch] TASK SHA FILE")
 	}
