@@ -1,0 +1,351 @@
+package main
+
+// crew status's live view: the lines the plain text prints (reportLines), in a
+// terminal, built again every few seconds, with folds the user opens and closes.
+
+import (
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+)
+
+// How often the live view builds its report, and how often it brings in what
+// changed elsewhere: the PRs on GitHub and, on a machine that doesn't run the
+// crew, the ledger. A beat every second starts whichever is due.
+const (
+	buildEvery      = 3 * time.Second
+	readGitHubEvery = 30 * time.Second
+	pullLedgerEvery = time.Minute
+	beatEvery       = time.Second
+)
+
+// statusFeed is what crew status runs: pulling the ledger, reading GitHub for
+// the open PRs, and building a report from those reads. The live view runs
+// each in the background, on its own, so one that hangs holds back neither of
+// the others.
+type statusFeed struct {
+	pullLedger func()
+	readPRs    func() prReads
+	build      func(prReads) statusReport
+}
+
+// feedOf is crew status's feed for the scope it takes: one project, or "" for
+// all of them. Each read and build asks which projects that is, as they may
+// change while the view is open.
+func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
+	return statusFeed{
+		pullLedger: c.catchUpLedger,
+		readPRs:    func() prReads { return c.readPRs(c.projects(scope)) },
+		build:      func(reads prReads) statusReport { return buildReport(c, c.projects(scope), doneToo, reads) },
+	}
+}
+
+// watchStatus runs the live view until the user quits.
+func watchStatus(feed statusFeed) error {
+	p := tea.NewProgram(newLiveStatus(feed))
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		t := time.NewTicker(beatEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				p.Send(beat{})
+			case <-stop:
+				return
+			}
+		}
+	}()
+	_, err := p.Run()
+	return err
+}
+
+// job is one of the view's background jobs: building the report, reading
+// GitHub or pulling the ledger. It runs once at a time, at most every so
+// often, unless it's asked for sooner.
+type job struct {
+	every   time.Duration
+	running bool
+	last    time.Time // when it last started; zero before the first time
+	asked   bool      // wanted before its time: the user asked for a refresh, or new reads came in
+}
+
+// starts says whether the job starts now, and marks it running if it does.
+// One that's asked for while it runs starts once it's done.
+func (j *job) starts(now time.Time) bool {
+	if j.running || (!j.asked && now.Sub(j.last) < j.every) {
+		return false
+	}
+	j.running, j.last, j.asked = true, now, false
+	return true
+}
+
+// liveStatus is the live view: the latest report's lines, which of them are on
+// show, and the line the cursor is on.
+type liveStatus struct {
+	feed  statusFeed
+	now   func() time.Time
+	reads prReads // the PRs as GitHub last answered; nil before the first read
+
+	building, reading, pulling job
+
+	lines   []statusLine // the latest report's; nil before the first
+	builtAt time.Time
+	// open is whether the user left a line open, by its key. A line the user
+	// hasn't opened or closed is open unless the plain text folds it.
+	open          map[string]bool
+	shown         []shownLine // every line not under a closed one, in order
+	cursor        int         // the line it's on, in shown
+	top           int         // the first line of shown on the screen
+	width, height int
+}
+
+// shownLine is a line on show, with how deep it is in the tree.
+type shownLine struct {
+	statusLine
+	depth int
+	open  bool
+}
+
+// The messages the view's jobs and its beat send it.
+type (
+	beat         struct{}
+	ledgerPulled struct{}
+	prsRead      struct{ reads prReads }
+	reportBuilt  struct {
+		report statusReport
+		at     time.Time
+	}
+)
+
+func newLiveStatus(feed statusFeed) *liveStatus {
+	return &liveStatus{
+		feed: feed, now: time.Now,
+		building: job{every: buildEvery}, reading: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
+		open: map[string]bool{}, width: 80, height: 24,
+	}
+}
+
+func (m *liveStatus) Init() tea.Cmd { return m.startDue() }
+
+// startDue starts, in the background, each job that's due and not running.
+func (m *liveStatus) startDue() tea.Cmd {
+	now, feed := m.now(), m.feed
+	var cmds []tea.Cmd
+	if m.pulling.starts(now) {
+		cmds = append(cmds, func() tea.Msg { feed.pullLedger(); return ledgerPulled{} })
+	}
+	if m.reading.starts(now) {
+		cmds = append(cmds, func() tea.Msg { return prsRead{feed.readPRs()} })
+	}
+	if m.building.starts(now) {
+		reads := m.reads
+		cmds = append(cmds, func() tea.Msg { return reportBuilt{feed.build(reads), now} })
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.scroll()
+	case beat:
+		return m, m.startDue()
+	case ledgerPulled:
+		m.pulling.running = false
+		m.building.asked = true
+		return m, m.startDue()
+	case prsRead:
+		m.reading.running = false
+		m.reads = msg.reads
+		m.building.asked = true
+		return m, m.startDue()
+	case reportBuilt:
+		m.building.running = false
+		m.show(msg.report, msg.at)
+		return m, m.startDue()
+	case tea.KeyPressMsg:
+		return m, m.press(msg.String())
+	}
+	return m, nil
+}
+
+// show puts a new report on screen, with the cursor on the line it was on, or
+// as near to where it was as there's a line, when that one's gone.
+func (m *liveStatus) show(r statusReport, at time.Time) {
+	var key string
+	if l, ok := m.current(); ok {
+		key = l.key
+	}
+	m.lines, m.builtAt = reportLines(r), at
+	m.layOut()
+	m.cursor = min(m.cursor, len(m.shown)-1)
+	for i, l := range m.shown {
+		if l.key == key {
+			m.cursor = i
+			break
+		}
+	}
+	m.scroll()
+}
+
+func (m *liveStatus) press(key string) tea.Cmd {
+	switch key {
+	case "q", "ctrl+c":
+		return tea.Quit
+	case "up", "k":
+		m.moveTo(m.cursor - 1)
+	case "down", "j":
+		m.moveTo(m.cursor + 1)
+	case "pgup":
+		m.moveTo(m.cursor - m.bodyHeight())
+	case "pgdown":
+		m.moveTo(m.cursor + m.bodyHeight())
+	case "home", "g":
+		m.moveTo(0)
+	case "end", "G":
+		m.moveTo(len(m.shown) - 1)
+	case "left", "h":
+		m.closeOrUp()
+	case "right", "l":
+		m.setOpen(true)
+	case "enter", "space":
+		if l, ok := m.current(); ok {
+			m.setOpen(!l.open)
+		}
+	case "r":
+		// A read or pull under way may have started before what the user
+		// wants to see, so another follows it.
+		m.reading.asked, m.pulling.asked = true, true
+		return m.startDue()
+	}
+	return nil
+}
+
+func (m *liveStatus) current() (shownLine, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.shown) {
+		return shownLine{}, false
+	}
+	return m.shown[m.cursor], true
+}
+
+func (m *liveStatus) moveTo(i int) {
+	m.cursor = max(0, min(i, len(m.shown)-1))
+	m.scroll()
+}
+
+// setOpen opens or closes the line the cursor is on, if it has lines under it.
+func (m *liveStatus) setOpen(open bool) {
+	l, ok := m.current()
+	if !ok || len(l.kids) == 0 {
+		return
+	}
+	m.open[l.key] = open
+	m.layOut()
+	m.scroll()
+}
+
+// closeOrUp closes the line the cursor is on or, when it's closed already or
+// has nothing under it, goes up to the line it's under.
+func (m *liveStatus) closeOrUp() {
+	l, ok := m.current()
+	if !ok {
+		return
+	}
+	if l.open {
+		m.setOpen(false)
+		return
+	}
+	for i := m.cursor - 1; i >= 0; i-- {
+		if m.shown[i].depth < l.depth {
+			m.moveTo(i)
+			return
+		}
+	}
+}
+
+// layOut works out which lines are on show: every one not under a closed one.
+func (m *liveStatus) layOut() {
+	m.shown = m.shown[:0]
+	var add func(lines []statusLine, depth int)
+	add = func(lines []statusLine, depth int) {
+		for _, l := range lines {
+			open, ok := m.open[l.key]
+			if !ok {
+				open = !l.folded
+			}
+			open = open && len(l.kids) > 0
+			m.shown = append(m.shown, shownLine{l, depth, open})
+			if open {
+				add(l.kids, depth+1)
+			}
+		}
+	}
+	add(m.lines, 0)
+}
+
+// bodyHeight is how many lines of the report fit on screen, above the bar.
+func (m *liveStatus) bodyHeight() int { return max(1, m.height-1) }
+
+// scroll moves the screen as little as keeps the cursor on it.
+func (m *liveStatus) scroll() {
+	body := m.bodyHeight()
+	m.top = min(m.top, m.cursor)
+	m.top = max(m.top, m.cursor-body+1)
+	m.top = max(0, min(m.top, len(m.shown)-body))
+}
+
+var cursorStyle = lipgloss.NewStyle().Reverse(true)
+
+func (m *liveStatus) View() tea.View {
+	var b strings.Builder
+	for i := m.top; i < m.top+m.bodyHeight(); i++ {
+		line := ""
+		if i < len(m.shown) {
+			line = fit(m.shown[i].text(), m.width)
+			if i == m.cursor {
+				line = cursorStyle.Render(line)
+			}
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(fit(m.bar(), m.width))
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
+}
+
+// text is the line as the live view shows it: indented by its depth, with a
+// marker for whether it's open, closed, or has nothing under it. The marker
+// takes two columns more than the text's lines, so the columns start two later.
+func (l shownLine) text() string {
+	marker := " "
+	if len(l.kids) > 0 {
+		marker = "▸"
+		if l.open {
+			marker = "▾"
+		}
+	}
+	return l.statusLine.text(strings.Repeat("  ", l.depth)+marker+" ", idColumn+2)
+}
+
+// bar is the line at the bottom: how fresh the report is, and the keys.
+func (m *liveStatus) bar() string {
+	state := "loading…"
+	if m.lines != nil {
+		state = "updated " + m.builtAt.Format("15:04:05")
+	}
+	if m.reading.running {
+		state += ", reading GitHub…"
+	}
+	return state + "   ↑↓ move  ←→ fold  r refresh  q quit"
+}
+
+// fit cuts a line to the screen's width.
+func fit(line string, width int) string {
+	return lipgloss.NewStyle().MaxWidth(width).Render(line)
+}

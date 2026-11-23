@@ -8,23 +8,27 @@ import (
 	"unicode/utf8"
 )
 
-// crew status [--done] [--all|--project P]: the tasks of one project (P, or the
-// default project) or of all of them, with their workers' state. Stacked tasks
-// are listed under their parent, and a goal's tasks under the goal, grouped by
-// where they stand. Each task not yet dispatched says what it waits for. Showing
-// one project, it ends with what's waiting on you in the others.
+// crew status [--done] [--plain] [--all|--project P]: the tasks of one project
+// (P, or the default project) or of all of them, with their workers' state.
+// Stacked tasks are listed under their parent, and a goal's tasks under the
+// goal, grouped by where they stand. Each task not yet dispatched says what it
+// waits for. Showing one project, it ends with what's waiting on you in the
+// others. In a terminal it's a live view (status_live.go); anywhere else, or with
+// --plain, it prints the text and exits.
 func cmdStatus(c *Crew, args []string) error {
-	all, proj, doneToo := false, "", false
+	all, proj, doneToo, plain := false, "", false, false
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--done":
 			doneToo = true
+		case args[0] == "--plain":
+			plain = true
 		case args[0] == "--all":
 			all = true
 		case args[0] == "--project" && len(args) > 1:
 			proj, args = args[1], args[1:]
 		default:
-			return usage("crew status [--done] [--all|--project P]")
+			return usage("crew status [--done] [--plain] [--all|--project P]")
 		}
 		args = args[1:]
 	}
@@ -32,10 +36,13 @@ func cmdStatus(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	c.catchUpLedger()
-	inScope := c.projects(scope)
-	printReport(os.Stdout, buildReport(c, inScope, doneToo, c.readPRs(inScope)))
-	return nil
+	feed := feedOf(c, scope, doneToo)
+	if plain || !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+		feed.pullLedger()
+		printReport(os.Stdout, feed.build(feed.readPRs()))
+		return nil
+	}
+	return watchStatus(feed)
 }
 
 // catchUpLedger pulls the ledger when another machine runs the crew and pushes
