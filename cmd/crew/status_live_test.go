@@ -322,9 +322,9 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	release(t, letBuild)
 }
 
-// TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang changes a task while
-// the view's first read of GitHub and pull of the ledger hang, and sees it on
-// screen within 5 seconds.
+// TestLiveStatusKeepsBuildingWhileItsReadsHang changes a task while the view's
+// first reads (GitHub, the workers and the branches) and its pull of the ledger
+// hang, and sees it on screen within 5 seconds.
 func TestLiveStatusKeepsBuildingWhileItsReadsHang(t *testing.T) {
 	c := statusLedger(t)
 	hang := make(chan struct{})

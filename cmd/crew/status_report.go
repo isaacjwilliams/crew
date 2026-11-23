@@ -113,8 +113,10 @@ const (
 // taskRow is one task, with the tasks stacked on it.
 type taskRow struct {
 	Task   Task
-	Number int   // its place in a numbered group, 0 for none
-	Worker Agent // its worker, as claude agents lists it; zero when it isn't
+	Number int // its place in a numbered group, 0 for none
+	// Worker is its worker as claude agents lists it, zero when it isn't
+	// listed, or one in the state "not listed yet" before the first listing.
+	Worker Agent
 	// Merge says whether a pr-open task's PR can merge now; nil for any other task.
 	Merge *mergeCheck
 	Notes []string
