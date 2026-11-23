@@ -84,7 +84,7 @@ func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 	var u claudeUsage
 	u.Input, u.Output, u.CacheRead, u.CacheWrite = 1_000_000, 1_000_000, 1_000_000, 2_000_000
-	u.CacheWrites.OneHour = 1_000_000
+	u.CacheWriteKept.OneHour = 1_000_000
 	for model, want := range map[string]float64{
 		// input + output + cache read + 1.25 × input for a 5-minute write + 2 × input for a 1-hour one
 		"claude-opus-5-5":   4 + 20 + 0.2 + 5 + 8,

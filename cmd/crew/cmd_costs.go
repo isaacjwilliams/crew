@@ -50,7 +50,8 @@ var (
 // kept for five minutes costs 1.25 times input, and one kept for an hour twice.
 type rate struct{ input, output, cacheRead float64 }
 
-// apiRates are Anthropic's API prices on the date ratesDate.
+// apiRates are Anthropic's API prices on the date ratesDate. A model missing
+// here is reported unpriced, which is the sign to add it.
 var apiRates = map[string]rate{
 	"claude-opus-5-5":   {4, 20, 0.20},
 	"claude-sonnet-5-5": {2, 10, 0.10},
@@ -62,7 +63,7 @@ const ratesDate = "2026-11-03"
 
 // dollars is what usage u cost at rate r.
 func (r rate) dollars(u claudeUsage) float64 {
-	oneHour := float64(u.CacheWrites.OneHour)
+	oneHour := float64(u.CacheWriteKept.OneHour)
 	fiveMinutes := float64(u.CacheWrite) - oneHour
 	return (float64(u.Input)*r.input + fiveMinutes*r.input*1.25 + oneHour*r.input*2 +
 		float64(u.CacheRead)*r.cacheRead + float64(u.Output)*r.output) / 1e6
@@ -188,7 +189,8 @@ type costScan struct {
 
 // folder charges the sessions in a transcript folder to its owner o: its main
 // sessions, then their subagents. In a task's folder, each subagent is charged
-// to its own step (subagentOwner).
+// to its own step (subagentOwner), which needs the main sessions read first:
+// they show which Agent calls a skill made.
 func (s *costScan) folder(dir string, o owner) error {
 	skillAgents := map[string]string{} // the step of each Agent call a skill made, by the call's ID
 	mains, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
@@ -317,28 +319,28 @@ func (l transcriptLine) toolUses() []toolUse {
 	return uses
 }
 
-// skillRun follows a worker's session for the agents a skill starts. After a
-// Skill call to /simplify or /security-review, its first Agent call, and those
-// straight after it with no other tool call between, may be the skill's: a
-// skill starts its agents together, and the worker's own usually come later.
-// The worker can start its own straight after, though, so subagentOwner gives
-// a skill only Claude Code's built-in agents, the only kind skills start.
+// skillRun picks out, in a worker's session, the Agent calls that may be a
+// skill's. A Skill call to /simplify or /security-review opens a window. It
+// stays open until the first Agent call, then for as long as Agent calls come
+// one after another, and closes at the next other tool call: a skill starts
+// its agents together. Agents the worker starts in that window are no skill's;
+// subagentOwner tells them apart, as a skill starts only built-in agents.
 type skillRun struct {
-	step    string // the step of the skill whose agents are expected
-	started bool   // its agents have started
+	step          string // the step of the skill whose window is open, or ""
+	agentsStarted bool   // an Agent call has come since the Skill call
 }
 
-// follow follows the session's next tool call, u, recording in agents the step
-// of an Agent call the skill made.
+// follow takes the session's next tool call, u, and records in agents the
+// step of an Agent call made while a skill's window is open.
 func (r *skillRun) follow(u toolUse, agents map[string]string) {
 	switch {
 	case u.Name == "Skill":
 		var in struct{ Skill string }
 		json.Unmarshal(u.Input, &in)
-		r.step, r.started = skillSteps[in.Skill], false
+		r.step, r.agentsStarted = skillSteps[in.Skill], false
 	case (u.Name == "Agent" || u.Name == "Task") && r.step != "":
-		agents[u.ID], r.started = r.step, true
-	case r.started:
+		agents[u.ID], r.agentsStarted = r.step, true
+	case r.agentsStarted:
 		r.step = ""
 	}
 }
@@ -346,9 +348,9 @@ func (r *skillRun) follow(u toolUse, agents map[string]string) {
 // subagentOwner is who the subagent whose transcript is at path is charged to,
 // when it ran in a folder owned by o. A brief review is charged to the task
 // whose file its prompt names, wherever it ran. In a task's folder, a built-in
-// agent a skill started is charged to the skill's step, one crew has the worker
-// start to that step, and any other to a step named by its agent. Elsewhere
-// it's charged to o.
+// agent started in a skill's window is charged to the skill's step (any other
+// kind is the worker's own), one crew has the worker start to that step, and
+// any other to a step named by its agent. Elsewhere it's charged to o.
 func subagentOwner(path string, o owner, skillAgents map[string]string) (owner, error) {
 	meta := subagentOf(path)
 	switch {
@@ -357,10 +359,13 @@ func subagentOwner(path string, o owner, skillAgents map[string]string) (owner, 
 	// transcripts.
 	case meta.AgentType == "brief-reviewer" || meta.AgentType == "plan-reviewer":
 		prompt, err := firstPrompt(path)
-		if m := briefTask.FindStringSubmatch(prompt); m != nil {
-			return owner{stepBriefReview, m[1] + "/" + m[2]}, err
+		if err != nil {
+			return owner{}, err
 		}
-		return owner{step: stepBriefReview}, err
+		if m := briefTask.FindStringSubmatch(prompt); m != nil {
+			return owner{stepBriefReview, m[1] + "/" + m[2]}, nil
+		}
+		return owner{step: stepBriefReview}, nil
 	case o.task == "":
 		return o, nil
 	case meta.IsBuiltIn && skillAgents[meta.ToolUseID] != "":
@@ -440,6 +445,8 @@ func costsIn(charges []*charge, tasks map[string]Task, from, to time.Time) costR
 		if !inRange(finishedAt(t)) {
 			continue
 		}
+		// A task with no created date is left out too: there's no telling
+		// whether all its sessions are here.
 		if created, _ := time.Parse(time.RFC3339, t.Get("created")); created.Before(r.dataStart) {
 			r.leftOut++
 		} else {
@@ -493,7 +500,7 @@ func (r costReport) step(name string) *stepCost {
 }
 
 // finishedAt is when the task last merged or was done, or zero if it isn't
-// merged or done.
+// merged or done. Its Log runs oldest first, so the last change wins.
 func finishedAt(t Task) time.Time {
 	var at time.Time
 	if s := t.Status(); s != Merged && s != Done {
