@@ -1149,12 +1149,13 @@ var inlineCode = regexp.MustCompile("`[^`]*`")
 
 // notRunSign is the first of the notRunWords in text's prose, or "". What's
 // in fenced blocks and code spans is output and commands, not what the worker
-// says about the check.
+// says about the check. The prose is read as single-spaced words, so a phrase
+// wrapped onto an indented line still matches.
 func notRunSign(text string) string {
 	var prose []string
 	for l, fenced := range markdownLines(text) {
 		if !fenced {
-			prose = append(prose, inlineCode.ReplaceAllString(l, ""))
+			prose = append(prose, strings.Fields(inlineCode.ReplaceAllString(l, ""))...)
 		}
 	}
 	return notRunWords.FindString(strings.Join(prose, " "))

@@ -427,6 +427,7 @@ var notRunEvidence = map[string]string{
 	"a check left to the lead":       "Lead check (before merge, no model session):\n```\ncodex exec -\n```\n",
 	"a count it couldn't make":       "No count was possible for the waves API endpoint.\n",
 	"a smoke test for the user only": "Live smoke test, for Isaac only: it needs a real goal.\n",
+	"a phrase wrapped onto a line":   "Not\n   run: it needs a real terminal.\n",
 }
 
 func TestNotRunSign(t *testing.T) {
@@ -460,6 +461,10 @@ func TestEvidenceNotRun(t *testing.T) {
 		"### 3. three (on 0a1b2c3)\n```\nok\n```\n\n## Log\n")}
 	if got, want := task.Evidence().NotRun(task.UserChecks()), "1 ('Not done')"; got != want {
 		t.Errorf("NotRun = %q, want %q: only a criterion that isn't the user's check is refused", got, want)
+	}
+	pr := PREvidence("## Evidence\n\n1. one (on 0a1b2c3): Not\n   run: it needs a real terminal.\n")
+	if got, want := pr.NotRun(nil), "1 ('Not run')"; got != want {
+		t.Errorf("PR NotRun = %q, want %q: a phrase wrapped onto an item's next line is still read", got, want)
 	}
 }
 
