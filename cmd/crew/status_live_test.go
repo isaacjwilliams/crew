@@ -495,3 +495,160 @@ func homeState(t *testing.T, c *Crew) string {
 	t.Helper()
 	return gitOut(t, c.Home, "status", "--porcelain") + " " + gitOut(t, c.Home, "rev-parse", "HEAD")
 }
+
+// liveCrew is statusLedger with p's clone a real repo: a stack in flight whose
+// parent tips are pushed, an open PR stacked on it, a PR that targets a branch
+// other than its task's base, and a PR that can merge now. Stubs for claude, gh
+// and git log every call to calls. claude lists the workers in workers, and
+// fails while claudeFails exists.
+type liveCrew struct {
+	*Crew
+	repo                        string
+	calls, workers, claudeFails string
+}
+
+func newLiveCrew(t *testing.T) liveCrew {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := statusLedger(t)
+	outside := t.TempDir() // the stubs' files, kept out of the home
+	l := liveCrew{Crew: c, repo: stackRepo(t, "agent/lower", "agent/upper", "agent/top", "agent/moved", "agent/old", "agent/ready"),
+		calls: outside + "/calls.log", workers: outside + "/workers.json", claudeFails: outside + "/claude-fails"}
+	writeFile(t, c, "REPO="+l.repo+"\n", "projects", "p", "project.env")
+	l.listWorkers(t, `{"id":"w1","state":"working","pid":1},{"id":"w20","state":"working","pid":2},{"id":"w24","state":"idle","pid":3}`)
+	writeFile(t, c, `#!/bin/sh
+echo "claude $*" >>`+l.calls+`
+[ -e `+l.claudeFails+` ] && exit 1
+cat `+l.workers+`
+`, "bin", "claude")
+	writeFile(t, c, `#!/bin/sh
+echo "gh $*" >>`+l.calls+`
+echo '{"state":"OPEN","baseRefName":"main","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+`, "bin", "gh")
+	writeFile(t, c, `#!/bin/sh
+echo "git $*" >>`+l.calls+`
+exec `+realGit+` "$@"
+`, "bin", "git")
+	reportTask(t, c, "p", "020-lower", false, "status: working", "base: main", "branch: agent/lower", "worker_job: w20")
+	reportTask(t, c, "p", "021-upper", false, "status: working", "base: agent/lower", "branch: agent/upper")
+	reportTask(t, c, "p", "022-top", false, "status: pr-open", "base: agent/upper", "branch: agent/top",
+		"pr: https://github.com/o/r/pull/22", "pr_state: open", "pr_base: agent/upper")
+	reportTask(t, c, "p", "023-moved", false, "status: working", "base: main", "branch: agent/moved",
+		"pr: https://github.com/o/r/pull/23", "pr_state: open", "pr_base: agent/old")
+	reportTask(t, c, "p", "024-ready", false, "status: pr-open", "risk: low", "base: main", "branch: agent/ready",
+		"pr: https://github.com/o/r/pull/24", "pr_state: open", "pr_base: main", "worker_job: w24")
+	return l
+}
+
+// listWorkers has claude agents list the workers given, as JSON objects.
+func (l liveCrew) listWorkers(t *testing.T, workers string) {
+	t.Helper()
+	if err := os.WriteFile(l.workers, []byte("["+workers+"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// callsSince is the calls the stubs logged after the first n.
+func (l liveCrew) callsSince(n int) []string {
+	b, _ := os.ReadFile(l.calls)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	return lines[min(n, len(lines)):]
+}
+
+// The calls a second of the live view made, counted by what they read.
+type liveCalls struct{ builds, listings, branchCalls, ghCalls, pulls int }
+
+// countCalls sorts calls by what they read: the workers, p's branches, GitHub,
+// or the ledger.
+func (l liveCrew) countCalls(calls []string) liveCalls {
+	var n liveCalls
+	for _, call := range calls {
+		switch {
+		case strings.HasPrefix(call, "claude agents "):
+			n.listings++
+		case strings.HasPrefix(call, "git -C "+l.repo+" "):
+			n.branchCalls++
+		case strings.HasPrefix(call, "gh "):
+			n.ghCalls++
+		case strings.HasPrefix(call, "git ") && strings.Contains(call, " pull "):
+			n.pulls++
+		}
+	}
+	return n
+}
+
+// secondsWhen is the seconds, from the start, in which a holds.
+func secondsWhen(seconds []liveCalls, holds func(liveCalls) bool) []time.Duration {
+	var at []time.Duration
+	for i, n := range seconds {
+		if holds(n) {
+			at = append(at, time.Duration(i)*time.Second)
+		}
+	}
+	return at
+}
+
+// For a minute, with a task file changing every few seconds, the live view
+// lists the workers and reads the tasks' branches with each report it builds.
+// GitHub is read every 30 seconds and the ledger pulled every minute.
+func TestLiveStatusListsWorkersAndReadsBranchesWhenDue(t *testing.T) {
+	l := newLiveCrew(t)
+	writeFile(t, l.Crew, "laptop\n", "host") // another machine runs the crew, so the ledger is pulled
+	g := gitRepo{t, l.Home}
+	g.git("init", "-q")
+	g.git("add", "-A")
+	g.git("commit", "-qm", "home")
+
+	feed := feedOf(l.Crew, "p", false)
+	var builds atomic.Int32
+	build := feed.build
+	feed.build = func(r prReads) (statusReport, error) { builds.Add(1); return build(r) }
+	clock := tenOClock
+	m := newLiveStatus(feed)
+	m.now = func() time.Time { return clock }
+	logged := len(l.callsSince(0))
+	var seconds []liveCalls
+	settle(m, m.Init())
+	for s := 0; ; s++ {
+		calls := l.callsSince(logged)
+		logged += len(calls)
+		n := l.countCalls(calls)
+		n.builds = int(builds.Swap(0))
+		seconds = append(seconds, n)
+		if s == 60 {
+			break
+		}
+		if s%4 == 3 { // the ledger changes under the view
+			reportTask(t, l.Crew, "p", "012-idea", s%8 == 3, "status: draft", "base: main")
+		}
+		clock = clock.Add(time.Second)
+		_, cmd := m.Update(beat{})
+		settle(m, cmd)
+	}
+
+	var total liveCalls
+	for _, n := range seconds {
+		total.builds += n.builds
+		total.listings += n.listings
+	}
+	if total.listings != total.builds || total.builds < 20 {
+		t.Errorf("the view listed the workers %d times in %d builds, want once each", total.listings, total.builds)
+	}
+	built := secondsWhen(seconds, func(n liveCalls) bool { return n.builds > 0 })
+	if read := secondsWhen(seconds, func(n liveCalls) bool { return n.branchCalls > 0 }); !slices.Equal(read, built) {
+		t.Errorf("the branches were read at %v, want with each build, at %v", read, built)
+	}
+	s := time.Second
+	if read := secondsWhen(seconds, func(n liveCalls) bool { return n.ghCalls > 0 }); !slices.Equal(read, []time.Duration{0, 30 * s, 60 * s}) {
+		t.Errorf("GitHub was read at %v, want every 30s", read)
+	}
+	if pulled := secondsWhen(seconds, func(n liveCalls) bool { return n.pulls > 0 }); !slices.Equal(pulled, []time.Duration{0, 60 * s}) {
+		t.Errorf("the ledger was pulled at %v, want every minute", pulled)
+	}
+}
