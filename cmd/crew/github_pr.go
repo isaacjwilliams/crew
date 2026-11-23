@@ -87,8 +87,8 @@ func (pr gitHubPR) record(t Task) bool {
 }
 
 // noteMerge marks t merged when this, its PR, is, and says whether it did.
-// crew sync does it for every task, and crew hand-over for a first run's
-// parent, which may have merged since sync last looked.
+// crew sync does it for every task, and crew check-base and crew hand-over
+// for a first run's parent, which may have merged since sync last looked.
 func (pr gitHubPR) noteMerge(t Task) bool {
 	if pr.URL != t.PR() || pr.State != "MERGED" || t.Status() == Merged {
 		return false

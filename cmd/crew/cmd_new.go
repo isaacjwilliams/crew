@@ -475,15 +475,15 @@ func fetchOrigin(repo string) error {
 // its PR isn't where the task belongs now, and tells the worker how to move
 // them, as crew restack would (rebaseFor, afterPush). A stacked task's branch
 // belongs on its parent's latest commit, or on what the parent merged into, and
-// every task's PR targets its base. Before the first hand-over the worker's own
-// session is still making the branch, so it moves them itself; after it, crew
-// tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
-// and of its parent as GitHub has them now, or nil when crew didn't read one
-// (readTaskPRs). They were read before the lock, so each is recorded only in
-// the task whose PR it is: not in a new parent the task moved to meanwhile,
-// say. then is what the worker does once a retarget is all it had to run, such
-// as "hand over again". Call it with the lock held.
-func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, then string) error {
+// every task's PR targets its base. After the first hand-over, crew tick
+// restacks the task instead.
+//
+// It first records what onGitHub and parentOnGitHub say, as crew sync would:
+// the PRs of the task and its parent, read before the lock (readTaskPRs), or
+// nil when there was none to read. afterRetarget is what the worker does once a
+// retarget is all it had to run, such as "hand over again". Call it with the
+// lock held.
+func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, afterRetarget string) error {
 	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
 	// crew sync may not have looked since the worker opened or moved its PR,
@@ -505,7 +505,7 @@ func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHu
 	}
 	retarget := idx.retargetReason(t, repo)
 	if retarget != "" && idx.onBase(t, repo) {
-		return fail("your PR has to move before its first hand-over (%s): run `gh pr edit --base %s`, then %s", retarget, t.Base(), then)
+		return fail("your PR has to move before its first hand-over (%s): run `gh pr edit --base %s`, then %s", retarget, t.Base(), afterRetarget)
 	}
 	if !stacked {
 		if retarget != "" {
