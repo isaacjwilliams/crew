@@ -8,7 +8,9 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -506,11 +508,11 @@ func printStats(project string, since time.Time, stats []taskStats, h history) {
 	rows = append(rows, nil,
 		append([]string{"total", ""}, sum.cells("")...),
 		[]string{"median", "", "", "", roughly(median(prWaits)), roughly(median(questionWaits))})
-	printTable(statsHeadings, rows)
+	printTable(os.Stdout, statsHeadings, rows)
 
 	merged := byTier(stats, func(s taskStats) Risk { return s.task.Risk() })
 	fmt.Println("\nBy risk tier:")
-	printTable(tierHeadings, tierRows(merged, corrections))
+	printTable(os.Stdout, tierHeadings, tierRows(merged, corrections))
 	if lowDrawsMoreComments(merged) {
 		fmt.Println("\nLow-risk PRs drew more comments than medium ones: the tiers or SENSITIVE_PATHS may be off.")
 	}
@@ -618,10 +620,10 @@ func printCorrections(day string, corrections []correction, unchecked string) {
 	}
 }
 
-// printTable prints rows under two-line headings, each column as wide as its
-// widest cell: the first column aligned left, the others right. A row may stop
-// short of the last columns, and an empty row is a blank line.
-func printTable(headings [][2]string, rows [][]string) {
+// printTable writes rows to w under two-line headings, each column as wide as
+// its widest cell: the first column aligned left, the others right. A row may
+// stop short of the last columns, and an empty row is a blank line.
+func printTable(w io.Writer, headings [][2]string, rows [][]string) {
 	widths := make([]int, len(headings))
 	for i, h := range headings {
 		widths[i] = max(len(h[0]), len(h[1]))
@@ -640,7 +642,7 @@ func printTable(headings [][2]string, rows [][]string) {
 				line += fmt.Sprintf("  %*s", widths[i], cell)
 			}
 		}
-		fmt.Println(strings.TrimRight(line, " "))
+		fmt.Fprintln(w, strings.TrimRight(line, " "))
 	}
 	var top, bottom []string
 	for _, h := range headings {
