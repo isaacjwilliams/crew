@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,19 @@ const reviewerTranscript = `{"type":"user","timestamp":"2026-11-17T03:42:54.662Z
 {"type":"user","timestamp":"2026-11-17T03:45:21.834Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
 `
 
+// reviewerTranscriptFile writes content to a new file in a temporary
+// directory, and returns its path.
+func reviewerTranscriptFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agent-a.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestClaudeRunCostCountsEachMessageOnce(t *testing.T) {
-	cost, err := claudeRunCost([]byte(reviewerTranscript))
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, reviewerTranscript))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,15 +53,31 @@ func TestClaudeRunCostCountsEachMessageOnce(t *testing.T) {
 // zeros, and a line that doesn't read is an error, since it could hold a
 // message's only usage.
 func TestClaudeRunCostSaysWhatTheTranscriptDoesNotReport(t *testing.T) {
-	cost, err := claudeRunCost([]byte(`{"type":"user","timestamp":"2026-11-17T03:42:54Z"}` + "\n" + `{"type":"user","timestamp":"2026-11-17T03:42:59Z"}` + "\n"))
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, `{"type":"user","timestamp":"2026-11-17T03:42:54Z"}`+"\n"+`{"type":"user","timestamp":"2026-11-17T03:42:59Z"}`+"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := cost.String(), "tokens not reported; 5s; model not reported, effort not reported"; got != want {
 		t.Errorf("cost = %q; want %q", got, want)
 	}
-	if _, err := claudeRunCost([]byte(reviewerTranscript + `{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "line 12") {
-		t.Errorf("a cut-off line gave %v; want an error naming line 12", err)
+	if _, err := claudeRunCost(reviewerTranscriptFile(t, reviewerTranscript+`{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "1 lines didn't read") {
+		t.Errorf("a cut-off line gave %v; want an error saying one line didn't read", err)
+	}
+}
+
+// A message keeps its fullest usage, whichever copy comes last: a resumed
+// session may copy it with its counts zeroed.
+func TestClaudeRunCostKeepsAMessagesFullestUsage(t *testing.T) {
+	line := func(output int) string {
+		return `{"type":"assistant","timestamp":"2026-11-17T03:42:56Z","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":` +
+			strconv.Itoa(output) + `}}}` + "\n"
+	}
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, line(500)+line(0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cost.tokens.total(); got != 500 {
+		t.Errorf("tokens = %d; want the 500 of the fuller copy, not the zeroed one written last", got)
 	}
 }
 

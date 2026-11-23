@@ -68,12 +68,20 @@ type claudeUsage struct {
 	CacheWrite int `json:"cache_creation_input_tokens"`
 	CacheRead  int `json:"cache_read_input_tokens"`
 	Output     int `json:"output_tokens"`
+	// The cache writes kept for an hour, which cost more than the rest: those
+	// kept for five minutes, the API's default.
+	CacheWriteKept struct {
+		OneHour int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u claudeUsage) total() int { return u.Input + u.CacheWrite + u.CacheRead + u.Output }
 
 func (u claudeUsage) add(v claudeUsage) claudeUsage {
-	return claudeUsage{u.Input + v.Input, u.CacheWrite + v.CacheWrite, u.CacheRead + v.CacheRead, u.Output + v.Output}
+	sum := claudeUsage{Input: u.Input + v.Input, CacheWrite: u.CacheWrite + v.CacheWrite,
+		CacheRead: u.CacheRead + v.CacheRead, Output: u.Output + v.Output}
+	sum.CacheWriteKept.OneHour = u.CacheWriteKept.OneHour + v.CacheWriteKept.OneHour
+	return sum
 }
 
 func (u claudeUsage) String() string {
@@ -95,11 +103,7 @@ func cmdReviewCost(c *Crew, args []string) error {
 	if len(matches) != 1 {
 		return fail("found %d transcripts for agent %s under %s; want one", len(matches), args[0], transcripts)
 	}
-	b, err := os.ReadFile(matches[0])
-	if err != nil {
-		return err
-	}
-	cost, err := claudeRunCost(b)
+	cost, err := claudeRunCost(matches[0])
 	if err != nil {
 		return fail("%s: %v", matches[0], err)
 	}
@@ -107,71 +111,132 @@ func cmdReviewCost(c *Crew, args []string) error {
 	return nil
 }
 
-// claudeRunCost reads what a Claude subagent's run cost from its transcript:
-// the tokens its API messages used, the time from its first entry to its last,
-// and the models and efforts its replies name.
-//
-// Claude Code writes a message's usage again with each of the message's
-// content blocks, so each message counts once, by its ID, with the usage
-// written last. A message without an ID counts on its own.
-func claudeRunCost(transcript []byte) (runCost, error) {
+// claudeRunCost reads what the Claude subagent run in the transcript at path
+// cost: the tokens its API messages used, the time from its first entry to its
+// last, and the models and efforts its replies name.
+func claudeRunCost(path string) (runCost, error) {
 	var cost runCost
-	usage := map[string]claudeUsage{}
+	var msgs messages
 	var first, last time.Time
-	lines := bufio.NewScanner(bytes.NewReader(transcript))
-	lines.Buffer(nil, 64<<20)
-	for n := 1; lines.Scan(); n++ {
-		if len(bytes.TrimSpace(lines.Bytes())) == 0 {
-			continue
-		}
-		var e struct {
-			Type      string
-			Timestamp time.Time
-			Effort    string
-			Message   struct {
-				ID    string
-				Model string
-				Usage *claudeUsage
-			}
-		}
-		// A line that doesn't read could hold a message's only usage, so the
-		// count would be short.
-		if err := json.Unmarshal(lines.Bytes(), &e); err != nil {
-			return runCost{}, fmt.Errorf("line %d: %v", n, err)
-		}
-		if !e.Timestamp.IsZero() {
+	unread, err := scanLines(path, "", func(l transcriptLine) bool {
+		if !l.Timestamp.IsZero() {
 			if first.IsZero() {
-				first = e.Timestamp
+				first = l.Timestamp
 			}
-			last = e.Timestamp
+			last = l.Timestamp
 		}
-		if e.Type != "assistant" {
-			continue
+		if l.Type != "assistant" {
+			return true
 		}
-		// Claude Code names its own messages, such as an API error, <synthetic>.
-		if m := e.Message.Model; m != "" && m != "<synthetic>" && !slices.Contains(cost.models, m) {
+		if m := l.Message.Model; m != "" && m != syntheticModel && !slices.Contains(cost.models, m) {
 			cost.models = append(cost.models, m)
 		}
-		if e.Effort != "" && !slices.Contains(cost.efforts, e.Effort) {
-			cost.efforts = append(cost.efforts, e.Effort)
+		if l.Effort != "" && !slices.Contains(cost.efforts, l.Effort) {
+			cost.efforts = append(cost.efforts, l.Effort)
 		}
-		if id := e.Message.ID; e.Message.Usage != nil {
-			if id == "" {
-				id = fmt.Sprintf("line %d", n)
-			}
-			usage[id] = *e.Message.Usage
-		}
-	}
-	if err := lines.Err(); err != nil {
+		msgs.add(l)
+		return true
+	})
+	if err != nil {
 		return runCost{}, err
 	}
-	if len(usage) > 0 {
+	// A line that doesn't read could hold a message's only usage, so the count
+	// would be short.
+	if unread > 0 {
+		return runCost{}, fmt.Errorf("%d lines didn't read", unread)
+	}
+	if len(msgs.all) > 0 {
 		var sum claudeUsage
-		for _, u := range usage {
-			sum = sum.add(u)
+		for _, m := range msgs.all {
+			sum = sum.add(m.usage)
 		}
 		cost.tokens = sum
 	}
 	cost.took = last.Sub(first)
 	return cost, nil
+}
+
+// transcriptLine is what is read from a line of a Claude Code transcript.
+type transcriptLine struct {
+	Type      string
+	Timestamp time.Time
+	Effort    string
+	Message   struct {
+		ID    string
+		Model string
+		Usage *claudeUsage
+	}
+}
+
+// scanLines calls f with each line of the transcript at path that holds want,
+// read, in order, until f returns false. Lines without want aren't read, which
+// keeps a scan quick, and a line that doesn't read is counted rather than
+// passed on: a session may be writing it.
+func scanLines(path, want string, f func(transcriptLine) bool) (unread int, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	lines := bufio.NewScanner(file)
+	lines.Buffer(nil, 64<<20)
+	for lines.Scan() {
+		var l transcriptLine
+		if len(bytes.TrimSpace(lines.Bytes())) == 0 || !bytes.Contains(lines.Bytes(), []byte(want)) {
+			continue
+		} else if json.Unmarshal(lines.Bytes(), &l) != nil {
+			unread++
+		} else if !f(l) {
+			break
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return unread, fmt.Errorf("%s: %v", path, err)
+	}
+	return unread, nil
+}
+
+// syntheticModel is the model Claude Code names its own messages, such as an
+// API error. They cost nothing.
+const syntheticModel = "<synthetic>"
+
+// message is one API message of a transcript.
+type message struct {
+	model string
+	at    time.Time
+	usage claudeUsage
+}
+
+// messages is the API messages of the transcripts read, each once, in the
+// order they were first read. Claude Code writes a message's usage again with
+// each of its content blocks, the last time in full, and a resumed session may
+// copy a message with its counts zeroed, so a message keeps its fullest usage.
+// A message without an ID counts on its own.
+type messages struct {
+	all  []*message
+	byID map[string]*message
+}
+
+// add takes the message on line l, and returns it with whether it's new. It
+// skips a line with no usage or a <synthetic> message, and returns nil.
+func (ms *messages) add(l transcriptLine) (m *message, isNew bool) {
+	u := l.Message.Usage
+	if u == nil || l.Message.Model == syntheticModel {
+		return nil, false
+	}
+	if m, ok := ms.byID[l.Message.ID]; ok {
+		if u.total() > m.usage.total() {
+			m.usage = *u
+		}
+		return m, false
+	}
+	m = &message{l.Message.Model, l.Timestamp, *u}
+	ms.all = append(ms.all, m)
+	if l.Message.ID != "" {
+		if ms.byID == nil {
+			ms.byID = map[string]*message{}
+		}
+		ms.byID[l.Message.ID] = m
+	}
+	return m, true
 }
