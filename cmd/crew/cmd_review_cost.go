@@ -158,13 +158,15 @@ func claudeRunCost(path string) (runCost, error) {
 
 // transcriptLine is what is read from a line of a Claude Code transcript.
 type transcriptLine struct {
-	Type      string
-	Timestamp time.Time
-	Effort    string
-	Message   struct {
-		ID    string
-		Model string
-		Usage *claudeUsage
+	Type       string
+	Timestamp  time.Time
+	Effort     string
+	Entrypoint string // how the session was run: "cli" for claude, "sdk-cli" for claude -p
+	Message    struct {
+		ID      string
+		Model   string
+		Usage   *claudeUsage
+		Content json.RawMessage
 	}
 }
 
