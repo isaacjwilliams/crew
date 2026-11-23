@@ -448,7 +448,7 @@ func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) e
 // task counts as stalled. A session the user is talking to with crew attach ends
 // its turn after every reply, and a nudge would end the attach, so a short quiet
 // spell doesn't count.
-const stallAfter = 15 * time.Minute
+const stallAfter = 8 * time.Minute
 
 // stalledNote is what crew nudge tells a worker whose turn ended mid-task: a
 // worker seen stalled had waited on a sub-agent, or just stopped after a step.
