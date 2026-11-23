@@ -389,6 +389,23 @@ pr_body 1; commit_in "$WT" src/filters.ts
 check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
   '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
 record_evidence 1; pr_body 1
+# Only the user's checks may be left to them: the brief marks one "User check:", or the
+# user makes one theirs later, in a Decision. Criterion 1 is marked; 3 isn't, until then.
+cp "$F1" "$SB/f1-before-user-checks"
+not_run='Not done: it needs a real terminal. To try: run it.'
+sed -i 's/^- z2$/- User check: z2/' "$F1"
+sed -i "/^### [13]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
+sed -i "/^[13]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
+out=$(crew hand-over 1 2>&1); st=$?
+check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless the brief marks it a user check" \
+  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). Run each check the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
+sed -i '/^## Decisions$/a - 2026-11-24 — Criterion 3 is a user check: only a real terminal shows it (lead)' "$F1"
+check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 3 ("* ]]'
+sed -i 's/^\(- 2026-11-24 — Criterion 3 is a user check: .*\) (lead)$/\1 (user)/' "$F1"
+out=$(crew hand-over 1 2>&1)
+check "hand-over accepts evidence that leaves a check to the user once a Decision of theirs makes it a user check" \
+  '[[ $out != *"wasn'"'"'t run"* && $out == *"automated review hasn'"'"'t run"* ]]'
+cp "$SB/f1-before-user-checks" "$F1"; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \

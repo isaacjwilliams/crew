@@ -374,8 +374,9 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 
 // checkEvidence refuses evidence that can't reach the user: an acceptance
 // criterion with no item in the task's ## Evidence or in the PR body (pr, nil
-// without a PR), an item that doesn't name the commit it ran on, or one that
-// ran on other work than the branch has now. A restack or a merge of the base
+// without a PR), an item that doesn't name the commit it ran on, one that says
+// its check wasn't run when it isn't the user's to check (Task.UserChecks), or
+// one that ran on other work than the branch has now. A restack or a merge of the base
 // that git made on its own keeps evidence current (branchWork.unchangedSince).
 func checkEvidence(t Task, repo string, pr Evidence) error {
 	n := len(t.AcceptanceCriteria())
@@ -400,6 +401,17 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 			return fail("the PR body's Evidence for acceptance criteria %s doesn't name the commit it ran on: put '(on <sha>)' after each item's criterion, with gh pr edit", numberList(unnamed))
 		}
 	}
+	var notRun []string
+	if items := task.NotRun(t.UserChecks()); items != "" {
+		notRun = append(notRun, "## Evidence: "+items)
+	}
+	if items := pr.NotRun(t.UserChecks()); items != "" {
+		notRun = append(notRun, "the PR body: "+items)
+	}
+	if len(notRun) > 0 {
+		return fail("evidence says its check wasn't run, in %s. Run each check the ways the project's AGENTS.md, docs and memory give. If none works, ask: write under ## Open questions what you tried and what stopped you, and set status needs-input. Only the brief ('- User check: …') or the user (a Decision 'Criterion <n> is a user check: … (user)') leaves a check to the user",
+			strings.Join(notRun, "; "))
+	}
 	work, err := ownWork(t, repo)
 	if err != nil {
 		return fail("couldn't check the evidence: %v", err)
@@ -410,7 +422,8 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	stale := map[string]bool{}
 	staleHere := false
 	for _, e := range []Evidence{task, pr} {
-		for _, sha := range e {
+		for _, item := range e {
+			sha := item.Commit
 			if _, checked := stale[sha]; checked {
 				continue
 			}

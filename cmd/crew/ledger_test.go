@@ -330,6 +330,7 @@ func TestEvidenceGaps(t *testing.T) {
 		{"an entry with only a comment under it doesn't count", "## Evidence\n### 1. one\n<!-- to do -->\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
 		{"a heading in fenced output belongs to the entry it's in", "## Evidence\n### 1. one\n```\n### 2. two\nok\n```\n### 3. three\nok\n\n", []int{2}},
 		{"a heading in tilde-fenced output belongs to the entry it's in", "## Evidence\n### 1. one\n~~~\n### 2. two\nok\n~~~\n### 3. three\nok\n\n", []int{2}},
+		{"a heading in an indented fence belongs to the entry it's in", "## Evidence\n### 1. one\n  ```\n### 2. two\nok\n  ```\n### 3. three\nok\n\n", []int{2}},
 		{"a shorter fence inside a longer one doesn't close it", "## Evidence\n### 1. one\n````\n```\n### 2. two\nok\n````\n### 3. three\nok\n\n", []int{2}},
 		{"lines under another heading belong to no entry", "## Evidence\n### 1. one\n### Notes\nok\n### 2. two\nok\n### 3. three\nok\n\n", []int{1}},
 	} {
@@ -343,8 +344,8 @@ func TestEvidenceGaps(t *testing.T) {
 func TestEvidenceNamesItsCommit(t *testing.T) {
 	task := Task{docWith(t, criteria+"## Evidence\n### 1. one (on 0a1b2c3)\nok\n### 2. two\n```\nran (on 4d5e6f7)\n```\n"+
 		"### 3. three (on 89abcdef0123456789abcdef0123456789abcdef)\nok\n### Security review\nNo findings.\n\n## Log\n")}
-	want := Evidence{1: "0a1b2c3", 2: "", 3: "89abcdef0123456789abcdef0123456789abcdef"}
-	if got := task.Evidence(); !maps.Equal(got, want) {
+	want := map[int]string{1: "0a1b2c3", 2: "", 3: "89abcdef0123456789abcdef0123456789abcdef"}
+	if got := commits(task.Evidence()); !maps.Equal(got, want) {
 		t.Errorf("Evidence = %v, want %v", got, want)
 	}
 	if got := task.Evidence().Unnamed(); !slices.Equal(got, []int{2}) {
@@ -357,7 +358,7 @@ func TestEvidenceNamesItsCommit(t *testing.T) {
 		"### 1. one (0a1b2c3)":    "",
 	} {
 		task := Task{docWith(t, criteria+"## Evidence\n"+heading+"\nok\n\n## Log\n")}
-		if got := task.Evidence()[1]; got != want {
+		if got := task.Evidence()[1].Commit; got != want {
 			t.Errorf("%q names %q, want %q", heading, got, want)
 		}
 	}
@@ -369,8 +370,8 @@ func TestPREvidence(t *testing.T) {
 		"```\r\n3. output too (on 3333333)\r\n```\r\n" +
 		"<!-- 3. in a comment (on 4444444) -->\r\n" +
 		"2. two, which names no commit: a look at the page\r\n\r\n## Notes for reviewers\r\n\r\n3. not evidence (on 5555555)\r\n"
-	want := Evidence{1: "0a1b2c3", 2: ""}
-	if got := PREvidence(body); !maps.Equal(got, want) {
+	want := map[int]string{1: "0a1b2c3", 2: ""}
+	if got := commits(PREvidence(body)); !maps.Equal(got, want) {
 		t.Errorf("PREvidence = %v, want %v: only top-level items under ## Evidence, outside fences and comments, count", got, want)
 	}
 	if got := PREvidence(body).Gaps(3); !slices.Equal(got, []int{3}) {
@@ -378,6 +379,87 @@ func TestPREvidence(t *testing.T) {
 	}
 	if got := PREvidence("No evidence section.").Gaps(2); !slices.Equal(got, []int{1, 2}) {
 		t.Errorf("Gaps without ## Evidence = %v, want [1 2]", got)
+	}
+}
+
+// commits is the commit each item of e names, by its criterion's number.
+func commits(e Evidence) map[int]string {
+	c := map[int]string{}
+	for n, item := range e {
+		c[n] = item.Commit
+	}
+	return c
+}
+
+func TestPREvidenceItemText(t *testing.T) {
+	body := "## Evidence\n\n1. one (on 0a1b2c3): `go test`\n   ```\n   4. output\n   ```\n   Not done.\n" +
+		"2. two (on 4d5e6f7): seen\n\n## Notes\n\nNot evidence.\n"
+	e := PREvidence(body)
+	if want := ": `go test`\n   ```\n   4. output\n   ```\n   Not done."; e[1].Text != want {
+		t.Errorf("item 1's text = %q, want %q: an item runs up to the next one, past its fenced output", e[1].Text, want)
+	}
+	if want := ": seen\n"; e[2].Text != want {
+		t.Errorf("item 2's text = %q, want %q: it ends with the section", e[2].Text, want)
+	}
+}
+
+func TestUserChecks(t *testing.T) {
+	task := Task{docWith(t, "## Acceptance criteria\n- one\n- User check: a live smoke test\n- three\n- four\n- five\n\n"+
+		"## Decisions\n- 2026-11-24 — Criterion 3 is a user check: needs a real terminal (user)\n"+
+		"- 2026-11-24 — criterion 4 is a user check, says the lead (lead)\n"+
+		"- 2026-11-24 — Criterion 5 is a user check (user) — no: the line must end with the user's mark\n\n## Log\n")}
+	if got, want := task.UserChecks(), map[int]bool{2: true, 3: true}; !maps.Equal(got, want) {
+		t.Errorf("UserChecks = %v, want %v: the brief's 'User check:' criteria and those a (user) Decision names", got, want)
+	}
+}
+
+// Evidence that leaves its check to the user, as workers wrote it. The first
+// two are 237's original Evidence 5 and 238's Evidence 7 in rolemodel's ledger.
+var notRunEvidence = map[string]string{
+	"237's Evidence 5": "Not done as the brief describes: this worktree's development database is empty and no production backup is on this machine, so a Chrome DevTools pass on a clone would mean capturing a production backup. I didn't, and ran the nearest real-browser check instead:\n" +
+		"`bundle exec rspec spec/system/stage_leader_board_run_card_broadcasting_spec.rb`\n```\n3 examples, 0 failures\n```\n" +
+		"It covers a division board filling, emptying and moving between Courses while the page is open (on-deck slot, pin released on a Course change). The highlighted slot after a Wave move is covered only by the Jest and batch specs. To try by hand on a clone: move a Wave to another Course with the dashboard open, start a run in it, see both slots take the new Course's card, then stop the run and see both advance.\n",
+	"238's Evidence 7":               "Not done. It needs a production clone in an isolated database and a dev server; I didn't set those up in this session. To try: on a dashboard, add a Passthrough over a Stage board through the picker, then stop a run that board includes; its on-deck and highlighted cards should advance without a reload.\n",
+	"237's, reworded":                "Ran the nearest real-browser check; steps to try: move a Wave to another Course with the dashboard open, then stop the run.\n```\n3 examples, 0 failures\n```\n",
+	"a live check left to the user":  "Only the user can check this: the repo's rules forbid starting real model sessions to test.\n",
+	"a session it can't start":       "I can't run a real session from here.\n",
+	"a check left to someone named":  "Live check for Isaac: with the keyring locked, run it.\n",
+	"a check left to the lead":       "Lead check (before merge, no model session):\n```\ncodex exec -\n```\n",
+	"a count it couldn't make":       "No count was possible for the waves API endpoint.\n",
+	"a smoke test for the user only": "Live smoke test, for Isaac only: it needs a real goal.\n",
+}
+
+func TestNotRunSign(t *testing.T) {
+	for name, text := range notRunEvidence {
+		if notRunSign(text) == "" {
+			t.Errorf("%s: no sign it wasn't run in %q", name, text)
+		}
+	}
+	for name, text := range map[string]string{
+		"237's Evidence 5, redone":      "Chrome DevTools on the clone, as the brief describes: moved a Wave to another Course with the dashboard open, started a run in it, and both slots took the new Course's card. Stopped the run; both advanced.\n",
+		"words in output":               "`crew hand-over 1`\n```\nNot done. To try: …\n```\n",
+		"words in a list item's output": "`crew hand-over 1`\n   ```\n   Not done. To try: …\n   ```\n",
+		"words in a command":            "`grep -c 'to try' agents/implementer.md`: 0\n",
+		"a test's own words":            "The e2e live check (entry 1) does the same, and passes.\n",
+		"findings left for the user":    "Two findings left for the user and one fixed give `merge now`.\n",
+		"a rule quoted":                 "| `lead.md` | \"Only the user can reopen those decisions.\" |\n",
+		"what an organizer can't do":    "An organizer can't make that single change through the app.\n",
+		"a part run another way":        "I didn't run the browser on 1.x itself, so these formats are compared with 1.x's node output.\n",
+		"a capitalized word":            "It touches only Stage boards.\n",
+	} {
+		if sign := notRunSign(text); sign != "" {
+			t.Errorf("%s: %q read as not run, from %q", name, text, sign)
+		}
+	}
+}
+
+func TestEvidenceNotRun(t *testing.T) {
+	task := Task{docWith(t, "## Acceptance criteria\n- one\n- User check: two\n- three\n\n## Evidence\n"+
+		"### 1. one (on 0a1b2c3)\nNot done. To try: open the page.\n"+
+		"### 2. two (on 0a1b2c3)\nNeeds a live session. To try: start one.\n"+
+		"### 3. three (on 0a1b2c3)\n```\nok\n```\n\n## Log\n")}
+	if got, want := task.Evidence().NotRun(task.UserChecks()), "1 ('Not done')"; got != want {
+		t.Errorf("NotRun = %q, want %q: only a criterion that isn't the user's check is refused", got, want)
 	}
 }
 
