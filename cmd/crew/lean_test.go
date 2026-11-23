@@ -61,6 +61,22 @@ func leanOf(t *testing.T, settings *object) lean {
 	return l
 }
 
+// leanOfFlags is leanOf the settings of a lead started with flags.
+func leanOfFlags(t *testing.T, flags []string) lean {
+	t.Helper()
+	return leanOfJSON(t, flags[slices.Index(flags, "--settings")+1])
+}
+
+// leanOfJSON is leanOf settings given as JSON.
+func leanOfJSON(t *testing.T, settings string) lean {
+	t.Helper()
+	v, err := parseJSON([]byte(settings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leanOf(t, v.(*object))
+}
+
 func TestLeanSettingsTurnOffWhatAWorkerDoesntUseOfYours(t *testing.T) {
 	fakeYourSetup(t)
 	got := leanOf(t, leanSettings(newObject(), "implementer", nil))
@@ -121,6 +137,59 @@ func TestAProjectKeepsWhatKeepLoadedNames(t *testing.T) {
 	}
 }
 
+// Workers and goal leads start without what their role doesn't use of yours,
+// but for what their project's KEEP_LOADED names.
+func TestWorkersAndGoalLeadsStartWithoutWhatTheyDontUseOfYours(t *testing.T) {
+	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir()}
+	for _, f := range []string{"config/worker-settings.json", "lead/.claude/settings.json"} {
+		writeFile(t, c, "{}", f)
+	}
+	p := &Project{Name: "ninja", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir(), "KEEP_LOADED": "chrome-devtools"}}
+	worker, err := c.workerSettings(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalLead, err := c.goalLeadSettings(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for role, settings := range map[string]string{"a worker": worker, "a goal lead": goalLead} {
+		got := leanOfJSON(t, settings)
+		if len(got.plugins) != 2 || !got.connectorsOff || !got.noArtifact {
+			t.Errorf("%s starts with %+v, want your plugins, connectors and Artifact off", role, got)
+		}
+		if got.servers != nil {
+			t.Errorf("%s denies %v, want chrome-devtools kept for ninja", role, got.servers)
+		}
+	}
+}
+
+// What a session turns off of yours is in its fingerprint, so a skill you
+// install has crew start new sessions that leave it off.
+func TestInstallingASkillChangesWhatASessionLoads(t *testing.T) {
+	home := fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	writeFile(t, c, "{}", "config/worker-settings.json")
+	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir()}}
+	fingerprints := func() (worker, lead string) {
+		w, err := c.launchWorker(p, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags, err := c.leadFlags("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w.fingerprint, c.leadFingerprint(flags)
+	}
+	worker, lead := fingerprints()
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/pdf/SKILL.md")
+	if w, l := fingerprints(); w == worker || l == lead {
+		t.Errorf("after installing a skill, the worker's fingerprint changed: %t, the lead's: %t", w != worker, l != lead)
+	}
+}
+
 // A lead keeps what its projects' KEEP_LOADED name. A project whose settings are
 // broken doesn't stop the lead for every project, only a lead for that one.
 func TestALeadKeepsWhatItsProjectsKeepLoadedName(t *testing.T) {
@@ -133,11 +202,7 @@ func TestALeadKeepsWhatItsProjectsKeepLoadedName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a lead for every project: %v", err)
 	}
-	settings, err := parseJSON([]byte(flags[3]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := leanOf(t, settings.(*object)); got.servers != nil {
+	if got := leanOfFlags(t, flags); got.servers != nil {
 		t.Errorf("the lead denies %v, want chrome-devtools kept for ninja", got.servers)
 	}
 	if _, err := c.leadFlags("broken"); err == nil {
@@ -186,11 +251,7 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings, err := parseJSON([]byte(flags[3]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got = leanOf(t, settings.(*object))
+	got = leanOfFlags(t, flags)
 	if slices.Contains(got.servers, "p_trello") || slices.Contains(got.skills, "pr-review") {
 		t.Errorf("a lead denies %v and turns off %v, want p_trello and pr-review kept", got.servers, got.skills)
 	}
