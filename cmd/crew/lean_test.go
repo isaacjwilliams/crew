@@ -229,6 +229,8 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 	repoFiles := map[string]string{
 		".claude/skills/docx/SKILL.md": "",
 		".claude/skills/run/SKILL.md":  "",
+		".claude/commands/loop.md":     "",
+		".claude/commands/ci/init.md":  "",
 		".claude/settings.json":        `{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}`,
 		".mcp.json":                    `{"mcpServers": {"chrome-devtools": {}}}`,
 	}
@@ -240,10 +242,13 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 	if !slices.Equal(got.servers, []string{"sentry"}) {
 		t.Errorf("a worker denies %v, want only sentry: chrome-devtools is the repo's, p_trello the project's, figma local to the repo", got.servers)
 	}
-	for _, skill := range []string{"pr-review", "docx", "run"} {
+	for _, skill := range []string{"pr-review", "docx", "run", "loop"} {
 		if slices.Contains(got.skills, skill) {
 			t.Errorf("a worker turns off %s, which crew or the repo has too", skill)
 		}
+	}
+	if names := c.theirs(nil, repo); !slices.Contains(names, "ci:init") {
+		t.Errorf("theirs = %v, want the repo's command ci/init.md as the skill ci:init", names)
 	}
 	if !slices.Equal(got.plugins, []string{"stripe@claude-plugins-official"}) {
 		t.Errorf("a worker turns off plugins %v, want only Stripe: the repo enables frontend-design", got.plugins)

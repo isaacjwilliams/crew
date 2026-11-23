@@ -18,6 +18,7 @@ package main
 // settings file, which don't depend on what you've installed.
 
 import (
+	"io/fs"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -154,9 +155,9 @@ func (c *Crew) keepLoaded(p *Project) []string {
 // off by its name, so turning off one of yours by one of these names would turn
 // theirs off too.
 func (c *Crew) theirs(servers []string, repo string) []string {
-	names := slices.Concat(skillsIn(c.path(".claude", "skills")), servers)
+	names := slices.Concat(skillsOf(c.path(".claude")), servers)
 	if repo != "" {
-		names = append(names, skillsIn(filepath.Join(repo, ".claude", "skills"))...)
+		names = append(names, skillsOf(filepath.Join(repo, ".claude"))...)
 		for _, f := range []string{"settings.json", "settings.local.json"} {
 			names = append(names, enabledPlugins(filepath.Join(repo, ".claude", f))...)
 		}
@@ -165,6 +166,26 @@ func (c *Crew) theirs(servers []string, repo string) []string {
 			names = append(names, config.child("projects").child(repo).child("mcpServers").keys...)
 		}
 	}
+	return names
+}
+
+// skillsOf is the names of the skills in a .claude folder: those in its skills/,
+// and its commands/, whose files Claude Code loads as skills too.
+func skillsOf(dir string) []string {
+	return append(skillsIn(filepath.Join(dir, "skills")), commandsIn(filepath.Join(dir, "commands"))...)
+}
+
+// commandsIn is the names of the command files in dir and its folders, as
+// Claude Code names them: a/b.md is the skill a:b.
+func commandsIn(dir string) []string {
+	var names []string
+	filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(f) == ".md" {
+			rel, _ := filepath.Rel(dir, strings.TrimSuffix(f, ".md"))
+			names = append(names, strings.ReplaceAll(filepath.ToSlash(rel), "/", ":"))
+		}
+		return nil
+	})
 	return names
 }
 
