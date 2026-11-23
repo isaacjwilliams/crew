@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack nudge review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade install project checkout host lead serve doctor config new ready hand-over dispatch feedback followup attach restack nudge review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -39,6 +39,8 @@ complete -c crew -n "__fish_seen_subcommand_from status stats list sync proposal
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/done/abandoned'
 complete -c crew -n "__fish_seen_subcommand_from status" -l plain -d 'Print the text, even in a terminal'
 complete -c crew -n "__fish_seen_subcommand_from stats" -l since -x -d 'Tasks merged since this date (YYYY-MM-DD)'
+complete -c crew -n "__fish_seen_subcommand_from costs" -l from -x -d 'First day to count (YYYY-MM-DD)'
+complete -c crew -n "__fish_seen_subcommand_from costs" -l to -x -d 'Last day to count (YYYY-MM-DD)'
 complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r
 complete -c crew -n "__fish_seen_subcommand_from gardener" -l all

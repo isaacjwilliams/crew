@@ -406,6 +406,31 @@ A fix traces to its task through `fixes`, or to an unknown task when that's `unk
 
 It reads the ledger, and for reverts the default branch in the project's clone, which it fetches first. It changes nothing else, so it works on any machine; without the project's clone, or with a shallow one, it reports the rest and says `reverts: not checked`.
 
+### What each step cost
+
+```sh
+crew costs         # the last 7 days (--from YYYY-MM-DD, --to YYYY-MM-DD; both days included)
+```
+
+What each step of crew's process cost over those days, at Anthropic's API rates, read from this machine's Claude Code transcripts for every project. Run it on the weeks before and after a change to see whether a step got cheaper.
+
+```
+  step                         total  share
+  Brief review                   $97   5.8%
+  Worker sessions             $1,016    61%
+  Exhale                        $104   6.2%
+  …
+  Lead sessions                 $160   9.6%
+  Lead's agents                  $33     2%
+  …
+  All                         $1,675   100%
+```
+
+- **Steps**: a task's brief review, its worker's own sessions, then the agents the worker started, each its own step: `/simplify`'s are the exhale, the casual-observer is the pre-PR review, `/security-review`'s are the security review, the reviewer is the automated review, and any other agent is named by its type (`general-purpose`, say). Then what's no task's: the lead's sessions and the agents it started (other than brief reviews), the goal leads' the same way, the gardener's sessions, and Claude Code sessions outside crew.
+- **total** and **share**: what was spent in those days, counted when each message was sent, and its part of all spend.
+
+Below the table it says from when the transcripts are complete, if the range starts earlier: Claude Code deletes a session once it has been idle for `cleanupPeriodDays` (30 by default), but keeps one started or last continued in Claude Desktop or Cowork at any age, so `crew costs` dates the transcripts by the sessions run only from the command line. Then it gives the tokens of any model it has no rate for, which it doesn't price, and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
+
 ### What a worker's PR looks like
 
 Each PR is short and has the same shape, so you can tell at a glance whether to merge it, look at its evidence, or read the code closely: the objective it meets, in a sentence, then **Risk** (what could break, for whom, and how far it reaches), **How to revert** (and anything a revert alone doesn't undo), **Evidence**, and Notes for reviewers only when there's a trade-off or an open question. A stacked PR first names the PR it's stacked on. The template is `templates/pr-body.md` in your crew home.
