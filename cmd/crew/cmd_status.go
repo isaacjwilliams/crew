@@ -82,15 +82,15 @@ type statusLine struct {
 }
 
 // text is the line after the indent, with its columns, if any, starting after
-// idColumn.
-func (l statusLine) text(indent string, idColumn int) string {
+// column.
+func (l statusLine) text(indent string, column int) string {
 	head := indent + l.head
 	if l.tail == "" {
 		return head
 	}
 	// Padded by rune: a └ is one character wide but three bytes long.
-	head = cut(head, idColumn)
-	return head + strings.Repeat(" ", idColumn-utf8.RuneCountInString(head)) + " " + l.tail
+	head = cut(head, column)
+	return head + strings.Repeat(" ", column-utf8.RuneCountInString(head)) + " " + l.tail
 }
 
 func leafLine(key, head string) statusLine { return statusLine{key: key, head: head} }
@@ -100,10 +100,10 @@ func leafLine(key, head string) statusLine { return statusLine{key: key, head: h
 func reportLines(r statusReport) []statusLine {
 	var lines []statusLine
 	if r.ReadOnlyOn != "" {
-		lines = append(lines, leafLine("read-only", readOnlyLine(r.ReadOnlyOn)))
+		lines = append(lines, leafLine("read-only", "read-only: crew runs on "+r.ReadOnlyOn))
 	}
 	if len(r.Projects) == 0 {
-		return append(lines, leafLine("no projects", noProjects))
+		return append(lines, leafLine("no projects", "No projects registered. Run 'crew project add' in a repo."))
 	}
 	lines = append(lines, leafLine("workers", workersLine(r)))
 	for _, p := range r.Projects {
@@ -112,19 +112,10 @@ func reportLines(r statusReport) []statusLine {
 		}
 	}
 	if elsewhere := r.elsewhere(); len(elsewhere) > 0 {
-		l := leafLine("elsewhere", elsewhereHeading)
-		for _, e := range elsewhere {
-			name, _, _ := strings.Cut(e, ":")
-			l.kids = append(l.kids, leafLine("elsewhere "+name, e))
-		}
-		lines = append(lines, l)
+		lines = append(lines, statusLine{key: "elsewhere", head: elsewhereHeading, kids: elsewhere})
 	}
 	return lines
 }
-
-func readOnlyLine(machine string) string { return "read-only: crew runs on " + machine }
-
-const noProjects = "No projects registered. Run 'crew project add' in a repo."
 
 // workersLine counts the workers running across the crew, and says when no
 // project can dispatch.
@@ -138,13 +129,13 @@ func workersLine(r statusReport) string {
 
 const elsewhereHeading = "waiting on you in other projects  (crew status --all)"
 
-// elsewhere words what waits on the user in each project out of scope that has
-// something: "q: 1 PR(s) to review".
-func (r statusReport) elsewhere() []string {
-	var lines []string
+// elsewhere is a line for each project out of scope with something waiting on
+// the user: "q: 1 PR(s) to review".
+func (r statusReport) elsewhere() []statusLine {
+	var lines []statusLine
 	for _, p := range r.Projects {
 		if !p.InScope && p.Waiting != (waitingOnUser{}) {
-			lines = append(lines, p.Name+": "+p.Waiting.String())
+			lines = append(lines, leafLine("elsewhere "+p.Name, p.Name+": "+p.Waiting.String()))
 		}
 	}
 	return lines
@@ -156,7 +147,7 @@ func projectLines(p projectReport) statusLine {
 	key := "project " + p.Name
 	l := leafLine(key, projectLine(p))
 	if len(p.Rows)+len(p.Goals) == 0 {
-		l.kids = append(l.kids, leafLine(key+" none", noActiveTasks))
+		l.kids = append(l.kids, leafLine(key+" none", "(no active tasks)"))
 	}
 	for _, g := range p.Goals {
 		l.kids = append(l.kids, goalLines(g))
@@ -166,16 +157,9 @@ func projectLines(p projectReport) statusLine {
 		l.kids = append(l.kids, rowLines(row, ""))
 	}
 	if len(folded) > 0 {
-		drafts := statusLine{key: key + " drafts", head: draftsLine(folded, p.Name), folded: true}
-		for _, row := range folded {
-			drafts.kids = append(drafts.kids, rowLines(row, ""))
-		}
-		l.kids = append(l.kids, drafts)
+		l.kids = append(l.kids, foldedLine(key+" drafts", draftsLine(folded, p.Name), folded, func(taskRow) string { return "" }))
 	}
-	for _, f := range p.footer() {
-		label, _, _ := strings.Cut(f, ":")
-		l.kids = append(l.kids, leafLine(key+" "+label, f))
-	}
+	l.kids = append(l.kids, p.footer(key)...)
 	return l
 }
 
@@ -194,8 +178,6 @@ func projectLine(p projectReport) string {
 	}
 	return line
 }
-
-const noActiveTasks = "(no active tasks)"
 
 // listed splits the project's tasks outside a goal into the rows it lists and
 // the folded drafts it counts.
@@ -220,17 +202,18 @@ func draftsLine(folded []taskRow, project string) string {
 }
 
 // footer is what the project's listing ends with: its open proposals, memory
-// suggestions and PRs to review, each only when there are some.
-func (p projectReport) footer() []string {
-	var lines []string
+// suggestions and PRs to review, each only when there are some. Their keys
+// follow the project's.
+func (p projectReport) footer(key string) []statusLine {
+	var lines []statusLine
 	if p.OpenProposals > 0 {
-		lines = append(lines, fmt.Sprintf("open proposals: %d  (crew proposals --project %s)", p.OpenProposals, p.Name))
+		lines = append(lines, leafLine(key+" proposals", fmt.Sprintf("open proposals: %d  (crew proposals --project %s)", p.OpenProposals, p.Name)))
 	}
 	if n := p.Waiting.MemorySuggestions; n > 0 {
-		lines = append(lines, fmt.Sprintf("memory suggestions: %d  (projects/%s/memory-suggestions.md)", n, p.Name))
+		lines = append(lines, leafLine(key+" memory", fmt.Sprintf("memory suggestions: %d  (projects/%s/memory-suggestions.md)", n, p.Name)))
 	}
 	if len(p.ToReview) > 0 {
-		lines = append(lines, toReviewLine(p.ToReview))
+		lines = append(lines, leafLine(key+" to review", toReviewLine(p.ToReview)))
 	}
 	return lines
 }
@@ -331,11 +314,17 @@ func groupLines(goalKey string, g taskGroup) statusLine {
 		l.kids = append(l.kids, rowLines(row, g.numberColumn(row)))
 	}
 	if len(more) > 0 {
-		m := statusLine{key: key + " more", head: moreLine(more), folded: true}
-		for _, row := range more {
-			m.kids = append(m.kids, rowLines(row, g.numberColumn(row)))
-		}
-		l.kids = append(l.kids, m)
+		l.kids = append(l.kids, foldedLine(key+" more", fmt.Sprintf("… (%d more)", len(more)), more, g.numberColumn))
+	}
+	return l
+}
+
+// foldedLine counts rows the text leaves out, with them under it. number is
+// each row's number column.
+func foldedLine(key, head string, rows []taskRow, number func(taskRow) string) statusLine {
+	l := statusLine{key: key, head: head, folded: true}
+	for _, row := range rows {
+		l.kids = append(l.kids, rowLines(row, number(row)))
 	}
 	return l
 }
@@ -353,9 +342,6 @@ func (g taskGroup) listed() (rows, more []taskRow) {
 	}
 	return rows, more
 }
-
-// moreLine counts the rows a group leaves out.
-func moreLine(more []taskRow) string { return fmt.Sprintf("… (%d more)", len(more)) }
 
 // numberColumn is what goes before a row's ID in its group. Rows in flight have
 // none. Every other group's rows have a number column three wide, blank when
