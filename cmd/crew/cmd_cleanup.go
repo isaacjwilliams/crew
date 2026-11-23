@@ -117,11 +117,11 @@ func cmdCleanup(c *Crew, args []string) error {
 		if st.Delivered() && t.Branch() != "" {
 			gitOK(p.Repo(), "branch", "-D", t.Branch())
 		}
-		if wt == "" && len(dirs) == 0 {
-			fmt.Println(t.ID() + " has no worktree to clean up")
-			continue
-		}
 		if wt == "" {
+			if len(dirs) == 0 {
+				fmt.Println(t.ID() + " has no worktree to clean up")
+				continue
+			}
 			p.dropUnstartedBranch(t)
 		}
 		t.Set("worktree", "")
