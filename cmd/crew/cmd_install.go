@@ -463,7 +463,7 @@ func (in *installer) writeLeadLocalSettings() {
 // confirm asks a yes-or-no question. An empty answer is byDefault. Without a
 // terminal it reads the answer from stdin, and no answer is byDefault too.
 func confirm(question string, byDefault bool) bool {
-	if stdinIsTerminal() {
+	if isTerminal(os.Stdin) {
 		hint := "[y/N]"
 		if byDefault {
 			hint = "[Y/n]"
@@ -478,12 +478,12 @@ func confirm(question string, byDefault bool) bool {
 	return regexp.MustCompile(`^[Yy]`).MatchString(a)
 }
 
-// stdinIsTerminal: a person can answer on stdin, rather than a script or a test.
-// It asks for the terminal's settings, which only a terminal has, as isatty
-// does; the standard library has no isatty of its own. Being a character device
-// isn't enough: /dev/null is one too.
-func stdinIsTerminal() bool {
+// isTerminal: f is a terminal, so a person is at it, rather than a script or a
+// test. It asks for the terminal's settings, which only a terminal has, as
+// isatty does; the standard library has no isatty of its own. Being a character
+// device isn't enough: /dev/null is one too.
+func isTerminal(f *os.File) bool {
 	var t syscall.Termios
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), ioctlGetTermios, uintptr(unsafe.Pointer(&t)))
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), ioctlGetTermios, uintptr(unsafe.Pointer(&t)))
 	return errno == 0
 }

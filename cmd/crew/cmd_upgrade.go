@@ -121,7 +121,7 @@ func (c *Crew) confirmUpgrade(projects []*Project, next string, merged, yes bool
 	switch {
 	case yes:
 		return nil
-	case !stdinIsTerminal():
+	case !isTerminal(os.Stdin):
 		return fail("nothing has changed; run crew upgrade --yes to go ahead")
 	case confirm("Upgrade now?", false):
 		return nil

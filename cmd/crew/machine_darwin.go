@@ -22,5 +22,5 @@ func machineName() string {
 // macOS comes with curl.
 const installTools = "with Homebrew: brew install git gh"
 
-// ioctlGetTermios is the ioctl that reads a terminal's settings, for stdinIsTerminal.
+// ioctlGetTermios is the ioctl that reads a terminal's settings, for isTerminal.
 const ioctlGetTermios = syscall.TIOCGETA
