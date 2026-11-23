@@ -133,8 +133,8 @@ func (r taskRow) stackAsks() bool {
 // buildReport works out what crew status shows: the projects in scope in full,
 // and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
-// tasks. prs are the open PRs as GitHub last had them (readPRs).
-func buildReport(c *Crew, inScope []string, doneToo bool, prs prReads) statusReport {
+// tasks. reads are the open PRs as GitHub last had them (readPRs).
+func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
@@ -142,7 +142,7 @@ func buildReport(c *Crew, inScope []string, doneToo bool, prs prReads) statusRep
 	if len(inScope) == 0 {
 		return r
 	}
-	s := statusView{Crew: c, doneToo: doneToo, reads: prs}
+	s := statusView{Crew: c, doneToo: doneToo, reads: reads}
 	var err error
 	s.agents, err = c.listAgents()
 	switch {
@@ -177,7 +177,7 @@ type statusView struct {
 	// busy or idle: another machine runs the crew, or claude agents failed. It's
 	// empty when they can be seen.
 	workersUnseen string
-	reads         prReads
+	reads         prReads // every project's PRs as GitHub answered (readPRs); project picks out its own as prs
 
 	branches Branches
 	repo     string            // the project's clone here, for restack reasons; empty when there's none
