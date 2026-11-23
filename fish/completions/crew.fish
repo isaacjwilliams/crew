@@ -36,6 +36,7 @@ complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
 complete -c crew -n "__fish_seen_subcommand_from sync" -l quiet
 complete -c crew -n "__fish_seen_subcommand_from status stats list sync proposals pause resume" -l all -d 'Every project, not just this one'
 complete -c crew -n "__fish_seen_subcommand_from status" -l done -d 'Include merged/done/abandoned'
+complete -c crew -n "__fish_seen_subcommand_from status" -l plain -d 'Print the text, even in a terminal'
 complete -c crew -n "__fish_seen_subcommand_from stats" -l since -x -d 'Tasks merged since this date (YYYY-MM-DD)'
 complete -c crew -n "__fish_seen_subcommand_from proposals" -l any-status -d 'Every status, not just open'
 complete -c crew -n "__fish_seen_subcommand_from observe" -l base -r

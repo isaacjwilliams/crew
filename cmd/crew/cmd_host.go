@@ -80,7 +80,7 @@ func (c *Crew) hostUp(take bool) error {
 func (c *Crew) trustWorkRoot() {
 	home, _ := os.UserHomeDir()
 	root := c.Settings["WORK_ROOT"]
-	if trusted(home, root) || !stdinIsTerminal() {
+	if trusted(home, root) || !isTerminal(os.Stdin) {
 		return
 	}
 	say("Trusting %s, where workers run", tilde(home, root))

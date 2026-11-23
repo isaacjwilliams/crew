@@ -57,17 +57,27 @@ func newCrew() (*Crew, error) {
 	if c.Host == "" {
 		c.Host = machineName()
 	}
-	// Every setting has its default in defaults.env; config/crew.env holds the person's own.
-	c.Settings = Settings{}
-	if err := readEnvFile(filepath.Join(c.Home, "config/defaults.env"), c.Settings); err != nil {
+	s, err := sharedSettings(c.Home)
+	if err != nil {
 		return nil, err
 	}
-	if p := filepath.Join(c.Home, "config/crew.env"); isFile(p) {
-		if err := readEnvFile(p, c.Settings); err != nil {
+	c.Settings = s
+	return c, nil
+}
+
+// sharedSettings are the settings every project starts from. Each has its
+// default in config/defaults.env; config/crew.env holds the person's own.
+func sharedSettings(home string) (Settings, error) {
+	s := Settings{}
+	if err := readEnvFile(filepath.Join(home, "config/defaults.env"), s); err != nil {
+		return nil, err
+	}
+	if p := filepath.Join(home, "config/crew.env"); isFile(p) {
+		if err := readEnvFile(p, s); err != nil {
 			return nil, err
 		}
 	}
-	return c, nil
+	return s, nil
 }
 
 // shortHostname is the hostname up to its first dot.
