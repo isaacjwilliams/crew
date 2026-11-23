@@ -398,7 +398,7 @@ sed -i "/^### [13]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
 sed -i "/^[13]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless the brief marks it a user check" \
-  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). Run each check the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
+  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
 sed -i '/^## Decisions$/a - 2026-11-24 — Criterion 3 is a user check: only a real terminal shows it (lead)' "$F1"
 check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 3 ("* ]]'
 sed -i 's/^\(- 2026-11-24 — Criterion 3 is a user check: .*\) (lead)$/\1 (user)/' "$F1"
