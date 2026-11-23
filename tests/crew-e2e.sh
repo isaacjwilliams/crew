@@ -2488,7 +2488,7 @@ costs_session() {  # dir sent output: a session in dir that sent one message, la
   local f
   f=$HOME/.claude/projects/$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')/s.jsonl
   mkdir -p "${f%/*}"
-  printf '{"type":"assistant","timestamp":"%s","message":{"id":"msg_%s","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":%d}}}\n' "$2" "$RANDOM$RANDOM" "$3" >"$f"
+  printf '{"type":"assistant","timestamp":"%s","entrypoint":"cli","message":{"id":"msg_%s","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":%d}}}\n' "$2" "$RANDOM$RANDOM" "$3" >"$f"
   touch -d "$2" "$f"
 }
 costs_session "$L/lead" 2026-11-05T13:00:00Z 50000

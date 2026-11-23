@@ -104,6 +104,9 @@ func cmdCosts(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	if ts.elsewhere, err = c.tenuresElsewhere(); err != nil {
+		return err
+	}
 	if ts.unread > 0 {
 		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", ts.unread)
 	}
@@ -166,7 +169,19 @@ type transcripts struct {
 	// for cleanupPeriodDays, so every message sent since then is here. With no
 	// such session, it's when the scan ran: there's no telling.
 	completeFrom time.Time
-	unread       int // the lines that didn't read
+	elsewhere    []tenure // when another machine ran the crew, whose sessions aren't here
+	unread       int      // the lines that didn't read
+}
+
+// elsewhereDuring is the tenures of other machines from one time to another.
+func (ts transcripts) elsewhereDuring(from, to time.Time) []tenure {
+	var during []tenure
+	for _, t := range ts.elsewhere {
+		if t.from.Before(to) && t.to.After(from) {
+			during = append(during, t)
+		}
+	}
+	return during
 }
 
 // scanTranscripts charges every message in the transcripts under dir, each
@@ -454,6 +469,7 @@ func firstPrompt(path string) (string, error) {
 type costReport struct {
 	from, to     time.Time // the first and last day
 	completeFrom time.Time // from when this machine's transcripts hold every message
+	elsewhere    []tenure  // when another machine ran the crew in the range
 	steps        map[string]*stepCost
 	total        float64
 	perTask      []float64      // what each finished task cost in all
@@ -475,20 +491,24 @@ type stepCost struct {
 // both included. A total counts what was sent in the range. A median counts
 // whole tasks, those that merged or were done in the range, whenever they spent
 // it: each step's over the tasks that ran it. The medians leave out a task that
-// began before the transcripts are complete or has no worker session here, and
-// a task with a message there's no rate for.
+// began before the transcripts are complete, ran while another machine ran the
+// crew or has no worker session here, and a task with a message there's no
+// rate for.
 func costsIn(ts transcripts, tasks map[string]Task, from, to time.Time) costReport {
-	r := costReport{from: from, to: to, completeFrom: ts.completeFrom, steps: map[string]*stepCost{}, unpriced: map[string]int{}}
 	end := to.AddDate(0, 0, 1)
+	r := costReport{from: from, to: to, completeFrom: ts.completeFrom, elsewhere: ts.elsewhereDuring(from, end),
+		steps: map[string]*stepCost{}, unpriced: map[string]int{}}
 	inRange := func(at time.Time) bool { return !at.Before(from) && at.Before(end) }
 	finished := map[string]*taskSpend{} // the tasks the medians may count
 	for id, t := range tasks {
-		if !inRange(finishedAt(t)) {
+		done := finishedAt(t)
+		if !inRange(done) {
 			continue
 		}
 		// A task with no created date is left out too: there's no telling
 		// whether all its sessions are here.
-		if created, _ := time.Parse(time.RFC3339, t.Get("created")); created.Before(r.completeFrom) {
+		created, _ := time.Parse(time.RFC3339, t.Get("created"))
+		if created.Before(r.completeFrom) || len(ts.elsewhereDuring(created, done)) > 0 {
 			r.incomplete++
 		} else {
 			finished[id] = &taskSpend{steps: map[string]float64{}}
@@ -625,6 +645,10 @@ func (r costReport) print(w io.Writer) {
 	fmt.Fprintln(w)
 	if r.from.Before(r.completeFrom) {
 		fmt.Fprintf(w, "This machine's transcripts are complete only from %s: older sessions may have been deleted.\n", r.completeFrom.Local().Format(logTime))
+	}
+	for _, t := range r.elsewhere {
+		fmt.Fprintf(w, "%s ran the crew from %s to %s, and its sessions aren't on this machine.\n",
+			t.holder, t.from.Local().Format(logTime), t.to.Local().Format(logTime))
 	}
 	for _, model := range slices.Sorted(maps.Keys(r.unpriced)) {
 		fmt.Fprintf(w, "Not priced, as there's no rate for it: %s, %s tokens.\n", model, thousands(r.unpriced[model]))

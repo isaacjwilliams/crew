@@ -7,7 +7,9 @@ package main
 
 import (
 	"os"
+	"slices"
 	"strings"
+	"time"
 )
 
 // leaseLost is made by a push that found on origin that another machine claimed
@@ -49,6 +51,39 @@ func (c *Crew) previousHolder() string {
 		}
 	}
 	return "another machine"
+}
+
+// A tenure is a stretch of time one machine ran the crew: from when the host
+// file came to name it until the file next changed, or until now.
+type tenure struct {
+	holder   string
+	from, to time.Time
+}
+
+// tenuresElsewhere are the stretches of time another machine ran the crew,
+// oldest first, from the host file's history.
+func (c *Crew) tenuresElsewhere() ([]tenure, error) {
+	log, err := git(c.Home, "log", "--reverse", "--format=%H %aI", "--", "host")
+	if err != nil {
+		return nil, err
+	}
+	var tenures []tenure
+	for _, line := range strings.Split(log, "\n") {
+		commit, date, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, date)
+		if err != nil {
+			return nil, err
+		}
+		if n := len(tenures); n > 0 {
+			tenures[n-1].to = at
+		}
+		holder, _ := git(c.Home, "show", commit+":host")
+		tenures = append(tenures, tenure{holder, at, time.Now()})
+	}
+	return slices.DeleteFunc(tenures, func(t tenure) bool { return t.holder == "" || t.holder == c.Host }), nil
 }
 
 // requireHost fails unless this machine holds the lease: the host file names it,

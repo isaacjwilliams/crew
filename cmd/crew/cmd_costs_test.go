@@ -258,8 +258,9 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 
 // A median counts the whole of each task that finished in the range, over the
 // tasks that ran the step. A task that began before the transcripts are
-// complete, has no worker session here or has a message there's no rate for
-// is left out, and the report says how many were.
+// complete, ran while another machine ran the crew, has no worker session here
+// or has a message there's no rate for is left out, and the report says how
+// many were.
 func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 	task := func(id, created, finished string) Task {
 		return taskFile(t, id, "---\nstatus: merged\ncreated: "+costsDay(t, created).Format(time.RFC3339)+
@@ -274,6 +275,7 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 		"p/nowhere": task("nowhere", "2026-11-15 09:00", "2026-11-20 12:00"),
 		"p/briefed": task("briefed", "2026-11-15 09:00", "2026-11-20 12:00"),
 		"p/mystery": task("mystery", "2026-11-15 09:00", "2026-11-20 12:00"),
+		"p/moved":   task("moved", "2026-11-05 09:00", "2026-11-20 12:00"),
 		"p/open":    taskFile(t, "open", "---\nstatus: pr-open\ncreated: 2026-11-15T09:00:00Z\n---\n## Log\n"),
 	}
 	opus := func(task, step, at string, dollars int) *charge {
@@ -293,9 +295,11 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 		opus("p/open", stepWorker, "2026-11-20 09:00", 100),
 		opus("p/briefed", stepBriefReview, "2026-11-15 10:00", 1),
 		opus("p/mystery", stepWorker, "2026-11-15 10:00", 100),
+		opus("p/moved", stepWorker, "2026-11-08 09:00", 100),
 		{owner{stepWorker, "p/mystery"}, "claude-mystery-1", costsDay(t, "2026-11-15 11:00"), claudeUsage{Output: 1}},
 	}
-	ts := transcripts{charges: charges, completeFrom: costsDay(t, "2026-11-01 09:00")}
+	laptop := tenure{"laptop", costsDay(t, "2026-11-06 09:00"), costsDay(t, "2026-11-07 09:00")}
+	ts := transcripts{charges: charges, completeFrom: costsDay(t, "2026-11-01 09:00"), elsewhere: []tenure{laptop}}
 	r := costsIn(ts, tasks, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
 	var out strings.Builder
 	r.print(&out)
@@ -308,18 +312,25 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 
   All               $383   100%      2       $52
 
-Medians are of whole tasks, over the 2 that merged or were done in the range: each step's over the tasks that ran it. Left out: 3 with sessions missing from this machine's transcripts, and 1 with a message there's no rate for.
+Medians are of whole tasks, over the 2 that merged or were done in the range: each step's over the tasks that ran it. Left out: 4 with sessions missing from this machine's transcripts, and 1 with a message there's no rate for.
 `
 	if got := out.String(); !strings.HasPrefix(got, want) {
 		t.Errorf("report:\n%s\nwant it to start:\n%s", got, want)
 	}
-	if strings.Contains(out.String(), "complete only from") {
-		t.Errorf("the report says the transcripts are incomplete, though the range starts after they are complete:\n%s", out.String())
+	for _, incomplete := range []string{"complete only from", "laptop"} {
+		if strings.Contains(out.String(), incomplete) {
+			t.Errorf("the report says %q, though the transcripts hold the whole range:\n%s", incomplete, out.String())
+		}
 	}
 
 	out.Reset()
 	costsIn(ts, tasks, costsDay(t, "2026-10-25 00:00"), costsDay(t, "2026-11-22 00:00")).print(&out)
-	if want := "This machine's transcripts are complete only from 2026-11-01 09:00: older sessions may have been deleted.\n"; !strings.Contains(out.String(), want) {
-		t.Errorf("report doesn't say %q:\n%s", want, out.String())
+	for _, want := range []string{
+		"This machine's transcripts are complete only from 2026-11-01 09:00: older sessions may have been deleted.\n",
+		"laptop ran the crew from 2026-11-06 09:00 to 2026-11-07 09:00, and its sessions aren't on this machine.\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report doesn't say %q:\n%s", want, out.String())
+		}
 	}
 }
