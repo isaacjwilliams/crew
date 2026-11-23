@@ -1654,7 +1654,19 @@ FJ=$(crew new "Moved off its parent" --branch unstacked-child --on "$(tid "$FP")
 first_run "$FJ" 70; echo agent/first-parent >"$HOME/gh-pr-base-70"; crew set "$FJ" base main >/dev/null; out=$(crew hand-over "$FJ" 2>&1); st=$?
 check "a first run moved to a base its branch doesn't start on is told to ask, and stays off pr-open" \
   '((st == 1)) && [[ $out == *"your PR has to move before its first hand-over (PR targets agent/first-parent, not main), but your branch doesn'"'"'t start on main"*"ask what to do"* && $(crew get "$FJ" status) == working ]]'
-for t in "$FR" "$FH" "$FI" "$FJ"; do crew set "$t" status abandoned >/dev/null; done
+FK=$(crew new "Moved while handing over" --branch moving-child --on "$(tid "$FP")"); fill "$FK"; crew ready "$FK" >/dev/null; setstate "done" null; crew dispatch "$FK" >/dev/null
+first_run "$FK" 71
+# The lead moves the child to another parent while crew hand-over reads the first parent's PR, which GitHub calls merged.
+cat >"$HOME/gh-pr-view-hook" <<HOOK
+#!/bin/sh
+case "\$*" in *"/pull/61 --json state"*) ;; *) exit 0 ;; esac
+crew set "$FK" base agent/replacement-parent >/dev/null; echo MERGED >"$HOME/gh-pr-state-61"; rm "\$0"
+HOOK
+chmod +x "$HOME/gh-pr-view-hook"; before="$(crew get "$FR" status) $(crew get "$FR" pr_state)"
+crew hand-over "$FK" >/dev/null 2>&1; rm -f "$HOME/gh-pr-state-61"
+check "a parent's PR read before the child moved to another parent isn't recorded on the new one" \
+  '[[ $(crew get "$FK" base) == agent/replacement-parent && "$(crew get "$FR" status) $(crew get "$FR" pr_state)" == "$before" && $(crew get "$FP" status) != merged ]]'
+for t in "$FR" "$FH" "$FI" "$FJ" "$FK"; do crew set "$t" status abandoned >/dev/null; done
 
 # The parent merges while one child has its PR open and another has none yet.
 FC=$(crew new "PR open when its parent merged" --branch merged-child --on "$(tid "$FP")"); fill "$FC"; crew ready "$FC" >/dev/null; setstate "done" null; crew dispatch "$FC" >/dev/null

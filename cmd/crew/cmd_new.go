@@ -421,6 +421,8 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 // session is still making the branch, so it moves them itself; after it, crew
 // tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
 // and of its parent as GitHub has them now, or nil when crew didn't read one.
+// They were read before the lock, so each is recorded only in the task whose
+// PR it is: not in a new parent the task moved to meanwhile, say.
 // Call it with the lock held.
 func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR) error {
 	idx, repo := c.branches(p.Name), p.Repo()
