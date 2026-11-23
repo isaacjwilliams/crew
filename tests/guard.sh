@@ -248,10 +248,12 @@ check "the lead makes a fix only of a defect live in production, and anything el
 check "the lead traces a fix to the task that introduced it and names the check that missed it, from crew's list" \
   "grep -q 'Set .fixes. to the merged task whose change introduced it: find the commit with .git log -S' $A/lead.md && grep -q 'set .unknown. and say why under Context' $A/lead.md && [[ -n \$(missed_by) ]] && grep -qF \"Set \\\`missed_by\\\` to the check that should have caught it, from why it didn't: \$(missed_by).\" $A/lead.md"
 # --- stacks: crew restack's note and the dispatch prompt point at sections the implementer must have
-check "implementer may change its PR's base only when a restack says so" \
-  "grep -q 'its base branch when a restack tells you to' $A/implementer.md"
+check "implementer may change its PR's base only when a restack or crew hand-over says so" \
+  "grep -q 'its base branch when a restack or .crew hand-over. tells you to' $A/implementer.md"
 check "implementer has the sections crew's stack prompts name" \
   "grep -q '^## Workflow: restack' $A/implementer.md && grep -q '^## Stacked tasks' $A/implementer.md && grep -q 'follow your restack workflow' <<<\"\$SRC\" && grep -q 'Stacked tasks.. in your instructions' <<<\"\$SRC\""
+check "before its first hand-over, a stacked worker runs the rebase crew hand-over gives it and goes back to its first run" \
+  "section '## Stacked tasks' $A/implementer.md | grep -q 'Before your first hand-over, .crew hand-over. gives them' && awk '/^## Workflow: restack/ {w=1} w && /^6\\. / {print; exit}' $A/implementer.md | grep -q 'Before your first hand-over, go back to your first run here' && ! grep -qiE 'restack comes only after a hand-over|once (its|the) PR is open' $A/implementer.md $A/lead.md && grep -qF 'your branch has to move before its first hand-over (%s): %s' <<<\"\$SRC\""
 check "a restack session's prompt opens the way the implementer's one exception to reading the whole task file names it" \
   "grep -qF '\"You are restacking task %s in project %s: ' <<<\"\$SRC\" && grep -q 'The one exception is a restack session, whose first message starts \"You are restacking task\": go straight to \"Workflow: restack\"' $A/implementer.md"
 check "implementer records the new base only after pushing the restack" \
