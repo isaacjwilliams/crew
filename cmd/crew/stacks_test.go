@@ -141,6 +141,42 @@ func TestOnBase(t *testing.T) {
 	}
 }
 
+// A first hand-over's automated review covers the branch when it read from the
+// fork point the branch has on its base now, up to a commit the branch still
+// holds. A branch with no fork point on origin's base can't be judged.
+func TestStaleReview(t *testing.T) {
+	g := gitRepo{t, stackRepo(t)}
+	fork := g.git("rev-parse", "HEAD")
+	g.git("checkout", "-q", "-b", "agent/t")
+	reviewed := g.commit("own work", "own", "own work\n")
+	g.commit("a nitpick fixed after the review", "own", "own work, tidied\n")
+	g.git("checkout", "-q", "main")
+	moved := g.commit("main moves on", "other", "other\n")
+	dir := t.TempDir()
+	for _, c := range []struct {
+		name, base, fork, head string
+		stale                  bool
+	}{
+		{"a review from the fork point, up to an earlier commit of the branch", "main", fork, reviewed, false},
+		{"a review from another fork point", "main", moved, reviewed, true},
+		{"a review up to a commit the branch no longer holds", "main", fork, moved, true},
+		{"a base that isn't on origin", "gone", moved, reviewed, false},
+	} {
+		task := stackTask(t, dir, "001-t", "branch: agent/t", "base: "+c.base)
+		review := "## Automated reviews\n### Automated review 1\n\n- Range: `" + c.fork + ".." + c.head + "`, 1 commits on `agent/t` since `" + c.base + "` (fork point `" + c.fork + "`)\n\n"
+		text, err := os.ReadFile(task.Path)
+		if err == nil {
+			err = os.WriteFile(task.Path, []byte(strings.Replace(string(text), "## Log\n", review+"## Log\n", 1)), 0o644)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := staleReview(task, g.repo); (got != "") != c.stale {
+			t.Errorf("%s: staleReview = %q, want stale %v", c.name, got, c.stale)
+		}
+	}
+}
+
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := git(dir, args...)

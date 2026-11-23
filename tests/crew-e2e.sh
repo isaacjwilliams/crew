@@ -52,7 +52,7 @@ runs_on() {
   [[ $launch == *" --model $2 "* || ($launch == "claude --resume $(crew get "$1" worker_session) --bg "* && $(crew get "$1" worker_model) == "$2") ]]
 }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
-review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n" "$1"; }   # task-file review-number
+review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n${3:+$3\\n}" "$1"; }   # task-file review-number [record-line]
 clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
@@ -1582,6 +1582,179 @@ out=$(crew tick 2>&1)
 check "when a round arrives, its followup makes the worktree here" '[[ $out == *"$(basename "$F19" .md): round 1 sent to its worker"* && -d $WT19 && $(git -C "$WT19" branch --show-current) == agent/pr-moved ]]'
 crew set "$F19" status abandoned >/dev/null
 rm -f "$HOME/gh-pr-state"
+
+# First runs whose parent moves: crew hand-over refuses a stacked task's first hand-over off its
+# parent's latest commit and gives the task's own worker the rebase, which the worker runs. Each
+# test worker below does only what implementer.md's first-run steps and crew's messages say.
+echo OPEN >"$HOME/gh-pr-state"
+tid() { basename "$1" .md; }
+own() { git rev-list "$1..$(tip "$2")"; }  # parent-tip branch: the commits the branch adds to it
+run_given() {  # worktree message: what a worker does with commands crew gives it: runs each, in order, as written
+  local cmd
+  while IFS= read -r cmd; do (cd "$1" && bash -c "$cmd" >/dev/null 2>&1) || return 1; done < <(grep -o '`[^`]*`' <<<"$2" | tr -d '`')
+}
+ranged_review() {  # task n: an automated review as the pr-review skill records it, from the fork point on the base on origin
+  local b base fork head; b=$(crew get "$1" branch); base=$(crew get "$1" base)
+  fork=$(git merge-base "origin/$base" "refs/heads/$b"); head=$(git rev-parse "refs/heads/$b")
+  review "$(crew path "$1")" "$2" "- Range: \`$fork..$head\`, $(git rev-list --count "$fork..$head") commits on \`$b\` since \`$base\` (fork point \`$fork\`)"
+}
+first_run() {  # task pr: a first run up to its hand-over: work pushed, a PR, evidence, and a pass of automated review
+  work "$(crew get "$1" worktree)" "$(tid "$1").txt"
+  [[ -z $2 ]] || crew set "$1" pr "https://github.com/isaac/webapp/pull/$2"
+  record_evidence "$1"; [[ -z $2 ]] || pr_body "$1"; ranged_review "$1" 1
+}
+restacks_of() { grep -c "You are restacking task $(tid "$1") " "$HOME/claude-calls.log"; }
+resumes_of() { grep -c -- "--resume $(crew get "$1" worker_session)" "$HOME/claude-calls.log"; }
+STALE="no longer covers your branch"
+FP=$(crew new "First-run parent" --branch first-parent); fill "$FP"; crew ready "$FP" >/dev/null; setstate "done" null; crew dispatch "$FP" >/dev/null
+WTP=$(crew get "$FP" worktree); work "$WTP" p1.txt; crew set "$FP" pr https://github.com/isaac/webapp/pull/61; hand_over "$FP"
+
+# The parent moves while the child's worker is idle before its hand-over, with a file it hasn't committed.
+FA=$(crew new "Idle when its parent moved" --branch idle-child --on "$(tid "$FP")"); fill "$FA"; crew ready "$FA" >/dev/null
+crew set "$FA" model opus; setstate "done" null; crew dispatch "$FA" >/dev/null; WTA=$(crew get "$FA" worktree); sA=$(crew get "$FA" worker_session)
+first_run "$FA" 62; echo draft >"$WTA/notes.txt"
+work "$WTP" p2.txt; out=$(crew sync)
+check "sync says a child's worker rebases before its first hand-over" '[[ $out == *"$(tid "$FA"): needs a restack, $(tid "$FP") moved (its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how)"* ]]'
+stall "$FA" "done" null; n=$(fresh_launches)
+out=$(crew tick 2>&1)
+check "tick nudges a first run that went idle after its parent moved, in its own session, and sends no restack" \
+  '[[ $out == *"$(tid "$FA"): its worker'"'"'s turn ended mid-task; nudged it"* && $(last_prompt) == *"$NUDGE"* && $(fresh_launches) == "$n" && $(restacks_of "$FA") == 0 ]] && runs_on "$FA" opus'
+out=$(crew hand-over "$FA" 2>&1); st=$?
+check "a first hand-over off the parent's latest commit is refused with the rebase onto it, the cut and the lease" \
+  '((st == 1)) && [[ $out == *"your branch has to move before its first hand-over ($(tid "$FP") moved): rebase your branch with \`git fetch origin && git rebase --onto $(tip first-parent) $(crew get "$FA" base_sha)\`, then follow \"Stacked tasks\" in your instructions."*"\`git push --force-with-lease=agent/idle-child:$(git rev-parse origin/agent/idle-child) origin agent/idle-child\`"* && $out != *"base main"* && $(crew get "$FA" status) == working ]]'
+bs=$(crew get "$FA" base_sha); run_given "$WTA" "$out"; out=$(crew hand-over "$FA" 2>&1); st=$?
+check "after the rebase, hand-over refuses the automated review that read the parent's old commits" \
+  '((st == 1)) && [[ $out == *"automated review 1 $STALE: it read from $(cut -c1-12 <<<"$bs"), and your branch now leaves origin/agent/first-parent at $(tip first-parent | cut -c1-12). Run a pass of automated review, then hand over again"* && $(crew get "$FA" status) == working ]]'
+ranged_review "$FA" 2; out=$(crew hand-over "$FA" 2>&1); st=$?
+check "and hands over once a review has read the rebased branch: on the parent's tip, with only the child's commits" \
+  '((st == 0)) && [[ $(crew get "$FA" status) == pr-open && $(git rev-parse origin/agent/idle-child) == $(tip idle-child) && $(git log --format=%s "$(own "$(tip first-parent)" idle-child)" -1) == "add $(tid "$FA").txt" && $(own "$(tip first-parent)" idle-child | wc -l) == 1 ]]'
+check "the first run carried on in its own session: no restack, no followup, no question, and its uncommitted file is still in its worktree" \
+  '[[ $(crew get "$FA" worker_session) == "$sA" && $(restacks_of "$FA") == 0 && $(resumes_of "$FA") == 1 && -z $(crew get "$FA" restack_sent) && $(git -C "$WTA" status --porcelain) == "?? notes.txt" ]] && ! section "$FA" "## Open questions" | grep -q "^- \["'
+setstate "done" null; out=$(crew tick 2>&1)
+check "and once it's handed over on the parent's tip, tick has no restack to send it" '[[ $out != *"$(tid "$FA"):"*restack* && $(restacks_of "$FA") == 0 ]]'
+crew set "$FA" status abandoned >/dev/null
+
+# The parent moves while one child's turn runs straight to its hand-over, and while another waits on an answer.
+FB=$(crew new "Busy when its parent moved" --branch busy-child --on "$(tid "$FP")"); fill "$FB"; crew ready "$FB" >/dev/null; setstate "done" null; crew dispatch "$FB" >/dev/null
+FE=$(crew new "Asking when its parent moved" --branch asking-child --on "$(tid "$FP")"); fill "$FE"; crew ready "$FE" >/dev/null; setstate "done" null; crew dispatch "$FE" >/dev/null
+first_run "$FB" 63; first_run "$FE" 66
+sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$FE"; crew set "$FE" status needs-input
+work "$WTP" p3.txt; setstate working 4242 busy; n=$(launches)
+out=$(crew tick 2>&1)
+check "tick sends a busy first run nothing when its parent moves, and says its worker rebases it" \
+  '[[ $out == *"$(tid "$FB"): restack ($(tid "$FP") moved) isn'"'"'t crew'"'"'s to send: its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how"* && $(launches) == "$n" ]]'
+refused=0
+for _ in 1 2; do [[ $(crew hand-over "$FB" 2>&1) == *"your branch has to move before its first hand-over"* && $(crew get "$FB" status) == working ]] && refused=$((refused + 1)); done
+check "a worker that hands over again without acting on the move is refused again, and the task stays off pr-open" '((refused == 2)) && ! git merge-base --is-ancestor "$(tip first-parent)" "$(tip busy-child)"'
+out=$(crew hand-over "$FB" 2>&1); run_given "$(crew get "$FB" worktree)" "$out"
+check "a hand-over refused for a stale review hands over after a new one" \
+  '[[ $(crew hand-over "$FB" 2>&1) == *"automated review 1 $STALE"* ]] && ranged_review "$FB" 2 && crew hand-over "$FB" >/dev/null && [[ $(crew get "$FB" status) == pr-open && $(own "$(tip first-parent)" busy-child | wc -l) == 1 && $(restacks_of "$FB") == 0 && $(launches) == "$n" ]]'
+setstate "done" null; out=$(crew tick 2>&1); byhand=$(crew restack "$FE" 2>&1); st=$?
+check "a needs-input first run gets no restack from tick or by hand, which say who rebases it" \
+  '[[ $out == *"$(tid "$FE"): restack ($(tid "$FP") moved) isn'"'"'t crew'"'"'s to send"* && $(restacks_of "$FE") == 0 && $st == 4 && $byhand == *"$(tid "$FE") hasn'"'"'t been handed over: its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how"* ]]'
+sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$FE"; n=$(fresh_launches); r=$(resumes_of "$FE")
+crew followup "$FE" --note "A." >/dev/null 2>&1; crew set "$FE" status working
+out=$(crew hand-over "$FE" 2>&1); run_given "$(crew get "$FE" worktree)" "$out"; ranged_review "$FE" 2
+check "once answered, it reaches pr-open on the parent's tip with the answer's followup the only one sent" \
+  'crew hand-over "$FE" >/dev/null && [[ $(crew get "$FE" status) == pr-open && $(own "$(tip first-parent)" asking-child | wc -l) == 1 && $(resumes_of "$FE") == $((r + 1)) && $(fresh_launches) == "$n" && $(restacks_of "$FE") == 0 ]]'
+crew set "$FB" status abandoned >/dev/null; crew set "$FE" status abandoned >/dev/null
+
+# The parent is rewritten, and then gets a new commit, with no crew sync in between.
+FG=$(crew new "Moved twice before a sync" --branch twice-child --on "$(tid "$FP")"); fill "$FG"; crew ready "$FG" >/dev/null; setstate "done" null; crew dispatch "$FG" >/dev/null
+first_run "$FG" 67; WTG=$(crew get "$FG" worktree)
+(cd "$WTP" && git commit -q --amend -m "add p3.txt, reworded" && git push -q -f origin HEAD 2>/dev/null)
+run_given "$WTG" "$(crew hand-over "$FG" 2>&1)"; work "$WTP" p4.txt; out=$(crew hand-over "$FG" 2>&1); run_given "$WTG" "$out"
+check "a second rebase before a sync cuts where the first one left the branch, so the branch keeps only its own commits" \
+  '[[ $out == *"git rebase --onto $(tip first-parent) $(git -C "$WTP" rev-parse HEAD~1)"* ]] && ranged_review "$FG" 2 && crew hand-over "$FG" >/dev/null && [[ $(crew get "$FG" status) == pr-open && $(own "$(tip first-parent)" twice-child | wc -l) == 1 ]]'
+crew set "$FG" status abandoned >/dev/null
+
+# A worker that checks its base before each costly step of its first run, as implementer.md says:
+# the parent moves before its evidence and its review, and one review reads the branch it hands over.
+FL=$(crew new "Checks its base" --branch checking-child --on "$(tid "$FP")"); fill "$FL"; crew ready "$FL" >/dev/null; setstate "done" null; crew dispatch "$FL" >/dev/null
+WTL=$(crew get "$FL" worktree); work "$WTL" "$(tid "$FL").txt"; out=$(crew check-base "$FL" 2>&1); st=$?
+check "check-base lets a first run whose branch holds its parent's latest commit carry on" '((st == 0)) && [[ $out == "nothing to move: carry on" ]]'
+work "$WTP" p5.txt; out=$(crew check-base "$FL" 2>&1); st=$?
+check "check-base gives a first run whose parent moved the rebase hand-over would give, and changes no status" \
+  '((st == 1)) && [[ $out == *"your branch has to move before its first hand-over ($(tid "$FP") moved): rebase your branch with \`git fetch origin && git rebase --onto $(tip first-parent) $(crew get "$FL" base_sha)\`"*"\`git push --force-with-lease=agent/checking-child:$(git rev-parse origin/agent/checking-child) origin agent/checking-child\`"* && $(crew get "$FL" status) == working ]]'
+run_given "$WTL" "$out"; crew check-base "$FL" >/dev/null && record_evidence "$FL"; crew set "$FL" pr https://github.com/isaac/webapp/pull/72; pr_body "$FL"
+work "$WTP" p6.txt; out=$(crew check-base "$FL" 2>&1); run_given "$WTL" "$out"; crew check-base "$FL" >/dev/null && ranged_review "$FL" 1
+check "with a check before its evidence and its review, it hands over after one review, on the parent's tip, with only its own commits" \
+  'crew hand-over "$FL" >/dev/null && [[ $(crew get "$FL" status) == pr-open && $(grep -c "^### Automated review" "$FL") == 1 && $(own "$(tip first-parent)" checking-child | wc -l) == 1 && $(restacks_of "$FL") == 0 ]]'
+out=$(crew check-base "$FL" 2>&1); st=$?
+check "check-base leaves a task that has been handed over to crew's restacks" '((st == 1)) && [[ $out == *"$(tid "$FL") has been handed over: crew restacks it when its base moves"* ]]'
+crew set "$FL" status abandoned >/dev/null
+
+# The lead moves a first run onto another parent, a worker opens its PR on the wrong branch, and the
+# lead moves a stacked first run to the default branch. crew sync reads none of their PRs.
+edits() { grep -c "^gh pr edit --base $1\$" "$HOME/gh-calls.log"; }  # base: how many times a worker retargeted a PR to it
+FR=$(crew new "Replacement parent" --branch replacement-parent --on "$(tid "$FP")"); fill "$FR"; crew ready "$FR" >/dev/null; setstate "done" null; crew dispatch "$FR" >/dev/null
+FH=$(crew new "Moved to another parent" --branch moved-child --on "$(tid "$FP")"); fill "$FH"; crew ready "$FH" >/dev/null; setstate "done" null; crew dispatch "$FH" >/dev/null
+first_run "$FH" 68; echo agent/first-parent >"$HOME/gh-pr-base-68"; work "$(crew get "$FR" worktree)" r1.txt
+crew set "$FH" base agent/replacement-parent >/dev/null; e=$(edits agent/replacement-parent)
+out=$(crew hand-over "$FH" 2>&1); run_given "$(crew get "$FH" worktree)" "$out"
+(($(edits agent/replacement-parent) > e)) && echo agent/replacement-parent >"$HOME/gh-pr-base-68"  # GitHub moves the PR
+check "a first run moved onto another parent gets the rebase onto it and its PR's retarget" \
+  '[[ $out == *"your branch has to move before its first hand-over ($(tid "$FR") moved): rebase your branch with \`git fetch origin && git rebase --onto $(tip replacement-parent) "*"Your PR targets agent/first-parent, not your base: after pushing, run \`gh pr edit --base agent/replacement-parent\`."* && $(cat "$HOME/gh-pr-base-68") == agent/replacement-parent ]]'
+check "and hands over on the new parent once a review has read it there, with only its own commits" \
+  '[[ $(crew hand-over "$FH" 2>&1) == *"automated review 1 $STALE"* ]] && ranged_review "$FH" 2 && crew hand-over "$FH" >/dev/null && [[ $(crew get "$FH" status) == pr-open && $(own "$(tip replacement-parent)" moved-child | wc -l) == 1 ]]'
+FI=$(crew new "PR on the wrong branch" --branch wrong-pr-base); fill "$FI"; crew ready "$FI" >/dev/null; setstate "done" null; crew dispatch "$FI" >/dev/null
+first_run "$FI" 69; echo agent/first-parent >"$HOME/gh-pr-base-69"; e=$(edits main)
+check "check-base gives a first run whose PR targets another branch the retarget, then has it carry on" \
+  '[[ $(crew check-base "$FI" 2>&1) == *"your PR has to move before its first hand-over (PR targets agent/first-parent, not main): run \`gh pr edit --base main\`, then carry on" ]]'
+check "sync says a first run's own worker retargets its PR, not crew restack" \
+  '[[ $(crew sync 2>&1) == *"$(tid "$FI"): PR targets agent/first-parent, not main (its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how)"* ]]'
+out=$(crew hand-over "$FI" 2>&1); st=$?; run_given "$(crew get "$FI" worktree)" "$out"
+(($(edits main) > e)) && echo main >"$HOME/gh-pr-base-69"
+check "a first run whose PR targets another branch than its base gets the retarget alone" \
+  '((st == 1)) && [[ $out == *"your PR has to move before its first hand-over (PR targets agent/first-parent, not main): run \`gh pr edit --base main\`, then hand over again" && $(cat "$HOME/gh-pr-base-69") == main ]] && crew hand-over "$FI" >/dev/null && [[ $(crew get "$FI" status) == pr-open ]]'
+FJ=$(crew new "Moved off its parent" --branch unstacked-child --on "$(tid "$FP")"); fill "$FJ"; crew ready "$FJ" >/dev/null; setstate "done" null; crew dispatch "$FJ" >/dev/null
+first_run "$FJ" 70; echo agent/first-parent >"$HOME/gh-pr-base-70"; crew set "$FJ" base main >/dev/null; out=$(crew hand-over "$FJ" 2>&1); st=$?
+check "a first run moved to a base its branch doesn't start on is told to ask, and stays off pr-open" \
+  '((st == 1)) && [[ $out == *"your PR has to move before its first hand-over (PR targets agent/first-parent, not main), but your branch doesn'"'"'t start on main"*"ask what to do"* && $(crew get "$FJ" status) == working ]]'
+FK=$(crew new "Moved while handing over" --branch moving-child --on "$(tid "$FP")"); fill "$FK"; crew ready "$FK" >/dev/null; setstate "done" null; crew dispatch "$FK" >/dev/null
+first_run "$FK" 71
+# The lead moves the child to another parent while crew hand-over reads the first parent's PR, which GitHub calls merged.
+cat >"$HOME/gh-pr-view-hook" <<HOOK
+#!/bin/sh
+case "\$*" in *"/pull/61 --json state"*) ;; *) exit 0 ;; esac
+crew set "$FK" base agent/replacement-parent >/dev/null; echo MERGED >"$HOME/gh-pr-state-61"; rm "\$0"
+HOOK
+chmod +x "$HOME/gh-pr-view-hook"; before="$(crew get "$FR" status) $(crew get "$FR" pr_state)"
+crew hand-over "$FK" >/dev/null 2>&1; rm -f "$HOME/gh-pr-state-61"
+check "a parent's PR read before the child moved to another parent isn't recorded on the new one" \
+  '[[ $(crew get "$FK" base) == agent/replacement-parent && "$(crew get "$FR" status) $(crew get "$FR" pr_state)" == "$before" && $(crew get "$FP" status) != merged ]]'
+for t in "$FR" "$FH" "$FI" "$FJ" "$FK"; do crew set "$t" status abandoned >/dev/null; done
+
+# The parent merges while one child has its PR open and another has none yet.
+FC=$(crew new "PR open when its parent merged" --branch merged-child --on "$(tid "$FP")"); fill "$FC"; crew ready "$FC" >/dev/null; setstate "done" null; crew dispatch "$FC" >/dev/null
+FD=$(crew new "No PR when its parent merged" --branch merged-child-no-pr --on "$(tid "$FP")"); fill "$FD"; crew ready "$FD" >/dev/null; setstate "done" null; crew dispatch "$FD" >/dev/null
+first_run "$FC" 64; first_run "$FD" ""
+echo agent/first-parent >"$HOME/gh-pr-base-64"
+# The parent merges on GitHub while crew hand-over reads its PR, after the hand-over's first fetch.
+cat >"$HOME/gh-pr-view-hook" <<HOOK
+#!/bin/sh
+case "\$*" in *"/pull/61 --json state"*) ;; *) exit 0 ;; esac
+cd "$SB/other-clone" && { git fetch -q origin && git checkout -q -B main origin/main && git merge -q --squash origin/agent/first-parent &&
+  git commit -qm "First-run parent (#61)" && git push -q origin main && git push -q origin --delete agent/first-parent; } >/dev/null 2>&1
+echo MERGED >"$HOME/gh-pr-state-61"; rm "\$0"
+HOOK
+chmod +x "$HOME/gh-pr-view-hook"
+e=$(edits main); out=$(crew hand-over "$FC" 2>&1); run_given "$(crew get "$FC" worktree)" "$out"; git pull -q --ff-only
+check "a first hand-over notes the merge of a parent that crew sync hasn't seen" \
+  '[[ $(crew get "$FP" status) == merged && $(crew get "$FP" pr_state) == merged ]] && section "$FP" "## Log" | grep -q "PR merged"'
+(($(edits main) > e)) && echo main >"$HOME/gh-pr-base-64"  # GitHub moves the PR
+check "after a merge, the refusal has the worker rebase onto the default branch as merged, retarget its PR and record its base" \
+  '[[ $out == *"($(tid "$FP") merged)"*"git rebase --onto $(git rev-parse origin/main) "*"Your base is now main: after pushing, run \`gh pr edit --base main\` and \`crew set $(tid "$FC") base main\`."* && $(crew get "$FC" base) == main && $(cat "$HOME/gh-pr-base-64") == main && $(git log -1 --format=%s origin/main) == "First-run parent (#61)" ]]'
+ranged_review "$FC" 2; crew hand-over "$FC" >/dev/null
+check "and it hands over on the default branch, with only its own commits" '[[ $(crew get "$FC" status) == pr-open && $(git log --format=%s origin/main..origin/agent/merged-child) == "add $(tid "$FC").txt" ]]'
+out=$(crew check-base "$FD" 2>&1); st=$?
+check "a child with no PR yet gets the move from check-base, and the same from hand-over, which needs no PR first" \
+  '((st == 1)) && [[ $out == *"Your base is now main: after pushing, run \`crew set $(tid "$FD") base main\`."* && $out != *"gh pr edit"* && $(crew hand-over "$FD" 2>&1) == "$out" ]]'
+run_given "$(crew get "$FD" worktree)" "$out"; crew set "$FD" pr https://github.com/isaac/webapp/pull/65; echo main >"$HOME/gh-pr-base-65"; pr_body "$FD"; ranged_review "$FD" 2
+check "then opens its PR on the default branch and hands over, with only its own commits" \
+  'crew hand-over "$FD" >/dev/null && [[ $(crew get "$FD" status) == pr-open && $(crew get "$FD" base) == main && $(git log --format=%s origin/main..origin/agent/merged-child-no-pr) == "add $(tid "$FD").txt" ]]'
+crew set "$FC" status abandoned >/dev/null; crew set "$FD" status abandoned >/dev/null
+crew cleanup "$FP" >/dev/null; rm -f "$HOME/gh-pr-state" "$HOME/gh-pr-state-61" "$HOME"/gh-pr-base-6?
 
 # Goals: a goal lead plans every item; crew tick dispatches the ready tasks, passes
 # the goal lead its input, and closes the goal once every task is done.

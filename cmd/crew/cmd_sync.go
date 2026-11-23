@@ -79,10 +79,7 @@ func cmdSync(c *Crew, args []string) error {
 			if onGitHub.record(t) {
 				changed = true
 			}
-			if onGitHub.State == "MERGED" && st != Merged {
-				t.SetStatus(Merged)
-				t.Touch()
-				t.Log("PR merged")
+			if onGitHub.noteMerge(t) {
 				changed = true
 				fmt.Printf("%s: merged (run 'crew cleanup %s')\n", t.ID(), t.ID())
 			} else if onGitHub.State == "CLOSED" && st != Abandoned {
@@ -127,7 +124,7 @@ func cmdSync(c *Crew, args []string) error {
 					changed = true
 				}
 				if reason := idx.restackReason(t, p.Repo()); reason != "" {
-					say("%s: needs a restack, %s (run 'crew restack %s')", t.ID(), reason, t.ID())
+					say("%s: needs a restack, %s (%s)", t.ID(), reason, mover(t))
 				}
 			}
 			// The branch it should target may be new, and not fetched yet.
@@ -135,7 +132,7 @@ func cmdSync(c *Crew, args []string) error {
 				fetch()
 			}
 			if reason := idx.retargetReason(t, p.Repo()); reason != "" {
-				say("%s: %s (run 'crew restack %s')", t.ID(), reason, t.ID())
+				say("%s: %s (%s)", t.ID(), reason, mover(t))
 			}
 		}
 	}
@@ -148,4 +145,13 @@ func cmdSync(c *Crew, args []string) error {
 	}
 	say("sync done")
 	return nil
+}
+
+// mover says who moves a task whose branch or PR is off its base: crew restack,
+// or, before its first hand-over, the task's own worker.
+func mover(t Task) string {
+	if !t.HandedOver() {
+		return movesBeforeHandOver
+	}
+	return fmt.Sprintf("run 'crew restack %s'", t.ID())
 }
