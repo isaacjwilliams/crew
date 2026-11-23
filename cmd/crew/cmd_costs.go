@@ -224,10 +224,8 @@ func (s *costScan) folder(dir string, o owner) error {
 	mains, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, path := range mains {
 		var run skillRun
-		var last transcriptLine
 		err := s.read(path, func(l transcriptLine) {
 			s.charge(o, l)
-			last = l
 			if o.task != "" {
 				for _, u := range l.toolUses() {
 					run.follow(u, skillAgents)
@@ -237,7 +235,7 @@ func (s *costScan) folder(dir string, o owner) error {
 		if err != nil {
 			return err
 		}
-		if err := s.sessionWritten(path, last); err != nil {
+		if err := s.sessionWritten(path); err != nil {
 			return err
 		}
 	}
@@ -291,13 +289,18 @@ func (s *costScan) read(path string, f func(transcriptLine)) error {
 }
 
 // sessionWritten takes the transcripts to be complete only from when the
-// session at path, whose last message is last, was last written, if Claude
-// Code deletes it by age: if it was last run from the command line. Claude
-// Code keeps a session last run from Claude Desktop or Cowork at any age, and
-// an empty transcript too, so those don't count.
-func (s *costScan) sessionWritten(path string, last transcriptLine) error {
-	if last.Entrypoint != "cli" && last.Entrypoint != "sdk-cli" {
-		return nil
+// session at path was last written, if Claude Code deletes it by age: if it
+// ran only from the command line. Claude Code keeps a session started or last
+// continued in Claude Desktop or Cowork at any age, and an empty transcript
+// too, so those don't count.
+func (s *costScan) sessionWritten(path string) error {
+	ran := false // whether every line that says how the session ran says the command line
+	_, err := scanLines(path, `"entrypoint":`, func(l transcriptLine) bool {
+		ran = l.Entrypoint == "cli" || l.Entrypoint == "sdk-cli"
+		return ran
+	})
+	if err != nil || !ran {
+		return err
 	}
 	info, err := os.Stat(path)
 	if err != nil {

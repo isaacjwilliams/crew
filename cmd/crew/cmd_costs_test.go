@@ -208,7 +208,8 @@ func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 // has gone unwritten for a while, so any session that's gone was last written
 // before then. A session still running may hold older messages, and its
 // subagents' transcripts go with it, however old. Claude Code keeps an empty
-// transcript, and a session last run from Claude Desktop, at any age.
+// transcript, and a session started or last continued in Claude Desktop, at
+// any age.
 func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 	dir := t.TempDir()
 	opus := "claude-opus-5-5"
@@ -220,12 +221,19 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 	writeTranscript(t, dir, "-crew-lead/desktop.jsonl",
 		assistantLine("msg_4", opus, costsDay(t, "2026-09-30 09:00"), 1, text),
 		strings.Replace(assistantLine("msg_5", opus, costsDay(t, "2026-10-01 09:00"), 1, text), `"cli"`, `"claude-desktop"`, 1))
+	desktopPrompt := `{"type":"user","timestamp":"2026-10-01T09:00:00Z","entrypoint":"claude-desktop","message":{"role":"user","content":"Go on."}}` + "\n"
+	writeTranscript(t, dir, "-crew-lead/started-in-desktop.jsonl", desktopPrompt,
+		assistantLine("msg_6", opus, costsDay(t, "2026-10-01 10:00"), 1, text))
+	writeTranscript(t, dir, "-crew-lead/continued-in-desktop.jsonl",
+		assistantLine("msg_7", opus, costsDay(t, "2026-09-30 10:00"), 1, text), desktopPrompt)
 	for path, at := range map[string]string{
 		"empty.jsonl":                     "2026-09-18 09:00",
 		"oldest.jsonl":                    "2026-10-22 17:00",
 		"running.jsonl":                   "2026-11-23 09:00",
 		"running/subagents/agent-a.jsonl": "2026-10-01 09:00",
 		"desktop.jsonl":                   "2026-10-01 09:00",
+		"started-in-desktop.jsonl":        "2026-10-01 10:00",
+		"continued-in-desktop.jsonl":      "2026-10-01 09:00",
 	} {
 		if err := os.Chtimes(filepath.Join(dir, "-crew-lead", path), time.Time{}, costsDay(t, at)); err != nil {
 			t.Fatal(err)
