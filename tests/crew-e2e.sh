@@ -1701,6 +1701,8 @@ FI=$(crew new "PR on the wrong branch" --branch wrong-pr-base); fill "$FI"; crew
 first_run "$FI" 69; echo agent/first-parent >"$HOME/gh-pr-base-69"; e=$(edits main)
 check "check-base gives a first run whose PR targets another branch the retarget, then has it carry on" \
   '[[ $(crew check-base "$FI" 2>&1) == *"your PR has to move before its first hand-over (PR targets agent/first-parent, not main): run \`gh pr edit --base main\`, then carry on" ]]'
+check "sync says a first run's own worker retargets its PR, not crew restack" \
+  '[[ $(crew sync 2>&1) == *"$(tid "$FI"): PR targets agent/first-parent, not main (its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how)"* ]]'
 out=$(crew hand-over "$FI" 2>&1); st=$?; run_given "$(crew get "$FI" worktree)" "$out"
 (($(edits main) > e)) && echo main >"$HOME/gh-pr-base-69"
 check "a first run whose PR targets another branch than its base gets the retarget alone" \
