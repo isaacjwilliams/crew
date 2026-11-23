@@ -375,9 +375,9 @@ const restackModel = "sonnet"
 const restackPrompt = "You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs."
 
 // launchRestack is the launcher of a restack session: a worker on restackModel,
-// at the user's own effort (a rebase needs no more), that restackPrompt tells to run one restack and
-// nothing else. Its fingerprint takes in that prompt, since it's part of what
-// the session loads. That sets a restack session's fingerprint apart from a
+// at the user's own effort whatever the task's, that restackPrompt tells to run
+// one restack and nothing else. Its fingerprint takes in that prompt, since it's
+// part of what the session loads. That sets a restack session's fingerprint apart from a
 // worker's, so followup can tell one and start a fresh worker after it, even on
 // a task whose model is restackModel.
 func (c *Crew) launchRestack(p *Project) (launcher, error) {

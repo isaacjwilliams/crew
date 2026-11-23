@@ -456,12 +456,12 @@ var (
 // launchSession starts a background session for a ledger file in wt, or resumes
 // the one it records as <prefix>_session, and confirms it started. A fresh
 // session gets the launcher's flags, model and effort, the file's <prefix>_name
-// and the ledger as an extra directory. A resume passes only the session and the prompt:
-// a background session keeps the options it was started with (agent, model,
-// permission mode, settings, --add-dir), and passing any launch flag again makes
-// Claude Code start a copy under a new session instead of continuing this one.
-// A fresh session takes the one it replaces out of agent view once it has
-// started. Both refresh the project's MCP config first (refreshMCPConfig).
+// and the ledger as an extra directory. A resume passes only the session and
+// the prompt: a background session keeps the options it was started with
+// (agent, model, effort, permission mode, settings, --add-dir), and passing any
+// launch flag again makes Claude Code start a copy under a new session instead
+// of continuing this one. A fresh session takes the one it replaces out of agent
+// view once it has started. Both refresh the project's MCP config first (refreshMCPConfig).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {
