@@ -13,11 +13,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // The steps a message is charged to, besides the review steps review_runs.go
@@ -28,6 +28,8 @@ const (
 	stepLead     = "Lead sessions"
 	stepGoalLead = "Goal-lead sessions"
 	stepGardener = "Gardener"
+	// crew review-eval's reviewer reruns, and the agents they start.
+	stepReviewEval = "Review eval"
 	// The agents a lead or goal lead starts, apart from brief reviews.
 	stepLeadAgents     = "Lead's agents"
 	stepGoalLeadAgents = "Goal leads' agents"
@@ -38,7 +40,7 @@ const (
 // agents its worker started, then the spend that's no task's.
 var (
 	taskSteps   = []string{stepBriefReview, stepWorker, stepExhale, stepPrePRReview, stepSecurityReview, stepAutomatedReview}
-	sharedSteps = []string{stepLead, stepLeadAgents, stepGoalLead, stepGoalLeadAgents, stepGardener, stepOther}
+	sharedSteps = []string{stepLead, stepLeadAgents, stepGoalLead, stepGoalLeadAgents, stepGardener, stepReviewEval, stepOther}
 )
 
 var (
@@ -125,6 +127,7 @@ func (c *Crew) transcriptSteps() (map[string]string, error) {
 	steps := map[string]string{transcriptFolder(c.path("lead")): stepLead}
 	for _, p := range projects {
 		steps[transcriptFolder(gardenerCheckout(p))] = stepGardener
+		steps[transcriptFolder(evalCheckout(p))] = stepReviewEval
 		for _, g := range c.goals(p.Name) {
 			steps[transcriptFolder(goalCheckout(p, g))] = stepGoalLead
 		}
@@ -137,11 +140,36 @@ func (c *Crew) transcriptSteps() (map[string]string, error) {
 
 // transcriptFolder is the folder Claude Code keeps the transcripts of sessions
 // started in dir in: dir with every character but a letter or digit made "-".
+// A name over 200 characters is cut there, and a hash of the whole path
+// follows, so two long paths with the same start stay apart.
 func transcriptFolder(dir string) string {
-	return notLetterOrDigit.ReplaceAllString(dir, "-")
+	const longest = 200
+	units := utf16.Encode([]rune(dir)) // Claude Code counts and hashes UTF-16 units
+	name := make([]byte, len(units))
+	var hash int32
+	for i, u := range units {
+		name[i] = '-'
+		if u < 0x80 && isLetterOrDigit(byte(u)) {
+			name[i] = byte(u)
+		}
+		hash = hash*31 + int32(u)
+	}
+	if len(name) <= longest {
+		return string(name)
+	}
+	return fmt.Sprintf("%s-%s", name[:longest], strconv.FormatInt(abs(int64(hash)), 36))
 }
 
-var notLetterOrDigit = regexp.MustCompile(`[^A-Za-z0-9]`)
+func isLetterOrDigit(b byte) bool {
+	return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9'
+}
+
+func abs(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 // A charge is one API message, and the step it's charged to.
 type charge struct {

@@ -292,3 +292,20 @@ func TestCostsSayFromWhenTheTranscriptsAreComplete(t *testing.T) {
 		}
 	}
 }
+
+// The expected folders come from the encoder in Claude Code 2.1.328 itself.
+func TestTranscriptFolderCutsAndHashesWhatPassesTwoHundredCharacters(t *testing.T) {
+	at200 := "/" + strings.Repeat("a/", 99) + "b"
+	at201 := "/" + strings.Repeat("a/", 100)
+	withUTF16Pairs := "/" + strings.Repeat("ab/", 70) + "é😀"
+	for _, tc := range []struct{ name, dir, want string }{
+		{"short", "/home/isaac/crew.x", "-home-isaac-crew-x"},
+		{"200 characters", at200, strings.NewReplacer("/", "-").Replace(at200)},
+		{"201 characters", at201, strings.NewReplacer("/", "-").Replace(at201)[:200] + "-f6id5z"},
+		{"astral characters count as two", withUTF16Pairs, strings.NewReplacer("/", "-").Replace(withUTF16Pairs[:len(withUTF16Pairs)-len("é😀")])[:200] + "-1lfpmr"},
+	} {
+		if got := transcriptFolder(tc.dir); got != tc.want {
+			t.Errorf("%s: transcriptFolder = %q; want %q", tc.name, got, tc.want)
+		}
+	}
+}
