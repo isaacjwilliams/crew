@@ -13,11 +13,13 @@ import (
 
 // statusReport is everything crew status shows.
 type statusReport struct {
-	ReadOnlyOn   string // the machine that runs the crew, when it isn't this one
-	Workers      slots  // the workers running across the crew against MAX_WORKERS
-	WorkersErr   error
-	NoneDispatch bool // every project has reached its MAX_WORKERS
-	Projects     []projectReport
+	ReadOnlyOn string // the machine that runs the crew, when it isn't this one
+	Workers    slots  // the workers running across the crew against MAX_WORKERS
+	WorkersErr error
+	// WorkersUnlisted: the workers haven't been listed yet, so none is counted.
+	WorkersUnlisted bool
+	NoneDispatch    bool // every project has reached its MAX_WORKERS
+	Projects        []projectReport
 }
 
 // projectReport is one project. Every project has its Name and Waiting; the rest
@@ -143,16 +145,19 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads statusReads) sta
 		return r
 	}
 	s := statusView{Crew: c, doneToo: doneToo, reads: reads}
-	var err error
-	s.agents, err = c.listAgents()
+	var listErr error
+	if w := reads.workers; w != nil {
+		s.agents, listErr = w.agents, w.err
+	}
 	switch {
 	case r.ReadOnlyOn != "":
 		s.workersUnseen = "worker can't be seen from this machine"
-	case err != nil:
+	case listErr != nil:
 		s.workersUnseen = "workers couldn't be listed"
 	}
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
+	r.WorkersUnlisted = reads.workers == nil
 	r.NoneDispatch = s.noProjectDispatches()
 	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
@@ -166,9 +171,50 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads statusReads) sta
 }
 
 // statusReads are what a report is built from besides the ledger, each as last
-// read.
+// read. The workers and the branches are nil until they've first been read, and
+// the report says so rather than guess.
 type statusReads struct {
-	prs prReads // every project's PRs as GitHub answered (readPRs)
+	prs      prReads     // every project's PRs as GitHub answered (readPRs)
+	workers  *workerList // the sessions claude agents listed (listWorkers)
+	branches branchReads // what git said of the tasks' branches (readBranches)
+}
+
+// workerList is what claude agents listed, or why it couldn't.
+type workerList struct {
+	agents Agents
+	err    error
+}
+
+func (c *Crew) listWorkers() *workerList {
+	as, err := c.listAgents()
+	return &workerList{as, err}
+}
+
+// branchRead is what git said of a task's branches: why it needs a restack, and
+// why its PR needs a retarget, when it does.
+type branchRead struct{ restack, retarget string }
+
+// branchReads are what git said of the branches of each task in flight that has
+// some to ask about (readsBranches), by the task's file.
+type branchReads map[string]branchRead
+
+// readBranches asks git about the branches of the tasks in flight in the
+// projects, in each project's clone here.
+func (c *Crew) readBranches(projects []string) branchReads {
+	reads := branchReads{}
+	for _, name := range projects {
+		p, err := c.loadProject(name)
+		if err != nil || p.Repo() == "" {
+			continue
+		}
+		idx := c.branches(name)
+		for _, t := range c.tasks(name) {
+			if t.Status().InFlight() && idx.readsBranches(t) {
+				reads[t.Path] = branchRead{idx.restackReason(t, p.Repo()), idx.retargetReason(t, p.Repo())}
+			}
+		}
+	}
+	return reads
 }
 
 // statusView builds a report. The fields from branches on belong to the project
@@ -341,7 +387,12 @@ func (s *statusView) goal(g Goal, tasks []Task) goalReport {
 }
 
 // agent is a job as claude agents lists it, or the zero Agent when it isn't.
+// Before the workers are first listed, a job's agent says so, rather than show
+// it as gone.
 func (s *statusView) agent(job string) Agent {
+	if job != "" && s.reads.workers == nil {
+		return Agent{ID: job, State: "not listed yet"}
+	}
 	if a := s.agents.find(job); a != nil {
 		return *a
 	}
@@ -566,18 +617,33 @@ func (s *statusView) prNotes(t Task) []string {
 	if prs := t.Get("pr_state"); prs != "" {
 		notes = append(notes, "("+prs+")")
 	}
-	if t.Status().InFlight() && s.repo != "" {
-		if reason := s.branches.restackReason(t, s.repo); reason != "" {
-			notes = append(notes, "needs restack: "+reason)
+	if t.Status().InFlight() {
+		b, read := s.branchRead(t)
+		if !read {
+			notes = append(notes, "branches not read yet")
 		}
-		if reason := s.branches.retargetReason(t, s.repo); reason != "" {
-			notes = append(notes, reason)
+		if b.restack != "" {
+			notes = append(notes, "needs restack: "+b.restack)
+		}
+		if b.retarget != "" {
+			notes = append(notes, b.retarget)
 		}
 	}
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
 	}
 	return notes
+}
+
+// branchRead is what git last said of t's branches, and false when they haven't
+// been read yet. A task with no clone here, or no branches to ask about, needs
+// no read.
+func (s *statusView) branchRead(t Task) (branchRead, bool) {
+	if s.repo == "" || !s.branches.readsBranches(t) {
+		return branchRead{}, true
+	}
+	b, ok := s.reads.branches[t.Path]
+	return b, ok
 }
 
 // learning is what a draft is still learning: how many items under Still to

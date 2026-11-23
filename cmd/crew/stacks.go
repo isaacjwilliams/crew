@@ -265,6 +265,13 @@ func (idx Branches) retargetReason(t Task, repo string) string {
 	return idx.offBaseReason(t, t.Get("pr_base"))
 }
 
+// readsBranches: t's restack and retarget reasons ask git about its branches,
+// since it's stacked or its open PR targets a branch it doesn't belong on.
+func (idx Branches) readsBranches(t Task) bool {
+	_, stacked := idx.parentOf(t)
+	return stacked || idx.prOffBase(t)
+}
+
 // prOffBase: crew sync last saw the task's open PR target a branch other than
 // the one the task belongs on now.
 func (idx Branches) prOffBase(t Task) bool {

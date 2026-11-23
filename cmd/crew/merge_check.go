@@ -73,10 +73,8 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	base := s.branches.effectiveBase(t)
 	parent, onParent := s.branches.liveParent(t)
 	_, stacked := s.branches.parentOf(t)
-	restack := ""
-	if s.repo != "" {
-		restack = s.branches.restackReason(t, s.repo)
-	}
+	branches, branchesRead := s.branchRead(t)
+	restack := branches.restack
 	retarget := s.branches.offBaseReason(t, pr.Base)
 	defaultBranch := s.settings["DEFAULT_BRANCH"]
 	// Every reason that holds is listed, even where one leads to another (a
@@ -85,6 +83,9 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		holds  bool
 		reason string
 	}{
+		// Clears within seconds: what crew status hasn't read yet.
+		{s.reads.workers == nil, "workers not listed yet"},
+		{!branchesRead, "branches not read yet"},
 		// Clears by itself, within minutes: the worker, crew tick, GitHub or CI.
 		{s.workersUnseen == "" && worker.busy(), "worker busy"},
 		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), unsentRounds(t) + " not sent yet"},

@@ -117,10 +117,10 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	return c
 }
 
-// readReport is the report crew status builds for the projects in
-// scope, after asking GitHub for their PRs.
+// readReport is the report crew status builds for the projects in scope, after
+// asking GitHub for their PRs, listing the workers and reading the branches.
 func readReport(c *Crew, inScope ...string) statusReport {
-	return buildReport(c, inScope, false, statusReads{prs: c.readPRs(inScope)})
+	return buildReport(c, inScope, false, statusReads{prs: c.readPRs(inScope), workers: c.listWorkers(), branches: c.readBranches(inScope)})
 }
 
 func rowIDs(rows []taskRow) []string {
@@ -215,11 +215,17 @@ func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
 	}
 }
 
+// A report goes by the reads it's given: building it runs no gh, claude or git.
 func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 	c := statusLedger(t)
-	writeFile(t, c, "REPO="+t.TempDir()+"\n", "projects", "p", "project.env") // so gh could be run for p's PRs
-	ghCalls := c.path("gh-calls")
-	writeFile(t, c, "#!/bin/sh\necho \"$@\" >>"+ghCalls+"\nexit 1\n", "bin", "gh")
+	repo := stackRepo(t, "agent/parent", "agent/child")
+	writeFile(t, c, "REPO="+repo+"\n", "projects", "p", "project.env") // so gh and git could be run for p's tasks
+	reportTask(t, c, "p", "011-child", false, "status: working", "base: agent/parent", "branch: agent/child")
+	workers, branches := c.listWorkers(), c.readBranches([]string{"p"})
+	calls := c.path("calls")
+	for _, cmd := range []string{"gh", "claude", "git"} {
+		writeFile(t, c, "#!/bin/sh\necho "+cmd+" \"$@\" >>"+calls+"\nexit 1\n", "bin", cmd)
+	}
 	// GitHub didn't answer for 013-risky's PR, answered for 014-later's, and
 	// wasn't asked for 015-earlier's.
 	prs := prReads{"p": {
@@ -228,7 +234,7 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 	}}
 	for build := 1; build <= 2; build++ {
 		checks := map[string]string{}
-		for _, row := range buildReport(c, []string{"p"}, false, statusReads{prs: prs}).Projects[0].Rows {
+		for _, row := range buildReport(c, []string{"p"}, false, statusReads{prs: prs, workers: workers, branches: branches}).Projects[0].Rows {
 			if row.Merge != nil {
 				checks[row.Task.ID()] = row.Merge.String()
 			}
@@ -243,8 +249,8 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 			t.Errorf("build %d: 015-earlier's merge check = %q, want it not read yet", build, got)
 		}
 	}
-	if calls, err := os.ReadFile(ghCalls); err == nil {
-		t.Errorf("building the report ran gh:\n%s", calls)
+	if calls, err := os.ReadFile(calls); err == nil {
+		t.Errorf("building the report ran:\n%s", calls)
 	}
 }
 

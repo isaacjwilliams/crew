@@ -12,23 +12,29 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// How often the live view builds its report, and how often it brings in what
-// changed elsewhere: the PRs on GitHub and, on a machine that doesn't run the
-// crew, the ledger. A beat every second starts whichever is due.
+// How often the live view builds its report from the ledger and what it last
+// read, and how often it reads again: the workers claude agents lists, the
+// tasks' branches in git, the PRs on GitHub and, on a machine that doesn't run
+// the crew, the ledger. A build starts no process, so it's cheap to run often.
+// A beat every second starts whichever is due.
 const (
-	buildEvery      = 3 * time.Second
-	readGitHubEvery = 30 * time.Second
-	pullLedgerEvery = time.Minute
-	beatEvery       = time.Second
+	buildEvery        = 3 * time.Second
+	listWorkersEvery  = 15 * time.Second
+	readBranchesEvery = 15 * time.Second
+	readGitHubEvery   = 30 * time.Second
+	pullLedgerEvery   = time.Minute
+	beatEvery         = time.Second
 )
 
-// statusFeed is what crew status runs: pulling the ledger, reading GitHub for
-// the open PRs, and building a report from those reads. The live view runs
-// each in the background, on its own, so one that hangs holds back neither of
-// the others.
+// statusFeed is what crew status runs: pulling the ledger, listing the
+// workers, reading the tasks' branches, reading GitHub for the open PRs, and
+// building a report from those reads. The live view runs each in the
+// background, on its own, so one that hangs holds back none of the others.
 type statusFeed struct {
-	pullLedger func()
-	readPRs    func() prReads
+	pullLedger   func()
+	listWorkers  func() *workerList
+	readBranches func() branchReads
+	readPRs      func() prReads
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
 	build func(statusReads) (statusReport, error)
@@ -39,8 +45,10 @@ type statusFeed struct {
 // change while the view is open.
 func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	return statusFeed{
-		pullLedger: c.catchUpLedger,
-		readPRs:    func() prReads { return c.readPRs(c.projects(scope)) },
+		pullLedger:   c.catchUpLedger,
+		listWorkers:  c.listWorkers,
+		readBranches: func() branchReads { return c.readBranches(c.projects(scope)) },
+		readPRs:      func() prReads { return c.readPRs(c.projects(scope)) },
 		build: func(reads statusReads) (statusReport, error) {
 			// The shared settings are read again for each report, so a change
 			// to crew.env shows while the view is open.
@@ -77,8 +85,8 @@ func watchStatus(feed statusFeed) error {
 	return err
 }
 
-// job is one of the view's background jobs: building the report, reading
-// GitHub or pulling the ledger. It runs once at a time, at most every so
+// job is one of the view's background jobs: building the report, or one of the
+// reads it's built from. It runs once at a time, at most every so
 // often, unless it's asked for sooner.
 type job struct {
 	every   time.Duration
@@ -105,12 +113,12 @@ func (j *job) starts(now time.Time) bool {
 type liveStatus struct {
 	feed statusFeed
 	now  func() time.Time
-	// reads is what the reports are built from besides the ledger. Its PRs are
-	// nil before the first read of GitHub ends, so the first report says the
-	// PRs aren't read yet, until the read that ends builds another.
+	// reads is what the reports are built from besides the ledger. Each is nil
+	// before its first read ends, so the first reports say what isn't read
+	// yet, until the read that ends builds another.
 	reads statusReads
 
-	building, readingGitHub, pulling job
+	building, listingWorkers, readingBranches, readingGitHub, pulling job
 
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
@@ -135,10 +143,12 @@ type shownLine struct {
 
 // The messages the view's jobs and its beat send it.
 type (
-	beat         struct{}
-	ledgerPulled struct{}
-	prsRead      struct{ reads prReads }
-	reportBuilt  struct {
+	beat          struct{}
+	ledgerPulled  struct{}
+	workersListed struct{ workers *workerList }
+	branchesRead  struct{ branches branchReads }
+	prsRead       struct{ reads prReads }
+	reportBuilt   struct {
 		report      statusReport
 		settingsErr error
 	}
@@ -147,7 +157,8 @@ type (
 func newLiveStatus(feed statusFeed) *liveStatus {
 	return &liveStatus{
 		feed: feed, now: time.Now,
-		building: job{every: buildEvery}, readingGitHub: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
+		building: job{every: buildEvery}, listingWorkers: job{every: listWorkersEvery},
+		readingBranches: job{every: readBranchesEvery}, readingGitHub: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
 		open: map[string]bool{}, width: 80, height: 24,
 	}
 }
@@ -160,6 +171,12 @@ func (m *liveStatus) startDue() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.pulling.starts(now) {
 		cmds = append(cmds, func() tea.Msg { feed.pullLedger(); return ledgerPulled{} })
+	}
+	if m.listingWorkers.starts(now) {
+		cmds = append(cmds, func() tea.Msg { return workersListed{feed.listWorkers()} })
+	}
+	if m.readingBranches.starts(now) {
+		cmds = append(cmds, func() tea.Msg { return branchesRead{feed.readBranches()} })
 	}
 	if m.readingGitHub.starts(now) {
 		cmds = append(cmds, func() tea.Msg { return prsRead{feed.readPRs()} })
@@ -174,8 +191,8 @@ func (m *liveStatus) startDue() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update starts a build as soon as a pull or a read ends, so what they brought
-// in shows at once; the beat starts each job again when it's due.
+// Update starts a build as soon as a pull or a read ends, so what it brought in
+// shows at once; the beat starts each job again when it's due.
 func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -185,6 +202,16 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startDue()
 	case ledgerPulled:
 		m.pulling.running = false
+		m.building.ask()
+		return m, m.startDue()
+	case workersListed:
+		m.listingWorkers.running = false
+		m.reads.workers = msg.workers
+		m.building.ask()
+		return m, m.startDue()
+	case branchesRead:
+		m.readingBranches.running = false
+		m.reads.branches = msg.branches
 		m.building.ask()
 		return m, m.startDue()
 	case prsRead:
@@ -246,6 +273,8 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	case "r":
 		// A read or pull under way may have started before what the user
 		// wants to see, so another follows it. Each builds when it ends.
+		m.listingWorkers.ask()
+		m.readingBranches.ask()
 		m.readingGitHub.ask()
 		m.pulling.ask()
 		return m.startDue()
