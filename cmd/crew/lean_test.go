@@ -160,15 +160,17 @@ func TestLeanSettingsLeaveAValueTheSettingsAlreadyHave(t *testing.T) {
 	}
 }
 
-// What each role's instructions use. The launch must turn none of it off.
+// What each role's instructions use. The launch must turn none of it off. Leads
+// and goal leads run crew followup, whose refusal for a busy worker offers
+// SendMessage.
 var roleUses = map[string]struct{ tools, agents, skills []string }{
 	"lead": {
-		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "Artifact"},
+		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "Artifact", "SendMessage"},
 		agents: []string{"brief-reviewer", "general-purpose", "Explore", "claude-code-guide"},
 		skills: []string{"artifact-capabilities", "artifact-design", "artifact-diagramming", "dataviz"},
 	},
 	"goal-lead": {
-		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch"},
+		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "SendMessage"},
 		agents: []string{"brief-reviewer", "general-purpose", "Explore", "claude-code-guide"},
 	},
 	"implementer": {
