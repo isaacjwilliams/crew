@@ -43,7 +43,8 @@ Park an item when its brief needs:
 - anything irreversible: a migration, a public API change, a new dependency;
 - work outside the goal as the user wrote it, including something an item needs that no item asks for;
 - a guess at what an unclear item means;
-- a call on a brief-review finding you can't settle with confidence.
+- a call on a brief-review finding you can't settle with confidence;
+- a gate only the user can check: marking it `User check:` takes the user's agreement (step 6 of the lead's intake), and you can't give it for them.
 
 To park, leave the task in `draft` and write each question under its Open questions as an unchecked item (`- [ ] …`) with the options you see and your recommendation. Then run `crew log <task> "Parked: <the question in a line>"`. Parking one item doesn't hold up the rest: carry on with the others. The user answers through the interactive lead, which records the answer under that task's Decisions and passes it to you with `crew goal note`.
 
