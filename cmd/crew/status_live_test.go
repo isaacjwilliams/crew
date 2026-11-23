@@ -20,18 +20,18 @@ func liveOn(r statusReport) *liveStatus {
 	return m
 }
 
+// keyCodes are the keys press takes by name.
+var keyCodes = map[string]rune{"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight,
+	"enter": tea.KeyEnter, "end": tea.KeyEnd, "home": tea.KeyHome, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown}
+
 // press sends keys to the view, as a person types them, and returns the last
 // key's command.
 func press(m *liveStatus, keys ...string) tea.Cmd {
 	var cmd tea.Cmd
 	for _, k := range keys {
-		var key tea.KeyPressMsg
-		switch k {
-		case "up", "down", "left", "right", "enter", "end", "home", "pgup", "pgdown":
-			key.Code = map[string]rune{"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight,
-				"enter": tea.KeyEnter, "end": tea.KeyEnd, "home": tea.KeyHome, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown}[k]
-		default:
-			key.Code, key.Text = []rune(k)[0], k
+		key := tea.KeyPressMsg{Code: []rune(k)[0], Text: k}
+		if code, ok := keyCodes[k]; ok {
+			key = tea.KeyPressMsg{Code: code}
 		}
 		_, cmd = m.Update(key)
 	}
@@ -56,7 +56,10 @@ func goTo(t *testing.T, m *liveStatus, text string) {
 // parentOf is the head of the line the line ending with text is under.
 func parentOf(m *liveStatus, text string) string {
 	i := lineOf(m, text)
-	for j := i - 1; i >= 0 && j >= 0; j-- {
+	if i < 0 {
+		return ""
+	}
+	for j := i - 1; j >= 0; j-- {
 		if m.shown[j].depth < m.shown[i].depth {
 			return m.shown[j].head
 		}
@@ -84,9 +87,12 @@ func screen(m *liveStatus) []string {
 	return strings.Split(m.View().Content, "\n")
 }
 
+// ansiCodes are the escapes that style the cursor's line.
+var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 // words is a line's words, without the tree's markers or the cursor's style.
 func words(line string) string {
-	line = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(line, "")
+	line = ansiCodes.ReplaceAllString(line, "")
 	return strings.Join(strings.FieldsFunc(line, func(r rune) bool {
 		return r == ' ' || r == '▸' || r == '▾' || r == '└'
 	}), " ")
@@ -142,7 +148,7 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 		"1 draft(s)  (crew list --project p --status draft)":                          "p",
 		"q: 1 task(s) with open questions, 1 PR(s) to review, 1 memory suggestion(s)": elsewhereHeading,
 	} {
-		if got := parentOf(m, text); got != under && !strings.HasSuffix(got, under) {
+		if got := parentOf(m, text); !strings.HasSuffix(got, under) {
 			t.Errorf("%q is under %q, want %q", text, got, under)
 		}
 	}
@@ -376,7 +382,10 @@ echo '{"state":"OPEN","baseRefName":"main","mergeable":"MERGEABLE","mergeStateSt
 case " $* " in *" pull "*) echo "git $*" >>`+log+`;; esac
 exec `+realGit+` "$@"
 `, "bin", "git")
-	gitInit(t, c.Home)
+	g := gitRepo{t, c.Home}
+	g.git("init", "-q")
+	g.git("add", "-A")
+	g.git("commit", "-qm", "home")
 	before := homeState(t, c)
 
 	now := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
@@ -427,14 +436,6 @@ exec `+realGit+` "$@"
 	}
 	if after := homeState(t, c); after != before {
 		t.Errorf("the feed changed the home:\nbefore %s\nafter  %s", before, after)
-	}
-}
-
-// gitInit makes dir a git repo with everything in it committed.
-func gitInit(t *testing.T, dir string) {
-	t.Helper()
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "home"}} {
-		gitOut(t, dir, args...)
 	}
 }
 

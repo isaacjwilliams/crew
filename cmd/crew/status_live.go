@@ -288,7 +288,8 @@ func (m *liveStatus) View() tea.View {
 }
 
 // text is the line as the live view shows it: indented by its depth, with a
-// marker for whether it's open, closed, or has nothing under it.
+// marker for whether it's open, closed, or has nothing under it. The marker
+// takes two columns more than the text's lines, so the columns start two later.
 func (l shownLine) text() string {
 	marker := " "
 	if len(l.kids) > 0 {
@@ -302,9 +303,10 @@ func (l shownLine) text() string {
 
 // bar is the line at the bottom: how fresh the report is, and the keys.
 func (m *liveStatus) bar() string {
-	state := "loading…"
+	var state string
 	switch {
 	case m.lines == nil:
+		state = "loading…"
 	case m.refreshing:
 		state = "refreshing…"
 	default:
