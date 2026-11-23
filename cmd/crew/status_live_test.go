@@ -646,9 +646,17 @@ func TestLiveStatusListsWorkersAndReadsBranchesWhenDue(t *testing.T) {
 		run.second()
 	}
 
+	built := secondsWhen(seconds, func(n liveCalls) bool { return n.builds > 0 })
+	listed := secondsWhen(seconds, func(n liveCalls) bool { return n.listings > 0 })
+	branchesRead := secondsWhen(seconds, func(n liveCalls) bool { return n.branchCalls > 0 })
+	gitHubRead := secondsWhen(seconds, func(n liveCalls) bool { return n.ghCalls > 0 })
+	pulled := secondsWhen(seconds, func(n liveCalls) bool { return n.pulls > 0 })
+	t.Logf("built in %d seconds; listed the workers at %v; read the branches at %v, %d git calls a read; read GitHub at %v; pulled at %v",
+		len(built), listed, branchesRead, oneRead, gitHubRead, pulled)
+
 	s := time.Second
 	every15s := []time.Duration{0, 15 * s, 30 * s, 45 * s, 60 * s}
-	if built := secondsWhen(seconds, func(n liveCalls) bool { return n.builds > 0 }); len(built) < 20 {
+	if len(built) < 20 {
 		t.Errorf("the view built its report in %d seconds of 61, want every 3s at least", len(built))
 	}
 	for i, n := range seconds {
@@ -656,16 +664,16 @@ func TestLiveStatusListsWorkersAndReadsBranchesWhenDue(t *testing.T) {
 			t.Errorf("at %ds, the view listed the workers %d times and ran git %d times in the clone, want once and one read's %d at most", i, n.listings, n.branchCalls, oneRead)
 		}
 	}
-	if listed := secondsWhen(seconds, func(n liveCalls) bool { return n.listings > 0 }); !slices.Equal(listed, every15s) {
+	if !slices.Equal(listed, every15s) {
 		t.Errorf("the workers were listed at %v, want every 15s", listed)
 	}
-	if read := secondsWhen(seconds, func(n liveCalls) bool { return n.branchCalls > 0 }); !slices.Equal(read, every15s) {
-		t.Errorf("the branches were read at %v, want every 15s", read)
+	if !slices.Equal(branchesRead, every15s) {
+		t.Errorf("the branches were read at %v, want every 15s", branchesRead)
 	}
-	if read := secondsWhen(seconds, func(n liveCalls) bool { return n.ghCalls > 0 }); !slices.Equal(read, []time.Duration{0, 30 * s, 60 * s}) {
-		t.Errorf("GitHub was read at %v, want every 30s", read)
+	if !slices.Equal(gitHubRead, []time.Duration{0, 30 * s, 60 * s}) {
+		t.Errorf("GitHub was read at %v, want every 30s", gitHubRead)
 	}
-	if pulled := secondsWhen(seconds, func(n liveCalls) bool { return n.pulls > 0 }); !slices.Equal(pulled, []time.Duration{0, 60 * s}) {
+	if !slices.Equal(pulled, []time.Duration{0, 60 * s}) {
 		t.Errorf("the ledger was pulled at %v, want every minute", pulled)
 	}
 }
