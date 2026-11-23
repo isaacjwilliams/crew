@@ -341,8 +341,11 @@ func cmdCheckBase(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	onGitHub, parentOnGitHub, err := c.readPlace(p, t)
+	onGitHub, parentOnGitHub, err := c.readTaskPRs(p, t)
 	if err != nil {
+		return err
+	}
+	if err := fetchOrigin(p.Repo()); err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -378,16 +381,17 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		pr = PREvidence(string(body))
 	}
 	first := !t.HandedOver()
-	// The PR's branch on origin may have commits from elsewhere, a suggestion
-	// applied on GitHub say, that the evidence and raiseRisk have to see, so
-	// either way origin is fetched.
 	var onGitHub, parentOnGitHub *gitHubPR
 	if first {
-		onGitHub, parentOnGitHub, err = c.readPlace(p, t)
-	} else {
-		err = fetchOrigin(p.Repo())
+		if onGitHub, parentOnGitHub, err = c.readTaskPRs(p, t); err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
+	// The PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that the evidence and raiseRisk have to see. The
+	// fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
+	// in the refs a rebase is planned from.
+	if err := fetchOrigin(p.Repo()); err != nil {
 		return nil, err
 	}
 	return func() error {
@@ -434,13 +438,13 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	}, nil
 }
 
-// readPlace reads what refuseOffBase places a task by, before crew takes the
-// lock, so a slow network doesn't hold up other crew commands: the PRs of the
-// task and of its parent as GitHub has them now (the parent's may have merged
-// since crew sync looked), each nil when there's none to read, and then origin.
-// The fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
-// in the refs a rebase is planned from.
-func (c *Crew) readPlace(p *Project, t Task) (onGitHub, parentOnGitHub *gitHubPR, err error) {
+// readTaskPRs reads the PRs refuseOffBase places a task by, before crew takes
+// the lock, so a slow network doesn't hold up other crew commands: the task's
+// own and its parent's, as GitHub has them now (the parent's may have merged
+// since crew sync looked), each nil when there's none to read. Fetch origin
+// after it, so a merge GitHub reported is in the refs a rebase is planned from.
+func (c *Crew) readTaskPRs(p *Project, t Task) (*gitHubPR, *gitHubPR, error) {
+	var onGitHub, parentOnGitHub *gitHubPR
 	if t.PR() != "" {
 		read, err := readPR(p.Repo(), t.PR())
 		if err != nil {
@@ -455,7 +459,7 @@ func (c *Crew) readPlace(p *Project, t Task) (onGitHub, parentOnGitHub *gitHubPR
 		}
 		parentOnGitHub = &read
 	}
-	return onGitHub, parentOnGitHub, fetchOrigin(p.Repo())
+	return onGitHub, parentOnGitHub, nil
 }
 
 // fetchOrigin fetches the project's clone from origin, for a check of the
@@ -475,10 +479,10 @@ func fetchOrigin(repo string) error {
 // session is still making the branch, so it moves them itself; after it, crew
 // tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
 // and of its parent as GitHub has them now, or nil when crew didn't read one
-// (readPlace). They were read before the lock, so each is recorded only in the
-// task whose PR it is: not in a new parent the task moved to meanwhile, say.
-// then is what the worker does once a retarget is all it had to run, such as
-// "hand over again". Call it with the lock held.
+// (readTaskPRs). They were read before the lock, so each is recorded only in
+// the task whose PR it is: not in a new parent the task moved to meanwhile,
+// say. then is what the worker does once a retarget is all it had to run, such
+// as "hand over again". Call it with the lock held.
 func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, then string) error {
 	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
