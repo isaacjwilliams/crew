@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -211,5 +212,38 @@ func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
 	}
 	if r.ReadOnlyOn != "" || r.Workers != (slots{used: 1, limit: 3}) || r.NoneDispatch {
 		t.Errorf("crew-wide: read-only on %q, workers %+v, none dispatch %v", r.ReadOnlyOn, r.Workers, r.NoneDispatch)
+	}
+}
+
+func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
+	c := statusLedger(t)
+	writeFile(t, c, "REPO="+t.TempDir()+"\n", "projects", "p", "project.env") // so gh could be run for p's PRs
+	ghCalls := c.path("gh-calls")
+	writeFile(t, c, "#!/bin/sh\necho \"$@\" >>"+ghCalls+"\nexit 1\n", "bin", "gh")
+	// GitHub didn't answer for 013-risky's PR, answered for 014-later's, and
+	// wasn't asked for 015-earlier's.
+	prs := map[string]prRead{
+		"https://github.com/o/r/pull/9":  {err: errors.New("gh: no answer")},
+		"https://github.com/o/r/pull/12": {pr: gitHubPR{State: "OPEN", Base: "main", CI: ciPassing, MergeState: "CLEAN"}},
+	}
+	for build := 1; build <= 2; build++ {
+		checks := map[string]string{}
+		for _, row := range buildReport(c, []string{"p"}, false, prs).Projects[0].Rows {
+			if row.Merge != nil {
+				checks[row.Task.ID()] = row.Merge.String()
+			}
+		}
+		if got := checks["013-risky"]; !strings.HasSuffix(got, "(couldn't read GitHub; as of the last sync)") {
+			t.Errorf("build %d: 013-risky's merge check = %q, want it to go by the last sync", build, got)
+		}
+		if got := checks["014-later"]; got == "" || strings.Contains(got, "GitHub") {
+			t.Errorf("build %d: 014-later's merge check = %q, want it to go by GitHub's answer", build, got)
+		}
+		if got := checks["015-earlier"]; got != "not yet: PR not read on GitHub yet" {
+			t.Errorf("build %d: 015-earlier's merge check = %q, want it not read yet", build, got)
+		}
+	}
+	if calls, err := os.ReadFile(ghCalls); err == nil {
+		t.Errorf("building the report ran gh:\n%s", calls)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,5 +67,91 @@ func TestPrintReportWithoutProjects(t *testing.T) {
 	got := plainText(statusReport{ReadOnlyOn: "no machine"})
 	if want := "read-only: crew runs on no machine\nNo projects registered. Run 'crew project add' in a repo.\n"; got != want {
 		t.Errorf("plain text = %q, want %q", got, want)
+	}
+}
+
+// treeOf maps each line of the tree to the line it's under ("" at the top) by
+// their heads, and lists every line's key in order.
+func treeOf(lines []statusLine) (parents map[string]string, keys []string) {
+	parents = map[string]string{}
+	var walk func(lines []statusLine, parent string)
+	walk = func(lines []statusLine, parent string) {
+		for _, l := range lines {
+			parents[l.head] = parent
+			keys = append(keys, l.key)
+			walk(l.kids, l.head)
+		}
+	}
+	walk(lines, "")
+	return parents, keys
+}
+
+// shownText is the tree's lines the plain text shows, in order: every line but
+// a folded line's kids.
+func shownText(lines []statusLine, indent string) []string {
+	var text []string
+	for _, l := range lines {
+		text = append(text, l.text(indent, idColumn))
+		if !l.folded {
+			text = append(text, shownText(l.kids, indent+"  ")...)
+		}
+	}
+	return text
+}
+
+func TestReportLines(t *testing.T) {
+	c := fullStatusLedger(t)
+	r := readReport(c, "p")
+	lines := reportLines(r)
+
+	var printed []string
+	for _, l := range strings.Split(plainText(r), "\n") {
+		if l != "" {
+			printed = append(printed, l)
+		}
+	}
+	if shown := shownText(lines, ""); !slices.Equal(printed, shown) {
+		t.Errorf("the plain text isn't the tree's lines:\n%s\nwant:\n%s", strings.Join(printed, "\n"), strings.Join(shown, "\n"))
+	}
+
+	parents, keys := treeOf(lines)
+	drafts := "1 draft(s)  (crew list --project p --status draft)"
+	for text, under := range map[string]string{
+		"workers running: 1/3":    "",
+		"p":                       "",
+		"goal 001-launch":         "p",
+		"in flight":               "goal 001-launch",
+		"001-in-flight":           "in flight",
+		"next, in dispatch order": "goal 001-launch",
+		"1  002-next":             "next, in dispatch order",
+		"… (2 more)":              "next, in dispatch order",
+		"6  007-next":             "… (2 more)", // counted, not listed
+		"7  008-next":             "… (2 more)",
+		"parked":                  "goal 001-launch",
+		"   009-parked":           "parked",
+		"010-parent":              "p",
+		"└ 011-child":             "010-parent",
+		drafts:                    "p",
+		"012-idea":                drafts, // counted, not listed
+		"open proposals: 1  (crew proposals --project p)": "p",
+		elsewhereHeading:                   "",
+		"r: 1 task(s) with open questions": elsewhereHeading,
+	} {
+		if got, ok := parents[text]; !ok {
+			t.Errorf("no line %q in the tree", text)
+		} else if got != under {
+			t.Errorf("%q is under %q, want %q", text, got, under)
+		}
+	}
+
+	seen := map[string]bool{}
+	for _, k := range keys {
+		if seen[k] {
+			t.Errorf("two lines have the key %q", k)
+		}
+		seen[k] = true
+	}
+	if _, again := treeOf(reportLines(readReport(c, "p"))); !slices.Equal(again, keys) {
+		t.Errorf("building the report again changed the keys:\n%q\nwant:\n%q", again, keys)
 	}
 }
