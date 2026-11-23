@@ -204,7 +204,7 @@ An MCP server you need for one project, such as its tracker, goes in `~/crew/pro
 
 ### What crew's sessions load of yours
 
-Without a word from crew, a lead, goal lead or worker would load everything your own sessions load. Every plugin, skill, MCP server and connector takes room in each request it makes, mostly for tools the role never calls. So crew starts each one without the parts of your setup that its role doesn't use:
+Without a word from crew, a lead, goal lead or worker would load everything your own sessions load. Every plugin, skill, MCP server and connector takes room in each request it makes, mostly for tools the role never calls. So the sessions crew starts, from `lead`, `crew dispatch` and the rest, go without the parts of your setup that their role doesn't use:
 
 - the plugins your `~/.claude/settings.json` enables;
 - your skills in `~/.claude/skills`, and those synced from claude.ai;
@@ -213,7 +213,7 @@ Without a word from crew, a lead, goal lead or worker would load everything your
 - your claude.ai connectors;
 - the Artifact tool, for goal leads and workers. Leads keep it.
 
-What a session gets from crew or from the repo stays: crew's own skills and agents, the repo's agents, skills and `.mcp.json` servers, and the project's `mcp.json` servers. crew turns things off only in the settings it starts each session with, so nothing under `~/.claude` changes and your own sessions load what they always did.
+What a session gets from crew or from the repo stays: crew's own skills and agents, the repo's agents, skills, plugins and servers, and the project's `mcp.json` servers. Claude Code turns things off by name, so anything of yours that shares a name with one of these stays too. crew turns things off only in the settings it starts each session with, so nothing under `~/.claude` changes and your own sessions load what they always did. That includes a `claude` you start in `~/crew/lead` yourself, and the phone lead: they load all of your setup.
 
 To keep something of yours for one project's sessions, name it in `KEEP_LOADED` in `~/crew/projects/<owner>-<repo>/project.env`: a plugin by its id or name, a skill or a server by its name, or `claude.ai` for all the connectors (crew can't turn them off one by one). For a project whose workers test payments in a browser:
 
@@ -742,7 +742,7 @@ Permission rules for each kind of session are in `lead/.claude/settings.json` (t
 
 To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick up changes within seconds.
 
-**MCP servers.** Workers and goal leads get every MCP server configured for the repo they run in: its `.mcp.json`, plus your local-scope servers. A browser or an error tracker set up for one project is there for that project's crew and no other, with nothing to change in the crew. The lead doesn't run in a repo, so it gets none of a repo's own servers. Servers that a project's lead should have too, such as its tracker, go in the project's `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)). Their calls go through auto mode's classifier like shell commands. Your user-scope servers and claude.ai connectors reach a project's sessions only when its `KEEP_LOADED` names them (see [What crew's sessions load of yours](#what-crews-sessions-load-of-yours)). To keep one project's workers off a server of the repo's, add a `deny` rule such as `"mcp__claude_ai_Gmail"` to `projects/<project>/worker-settings.json`, or `"mcp__*"` for all of them.
+**MCP servers.** Workers and goal leads get every MCP server configured for the repo they run in: its `.mcp.json`, plus your local-scope servers. A browser or an error tracker set up for one project is there for that project's crew and no other, with nothing to change in the crew. The lead doesn't run in a repo, so it gets none of a repo's own servers. Servers that a project's lead should have too, such as its tracker, go in the project's `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)). Their calls go through auto mode's classifier like shell commands. Your user-scope servers and claude.ai connectors reach a project's sessions only when its `KEEP_LOADED` names them (see [What crew's sessions load of yours](#what-crews-sessions-load-of-yours)). To keep one project's workers off a server of the repo's, add a `deny` rule such as `"mcp__sentry"` to `projects/<project>/worker-settings.json`, or `"mcp__*"` for all of them.
 
 ## 10. Troubleshooting
 
