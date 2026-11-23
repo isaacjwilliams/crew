@@ -46,15 +46,15 @@ func writeTranscript(t *testing.T, dir, path string, lines ...string) {
 }
 
 // Each message counts once, however many times and in however many sessions
-// Claude Code wrote it, and only when it was sent in the range: from midnight
-// on the first day to midnight after the last.
+// Claude Code wrote it, with its fullest usage, and only when it was sent in
+// the range: from midnight on the first day to midnight after the last.
 func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 	dir := t.TempDir()
 	from, to := costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00")
 	opus := "claude-opus-5-5"
 	writeTranscript(t, dir, "-crew-lead/s1.jsonl",
 		`{"type":"user","timestamp":"2026-11-18T10:00:00Z","message":{"role":"user","content":"Go."}}`+"\n",
-		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 1_000_000, `{"type":"thinking"}`),
+		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 400_000, `{"type":"thinking"}`),
 		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 1_000_000, `{"type":"text"}`),
 		assistantLine("msg_2", "<synthetic>", costsDay(t, "2026-11-18 10:01"), 1_000_000, `{"type":"text"}`),
 		assistantLine("msg_3", opus, from.Add(-time.Second), 1_000_000, `{"type":"text"}`),
@@ -62,9 +62,10 @@ func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 		assistantLine("msg_5", opus, to.AddDate(0, 0, 1).Add(-time.Second), 1_000_000, `{"type":"text"}`),
 		assistantLine("msg_6", opus, to.AddDate(0, 0, 1), 1_000_000, `{"type":"text"}`),
 		`{"type":"assistant","message":{"id":"msg_7","usa`)
-	// A resumed session starts with the messages it resumed.
+	// A resumed session starts with the messages it resumed, which may have
+	// their counts zeroed.
 	writeTranscript(t, dir, "-crew-lead/s2.jsonl",
-		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 1_000_000, `{"type":"text"}`))
+		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 0, `{"type":"text"}`))
 
 	charges, unread, err := scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}})
 	if err != nil {

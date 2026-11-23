@@ -222,8 +222,9 @@ func (s *costScan) folder(dir string, o owner) error {
 }
 
 // charge charges the message on line l to o, unless it was charged already:
-// then only its usage is updated, since Claude Code writes the usage again with
-// each of the message's content blocks, the last time in full. Claude Code's
+// then it keeps the fuller of the two usages. Claude Code writes the usage
+// again with each of the message's content blocks, the last time in full, and
+// a resumed session may copy a message with its counts zeroed. Claude Code's
 // own messages, such as an API error, name the model <synthetic> and cost
 // nothing.
 func (s *costScan) charge(o owner, l transcriptLine) {
@@ -232,7 +233,9 @@ func (s *costScan) charge(o owner, l transcriptLine) {
 		return
 	}
 	if c, ok := s.byID[m.ID]; ok {
-		c.usage = *m.Usage
+		if m.Usage.total() > c.usage.total() {
+			c.usage = *m.Usage
+		}
 		return
 	}
 	c := &charge{o, m.Model, l.Timestamp, *m.Usage}
