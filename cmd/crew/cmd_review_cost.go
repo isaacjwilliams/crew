@@ -183,12 +183,15 @@ func scanLines(path, want string, f func(transcriptLine) bool) (unread int, err 
 	lines := bufio.NewScanner(file)
 	lines.Buffer(nil, 64<<20)
 	for lines.Scan() {
-		var l transcriptLine
 		if len(bytes.TrimSpace(lines.Bytes())) == 0 || !bytes.Contains(lines.Bytes(), []byte(want)) {
 			continue
-		} else if json.Unmarshal(lines.Bytes(), &l) != nil {
+		}
+		var l transcriptLine
+		if json.Unmarshal(lines.Bytes(), &l) != nil {
 			unread++
-		} else if !f(l) {
+			continue
+		}
+		if !f(l) {
 			break
 		}
 	}

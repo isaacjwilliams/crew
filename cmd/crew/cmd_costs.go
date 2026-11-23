@@ -391,9 +391,9 @@ func costsIn(ts transcripts, from, to time.Time) costReport {
 		if !slices.Contains(r.rated, c.model) {
 			r.rated = append(r.rated, c.model)
 		}
-		dollars := rt.dollars(c.usage)
-		r.steps[c.step] += dollars
-		r.total += dollars
+		cost := rt.dollars(c.usage)
+		r.steps[c.step] += cost
+		r.total += cost
 	}
 	slices.Sort(r.rated)
 	return r
