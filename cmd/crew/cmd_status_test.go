@@ -25,7 +25,7 @@ func plainText(r statusReport) string {
 }
 
 func TestPrintReport(t *testing.T) {
-	r := buildReport(fullStatusLedger(t), []string{"p"}, false)
+	r := readReport(fullStatusLedger(t), "p")
 	r.ReadOnlyOn = "laptop"
 	want := `read-only: crew runs on laptop
 workers running: 1/3

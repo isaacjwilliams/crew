@@ -37,7 +37,8 @@ func cmdStatus(c *Crew, args []string) error {
 		// crew command changes the ledger here, so this needs no lock.
 		gitOK(c.Home, "pull", "-q", "--ff-only")
 	}
-	printReport(os.Stdout, buildReport(c, c.projects(scope), doneToo))
+	inScope := c.projects(scope)
+	printReport(os.Stdout, buildReport(c, inScope, doneToo, c.readPRs(inScope)))
 	return nil
 }
 

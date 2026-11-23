@@ -116,6 +116,12 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	return c
 }
 
+// readReport is the report crew status --plain builds for the projects in
+// scope, after asking GitHub for their PRs.
+func readReport(c *Crew, inScope ...string) statusReport {
+	return buildReport(c, inScope, false, c.readPRs(inScope))
+}
+
 func rowIDs(rows []taskRow) []string {
 	var ids []string
 	for _, r := range rows {
@@ -125,7 +131,7 @@ func rowIDs(rows []taskRow) []string {
 }
 
 func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
-	r := buildReport(statusLedger(t), []string{"p"}, false)
+	r := readReport(statusLedger(t), "p")
 	p := r.Projects[0]
 	if p.Name != "p" || !p.InScope || len(p.Goals) != 1 {
 		t.Fatalf("project p = %+v", p)
@@ -153,12 +159,12 @@ func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
 
 func TestBuildReportCountsOnlyTasksThatCanStillMerge(t *testing.T) {
 	c := statusLedger(t)
-	before := buildReport(c, []string{"p"}, false).Projects[0].Goals[0]
+	before := readReport(c, "p").Projects[0].Goals[0]
 	goal := []string{"goal: 001-launch", "base: main"}
 	reportTask(t, c, "p", "016-merged", false, slices.Concat(goal, []string{"status: merged"})...)
 	reportTask(t, c, "p", "017-abandoned", false, slices.Concat(goal, []string{"status: abandoned"})...)
 	reportTask(t, c, "p", "018-spike", false, slices.Concat(goal, []string{"status: done", "kind: spike"})...)
-	g := buildReport(c, []string{"p"}, false).Projects[0].Goals[0]
+	g := readReport(c, "p").Projects[0].Goals[0]
 	// Only the merged task adds to the counts, not the abandoned task or the spike.
 	if g.Total != before.Total+1 || g.Merged != before.Merged+1 {
 		t.Errorf("goal counts: %d of %d merged, want %d of %d", g.Merged, g.Total, before.Merged+1, before.Total+1)
@@ -166,7 +172,7 @@ func TestBuildReportCountsOnlyTasksThatCanStillMerge(t *testing.T) {
 }
 
 func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
-	p := buildReport(statusLedger(t), []string{"p"}, false).Projects[0]
+	p := readReport(statusLedger(t), "p").Projects[0]
 	if got, want := rowIDs(p.Rows), []string{"010-parent", "012-idea", "013-risky", "014-later", "015-earlier"}; !slices.Equal(got, want) {
 		t.Fatalf("rows outside the goal = %v, want %v", got, want)
 	}
@@ -192,7 +198,7 @@ func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 }
 
 func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
-	r := buildReport(statusLedger(t), []string{"p"}, false)
+	r := readReport(statusLedger(t), "p")
 	if len(r.Projects) != 2 || r.Projects[1].Name != "q" {
 		t.Fatalf("projects = %+v, want p then q", r.Projects)
 	}

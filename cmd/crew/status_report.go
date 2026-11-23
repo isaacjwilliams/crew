@@ -133,8 +133,8 @@ func (r taskRow) stackAsks() bool {
 // buildReport works out what crew status shows: the projects in scope in full,
 // and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
-// tasks.
-func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
+// tasks. prs are the open PRs as GitHub last had them (readPRs).
+func buildReport(c *Crew, inScope []string, doneToo bool, prs map[string]prRead) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
@@ -142,7 +142,7 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 	if len(inScope) == 0 {
 		return r
 	}
-	s := statusView{Crew: c, doneToo: doneToo}
+	s := statusView{Crew: c, doneToo: doneToo, prs: prs}
 	var err error
 	s.agents, err = c.listAgents()
 	switch {
@@ -154,7 +154,6 @@ func buildReport(c *Crew, inScope []string, doneToo bool) statusReport {
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
 	r.NoneDispatch = s.noProjectDispatches()
-	s.prs = s.readPRs(inScope)
 	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
 	}
@@ -180,13 +179,13 @@ type statusView struct {
 	workersUnseen string
 
 	branches Branches
-	repo     string              // the project's clone here, for restack reasons; empty when there's none
-	settings Settings            // the project's, or the crew's when they can't be read (settingsOf)
-	kids     map[string][]Task   // a task's file → the tasks stacked on it
-	spikes   map[string][]Task   // a task's ID → the spikes that inform it
-	deps     map[string]depsOf   // a task's file → the tasks it waits on
-	caps     map[string]capOf    // a goal's ID → its tasks in flight against its max_in_flight
-	prs      map[string]gitHubPR // a pr-open task's file → its PR as GitHub has it now (readPRs)
+	repo     string            // the project's clone here, for restack reasons; empty when there's none
+	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
+	kids     map[string][]Task // a task's file → the tasks stacked on it
+	spikes   map[string][]Task // a task's ID → the spikes that inform it
+	deps     map[string]depsOf // a task's file → the tasks it waits on
+	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
+	prs      map[string]prRead // a PR's URL → what GitHub answered when crew last asked; a PR missing wasn't asked for
 }
 
 // depsOf and capOf keep what status has worked out for a task or a goal, error
