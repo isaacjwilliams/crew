@@ -100,14 +100,14 @@ func cmdCosts(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	charges, unread, err := scanTranscripts(claudeTranscripts(), owners)
+	ts, err := scanTranscripts(claudeTranscripts(), owners)
 	if err != nil {
 		return err
 	}
-	if unread > 0 {
-		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", unread)
+	if ts.unread > 0 {
+		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", ts.unread)
 	}
-	costsIn(charges, tasks, from, to).print(os.Stdout)
+	costsIn(ts, tasks, from, to).print(os.Stdout)
 	return nil
 }
 
@@ -156,13 +156,26 @@ type charge struct {
 	usage claudeUsage
 }
 
+// transcripts is what this machine's transcripts hold: each message, charged
+// once, and the time from which they hold every message.
+type transcripts struct {
+	charges []*charge
+	// completeFrom is when the oldest transcript with a message in it was last
+	// written. Claude Code deletes a session once it has been idle for
+	// cleanupPeriodDays, so a session that's gone was last written before
+	// then, and every message sent since is here. Claude Code keeps an empty
+	// transcript, however old, so those don't count.
+	completeFrom time.Time
+	unread       int // the lines that didn't read
+}
+
 // scanTranscripts charges every message in the transcripts under dir, each
-// once, to its owner. It counts the lines that didn't read.
-func scanTranscripts(dir string, owners map[string]owner) ([]*charge, int, error) {
+// once, to its owner.
+func scanTranscripts(dir string, owners map[string]owner) (transcripts, error) {
 	s := costScan{byID: map[string]*charge{}}
 	folders, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, 0, err
+		return transcripts{}, err
 	}
 	for _, f := range folders {
 		if !f.IsDir() {
@@ -173,18 +186,18 @@ func scanTranscripts(dir string, owners map[string]owner) ([]*charge, int, error
 			o = owner{step: stepOther}
 		}
 		if err := s.folder(filepath.Join(dir, f.Name()), o); err != nil {
-			return nil, 0, err
+			return transcripts{}, err
 		}
 	}
-	return s.charges, s.unread, nil
+	return s.transcripts, nil
 }
 
-// costScan is the messages charged so far, in the order they were first read
-// and by their ID, so a message Claude Code wrote more than once counts once.
+// costScan is the transcripts read so far, with their messages in the order
+// they were first read and by their ID, so a message Claude Code wrote more
+// than once counts once.
 type costScan struct {
-	charges []*charge
-	byID    map[string]*charge
-	unread  int
+	transcripts
+	byID map[string]*charge
 }
 
 // folder charges the sessions in a transcript folder to its owner o: its main
@@ -246,15 +259,29 @@ func (s *costScan) charge(o owner, l transcriptLine) {
 }
 
 // read calls f with each assistant line of the transcript at path, in order.
+// If there were any, the transcripts are complete only from when it was last
+// written, at the earliest.
 func (s *costScan) read(path string, f func(transcriptLine)) error {
+	var messages bool
 	unread, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
 		if l.Type == "assistant" {
 			f(l)
+			messages = true
 		}
 		return true
 	})
 	s.unread += unread
-	return err
+	if err != nil || !messages {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if s.completeFrom.IsZero() || info.ModTime().Before(s.completeFrom) {
+		s.completeFrom = info.ModTime()
+	}
+	return nil
 }
 
 // scanLines calls f with each line of the transcript at path that holds want,
@@ -414,14 +441,16 @@ func firstPrompt(path string) (string, error) {
 
 // costReport is what the steps cost over a range of days.
 type costReport struct {
-	from, to  time.Time // the first and last day
-	dataStart time.Time // when this machine's first message was sent
-	steps     map[string]*stepCost
-	total     float64
-	perTask   []float64      // what each finished task cost in all
-	unpriced  map[string]int // the tokens of each model there's no rate for
-	rated     []string       // the models priced, for the rates the report gives
-	leftOut   int            // the finished tasks the medians leave out
+	from, to     time.Time // the first and last day
+	completeFrom time.Time // from when this machine's transcripts hold every message
+	steps        map[string]*stepCost
+	total        float64
+	perTask      []float64      // what each finished task cost in all
+	unpriced     map[string]int // the tokens sent in the range of each model there's no rate for
+	rated        []string       // the models priced, for the rates the report gives
+	// The finished tasks the medians leave out: those with sessions missing
+	// here, and those with a message there's no rate for.
+	incomplete, partlyPriced int
 }
 
 // stepCost is what a step cost in the range, and what it cost each finished
@@ -431,39 +460,45 @@ type stepCost struct {
 	perTask []float64
 }
 
-// costsIn is the report on the charges from the first day to the last, both
-// included. A total counts what was sent in the range. A median counts whole
-// tasks, those that merged or were done in the range, whenever they spent it:
-// each step's over the tasks that ran it. A task that began before this
-// machine's transcripts, or has none, is left out of the medians.
-func costsIn(charges []*charge, tasks map[string]Task, from, to time.Time) costReport {
-	r := costReport{from: from, to: to, steps: map[string]*stepCost{}, unpriced: map[string]int{}}
-	if len(charges) > 0 {
-		r.dataStart = slices.MinFunc(charges, func(a, b *charge) int { return a.at.Compare(b.at) }).at
-	}
+// costsIn is the report on the transcripts from the first day to the last,
+// both included. A total counts what was sent in the range. A median counts
+// whole tasks, those that merged or were done in the range, whenever they spent
+// it: each step's over the tasks that ran it. The medians leave out a task that
+// began before the transcripts are complete or has no worker session here, and
+// a task with a message there's no rate for.
+func costsIn(ts transcripts, tasks map[string]Task, from, to time.Time) costReport {
+	r := costReport{from: from, to: to, completeFrom: ts.completeFrom, steps: map[string]*stepCost{}, unpriced: map[string]int{}}
 	end := to.AddDate(0, 0, 1)
 	inRange := func(at time.Time) bool { return !at.Before(from) && at.Before(end) }
-	finished := map[string]map[string]float64{} // what each task the medians count cost, by step
+	finished := map[string]*taskSpend{} // the tasks the medians may count
 	for id, t := range tasks {
 		if !inRange(finishedAt(t)) {
 			continue
 		}
 		// A task with no created date is left out too: there's no telling
 		// whether all its sessions are here.
-		if created, _ := time.Parse(time.RFC3339, t.Get("created")); created.Before(r.dataStart) {
-			r.leftOut++
+		if created, _ := time.Parse(time.RFC3339, t.Get("created")); created.Before(r.completeFrom) {
+			r.incomplete++
 		} else {
-			finished[id] = map[string]float64{}
+			finished[id] = &taskSpend{steps: map[string]float64{}}
 		}
 	}
-	for _, c := range charges {
-		sent, inTask := inRange(c.at), finished[c.task] != nil
-		if !sent && !inTask {
+	for _, c := range ts.charges {
+		sent, task := inRange(c.at), finished[c.task]
+		if !sent && task == nil {
 			continue
+		}
+		if task != nil && c.step == stepWorker {
+			task.worker = true
 		}
 		rt, priced := apiRates[c.model]
 		if !priced {
-			r.unpriced[c.model] += c.usage.total()
+			if sent {
+				r.unpriced[c.model] += c.usage.total()
+			}
+			if task != nil {
+				task.unpriced = true
+			}
 			continue
 		}
 		if !slices.Contains(r.rated, c.model) {
@@ -474,24 +509,35 @@ func costsIn(charges []*charge, tasks map[string]Task, from, to time.Time) costR
 			r.step(c.step).dollars += dollars
 			r.total += dollars
 		}
-		if inTask {
-			finished[c.task][c.step] += dollars
+		if task != nil {
+			task.steps[c.step] += dollars
 		}
 	}
-	for _, steps := range finished {
-		if len(steps) == 0 {
-			r.leftOut++ // its sessions ran on another machine
-			continue
+	for _, t := range finished {
+		switch {
+		case !t.worker: // it ran on another machine
+			r.incomplete++
+		case t.unpriced:
+			r.partlyPriced++
+		default:
+			total := 0.0
+			for name, dollars := range t.steps {
+				r.step(name).perTask = append(r.step(name).perTask, dollars)
+				total += dollars
+			}
+			r.perTask = append(r.perTask, total)
 		}
-		total := 0.0
-		for name, dollars := range steps {
-			r.step(name).perTask = append(r.step(name).perTask, dollars)
-			total += dollars
-		}
-		r.perTask = append(r.perTask, total)
 	}
 	slices.Sort(r.rated)
 	return r
+}
+
+// taskSpend is what a finished task cost, by step, and whether that's all of
+// it: whether its worker's sessions are here, and whether a message of its has
+// no rate.
+type taskSpend struct {
+	steps            map[string]float64
+	worker, unpriced bool
 }
 
 // step is the named step's cost, which starts at nothing.
@@ -555,12 +601,19 @@ func (r costReport) print(w io.Writer) {
 	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}, {"", "tasks"}, {"median", "per task"}}, rows)
 
 	fmt.Fprintf(w, "\nMedians are of whole tasks, over the %d that merged or were done in the range: each step's over the tasks that ran it.", len(r.perTask))
-	if r.leftOut > 0 {
-		fmt.Fprintf(w, " %d more are left out, as some of their sessions aren't in this machine's transcripts.", r.leftOut)
+	var leftOut []string
+	if r.incomplete > 0 {
+		leftOut = append(leftOut, fmt.Sprintf("%d with sessions missing from this machine's transcripts", r.incomplete))
+	}
+	if r.partlyPriced > 0 {
+		leftOut = append(leftOut, fmt.Sprintf("%d with a message there's no rate for", r.partlyPriced))
+	}
+	if len(leftOut) > 0 {
+		fmt.Fprintf(w, " Left out: %s.", strings.Join(leftOut, ", and "))
 	}
 	fmt.Fprintln(w)
-	if r.from.Before(r.dataStart) {
-		fmt.Fprintf(w, "This machine's transcripts begin at %s: there's nothing from before then.\n", r.dataStart.Local().Format(logTime))
+	if r.from.Before(r.completeFrom) {
+		fmt.Fprintf(w, "This machine's transcripts are complete only from %s: older sessions may have been deleted.\n", r.completeFrom.Local().Format(logTime))
 	}
 	for _, model := range slices.Sorted(maps.Keys(r.unpriced)) {
 		fmt.Fprintf(w, "Not priced, as there's no rate for it: %s, %s tokens.\n", model, thousands(r.unpriced[model]))

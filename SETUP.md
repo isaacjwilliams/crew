@@ -428,9 +428,9 @@ What each step of crew's process cost over those days, at Anthropic's API rates,
 
 - **Steps**: a task's brief review, its worker's own sessions, then the agents the worker started, each its own step: `/simplify`'s are the exhale, the casual-observer is the pre-PR review, `/security-review`'s are the security review, the reviewer is the automated review, and any other agent is named by its type (`general-purpose`, say). Then what's no task's: the lead's sessions, the goal leads', the gardener's, and Claude Code sessions outside crew.
 - **total** and **share**: what was spent in those days, counted when each message was sent.
-- **tasks** and **median per task**: over the tasks that merged or were done in those days and ran the step, what the step cost each of them, whenever it was spent. A task with sessions before this machine's oldest transcript, or with none on this machine, is left out, and the report counts those.
+- **tasks** and **median per task**: over the tasks that merged or were done in those days and ran the step, what the step cost each of them, whenever it was spent. A task created before this machine's transcripts are complete, with no worker session on this machine, or with a message there's no rate for is left out, and the report counts those.
 
-Below the table it says when the transcripts begin, if the range starts earlier; the tokens of any model it has no rate for, which it doesn't price; and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
+Below the table it says from when the transcripts are complete, if the range starts earlier: Claude Code deletes a session once it has been idle for `cleanupPeriodDays` (30 by default). Then it gives the tokens of any model it has no rate for, which it doesn't price, and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
 
 ### What a worker's PR looks like
 
