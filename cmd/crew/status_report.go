@@ -152,6 +152,8 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads statusReads) sta
 	switch {
 	case r.ReadOnlyOn != "":
 		s.workersUnseen = "worker can't be seen from this machine"
+	case reads.workers == nil:
+		s.workersUnseen = "workers not listed yet"
 	case listErr != nil:
 		s.workersUnseen = "workers couldn't be listed"
 	}
@@ -194,12 +196,13 @@ func (c *Crew) listWorkers() *workerList {
 // why its PR needs a retarget, when it does.
 type branchRead struct{ restack, retarget string }
 
-// branchReads are what git said of the branches of each task in flight that has
-// some to ask about (readsBranches), by the task's file.
+// branchReads are what git said of the branches of each task in flight, by the
+// task's file.
 type branchReads map[string]branchRead
 
 // readBranches asks git about the branches of the tasks in flight in the
-// projects, in each project's clone here.
+// projects, in each project's clone here. Only a stacked task, or one whose PR
+// is off its base, runs git.
 func (c *Crew) readBranches(projects []string) branchReads {
 	reads := branchReads{}
 	for _, name := range projects {
@@ -209,7 +212,7 @@ func (c *Crew) readBranches(projects []string) branchReads {
 		}
 		idx := c.branches(name)
 		for _, t := range c.tasks(name) {
-			if t.Status().InFlight() && idx.readsBranches(t) {
+			if t.Status().InFlight() {
 				reads[t.Path] = branchRead{idx.restackReason(t, p.Repo()), idx.retargetReason(t, p.Repo())}
 			}
 		}
@@ -226,13 +229,13 @@ type statusView struct {
 	agents  Agents
 	running int // the workers running across the crew, counted once
 	// workersUnseen says why the workers can't be seen here, so none counts as
-	// busy or idle: another machine runs the crew, or claude agents failed. It's
-	// empty when they can be seen.
+	// busy or idle: another machine runs the crew, claude agents hasn't been
+	// run yet, or it failed. It's empty when they can be seen.
 	workersUnseen string
 	reads         statusReads // project picks out its own PRs as prs
 
 	branches Branches
-	repo     string            // the project's clone here, for restack reasons; empty when there's none
+	repo     string            // the project's clone here, whose branches are read; empty when there's none
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
@@ -636,10 +639,9 @@ func (s *statusView) prNotes(t Task) []string {
 }
 
 // branchRead is what git last said of t's branches, and false when they haven't
-// been read yet. A task with no clone here, or no branches to ask about, needs
-// no read.
+// been read yet. A task with no clone here has none to read.
 func (s *statusView) branchRead(t Task) (branchRead, bool) {
-	if s.repo == "" || !s.branches.readsBranches(t) {
+	if s.repo == "" {
 		return branchRead{}, true
 	}
 	b, ok := s.reads.branches[t.Path]

@@ -55,7 +55,6 @@ func TestMergeCheck(t *testing.T) {
 		unasked  bool              // GitHub wasn't asked for the PR
 		worker   Agent
 		unseen   string            // why the workers can't be seen
-		unlisted bool              // the workers haven't been listed yet
 		unbranch bool              // the branches haven't been read yet
 		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
 		parent   string            // the status of 020-parent, on branch agent/parent
@@ -89,9 +88,8 @@ func TestMergeCheck(t *testing.T) {
 		{name: "GitHub unread, changes requested when last synced", unread: true, fields: map[string]string{"pr_state": "open, changes requested"}, want: "not yet: changes requested (couldn't read GitHub; as of the last sync)"},
 		{name: "another machine runs the crew", worker: Agent{State: "working"}, unseen: "worker can't be seen from this machine", want: "not yet: worker can't be seen from this machine"},
 		{name: "claude agents failed", unseen: "workers couldn't be listed", want: "not yet: workers couldn't be listed"},
-		{name: "workers not listed yet", unlisted: true, want: "not yet: workers not listed yet"},
-		{name: "stacked, branches not read yet", fields: map[string]string{"base": "agent/parent"}, parent: "merged", unbranch: true, want: "not yet: branches not read yet"},
-		{name: "not stacked, branches never read", unbranch: true, want: "merge now"},
+		{name: "workers not listed yet", unseen: "workers not listed yet", want: "not yet: workers not listed yet"},
+		{name: "branches not read yet", unbranch: true, want: "not yet: branches not read yet"},
 		{name: "several, soonest to clear first", worker: Agent{State: "working"}, pr: func(p *gitHubPR) { p.Draft, p.CI = true, ciFailing }, want: "not yet: worker busy; CI failing; draft"},
 		{name: "findings left for the user", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", want: "merge now, 2 finding(s) left for you"},
 		{name: "findings left for the user, and in the way", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
@@ -131,9 +129,6 @@ func TestMergeCheck(t *testing.T) {
 			c := &Crew{Home: dir}
 			writeFile(t, c, "REPO="+repo+"\n", "projects", "p", "project.env")
 			reads := statusReads{workers: &workerList{}, branches: c.readBranches([]string{"p"})}
-			if tc.unlisted {
-				reads.workers = nil
-			}
 			if tc.unbranch {
 				reads.branches = nil
 			}

@@ -83,8 +83,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		holds  bool
 		reason string
 	}{
-		// Clears within seconds: what crew status hasn't read yet.
-		{s.reads.workers == nil, "workers not listed yet"},
+		// Clears within seconds: the branches crew status hasn't read yet.
 		{!branchesRead, "branches not read yet"},
 		// Clears by itself, within minutes: the worker, crew tick, GitHub or CI.
 		{s.workersUnseen == "" && worker.busy(), "worker busy"},

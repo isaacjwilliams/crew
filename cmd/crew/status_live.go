@@ -191,6 +191,14 @@ func (m *liveStatus) startDue() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// readEnded marks a pull or a read done, and asks for a build to show what it
+// brought in.
+func (m *liveStatus) readEnded(j *job) tea.Cmd {
+	j.running = false
+	m.building.ask()
+	return m.startDue()
+}
+
 // Update starts a build as soon as a pull or a read ends, so what it brought in
 // shows at once; the beat starts each job again when it's due.
 func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -201,24 +209,16 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case beat:
 		return m, m.startDue()
 	case ledgerPulled:
-		m.pulling.running = false
-		m.building.ask()
-		return m, m.startDue()
+		return m, m.readEnded(&m.pulling)
 	case workersListed:
-		m.listingWorkers.running = false
 		m.reads.workers = msg.workers
-		m.building.ask()
-		return m, m.startDue()
+		return m, m.readEnded(&m.listingWorkers)
 	case branchesRead:
-		m.readingBranches.running = false
 		m.reads.branches = msg.branches
-		m.building.ask()
-		return m, m.startDue()
+		return m, m.readEnded(&m.readingBranches)
 	case prsRead:
-		m.readingGitHub.running = false
 		m.reads.prs = msg.reads
-		m.building.ask()
-		return m, m.startDue()
+		return m, m.readEnded(&m.readingGitHub)
 	case reportBuilt:
 		m.building.running = false
 		m.settingsErr = msg.settingsErr
