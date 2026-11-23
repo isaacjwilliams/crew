@@ -8,7 +8,7 @@ import (
 )
 
 // Another machine ran the crew from each commit that named it in the host file
-// until the file next changed, or until now. Stretches when this machine ran
+// until the file next changed; the last hasn't ended. Stretches when this machine ran
 // it, or none did, aren't tenures elsewhere.
 func TestTenuresElsewhereAreTheHostFilesOtherHolders(t *testing.T) {
 	home := t.TempDir()
@@ -29,7 +29,6 @@ func TestTenuresElsewhereAreTheHostFilesOtherHolders(t *testing.T) {
 	claim("", "2026-11-10T09:00:00Z")
 	claim("laptop", "2026-11-12T09:00:00Z")
 
-	began := time.Now()
 	got, err := (&Crew{Home: home, Host: "desk"}).tenuresElsewhere()
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +43,7 @@ func TestTenuresElsewhereAreTheHostFilesOtherHolders(t *testing.T) {
 	if g := got[0]; g.holder != "laptop" || !g.from.Equal(day("2026-11-01T09:00:00Z")) || !g.to.Equal(day("2026-11-05T09:00:00Z")) {
 		t.Errorf("first tenure %v; want the laptop's, from 2026-11-01 09:00 until the desk took over on 2026-11-05 09:00", g)
 	}
-	if g := got[1]; g.holder != "laptop" || !g.from.Equal(day("2026-11-12T09:00:00Z")) || g.to.Before(began) {
-		t.Errorf("second tenure %v; want the laptop's, from 2026-11-12 09:00 until now", g)
+	if g := got[1]; g.holder != "laptop" || !g.from.Equal(day("2026-11-12T09:00:00Z")) || !g.to.IsZero() {
+		t.Errorf("second tenure %v; want the laptop's, from 2026-11-12 09:00 and not yet ended", g)
 	}
 }

@@ -177,7 +177,7 @@ type transcripts struct {
 func (ts transcripts) elsewhereDuring(from, to time.Time) []tenure {
 	var during []tenure
 	for _, t := range ts.elsewhere {
-		if t.from.Before(to) && t.to.After(from) {
+		if t.during(from, to) {
 			during = append(during, t)
 		}
 	}
@@ -650,8 +650,13 @@ func (r costReport) print(w io.Writer) {
 		fmt.Fprintf(w, "This machine's transcripts are complete only from %s: older sessions may have been deleted.\n", r.completeFrom.Local().Format(logTime))
 	}
 	for _, t := range r.elsewhere {
-		fmt.Fprintf(w, "%s ran the crew from %s to %s, and its sessions aren't on this machine.\n",
-			t.holder, t.from.Local().Format(logTime), t.to.Local().Format(logTime))
+		if t.to.IsZero() {
+			fmt.Fprintf(w, "%s has run the crew since %s, and its sessions aren't on this machine.\n",
+				t.holder, t.from.Local().Format(logTime))
+		} else {
+			fmt.Fprintf(w, "%s ran the crew from %s to %s, and its sessions aren't on this machine.\n",
+				t.holder, t.from.Local().Format(logTime), t.to.Local().Format(logTime))
+		}
 	}
 	for _, model := range slices.Sorted(maps.Keys(r.unpriced)) {
 		fmt.Fprintf(w, "Not priced, as there's no rate for it: %s, %s tokens.\n", model, thousands(r.unpriced[model]))

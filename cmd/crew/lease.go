@@ -54,10 +54,16 @@ func (c *Crew) previousHolder() string {
 }
 
 // A tenure is a stretch of time one machine ran the crew: from when the host
-// file came to name it until the file next changed, or until now.
+// file came to name it until the file next changed. The holder's tenure hasn't
+// ended, so its to is zero.
 type tenure struct {
 	holder   string
 	from, to time.Time
+}
+
+// during reports whether the tenure overlaps the time from one moment to another.
+func (t tenure) during(from, to time.Time) bool {
+	return t.from.Before(to) && (t.to.IsZero() || t.to.After(from))
 }
 
 // tenuresElsewhere are the stretches of time another machine ran the crew,
@@ -81,7 +87,7 @@ func (c *Crew) tenuresElsewhere() ([]tenure, error) {
 			tenures[n-1].to = at
 		}
 		holder, _ := git(c.Home, "show", commit+":host")
-		tenures = append(tenures, tenure{holder, at, time.Now()})
+		tenures = append(tenures, tenure{holder: holder, from: at})
 	}
 	return slices.DeleteFunc(tenures, func(t tenure) bool { return t.holder == "" || t.holder == c.Host }), nil
 }

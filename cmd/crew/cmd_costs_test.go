@@ -307,7 +307,8 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 		{owner{stepWorker, "p/mystery"}, "claude-mystery-1", costsDay(t, "2026-11-15 11:00"), claudeUsage{Output: 1}},
 	}
 	laptop := tenure{"laptop", costsDay(t, "2026-11-06 09:00"), costsDay(t, "2026-11-07 09:00")}
-	ts := transcripts{charges: charges, completeFrom: costsDay(t, "2026-11-01 09:00"), elsewhere: []tenure{laptop}}
+	desk := tenure{holder: "desk", from: costsDay(t, "2026-11-24 09:00")}
+	ts := transcripts{charges: charges, completeFrom: costsDay(t, "2026-11-01 09:00"), elsewhere: []tenure{laptop, desk}}
 	r := costsIn(ts, tasks, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
 	var out strings.Builder
 	r.print(&out)
@@ -325,17 +326,18 @@ Medians are of whole tasks, over the 2 that merged or were done in the range: ea
 	if got := out.String(); !strings.HasPrefix(got, want) {
 		t.Errorf("report:\n%s\nwant it to start:\n%s", got, want)
 	}
-	for _, incomplete := range []string{"complete only from", "laptop"} {
+	for _, incomplete := range []string{"complete only from", "laptop", "desk"} {
 		if strings.Contains(out.String(), incomplete) {
 			t.Errorf("the report says %q, though the transcripts hold the whole range:\n%s", incomplete, out.String())
 		}
 	}
 
 	out.Reset()
-	costsIn(ts, tasks, costsDay(t, "2026-10-25 00:00"), costsDay(t, "2026-11-22 00:00")).print(&out)
+	costsIn(ts, tasks, costsDay(t, "2026-10-25 00:00"), costsDay(t, "2026-11-24 00:00")).print(&out)
 	for _, want := range []string{
 		"This machine's transcripts are complete only from 2026-11-01 09:00: older sessions may have been deleted.\n",
 		"laptop ran the crew from 2026-11-06 09:00 to 2026-11-07 09:00, and its sessions aren't on this machine.\n",
+		"desk has run the crew since 2026-11-24 09:00, and its sessions aren't on this machine.\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report doesn't say %q:\n%s", want, out.String())
