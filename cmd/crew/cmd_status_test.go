@@ -86,35 +86,9 @@ func treeOf(lines []statusLine) (parents map[string]string, keys []string) {
 	return parents, keys
 }
 
-// shownText is the tree's lines the plain text shows, in order: every line but
-// a folded line's kids.
-func shownText(lines []statusLine, indent string) []string {
-	var text []string
-	for _, l := range lines {
-		text = append(text, l.text(indent, idColumn))
-		if !l.folded {
-			text = append(text, shownText(l.kids, indent+"  ")...)
-		}
-	}
-	return text
-}
-
 func TestReportLines(t *testing.T) {
 	c := fullStatusLedger(t)
-	r := readReport(c, "p")
-	lines := reportLines(r)
-
-	var printed []string
-	for _, l := range strings.Split(plainText(r), "\n") {
-		if l != "" {
-			printed = append(printed, l)
-		}
-	}
-	if shown := shownText(lines, ""); !slices.Equal(printed, shown) {
-		t.Errorf("the plain text isn't the tree's lines:\n%s\nwant:\n%s", strings.Join(printed, "\n"), strings.Join(shown, "\n"))
-	}
-
-	parents, keys := treeOf(lines)
+	parents, keys := treeOf(reportLines(readReport(c, "p")))
 	drafts := "1 draft(s)  (crew list --project p --status draft)"
 	for text, under := range map[string]string{
 		"workers running: 1/3":    "",

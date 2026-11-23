@@ -50,10 +50,11 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	if t.Status() != PROpen {
 		return nil
 	}
-	if t.PR() == "" {
+	url := t.PR()
+	if url == "" {
 		return &mergeCheck{InTheWay: []string{"no PR"}}
 	}
-	read, asked := s.prs[t.PR()]
+	read, asked := s.prs[url]
 	if !asked {
 		return &mergeCheck{InTheWay: []string{"PR not read on GitHub yet"}}
 	}
@@ -141,18 +142,23 @@ func (c *Crew) readPRs(projects []string) map[string]prRead {
 	for _, name := range projects {
 		p, projectErr := c.loadProject(name)
 		for _, t := range c.tasks(name) {
-			if t.Status() != PROpen || t.PR() == "" {
+			if t.Status() != PROpen {
 				continue
 			}
-			wg.Go(func() {
-				pr, err := gitHubPR{}, projectErr
-				if err == nil {
-					pr, err = readPR(p.Repo(), t.PR())
-				}
+			url := t.PR()
+			if url == "" {
+				continue
+			}
+			keep := func(pr gitHubPR, err error) {
 				mu.Lock()
-				prs[t.PR()] = prRead{pr, err}
+				prs[url] = prRead{pr, err}
 				mu.Unlock()
-			})
+			}
+			if projectErr != nil {
+				keep(gitHubPR{}, projectErr) // other projects' reads may still be running
+				continue
+			}
+			wg.Go(func() { keep(readPR(p.Repo(), url)) })
 		}
 	}
 	wg.Wait()

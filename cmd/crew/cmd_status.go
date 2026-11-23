@@ -48,7 +48,8 @@ func (c *Crew) catchUpLedger() {
 
 // printReport prints a status report as plain text: its lines, each under the
 // line it belongs to, with folded lines' kids left out. A blank line comes before
-// each project, and before what waits in the others.
+// each top-level line with lines under it: a project, or what waits in the
+// others.
 func printReport(w io.Writer, r statusReport) {
 	for _, l := range reportLines(r) {
 		if len(l.kids) > 0 {
@@ -153,11 +154,9 @@ func projectLines(p projectReport) statusLine {
 		l.kids = append(l.kids, goalLines(g))
 	}
 	rows, folded := p.listed()
-	for _, row := range rows {
-		l.kids = append(l.kids, rowLines(row, ""))
-	}
+	l.kids = append(l.kids, rowsLines(rows, noNumber)...)
 	if len(folded) > 0 {
-		l.kids = append(l.kids, foldedLine(key+" drafts", draftsLine(folded, p.Name), folded, func(taskRow) string { return "" }))
+		l.kids = append(l.kids, statusLine{key: key + " drafts", head: draftsLine(folded, p.Name), kids: rowsLines(folded, noNumber), folded: true})
 	}
 	l.kids = append(l.kids, p.footer(key)...)
 	return l
@@ -307,24 +306,11 @@ func groupLines(goalKey string, g taskGroup) statusLine {
 	if kind == groupNext {
 		kind = groupReady
 	}
-	key := fmt.Sprintf("%s group %d", goalKey, kind)
-	l := leafLine(key, g.Kind.heading())
+	key := goalKey + " group " + kind.heading()
 	rows, more := g.listed()
-	for _, row := range rows {
-		l.kids = append(l.kids, rowLines(row, g.numberColumn(row)))
-	}
+	l := statusLine{key: key, head: g.Kind.heading(), kids: rowsLines(rows, g.numberColumn)}
 	if len(more) > 0 {
-		l.kids = append(l.kids, foldedLine(key+" more", fmt.Sprintf("… (%d more)", len(more)), more, g.numberColumn))
-	}
-	return l
-}
-
-// foldedLine counts rows the text leaves out, with them under it. number is
-// each row's number column.
-func foldedLine(key, head string, rows []taskRow, number func(taskRow) string) statusLine {
-	l := statusLine{key: key, head: head, folded: true}
-	for _, row := range rows {
-		l.kids = append(l.kids, rowLines(row, number(row)))
+		l.kids = append(l.kids, statusLine{key: key + " more", head: fmt.Sprintf("… (%d more)", len(more)), kids: rowsLines(more, g.numberColumn), folded: true})
 	}
 	return l
 }
@@ -356,6 +342,19 @@ func (g taskGroup) numberColumn(row taskRow) string {
 	}
 	return fmt.Sprintf("%-3s", number)
 }
+
+// rowsLines is a line for each row, with the tasks stacked on it under it.
+// number is each row's number column.
+func rowsLines(rows []taskRow, number func(taskRow) string) []statusLine {
+	var lines []statusLine
+	for _, row := range rows {
+		lines = append(lines, rowLines(row, number(row)))
+	}
+	return lines
+}
+
+// noNumber is the number column of a row outside a goal: there's none.
+func noNumber(taskRow) string { return "" }
 
 // rowLines is a task's line, with the tasks stacked on it under it. The number
 // is its group's number column.
