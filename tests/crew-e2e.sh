@@ -1661,14 +1661,21 @@ FC=$(crew new "PR open when its parent merged" --branch merged-child --on "$(tid
 FD=$(crew new "No PR when its parent merged" --branch merged-child-no-pr --on "$(tid "$FP")"); fill "$FD"; crew ready "$FD" >/dev/null; setstate "done" null; crew dispatch "$FD" >/dev/null
 first_run "$FC" 64; first_run "$FD" ""
 echo agent/first-parent >"$HOME/gh-pr-base-64"
-git merge -q --squash origin/agent/first-parent >/dev/null && git commit -qm "First-run parent (#61)" && git push -q origin main
-git push -q origin --delete agent/first-parent; echo MERGED >"$HOME/gh-pr-state-61"  # crew sync hasn't seen it yet
-e=$(edits main); out=$(crew hand-over "$FC" 2>&1); run_given "$(crew get "$FC" worktree)" "$out"
+# The parent merges on GitHub while crew hand-over reads its PR, after the hand-over's first fetch.
+cat >"$HOME/gh-pr-view-hook" <<HOOK
+#!/bin/sh
+case "\$*" in *"/pull/61 --json state"*) ;; *) exit 0 ;; esac
+cd "$SB/other-clone" && { git fetch -q origin && git checkout -q -B main origin/main && git merge -q --squash origin/agent/first-parent &&
+  git commit -qm "First-run parent (#61)" && git push -q origin main && git push -q origin --delete agent/first-parent; } >/dev/null 2>&1
+echo MERGED >"$HOME/gh-pr-state-61"; rm "\$0"
+HOOK
+chmod +x "$HOME/gh-pr-view-hook"
+e=$(edits main); out=$(crew hand-over "$FC" 2>&1); run_given "$(crew get "$FC" worktree)" "$out"; git pull -q --ff-only
 check "a first hand-over notes the merge of a parent that crew sync hasn't seen" \
   '[[ $(crew get "$FP" status) == merged && $(crew get "$FP" pr_state) == merged ]] && section "$FP" "## Log" | grep -q "PR merged"'
 (($(edits main) > e)) && echo main >"$HOME/gh-pr-base-64"  # GitHub moves the PR
-check "after a merge, the refusal has the worker rebase onto the default branch, retarget its PR and record its base" \
-  '[[ $out == *"($(tid "$FP") merged)"*"git rebase --onto $(git rev-parse origin/main) "*"Your base is now main: after pushing, run \`gh pr edit --base main\` and \`crew set $(tid "$FC") base main\`."* && $(crew get "$FC" base) == main && $(cat "$HOME/gh-pr-base-64") == main ]]'
+check "after a merge, the refusal has the worker rebase onto the default branch as merged, retarget its PR and record its base" \
+  '[[ $out == *"($(tid "$FP") merged)"*"git rebase --onto $(git rev-parse origin/main) "*"Your base is now main: after pushing, run \`gh pr edit --base main\` and \`crew set $(tid "$FC") base main\`."* && $(crew get "$FC" base) == main && $(cat "$HOME/gh-pr-base-64") == main && $(git log -1 --format=%s origin/main) == "First-run parent (#61)" ]]'
 ranged_review "$FC" 2; crew hand-over "$FC" >/dev/null
 check "and it hands over on the default branch, with only its own commits" '[[ $(crew get "$FC" status) == pr-open && $(git log --format=%s origin/main..origin/agent/merged-child) == "add $(tid "$FC").txt" ]]'
 out=$(crew hand-over "$FD" 2>&1); st=$?

@@ -334,11 +334,6 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The PR's branch on origin may have commits from elsewhere, a suggestion
-	// applied on GitHub say, that the evidence and raiseRisk have to see.
-	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
-	}
 	var pr Evidence // nil without a PR: with pr_mode none, the worker opens none
 	if t.PR() != "" {
 		body, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "body", "--jq", ".body")
@@ -366,6 +361,13 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 			}
 			parentOnGitHub = &read
 		}
+	}
+	// The PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that the evidence and raiseRisk have to see. The
+	// fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
+	// in the refs a rebase is planned from.
+	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
+		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
 	}
 	return func() error {
 		// Before the PR check: a worker whose parent merged can't open its PR on

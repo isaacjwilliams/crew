@@ -241,8 +241,9 @@ worker: /pr-review TASK  (the skill, from the home's .claude/skills/)
         → again, until a review is clean or AUTO_REVIEWS have run
         → templates/review-comment.md → crew review-summary TASK FILE → "Summary posted"
         → converged: crew hand-over TASK
-              ├─ before the lock: git fetch origin; gh pr view --json body (PREvidence), unless pr_mode is none;
-              │    at the first hand-over, the PR and its parent's as crew sync reads them (readPR)
+              ├─ before the lock: gh pr view --json body (PREvidence), unless pr_mode is none; at the first
+              │    hand-over, the PR and its parent's as crew sync reads them (readPR); then git fetch origin,
+              │    so the refs hold whatever those PRs say merged
               ├─ first hand-over (refuseOffBase): records both PRs (gitHubPR.record), and the parent's merge
               │    (noteMerge), and moves base_sha (noteBaseSHA), as crew sync and crew restack do, then refuses while a stacked branch doesn't
               │    hold its parent's latest commit, with the rebase (rebaseFor) and, after a merge, the new base
