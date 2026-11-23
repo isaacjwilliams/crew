@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -54,7 +53,7 @@ func cmdDispatch(c *Crew, args []string) error {
 		base = p.DefaultBranch()
 	}
 	branch := t.Branch()
-	wt := filepath.Join(p.WorkRoot(), p.Name, t.ID())
+	wt := p.taskWorktree(t)
 
 	if err := c.lock(); err != nil {
 		return err
