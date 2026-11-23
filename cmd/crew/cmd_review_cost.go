@@ -69,7 +69,7 @@ type claudeUsage struct {
 	CacheRead  int `json:"cache_read_input_tokens"`
 	Output     int `json:"output_tokens"`
 	// The cache writes kept for an hour, which cost more than the rest: those
-	// kept for five minutes, the API's default.
+	// kept for five minutes, the API's default. CacheWrite counts both.
 	CacheWriteKept struct {
 		OneHour int `json:"ephemeral_1h_input_tokens"`
 	} `json:"cache_creation"`

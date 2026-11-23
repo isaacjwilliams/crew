@@ -41,13 +41,13 @@ var (
 	sharedSteps = []string{stepLead, stepLeadAgents, stepGoalLead, stepGoalLeadAgents, stepGardener, stepOther}
 )
 
-// The agents crew has a worker start, by the step each is, and the skills
-// whose agents are a step.
 var (
+	// The agents crew has a worker start, by their step.
 	agentSteps = map[string]string{"casual-observer": stepPrePRReview, "reviewer": stepAutomatedReview}
 	// The step of a lead's or goal lead's agents, by the step of their session.
 	leadAgentSteps = map[string]string{stepLead: stepLeadAgents, stepGoalLead: stepGoalLeadAgents}
-	skillSteps     = map[string]string{"simplify": stepExhale, "security-review": stepSecurityReview}
+	// The skills whose agents are a step, by the skill's name.
+	skillSteps = map[string]string{"simplify": stepExhale, "security-review": stepSecurityReview}
 )
 
 // rate is a model's API price, in dollars per million tokens. A cache write
@@ -300,6 +300,10 @@ func (l transcriptLine) toolUses() []toolUse {
 // one after another, and closes at the next other tool call: a skill starts
 // its agents together. Agents the worker starts in that window are no skill's;
 // subagentStep tells them apart, as a skill starts only built-in agents.
+//
+// For example, in the calls Skill(simplify), Agent, Agent, Bash, Agent, the
+// first two Agent calls are simplify's. The Bash call closes the window, so
+// the last one is the worker's own.
 type skillRun struct {
 	step          string // the step of the skill whose window is open, or ""
 	agentsStarted bool   // an Agent call has come since the Skill call
@@ -316,7 +320,7 @@ func (r *skillRun) follow(u toolUse, agents map[string]string) {
 	case (u.Name == "Agent" || u.Name == "Task") && r.step != "":
 		agents[u.ID], r.agentsStarted = r.step, true
 	case r.agentsStarted:
-		r.step = ""
+		r.step = "" // any other tool call, after the skill's agents, closes the window
 	}
 }
 
@@ -412,7 +416,7 @@ func (r costReport) print(w io.Writer) {
 		}
 	}
 	slices.Sort(agents)
-	row := func(name string, total float64) []string { return []string{name, dollars(total), r.share(total)} }
+	row := func(name string, total float64) []string { return []string{name, formatDollars(total), r.share(total)} }
 	var rows [][]string
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
@@ -456,8 +460,8 @@ func (r costReport) share(dollars float64) string {
 	return strconv.Itoa(int(math.Round(percent))) + "%"
 }
 
-// dollars is an amount as a person needs it: "$1,675", or "$4.27" under $10.
-func dollars(x float64) string {
+// formatDollars is an amount as a person needs it: "$1,675", or "$4.27" under $10.
+func formatDollars(x float64) string {
 	if x < 10 {
 		return fmt.Sprintf("$%.2f", x)
 	}
