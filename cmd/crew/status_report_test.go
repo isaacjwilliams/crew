@@ -222,10 +222,10 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 	writeFile(t, c, "#!/bin/sh\necho \"$@\" >>"+ghCalls+"\nexit 1\n", "bin", "gh")
 	// GitHub didn't answer for 013-risky's PR, answered for 014-later's, and
 	// wasn't asked for 015-earlier's.
-	prs := map[string]prRead{
+	prs := prReads{"p": {
 		"https://github.com/o/r/pull/9":  {err: errors.New("gh: no answer")},
 		"https://github.com/o/r/pull/12": {pr: gitHubPR{State: "OPEN", Base: "main", CI: ciPassing, MergeState: "CLEAN"}},
-	}
+	}}
 	for build := 1; build <= 2; build++ {
 		checks := map[string]string{}
 		for _, row := range buildReport(c, []string{"p"}, false, prs).Projects[0].Rows {
@@ -245,5 +245,26 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 	}
 	if calls, err := os.ReadFile(ghCalls); err == nil {
 		t.Errorf("building the report ran gh:\n%s", calls)
+	}
+}
+
+func TestReadPRsKeepsEachProjectsPRsApart(t *testing.T) {
+	c := statusLedger(t)
+	// p's and q's tasks both name PR 12, each in its own repository: open in
+	// p's, merged in q's.
+	for project, state := range map[string]string{"p": "OPEN", "q": "MERGED"} {
+		repo := t.TempDir()
+		writeFile(t, c, "REPO="+repo+"\n", "projects", project, "project.env")
+		writeFile(t, c, `{"state":"`+state+`","baseRefName":"main","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}`, filepath.Base(repo)+".json")
+		reportTask(t, c, project, "020-twelve", false, "status: pr-open", "base: main", "pr: 12")
+	}
+	writeFile(t, c, "#!/bin/sh\ncat "+c.Home+"/$(basename \"$PWD\").json\n", "bin", "gh")
+	r := readReport(c, "p", "q")
+	for i, wantClosed := range []string{"", "merged"} {
+		for _, row := range r.Projects[i].Rows {
+			if row.Task.ID() == "020-twelve" && row.Merge.Closed != wantClosed {
+				t.Errorf("%s's PR 12: closed = %q, want %q", r.Projects[i].Name, row.Merge.Closed, wantClosed)
+			}
+		}
 	}
 }

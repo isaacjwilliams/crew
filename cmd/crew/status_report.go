@@ -134,7 +134,7 @@ func (r taskRow) stackAsks() bool {
 // and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
 // tasks. prs are the open PRs as GitHub last had them (readPRs).
-func buildReport(c *Crew, inScope []string, doneToo bool, prs map[string]prRead) statusReport {
+func buildReport(c *Crew, inScope []string, doneToo bool, prs prReads) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
@@ -142,7 +142,7 @@ func buildReport(c *Crew, inScope []string, doneToo bool, prs map[string]prRead)
 	if len(inScope) == 0 {
 		return r
 	}
-	s := statusView{Crew: c, doneToo: doneToo, prs: prs}
+	s := statusView{Crew: c, doneToo: doneToo, reads: prs}
 	var err error
 	s.agents, err = c.listAgents()
 	switch {
@@ -177,6 +177,7 @@ type statusView struct {
 	// busy or idle: another machine runs the crew, or claude agents failed. It's
 	// empty when they can be seen.
 	workersUnseen string
+	reads         prReads
 
 	branches Branches
 	repo     string            // the project's clone here, for restack reasons; empty when there's none
@@ -185,7 +186,7 @@ type statusView struct {
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
 	deps     map[string]depsOf // a task's file → the tasks it waits on
 	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
-	prs      map[string]prRead // a PR's URL → what GitHub answered when crew last asked; a PR missing wasn't asked for
+	prs      map[string]prRead // the project's PRs as its tasks name them → what GitHub answered when crew last asked; a PR missing wasn't asked for
 }
 
 // depsOf and capOf keep what status has worked out for a task or a goal, error
@@ -240,7 +241,7 @@ func (s *statusView) project(name string) projectReport {
 	tasks := s.tasks(name)
 	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), InScope: true}
 	s.branches = s.Crew.branches(name)
-	s.repo, s.settings = "", s.settingsOf(name)
+	s.repo, s.settings, s.prs = "", s.settingsOf(name), s.reads[name]
 	if p, err := s.loadProject(name); err == nil {
 		s.repo = p.Repo()
 	}
