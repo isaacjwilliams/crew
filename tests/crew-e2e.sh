@@ -1476,6 +1476,20 @@ out=$(crew cleanup "$LEFT" --force 2>&1); st=$?
 check "a forced cleanup doesn't report cleaning up while something that isn't a worktree is at the task's path" \
   '((st == 4)) && [[ $out == *"$(basename "$LEFT" .md): worktree stays: "* && $out != *"cleaned up"* && -d $WLEFT ]] && ! grep -q "cleaned up worktree" "$LEFT"'
 rmdir "$WLEFT"
+# A leftover whose branch has commits of its own keeps the branch, and one reached by two spellings of its path is removed once.
+KEEP=$(crew new "Leftover with work" --branch leftover-work); fill "$KEEP"; crew ready "$KEEP" >/dev/null; setstate "done" null; crew dispatch "$KEEP" >/dev/null
+WKEEP=$(crew get "$KEEP" worktree); (cd "$WKEEP" && echo x >w.txt && git add w.txt && git commit -qm "work")
+crew set "$KEEP" worktree "" >/dev/null; crew set "$KEEP" status abandoned >/dev/null
+out=$(crew cleanup "$KEEP" --force 2>&1)
+check "a forced cleanup of a leftover removes it but keeps a branch that has commits of its own" \
+  '[[ $out == *"cleaned up"* && ! -d $WKEEP ]] && git -C "$SB/webapp" show-ref --verify --quiet refs/heads/agent/leftover-work'
+ALIAS=$(crew new "Aliased path" --branch aliased-path); fill "$ALIAS"; crew ready "$ALIAS" >/dev/null; setstate "done" null; crew dispatch "$ALIAS" >/dev/null
+WALIAS=$(crew get "$ALIAS" worktree); ln -s "$WALIAS" "$SB/alias-link"
+crew set "$ALIAS" worktree "$SB/alias-link" >/dev/null; crew set "$ALIAS" status abandoned >/dev/null
+out=$(crew cleanup "$ALIAS" --force 2>&1); st=$?
+check "a forced cleanup reached by two spellings of one worktree path removes it once and succeeds" \
+  '((st == 0)) && [[ $out == *"cleaned up"* && ! -d $WALIAS && -z $(crew get "$ALIAS" worktree) ]]'
+rm -f "$SB/alias-link"
 # A PR's new base that only another clone has pushed, with no stack in flight for sync to fetch
 # for (12 steps aside): sync fetches for the PR itself.
 crew set 12 status abandoned >/dev/null

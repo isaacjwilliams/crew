@@ -69,6 +69,7 @@ func cmdCleanup(c *Crew, args []string) error {
 			warn("%s", line)
 		}
 	}()
+tasks:
 	for _, t := range tasks {
 		p, err := c.loadProject(t.Project())
 		if err != nil {
@@ -100,28 +101,26 @@ func cmdCleanup(c *Crew, args []string) error {
 			stay(t, fmt.Sprintf("worker %s is still running (stop it in claude agents)", job))
 			continue
 		}
-		// A sentinel, not a stay in the loop: stay and continue must move on to the next task.
-		stuck := ""
 		for _, dir := range dirs {
+			// Gone already when two spellings of one path were both found.
+			if !isDir(dir) {
+				continue
+			}
 			stopProcessesIn(dir)
 			removed, err := p.worktreeRemove(dir, force, p.worktreeLog(t))
 			if err != nil {
 				return err
 			}
 			if !removed {
-				stuck = dir
-				break
+				stay(t, fmt.Sprintf("the worktree tool couldn't remove %s", dir))
+				continue tasks
 			}
-		}
-		if stuck != "" {
-			stay(t, fmt.Sprintf("the worktree tool couldn't remove %s", stuck))
-			continue
 		}
 		if st.Delivered() && t.Branch() != "" {
 			gitOK(p.Repo(), "branch", "-D", t.Branch())
 		}
 		// No recorded worktree: either a dispatch failed while making one, or the task
-		// was never dispatched and there is nothing to clean up.
+		// has none to clean up (never dispatched, or cleaned up before).
 		if wt == "" {
 			if len(dirs) == 0 {
 				fmt.Println(t.ID() + " has no worktree to clean up")
