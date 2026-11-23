@@ -10,8 +10,8 @@ import (
 )
 
 // fakeYourSetup gives a fake HOME a setup like the user's own: two plugins on and
-// one off, a personal skill, a skill synced from claude.ai and a user-scope MCP
-// server.
+// one off, a personal skill, a skill synced from claude.ai, two command files and
+// a user-scope MCP server.
 func fakeYourSetup(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -21,7 +21,9 @@ func fakeYourSetup(t *testing.T) string {
 			"frontend-design@claude-plugins-official": true, "ruby-lsp@claude-plugins-official": false}}`,
 		".claude/skills/codex-review/SKILL.md":       "---\nname: codex-review\n---\n",
 		".claude/skills/synced/bucket/docx/SKILL.md": "---\nname: docx\n---\n",
-		".claude.json": `{"mcpServers": {"chrome-devtools": {"command": "npx"}}}`,
+		".claude/commands/standup.md":                "",
+		".claude/commands/ci/init.md":                "",
+		".claude.json":                               `{"mcpServers": {"chrome-devtools": {"command": "npx"}}}`,
 	}
 	for name, body := range files {
 		writeFile(t, &Crew{Home: home}, body, name)
@@ -83,7 +85,7 @@ func TestLeanSettingsTurnOffWhatAWorkerDoesntUseOfYours(t *testing.T) {
 	if want := []string{"frontend-design@claude-plugins-official", "stripe@claude-plugins-official"}; !slices.Equal(got.plugins, want) {
 		t.Errorf("plugins off = %v, want %v: only the ones your settings enable", got.plugins, want)
 	}
-	for _, skill := range []string{"codex-review", "docx", "claude-api", "artifact-design", "loop"} {
+	for _, skill := range []string{"codex-review", "docx", "standup", "ci:init", "claude-api", "artifact-design", "loop"} {
 		if !slices.Contains(got.skills, skill) {
 			t.Errorf("skill %s is on, want off: skills off = %v", skill, got.skills)
 		}
@@ -256,13 +258,10 @@ func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
 	if !slices.Equal(got.servers, []string{"sentry"}) {
 		t.Errorf("a worker denies %v, want only sentry: chrome-devtools is the repo's, p_trello the project's, figma local to the repo", got.servers)
 	}
-	for _, skill := range []string{"pr-review", "docx", "run", "loop", "schedule", "claude-api"} {
+	for _, skill := range []string{"pr-review", "docx", "run", "loop", "schedule", "claude-api", "ci:init"} {
 		if slices.Contains(got.skills, skill) {
 			t.Errorf("a worker turns off %s, which crew or the repo has too", skill)
 		}
-	}
-	if names := c.theirs(nil, repo); !slices.Contains(names, "ci:init") {
-		t.Errorf("theirs = %v, want the repo's command ci/init.md, through a link, as the skill ci:init", names)
 	}
 	if !slices.Equal(got.plugins, []string{"stripe@claude-plugins-official"}) {
 		t.Errorf("a worker turns off plugins %v, want only Stripe: the repo enables frontend-design", got.plugins)

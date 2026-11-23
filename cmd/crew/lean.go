@@ -2,12 +2,13 @@ package main
 
 // What crew's sessions load of your own Claude Code setup. Without a word from
 // crew, a lead, goal lead or worker would load everything your own sessions do:
-// the plugins your settings enable, your personal skills and those synced from
-// claude.ai, the skills Claude Code ships, your user-scope MCP servers and your
-// claude.ai connectors. Most of it is no use to the role, and all of it takes
-// room in every request the session makes. leanSettings turns off what a role
-// doesn't use, in the session's own --settings: nothing under ~/.claude changes,
-// so your own sessions load what they always did.
+// the plugins your settings enable, your personal skills and command files and
+// the skills synced from claude.ai, the skills Claude Code ships, your
+// user-scope MCP servers and your claude.ai connectors. Most of it is no use to
+// the role, and all of it takes room in every request the session makes.
+// leanSettings turns off what a role doesn't use, in the session's own
+// --settings: nothing under ~/.claude changes, so your own sessions load what
+// they always did.
 //
 // What a session gets from crew and its project is never turned off: the home's
 // skills, the repo's own agents, skills, plugins and servers, and the project's
@@ -110,7 +111,7 @@ func leanSettings(settings *object, role string, keep []string) *object {
 // yourSetup is what of your own Claude Code setup crew can turn off by name.
 type yourSetup struct {
 	plugins []string // the plugins ~/.claude/settings.json enables, by id
-	skills  []string // your personal skills and those synced from claude.ai
+	skills  []string // your personal skills and command files, and skills synced from claude.ai
 	servers []string // the MCP servers ~/.claude.json gives every project
 }
 
@@ -123,10 +124,8 @@ func readYourSetup() yourSetup {
 	var yours yourSetup
 	yours.plugins = enabledPlugins(filepath.Join(dir, "settings.json"))
 	slices.Sort(yours.plugins)
-	// Personal skills are folders in ~/.claude/skills; synced ones sit two folders
-	// down in its synced/.
-	skills := filepath.Join(dir, "skills")
-	yours.skills = append(skillsIn(skills), skillsIn(filepath.Join(skills, "synced", "*"))...)
+	// Synced skills sit two folders down in ~/.claude/skills/synced.
+	yours.skills = append(skillsOf(dir), skillsIn(filepath.Join(dir, "skills", "synced", "*"))...)
 	if config, _ := readSettings(claudeGlobalConfig()); config != nil {
 		if servers, ok := config.vals["mcpServers"].(*object); ok {
 			yours.servers = slices.Sorted(slices.Values(servers.keys))

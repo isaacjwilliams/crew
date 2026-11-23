@@ -207,7 +207,7 @@ An MCP server you need for one project, such as its tracker, goes in `~/crew/pro
 Without a word from crew, a lead, goal lead or worker would load everything your own sessions load. Every plugin, skill, MCP server and connector takes room in each request it makes, mostly for tools the role never calls. So the sessions crew starts, from `lead`, `crew dispatch` and the rest, go without the parts of your setup that their role doesn't use:
 
 - the plugins your `~/.claude/settings.json` enables;
-- your skills in `~/.claude/skills`, and those synced from claude.ai;
+- your skills in `~/.claude/skills`, your command files in `~/.claude/commands`, and the skills synced from claude.ai;
 - the skills Claude Code ships that the role doesn't use (workers keep `simplify` and `security-review`, leads keep the artifact skills);
 - your user-scope MCP servers (in `~/.claude.json`);
 - your claude.ai connectors;
