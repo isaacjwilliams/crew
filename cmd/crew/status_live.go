@@ -39,7 +39,17 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	return statusFeed{
 		pullLedger: c.catchUpLedger,
 		readPRs:    func() prReads { return c.readPRs(c.projects(scope)) },
-		build:      func(reads prReads) statusReport { return buildReport(c, c.projects(scope), doneToo, reads) },
+		build: func(reads prReads) statusReport {
+			// The shared settings are read again for each report, so a change
+			// to crew.env shows while the view is open. Settings that can't be
+			// read (crew.env half saved, say) leave the report on the ones crew
+			// started with, and the next report tries again.
+			now := *c
+			if s, err := sharedSettings(c.Home); err == nil {
+				now.Settings = s
+			}
+			return buildReport(&now, c.projects(scope), doneToo, reads)
+		},
 	}
 }
 

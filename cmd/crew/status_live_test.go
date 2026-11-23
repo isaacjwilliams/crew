@@ -350,6 +350,21 @@ func TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang(t *testing.T) {
 	}
 }
 
+func TestLiveStatusReadsTheSharedSettingsForEachReport(t *testing.T) {
+	c := statusLedger(t)
+	writeFile(t, c, "MAX_WORKERS=3\nGOAL_MAX_IN_FLIGHT=2\n", "config", "defaults.env")
+	feed := feedOf(c, "p", false)
+	feed.pullLedger = func() {}
+	feed.readPRs = func() prReads { return nil }
+	m := newLiveStatus(feed)
+	settle(m, m.Init())
+	writeFile(t, c, "MAX_WORKERS=6\n", "config", "crew.env")
+	settle(m, press(m, "r"))
+	if l := m.shown[0].head; !strings.Contains(l, "1/6") {
+		t.Errorf("after MAX_WORKERS went from 3 to 6 in crew.env, the view says %q", l)
+	}
+}
+
 func TestLiveStatusFitsTheScreen(t *testing.T) {
 	m := liveOn(readReport(fullStatusLedger(t), "p"))
 	openAll(m)
