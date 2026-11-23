@@ -117,7 +117,7 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	return c
 }
 
-// readReport is the report crew status --plain builds for the projects in
+// readReport is the report crew status builds for the projects in
 // scope, after asking GitHub for their PRs.
 func readReport(c *Crew, inScope ...string) statusReport {
 	return buildReport(c, inScope, false, c.readPRs(inScope))
