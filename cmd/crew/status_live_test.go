@@ -260,12 +260,14 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	c := statusLedger(t)
 	hang, letBuild := make(chan struct{}), make(chan struct{})
 	defer close(hang)
-	var pulls, reads atomic.Int32
+	var pulls, listings, branchesRead, reads atomic.Int32
 	feed := feedOf(c, "p", false)
 	build := feed.build
 	feed.pullLedger = func() { pulls.Add(1); <-hang }
+	feed.listWorkers = func() *workerList { listings.Add(1); <-hang; return nil }
+	feed.readBranches = func() branchReads { branchesRead.Add(1); <-hang; return nil }
 	feed.readPRs = func() prReads { reads.Add(1); <-hang; return nil }
-	feed.build = func(r prReads) (statusReport, error) { <-letBuild; return build(r) }
+	feed.build = func(r statusReads) (statusReport, error) { <-letBuild; return build(r) }
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }
@@ -310,8 +312,9 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	if _, later := m.Update(beat{}); refresh != nil || later != nil {
 		t.Error("the view started a job while the same one was under way")
 	}
-	if pulls.Load() != 1 || reads.Load() != 1 {
-		t.Errorf("the view pulled the ledger %d times and read GitHub %d times, want once each", pulls.Load(), reads.Load())
+	if pulls.Load() != 1 || listings.Load() != 1 || branchesRead.Load() != 1 || reads.Load() != 1 {
+		t.Errorf("the view pulled the ledger %d times, listed the workers %d times, read the branches %d times and read GitHub %d times, want once each",
+			pulls.Load(), listings.Load(), branchesRead.Load(), reads.Load())
 	}
 	if !quits(press(m, "q")) {
 		t.Error("q doesn't quit while a report is being built")
@@ -319,22 +322,24 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	release(t, letBuild)
 }
 
-// TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang changes a task while
-// the view's first read of GitHub and pull of the ledger hang, and sees it on
-// screen within 5 seconds.
-func TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang(t *testing.T) {
+// TestLiveStatusKeepsBuildingWhileItsReadsHang changes a task while the view's
+// first reads (GitHub, the workers and the branches) and its pull of the ledger
+// hang, and sees it on screen within 5 seconds.
+func TestLiveStatusKeepsBuildingWhileItsReadsHang(t *testing.T) {
 	c := statusLedger(t)
 	hang := make(chan struct{})
 	defer close(hang)
 	feed := feedOf(c, "p", false)
 	feed.pullLedger = func() { <-hang }
+	feed.listWorkers = func() *workerList { <-hang; return nil }
+	feed.readBranches = func() branchReads { <-hang; return nil }
 	feed.readPRs = func() prReads { <-hang; return nil }
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }
 	msgs := make(chan tea.Msg, 8)
 	inBackground(m.Init(), msgs)
-	m.Update(next(t, msgs)) // the first report; the read and the pull still hang
+	m.Update(next(t, msgs)) // the first report; the reads and the pull still hang
 
 	reportTask(t, c, "p", "010-parent", false, "status: needs-input", "base: main", "branch: agent/parent")
 	for range 5 {
@@ -346,7 +351,7 @@ func TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang(t *testing.T) {
 		}
 	}
 	if i := lineOf(m, "010-parent"); i < 0 || !strings.Contains(m.shown[i].tail, "needs-input") {
-		t.Error("5 seconds after a task changed, while GitHub and the ledger hang, the view doesn't show it")
+		t.Error("5 seconds after a task changed, while the reads and the pull hang, the view doesn't show it")
 	}
 }
 
@@ -494,4 +499,355 @@ exec `+realGit+` "$@"
 func homeState(t *testing.T, c *Crew) string {
 	t.Helper()
 	return gitOut(t, c.Home, "status", "--porcelain") + " " + gitOut(t, c.Home, "rev-parse", "HEAD")
+}
+
+// liveCrew is statusLedger with p's clone a real repo: a stack in flight whose
+// parent tips are pushed, an open PR stacked on it, a PR that targets a branch
+// other than its task's base, and a PR that can merge now. Stubs for claude, gh
+// and git log every call to calls. claude lists the workers in workers, and
+// fails while claudeFails exists.
+type liveCrew struct {
+	*Crew
+	repo                        string
+	calls, workers, claudeFails string
+}
+
+func newLiveCrew(t *testing.T) liveCrew {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := statusLedger(t)
+	outside := t.TempDir() // the stubs' files, kept out of the home
+	l := liveCrew{Crew: c, repo: stackRepo(t, "agent/lower", "agent/upper", "agent/top", "agent/moved", "agent/old", "agent/ready"),
+		calls: outside + "/calls.log", workers: outside + "/workers.json", claudeFails: outside + "/claude-fails"}
+	writeFile(t, c, "REPO="+l.repo+"\n", "projects", "p", "project.env")
+	l.listWorkers(t, `{"id":"w1","state":"working","pid":1},{"id":"w20","state":"working","pid":2},{"id":"w24","state":"idle","pid":3}`)
+	writeFile(t, c, `#!/bin/sh
+echo "claude $*" >>`+l.calls+`
+[ -e `+l.claudeFails+` ] && exit 1
+cat `+l.workers+`
+`, "bin", "claude")
+	writeFile(t, c, `#!/bin/sh
+echo "gh $*" >>`+l.calls+`
+echo '{"state":"OPEN","baseRefName":"main","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+`, "bin", "gh")
+	writeFile(t, c, `#!/bin/sh
+echo "git $*" >>`+l.calls+`
+exec `+realGit+` "$@"
+`, "bin", "git")
+	reportTask(t, c, "p", "020-lower", false, "status: working", "base: main", "branch: agent/lower", "worker_job: w20")
+	reportTask(t, c, "p", "021-upper", false, "status: working", "base: agent/lower", "branch: agent/upper")
+	reportTask(t, c, "p", "022-top", false, "status: pr-open", "base: agent/upper", "branch: agent/top",
+		"pr: https://github.com/o/r/pull/22", "pr_state: open", "pr_base: agent/upper")
+	reportTask(t, c, "p", "023-moved", false, "status: working", "base: main", "branch: agent/moved",
+		"pr: https://github.com/o/r/pull/23", "pr_state: open", "pr_base: agent/old")
+	reportTask(t, c, "p", "024-ready", false, "status: pr-open", "risk: low", "base: main", "branch: agent/ready",
+		"pr: https://github.com/o/r/pull/24", "pr_state: open", "pr_base: main", "worker_job: w24")
+	return l
+}
+
+// listWorkers has claude agents list the workers given, as JSON objects.
+func (l liveCrew) listWorkers(t *testing.T, workers string) {
+	t.Helper()
+	if err := os.WriteFile(l.workers, []byte("["+workers+"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// moveOn puts a new commit on a branch's tip on origin, as its worker would by
+// pushing, and returns the tip it had.
+func (l liveCrew) moveOn(t *testing.T, branch string) string {
+	t.Helper()
+	g := gitRepo{t, l.repo}
+	was := g.git("rev-parse", "refs/remotes/origin/"+branch)
+	g.git("update-ref", "refs/remotes/origin/"+branch, g.git("commit-tree", was+"^{tree}", "-p", was, "-m", "moved on"))
+	return was
+}
+
+// callsSince is the calls the stubs logged after the first n.
+func (l liveCrew) callsSince(n int) []string {
+	b, _ := os.ReadFile(l.calls)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	return lines[min(n, len(lines)):]
+}
+
+// The calls a second of the live view made, counted by what they read.
+type liveCalls struct{ builds, listings, branchCalls, ghCalls, pulls int }
+
+// countCalls sorts calls by what they read: the workers, p's branches, GitHub,
+// or the ledger.
+func (l liveCrew) countCalls(calls []string) liveCalls {
+	var n liveCalls
+	for _, call := range calls {
+		switch {
+		case strings.HasPrefix(call, "claude agents "):
+			n.listings++
+		case strings.HasPrefix(call, "git -C "+l.repo+" "):
+			n.branchCalls++
+		case strings.HasPrefix(call, "gh "):
+			n.ghCalls++
+		case strings.HasPrefix(call, "git ") && strings.Contains(call, " pull "):
+			n.pulls++
+		}
+	}
+	return n
+}
+
+// secondsWhen is the seconds, from the start, in which a holds.
+func secondsWhen(seconds []liveCalls, holds func(liveCalls) bool) []time.Duration {
+	var at []time.Duration
+	for i, n := range seconds {
+		if holds(n) {
+			at = append(at, time.Duration(i)*time.Second)
+		}
+	}
+	return at
+}
+
+// For a minute, with a task file changing every few seconds, the live view
+// lists the workers and reads the tasks' branches every 15 seconds, however
+// often it builds. GitHub is read every 30 seconds and the ledger pulled every
+// minute.
+func TestLiveStatusListsWorkersAndReadsBranchesWhenDue(t *testing.T) {
+	l := newLiveCrew(t)
+	writeFile(t, l.Crew, "laptop\n", "host") // another machine runs the crew, so the ledger is pulled
+	g := gitRepo{t, l.Home}
+	g.git("init", "-q")
+	g.git("add", "-A")
+	g.git("commit", "-qm", "home")
+	logged := len(l.callsSince(0))
+	l.readBranches([]string{"p"})
+	oneRead := l.countCalls(l.callsSince(logged)).branchCalls
+
+	feed := feedOf(l.Crew, "p", false)
+	var builds atomic.Int32
+	build := feed.build
+	feed.build = func(r statusReads) (statusReport, error) { builds.Add(1); return build(r) }
+	logged = len(l.callsSince(0))
+	var seconds []liveCalls
+	run := newLiveRun(feed)
+	for s := 0; ; s++ {
+		calls := l.callsSince(logged)
+		logged += len(calls)
+		n := l.countCalls(calls)
+		n.builds = int(builds.Swap(0))
+		seconds = append(seconds, n)
+		if s == 60 {
+			break
+		}
+		if s%4 == 3 { // the ledger changes under the view
+			reportTask(t, l.Crew, "p", "012-idea", s%8 == 3, "status: draft", "base: main")
+		}
+		run.second()
+	}
+
+	built := secondsWhen(seconds, func(n liveCalls) bool { return n.builds > 0 })
+	listed := secondsWhen(seconds, func(n liveCalls) bool { return n.listings > 0 })
+	branchesRead := secondsWhen(seconds, func(n liveCalls) bool { return n.branchCalls > 0 })
+	gitHubRead := secondsWhen(seconds, func(n liveCalls) bool { return n.ghCalls > 0 })
+	pulled := secondsWhen(seconds, func(n liveCalls) bool { return n.pulls > 0 })
+	t.Logf("built in %d seconds; listed the workers at %v; read the branches at %v, %d git calls a read; read GitHub at %v; pulled at %v",
+		len(built), listed, branchesRead, oneRead, gitHubRead, pulled)
+
+	s := time.Second
+	every15s := []time.Duration{0, 15 * s, 30 * s, 45 * s, 60 * s}
+	if len(built) < 20 {
+		t.Errorf("the view built its report in %d seconds of 61, want every 3s at least", len(built))
+	}
+	for i, n := range seconds {
+		if n.listings > 1 || n.branchCalls > oneRead {
+			t.Errorf("at %ds, the view listed the workers %d times and ran git %d times in the clone, want once and one read's %d at most", i, n.listings, n.branchCalls, oneRead)
+		}
+	}
+	if !slices.Equal(listed, every15s) {
+		t.Errorf("the workers were listed at %v, want every 15s", listed)
+	}
+	if !slices.Equal(branchesRead, every15s) {
+		t.Errorf("the branches were read at %v, want every 15s", branchesRead)
+	}
+	if !slices.Equal(gitHubRead, []time.Duration{0, 30 * s, 60 * s}) {
+		t.Errorf("GitHub was read at %v, want every 30s", gitHubRead)
+	}
+	if !slices.Equal(pulled, []time.Duration{0, 60 * s}) {
+		t.Errorf("the ledger was pulled at %v, want every minute", pulled)
+	}
+}
+
+// liveRun is a live view run second by second, as its beat runs it, with each
+// command it gives run to the end before the next second.
+type liveRun struct {
+	m     *liveStatus
+	clock time.Time
+}
+
+// newLiveRun opens a view on feed at tenOClock.
+func newLiveRun(feed statusFeed) *liveRun {
+	r := &liveRun{m: newLiveStatus(feed), clock: tenOClock}
+	r.m.now = func() time.Time { return r.clock }
+	settle(r.m, r.m.Init())
+	return r
+}
+
+// second moves the clock on a second and lets the view do what's due.
+func (r *liveRun) second() {
+	r.clock = r.clock.Add(time.Second)
+	_, cmd := r.m.Update(beat{})
+	settle(r.m, cmd)
+}
+
+// open is how long the view has been open.
+func (r *liveRun) open() time.Duration { return r.clock.Sub(tenOClock) }
+
+// tail is what the view shows after a task's ID: its status, worker, PR and
+// merge check or notes.
+func (r *liveRun) tail(id string) string {
+	if i := lineOf(r.m, id); i >= 0 {
+		return r.m.shown[i].tail
+	}
+	return ""
+}
+
+// A change to a task file shows with the next build, within 3 seconds, and
+// the view lists no workers and reads no branches to show it.
+func TestLiveStatusShowsALedgerChangeWithoutReadingAgain(t *testing.T) {
+	l := newLiveCrew(t)
+	run := newLiveRun(feedOf(l.Crew, "p", false))
+	for range 5 {
+		run.second()
+	}
+	logged := len(l.callsSince(0))
+	reportTask(t, l.Crew, "p", "020-lower", false, "status: needs-input", "base: main", "branch: agent/lower", "worker_job: w20")
+	reportTask(t, l.Crew, "p", "024-ready", true, "status: pr-open", "risk: low", "base: main", "branch: agent/ready",
+		"pr: https://github.com/o/r/pull/24", "pr_state: open", "pr_base: main", "worker_job: w24")
+	changed := run.open()
+	for !strings.HasPrefix(run.tail("020-lower"), "needs-input") || !strings.Contains(run.tail("024-ready"), "1 open question(s)") {
+		if run.open()-changed == 3*time.Second {
+			t.Fatalf("3s after the ledger changed, the view shows 020-lower %q and 024-ready %q", run.tail("020-lower"), run.tail("024-ready"))
+		}
+		run.second()
+	}
+	if calls := l.callsSince(logged); len(calls) > 0 {
+		t.Errorf("to show the change, the view ran:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+// A worker's change of state, and a restack becoming needed, show within 15
+// seconds. After r, they show as soon as the reads it starts come back.
+func TestLiveStatusShowsWorkersAndRestacksWithin15Seconds(t *testing.T) {
+	l := newLiveCrew(t)
+	run := newLiveRun(feedOf(l.Crew, "p", false))
+	for range 5 {
+		run.second()
+	}
+	// 024-ready's worker starts on a round, and 020-lower's branch moves on
+	// under 021-upper.
+	l.listWorkers(t, `{"id":"w1","state":"working","pid":1},{"id":"w20","state":"working","pid":2},{"id":"w24","state":"working","pid":3}`)
+	lowerWas := l.moveOn(t, "agent/lower")
+	for range 15 {
+		run.second()
+	}
+	if got := run.tail("024-ready"); !strings.Contains(got, "worker: working") || !strings.Contains(got, "not yet: worker busy") {
+		t.Errorf("15s after its worker started, 024-ready shows %q", got)
+	}
+	if got := run.tail("021-upper"); !strings.Contains(got, "needs restack: 020-lower moved") {
+		t.Errorf("15s after 020-lower moved on, 021-upper shows %q", got)
+	}
+
+	// Both go back; r shows it at once.
+	l.listWorkers(t, `{"id":"w1","state":"working","pid":1},{"id":"w20","state":"working","pid":2},{"id":"w24","state":"idle","pid":3}`)
+	gitRepo{t, l.repo}.git("update-ref", "refs/remotes/origin/agent/lower", lowerWas)
+	settle(run.m, press(run.m, "r"))
+	if got := run.tail("024-ready"); !strings.Contains(got, "worker: idle") || !strings.Contains(got, "merge now") {
+		t.Errorf("after r, with its worker idle, 024-ready shows %q", got)
+	}
+	if got := run.tail("021-upper"); strings.Contains(got, "needs restack") {
+		t.Errorf("after r, with 020-lower back where it was, 021-upper shows %q", got)
+	}
+}
+
+// Until the workers are first listed and the branches first read, the view
+// claims nothing they could contradict.
+func TestLiveStatusClaimsNothingBeforeTheFirstReads(t *testing.T) {
+	l := newLiveCrew(t)
+	hold := make(chan struct{})
+	feed := feedOf(l.Crew, "p", false)
+	listWorkers, readBranches := feed.listWorkers, feed.readBranches
+	feed.listWorkers = func() *workerList { <-hold; return listWorkers() }
+	feed.readBranches = func() branchReads { <-hold; return readBranches() }
+	m := newLiveStatus(feed)
+	m.now = func() time.Time { return tenOClock }
+	msgs := make(chan tea.Msg, 8)
+	inBackground(m.Init(), msgs)
+	handle := func() {
+		_, cmd := m.Update(next(t, msgs))
+		inBackground(cmd, msgs)
+	}
+	// Until a report built from GitHub's answer is on show.
+	for m.reads.prs == nil || m.building.running || m.building.asked || len(m.shown) == 0 {
+		handle()
+	}
+
+	openAll(m)
+	for _, line := range m.shown {
+		if strings.Contains(line.tail, "merge now") {
+			t.Errorf("before the first listing, %s says %q", line.head, line.tail)
+		}
+	}
+	if got := m.shown[0].head; got != "workers running: not listed yet" {
+		t.Errorf("before the first listing, the workers line is %q", got)
+	}
+	for _, id := range []string{"001-in-flight", "020-lower", "024-ready"} {
+		if got := lineOf(m, id); got < 0 || !strings.Contains(m.shown[got].tail, "worker: not listed yet") {
+			t.Errorf("before the first listing, %s's worker isn't said to be not listed yet", id)
+		}
+	}
+	for _, id := range []string{"021-upper", "023-moved"} {
+		if got := lineOf(m, id); got < 0 || !strings.Contains(m.shown[got].tail, "branches not read yet") {
+			t.Errorf("before the first branch read, %s doesn't say its branches aren't read yet", id)
+		}
+	}
+	// git is never asked about 020-lower: it isn't stacked, and has no PR.
+	if got := lineOf(m, "020-lower"); got < 0 || strings.Contains(m.shown[got].tail, "branches not read yet") {
+		t.Errorf("before the first branch read, 020-lower is shown as %q", m.shown[got].tail)
+	}
+
+	close(hold) // the reads come back, and with them what they say
+	tail := func(id string) string { return m.shown[lineOf(m, id)].tail }
+	for !strings.Contains(tail("024-ready"), "merge now") || !strings.Contains(tail("023-moved"), "PR targets agent/old, not main") {
+		handle()
+	}
+}
+
+// When listing the workers starts failing, the build after says so, and no
+// row says merge now until a listing succeeds again.
+func TestLiveStatusSaysWhenTheWorkersCouldntBeListed(t *testing.T) {
+	l := newLiveCrew(t)
+	run := newLiveRun(feedOf(l.Crew, "p", false))
+	for run.open() < 60*time.Second {
+		run.second()
+		switch run.open() {
+		case 20 * time.Second: // claude agents fails from here, until 40s
+			if err := os.WriteFile(l.claudeFails, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		case 40 * time.Second:
+			if err := os.Remove(l.claudeFails); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The listings at 30s fails; the one at 45s succeeds.
+		failed := run.open() >= 30*time.Second && run.open() < 45*time.Second
+		got := run.tail("024-ready")
+		if failed && (!strings.Contains(got, "workers couldn't be listed") || strings.Contains(got, "merge now")) {
+			t.Errorf("at %v, after a listing failed, 024-ready shows %q", run.open(), got)
+		}
+		if !failed && !strings.Contains(got, "merge now") {
+			t.Errorf("at %v, after a listing succeeded, 024-ready shows %q", run.open(), got)
+		}
+	}
 }

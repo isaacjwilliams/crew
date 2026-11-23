@@ -55,8 +55,10 @@ func TestMergeCheck(t *testing.T) {
 		unasked  bool              // GitHub wasn't asked for the PR
 		worker   Agent
 		unseen   string            // why the workers can't be seen
+		unbranch bool              // the branches haven't been read yet
 		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
 		parent   string            // the status of 020-parent, on branch agent/parent
+		reparent string            // 020-parent's status by the time the report is built, after the branches were read
 		want     string
 	}{
 		{name: "nothing in the way", want: "merge now"},
@@ -68,6 +70,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "automated review off for the task", fields: map[string]string{"auto_review": "no"}, body: "## Log\n", want: "merge now"},
 		{name: "automated review off for the project", settings: map[string]string{"AUTO_REVIEWS": "0"}, body: "## Log\n", want: "merge now"},
 		{name: "parent merged, still the base", fields: map[string]string{"base": "agent/parent"}, parent: "merged", want: "not yet: needs restack: 020-parent merged"},
+		{name: "parent merged since the branches were read", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", reparent: "merged", want: "not yet: branches not read yet"},
 		{name: "PR targets another branch", pr: func(p *gitHubPR) { p.Base = "agent/old" }, want: "not yet: PR targets agent/old, not main"},
 		{name: "stacked on an unmerged task", fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: stacked on 020"},
 		{name: "based on another branch", fields: map[string]string{"base": "release"}, pr: func(p *gitHubPR) { p.Base = "release" }, want: "not yet: based on release, not main"},
@@ -87,6 +90,9 @@ func TestMergeCheck(t *testing.T) {
 		{name: "GitHub unread, changes requested when last synced", unread: true, fields: map[string]string{"pr_state": "open, changes requested"}, want: "not yet: changes requested (couldn't read GitHub; as of the last sync)"},
 		{name: "another machine runs the crew", worker: Agent{State: "working"}, unseen: "worker can't be seen from this machine", want: "not yet: worker can't be seen from this machine"},
 		{name: "claude agents failed", unseen: "workers couldn't be listed", want: "not yet: workers couldn't be listed"},
+		{name: "workers not listed yet", unseen: "workers not listed yet", want: "not yet: workers not listed yet"},
+		{name: "branches not read yet", unbranch: true, fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: branches not read yet; stacked on 020"},
+		{name: "branches not read yet, with nothing for git to say", unbranch: true, want: "merge now"},
 		{name: "several, soonest to clear first", worker: Agent{State: "working"}, pr: func(p *gitHubPR) { p.Draft, p.CI = true, ciFailing }, want: "not yet: worker busy; CI failing; draft"},
 		{name: "findings left for the user", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", want: "merge now, 2 finding(s) left for you"},
 		{name: "findings left for the user, and in the way", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
@@ -123,7 +129,16 @@ func TestMergeCheck(t *testing.T) {
 			if tc.pr != nil {
 				tc.pr(&pr)
 			}
-			s := &statusView{Crew: &Crew{Home: dir}, workersUnseen: tc.unseen, repo: repo, settings: settings, prs: map[string]prRead{}}
+			c := &Crew{Home: dir}
+			writeFile(t, c, "REPO="+repo+"\n", "projects", "p", "project.env")
+			reads := statusReads{workers: &workerList{}, branches: c.readBranches([]string{"p"})}
+			if tc.reparent != "" {
+				mergeTask(t, dir, "020-parent", map[string]string{"status": tc.reparent, "base": "main", "branch": "agent/parent"}, "## Log\n")
+			}
+			if tc.unbranch {
+				reads.branches = nil
+			}
+			s := &statusView{Crew: c, workersUnseen: tc.unseen, reads: reads, settings: settings, prs: map[string]prRead{}}
 			s.branches = s.Crew.branches("p")
 			switch {
 			case tc.unread:

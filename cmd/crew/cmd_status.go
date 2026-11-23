@@ -39,7 +39,7 @@ func cmdStatus(c *Crew, args []string) error {
 	feed := feedOf(c, scope, doneToo)
 	if plain || !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		feed.pullLedger()
-		r, err := feed.build(feed.readPRs())
+		r, err := feed.build(statusReads{prs: feed.readPRs(), workers: feed.listWorkers(), branches: feed.readBranches()})
 		if err != nil {
 			warn("went by the settings crew started with: %v", err)
 		}
@@ -132,7 +132,11 @@ func reportLines(r statusReport) []statusLine {
 // workersLine counts the workers running across the crew, and says when no
 // project can dispatch.
 func workersLine(r statusReport) string {
-	line := "workers running: " + slotsText(r.Workers, r.WorkersErr)
+	count := slotsText(r.Workers, r.WorkersErr)
+	if r.WorkersUnlisted {
+		count = "not listed yet"
+	}
+	line := "workers running: " + count
 	if r.NoneDispatch {
 		line += ": full, nothing dispatches"
 	}

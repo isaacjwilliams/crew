@@ -13,11 +13,13 @@ import (
 
 // statusReport is everything crew status shows.
 type statusReport struct {
-	ReadOnlyOn   string // the machine that runs the crew, when it isn't this one
-	Workers      slots  // the workers running across the crew against MAX_WORKERS
-	WorkersErr   error
-	NoneDispatch bool // every project has reached its MAX_WORKERS
-	Projects     []projectReport
+	ReadOnlyOn string // the machine that runs the crew, when it isn't this one
+	Workers    slots  // the workers running across the crew against MAX_WORKERS
+	WorkersErr error
+	// WorkersUnlisted: the workers haven't been listed yet, so none is counted.
+	WorkersUnlisted bool
+	NoneDispatch    bool // every project has reached its MAX_WORKERS
+	Projects        []projectReport
 }
 
 // projectReport is one project. Every project has its Name and Waiting; the rest
@@ -111,8 +113,10 @@ const (
 // taskRow is one task, with the tasks stacked on it.
 type taskRow struct {
 	Task   Task
-	Number int   // its place in a numbered group, 0 for none
-	Worker Agent // its worker, as claude agents lists it; zero when it isn't
+	Number int // its place in a numbered group, 0 for none
+	// Worker is its worker as claude agents lists it, zero when it isn't
+	// listed, or one in the state "not listed yet" before the first listing.
+	Worker Agent
 	// Merge says whether a pr-open task's PR can merge now; nil for any other task.
 	Merge *mergeCheck
 	Notes []string
@@ -133,8 +137,8 @@ func (r taskRow) stackAsks() bool {
 // buildReport works out what crew status shows: the projects in scope in full,
 // and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
-// tasks. reads are the open PRs as GitHub last had them (readPRs).
-func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusReport {
+// tasks. reads are what it's built from besides the ledger.
+func buildReport(c *Crew, inScope []string, doneToo bool, reads statusReads) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
@@ -143,16 +147,21 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusR
 		return r
 	}
 	s := statusView{Crew: c, doneToo: doneToo, reads: reads}
-	var err error
-	s.agents, err = c.listAgents()
+	var listErr error
+	if w := reads.workers; w != nil {
+		s.agents, listErr = w.agents, w.err
+	}
 	switch {
 	case r.ReadOnlyOn != "":
 		s.workersUnseen = "worker can't be seen from this machine"
-	case err != nil:
+	case reads.workers == nil:
+		s.workersUnseen = "workers not listed yet"
+	case listErr != nil:
 		s.workersUnseen = "workers couldn't be listed"
 	}
 	s.running = c.runningWorkers(s.agents)
 	r.Workers, r.WorkersErr = workerSlots(c.Settings, s.running)
+	r.WorkersUnlisted = reads.workers == nil
 	r.NoneDispatch = s.noProjectDispatches()
 	for _, p := range inScope {
 		r.Projects = append(r.Projects, s.project(p))
@@ -165,6 +174,77 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusR
 	return r
 }
 
+// statusReads are what a report is built from besides the ledger, each as last
+// read. The workers and the branches are nil until they've first been read, and
+// the report says so rather than guess.
+type statusReads struct {
+	prs      prReads     // every project's PRs as GitHub answered (readPRs)
+	workers  *workerList // the sessions claude agents listed (listWorkers)
+	branches branchReads // what git said of the tasks' branches (readBranches)
+}
+
+// workerList is what claude agents listed, or why it couldn't.
+type workerList struct {
+	agents Agents
+	err    error
+}
+
+func (c *Crew) listWorkers() *workerList {
+	as, err := c.listAgents()
+	return &workerList{as, err}
+}
+
+// branchRead is what git said of a task's branches: why it needs a restack, and
+// why its PR needs a retarget, when it does. Git's answer holds only for the
+// place in its stack the task had when git was asked.
+type branchRead struct {
+	restack, retarget string
+	on                stackPlace
+}
+
+// stackPlace is where a task sits in its stack, as the ledger says: its base,
+// and the status of the task it's stacked on, if any. A parent that merges
+// changes why the task needs a restack, before git has anything new to say.
+type stackPlace struct {
+	base   string
+	parent Status
+}
+
+// placeOf is where t sits in its stack now.
+func (idx Branches) placeOf(t Task) stackPlace {
+	p, _ := idx.parentOf(t)
+	return stackPlace{t.Base(), p.Status()}
+}
+
+// branchReads are what git said of the branches of each task in flight, by the
+// task's file.
+type branchReads map[string]branchRead
+
+// readBranches asks git about the branches of the tasks in flight in the
+// projects, in each project's clone here. Only a stacked task, or one whose PR
+// is off its base, runs git. A project with no clone here has nothing to say.
+func (c *Crew) readBranches(projects []string) branchReads {
+	reads := branchReads{}
+	for _, name := range projects {
+		repo := ""
+		if p, err := c.loadProject(name); err == nil {
+			repo = p.Repo()
+		}
+		idx := c.branches(name)
+		for _, t := range c.tasks(name) {
+			if !t.Status().InFlight() {
+				continue
+			}
+			b := branchRead{on: idx.placeOf(t)}
+			if repo != "" {
+				b.restack, b.retarget = idx.restackReason(t, repo), idx.retargetReason(t, repo)
+			}
+			reads[t.Path] = b
+		}
+	}
+	return reads
+}
+
 // statusView builds a report. The fields from branches on belong to the project
 // it's on: project sets them afresh for each one, and the methods that work out
 // rows, notes and caps read them.
@@ -174,13 +254,12 @@ type statusView struct {
 	agents  Agents
 	running int // the workers running across the crew, counted once
 	// workersUnseen says why the workers can't be seen here, so none counts as
-	// busy or idle: another machine runs the crew, or claude agents failed. It's
-	// empty when they can be seen.
+	// busy or idle: another machine runs the crew, claude agents hasn't been
+	// run yet, or it failed. It's empty when they can be seen.
 	workersUnseen string
-	reads         prReads // every project's PRs as GitHub answered (readPRs); project picks out its own as prs
+	reads         statusReads // project picks out its own PRs as prs
 
 	branches Branches
-	repo     string            // the project's clone here, for restack reasons; empty when there's none
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
@@ -241,10 +320,7 @@ func (s *statusView) project(name string) projectReport {
 	tasks := s.tasks(name)
 	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), InScope: true}
 	s.branches = s.Crew.branches(name)
-	s.repo, s.settings, s.prs = "", s.settingsOf(name), s.reads[name]
-	if p, err := s.loadProject(name); err == nil {
-		s.repo = p.Repo()
-	}
+	s.settings, s.prs = s.settingsOf(name), s.reads.prs[name]
 	if p, err := s.ledgerProject(name); err == nil {
 		r.Paused = p.Paused()
 	}
@@ -335,7 +411,12 @@ func (s *statusView) goal(g Goal, tasks []Task) goalReport {
 }
 
 // agent is a job as claude agents lists it, or the zero Agent when it isn't.
+// Before the workers are first listed, a job's agent says so, rather than show
+// it as gone.
 func (s *statusView) agent(job string) Agent {
+	if job != "" && s.reads.workers == nil {
+		return Agent{ID: job, State: "not listed yet"}
+	}
 	if a := s.agents.find(job); a != nil {
 		return *a
 	}
@@ -560,18 +641,35 @@ func (s *statusView) prNotes(t Task) []string {
 	if prs := t.Get("pr_state"); prs != "" {
 		notes = append(notes, "("+prs+")")
 	}
-	if t.Status().InFlight() && s.repo != "" {
-		if reason := s.branches.restackReason(t, s.repo); reason != "" {
-			notes = append(notes, "needs restack: "+reason)
+	if t.Status().InFlight() {
+		b, read := s.branchesOf(t)
+		if !read {
+			notes = append(notes, "branches not read yet")
 		}
-		if reason := s.branches.retargetReason(t, s.repo); reason != "" {
-			notes = append(notes, reason)
+		if b.restack != "" {
+			notes = append(notes, "needs restack: "+b.restack)
+		}
+		if b.retarget != "" {
+			notes = append(notes, b.retarget)
 		}
 	}
 	if q := t.OpenQuestions(); q > 0 {
 		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
 	}
 	return notes
+}
+
+// branchesOf is what git last said of t's branches, and false when that no
+// longer holds: before the first read, for a task that went in flight since the
+// last one, and for one whose place in its stack has changed since. Git is only
+// asked about a stacked task or one whose PR is off its base; for any other,
+// there's nothing to wait for.
+func (s *statusView) branchesOf(t Task) (branchRead, bool) {
+	if _, stacked := s.branches.parentOf(t); !stacked && !s.branches.prOffBase(t) {
+		return branchRead{}, true
+	}
+	b, read := s.reads.branches[t.Path]
+	return b, read && b.on == s.branches.placeOf(t)
 }
 
 // learning is what a draft is still learning: how many items under Still to
