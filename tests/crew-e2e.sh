@@ -908,7 +908,7 @@ check "the stacked worktree starts on the parent's tip, which is recorded" '[[ $
 check "the worker is told which task and PR it is stacked on" 'grep -q "stacked on task 009-season-model (PR #21): agent/season-model" "$HOME/claude-calls.log"'
 work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; hand_over 10
 out=$(crew status)
-check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "  └ 010-season-admin                      pr-open "* ]]'
+check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "    └ 010-season-admin                    pr-open "* ]]'
 # The PRs waiting on the user, by the look they need: 9 and 10 are pr-open, and 2
 # and 5 join them for a moment.
 crew set 2 pr https://github.com/isaac/webapp/pull/41; hand_over 2
@@ -960,7 +960,7 @@ check "restack refuses a task that isn't stacked, before waiting for pr-open" '(
 F11=$(crew new "Season picker" --branch season-picker --on 10); fill "$F11"; crew ready 11 >/dev/null
 crew set 11 model sonnet; crew dispatch 11 >/dev/null; WT11=$(crew get 11 worktree); T10=$(tip season-admin)
 work "$WT11" picker.txt; crew set 11 pr https://github.com/isaac/webapp/pull/23; hand_over 11
-check "status nests a three-deep stack in order" '[[ $(crew status | grep -A2 "^  009-season-model " | tail -1) == "    └ 011-season-picker "* ]]'
+check "status nests a three-deep stack in order" '[[ $(crew status | grep -A2 "^  009-season-model " | tail -1) == "      └ 011-season-picker "* ]]'
 # The user squash-merges 9, and GitHub deletes its branch.
 git merge -q --squash origin/agent/season-model >/dev/null && git commit -qm "Season model (#21)" && git push -q origin main
 git push -q origin --delete agent/season-model
@@ -1704,16 +1704,16 @@ check "status lists a goal's in-flight tasks under their own heading" '[[ $(head
 check "status numbers the next task to dispatch, though a higher priority one waits on another task" '[[ $(heading "$st" "next, in dispatch order") == "      1  $(basename "$SN" .md)"* ]]'
 check "status lists a held task under waiting, saying what it waits for" '[[ $(heading "$st" "waiting on other tasks") == "         $(basename "$SH" .md)"*"priority 2  after $(num "$SI")" ]]'
 check "status leaves a merged dependency out of a task's after" '[[ $(heading "$st" "next, in dispatch order" | head -1) == *"$(basename "$SN" .md)"* && $(row "$(basename "$SN" .md)") != *after* ]]'
-check "status lists a task stacked on a ready one once, under its parent, and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(grep -A1 "1  $(basename "$SN" .md)" <<<"$st" | tail -1) == "         └ $(basename "$SK" .md)"* && $(row "$(basename "$SK" .md)") != *after* ]]'
+check "status lists a task stacked on a ready one once, under its parent, and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(grep -A1 "1  $(basename "$SN" .md)" <<<"$st" | tail -1) == "        └ $(basename "$SK" .md)"* && $(row "$(basename "$SK" .md)") != *after* ]]'
 crew goal cap "$GF5" 3 >/dev/null; crew set "$SN" status working
 for i in 1 2 3 4 5; do SL=$(goal_task "$GF5" "Groups more $i"); done
 st=$(crew status)
 check "status doesn't call a goal under its max_in_flight full" '[[ $st == *"goal $G5"*"2/3 in flight"$'"'"'\n'"'"'"    in flight"* && $st != *"in flight: full"* ]]'
 check "status numbers a ready task stacked on one in flight in next, on its parent and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(heading "$st" "next, in dispatch order" | head -1) == "      1  $(basename "$SK" .md)"*"on $(num "$SN")" ]]'
-check "status shows the first 5 tasks that can go next, and how many more there are" '[[ $(heading "$st" "next, in dispatch order" | grep -c "^      [1-5]  ") == 5 && $(heading "$st" "next, in dispatch order" | tail -1) == "         … (1 more)" ]]'
+check "status shows the first 5 tasks that can go next, and how many more there are" '[[ $(heading "$st" "next, in dispatch order" | grep -c "^      [1-5]  ") == 5 && $(heading "$st" "next, in dispatch order" | tail -1) == "      … (1 more)" ]]'
 SQ=$(crew new "Groups question on the sixth" --goal "$GF5" --on "$SL"); sed -i '/^## Open questions$/a - [ ] Which way? I recommend this one.' "$SQ"
 st=$(crew status)
-check "status still lists a task past the first 5 that has a question in its stack, with its number" '[[ $(heading "$st" "next, in dispatch order" | grep -A1 "^      6  $(basename "$SL" .md)" | tail -1) == "         └ $(num "$SQ")"*"1 open question(s)" && $(heading "$st" "next, in dispatch order") != *"more)"* ]]'
+check "status still lists a task past the first 5 that has a question in its stack, with its number" '[[ $(heading "$st" "next, in dispatch order" | grep -A1 "^      6  $(basename "$SL" .md)" | tail -1) == "        └ $(num "$SQ")"*"1 open question(s)" && $(heading "$st" "next, in dispatch order") != *"more)"* ]]'
 crew set "$SQ" status abandoned
 SA=$(goal_task "$GF5" "Groups abandoned parent"); SC=$(crew new "Groups orphan" --goal "$GF5" --on "$SA"); fill "$SC"; crew ready "$SC" >/dev/null
 crew set "$SA" status abandoned
