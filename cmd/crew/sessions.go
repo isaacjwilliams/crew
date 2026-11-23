@@ -452,8 +452,8 @@ var (
 
 // launchSession starts a background session for a ledger file in wt, or resumes
 // the one it records as <prefix>_session, and confirms it started. A fresh
-// session gets the launcher's flags, model and effort, the file's <prefix>_name and the
-// ledger as an extra directory. A resume passes only the session and the prompt:
+// session gets the launcher's flags, model and effort, the file's <prefix>_name
+// and the ledger as an extra directory. A resume passes only the session and the prompt:
 // a background session keeps the options it was started with (agent, model,
 // permission mode, settings, --add-dir), and passing any launch flag again makes
 // Claude Code start a copy under a new session instead of continuing this one.
@@ -603,10 +603,10 @@ func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, f
 
 // changedSince says what start would launch differently from the session d
 // records, or "" when nothing: its model and effort, from the recorded
-// <prefix>_model and <prefix>_effort (a session recorded before crew kept efforts
-// has none, which is no effort), and its instructions or settings, from the recorded <prefix>_fingerprint. A
-// session recorded before crew kept fingerprints has none, so it counts as
-// changed.
+// <prefix>_model and <prefix>_effort (a session recorded before crew kept
+// efforts has none, which is no effort), and its instructions or settings, from
+// the recorded <prefix>_fingerprint. A session recorded before crew kept
+// fingerprints has none, so it counts as changed.
 func (start launcher) changedSince(d Doc) string {
 	var changed []string
 	if was := d.Get(start.prefix + "_model"); was != start.model {
