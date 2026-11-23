@@ -1317,7 +1317,7 @@ check "nothing is nudged after 7 quiet minutes" '[[ -z $out && $(resumes) == "$n
 touch -d '9 minutes ago' "$STUB/$(crew get 13 worker_session).jsonl"
 out=$(crew tick 2>/dev/null)
 check "a worker quiet for 9 minutes is nudged" '[[ $out == "$NUDGED" && $(resumes) == $((n + 1)) ]] && nudged13'
-n=$(resumes); work "$WT13" nudge6.txt
+n=$(resumes); work "$WT13" nudge6.txt  # a new commit, so the nudge above no longer blocks the checks below
 stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
 out=$(crew tick 2>/dev/null)
 check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
