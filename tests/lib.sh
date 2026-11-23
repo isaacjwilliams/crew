@@ -49,6 +49,14 @@ isolate_home() {
   export MISE_DATA_DIR=${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}
   export MISE_STATE_DIR=${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}
   export MISE_CACHE_DIR=${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}
+  # Go's caches stay the real ones too: under a fake HOME, building crew would
+  # download its modules again, into files go makes read-only, which the
+  # sandbox's cleanup then can't remove.
+  if command -v go >/dev/null; then
+    export GOPATH=${GOPATH:-$(go env GOPATH)}
+    export GOMODCACHE=${GOMODCACHE:-$(go env GOMODCACHE)}
+    export GOCACHE=${GOCACHE:-$(go env GOCACHE)}
+  fi
   export HOME=$1
   mkdir -p "$HOME"
   # Drop every crew setting but the tests' own (CREW_TEST_*): a worker's session sets several.
