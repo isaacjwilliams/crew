@@ -4,6 +4,7 @@ package main
 // terminal, built again every few seconds, with folds the user opens and closes.
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -42,7 +43,9 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	}
 }
 
-// watchStatus runs the live view until the user quits.
+// watchStatus runs the live view until the user quits. Its beat comes from
+// outside the view, so a beat with nothing due gives no command, and tests can
+// beat it on their own clock without waiting a real second.
 func watchStatus(feed statusFeed) error {
 	p := tea.NewProgram(newLiveStatus(feed))
 	stop := make(chan struct{})
@@ -115,10 +118,7 @@ type (
 	beat         struct{}
 	ledgerPulled struct{}
 	prsRead      struct{ reads prReads }
-	reportBuilt  struct {
-		report statusReport
-		at     time.Time
-	}
+	reportBuilt  struct{ report statusReport }
 )
 
 func newLiveStatus(feed statusFeed) *liveStatus {
@@ -143,7 +143,7 @@ func (m *liveStatus) startDue() tea.Cmd {
 	}
 	if m.building.starts(now) {
 		reads := m.reads
-		cmds = append(cmds, func() tea.Msg { return reportBuilt{feed.build(reads), now} })
+		cmds = append(cmds, func() tea.Msg { return reportBuilt{feed.build(reads)} })
 	}
 	return tea.Batch(cmds...)
 }
@@ -166,7 +166,7 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startDue()
 	case reportBuilt:
 		m.building.running = false
-		m.show(msg.report, msg.at)
+		m.show(msg.report, m.building.last)
 		return m, m.startDue()
 	case tea.KeyPressMsg:
 		return m, m.press(msg.String())
@@ -183,14 +183,11 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 	}
 	m.lines, m.builtAt = reportLines(r), at
 	m.layOut()
-	m.cursor = min(m.cursor, len(m.shown)-1)
-	for i, l := range m.shown {
-		if l.key == key {
-			m.cursor = i
-			break
-		}
+	i := slices.IndexFunc(m.shown, func(l shownLine) bool { return l.key == key })
+	if i < 0 {
+		i = m.cursor
 	}
-	m.scroll()
+	m.moveTo(i)
 }
 
 func (m *liveStatus) press(key string) tea.Cmd {
@@ -258,14 +255,20 @@ func (m *liveStatus) closeOrUp() {
 	}
 	if l.open {
 		m.setOpen(false)
-		return
+	} else if i := m.above(m.cursor); i >= 0 {
+		m.moveTo(i)
 	}
-	for i := m.cursor - 1; i >= 0; i-- {
-		if m.shown[i].depth < l.depth {
-			m.moveTo(i)
-			return
+}
+
+// above is where the line that the line at i is under is on show, or -1 for a
+// line at the top.
+func (m *liveStatus) above(i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if m.shown[j].depth < m.shown[i].depth {
+			return j
 		}
 	}
+	return -1
 }
 
 // layOut works out which lines are on show: every one not under a closed one.

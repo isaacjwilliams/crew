@@ -17,7 +17,7 @@ import (
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
 	m := newLiveStatus(statusFeed{})
-	m.Update(reportBuilt{report: r, at: time.Now()})
+	m.Update(reportBuilt{r})
 	return m
 }
 
@@ -54,40 +54,18 @@ func goTo(t *testing.T, m *liveStatus, text string) {
 	m.moveTo(i)
 }
 
-// parentOf is the head of the line the line at i is under, or "" at the top.
-func parentOf(m *liveStatus, i int) string {
-	for j := i - 1; j >= 0; j-- {
-		if m.shown[j].depth < m.shown[i].depth {
-			return m.shown[j].head
-		}
-	}
-	return ""
-}
-
-// openAll opens every line that has lines under it.
+// openAll opens every line.
 func openAll(m *liveStatus) {
-	var open func(lines []statusLine)
-	open = func(lines []statusLine) {
-		for _, l := range lines {
-			if len(l.kids) > 0 {
-				m.open[l.key] = true
-				open(l.kids)
-			}
-		}
+	_, keys := treeOf(m.lines)
+	for _, k := range keys {
+		m.open[k] = true
 	}
-	open(m.lines)
 	m.layOut()
 }
 
 // screen is what the view shows, a line each, with the cursor's style left in.
 func screen(m *liveStatus) []string {
 	return strings.Split(m.View().Content, "\n")
-}
-
-// bar is the line at the bottom of the screen.
-func bar(m *liveStatus) string {
-	s := screen(m)
-	return s[len(s)-1]
 }
 
 // ansiCodes are the escapes that style the cursor's line.
@@ -97,7 +75,7 @@ var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func words(line string) string {
 	line = ansiCodes.ReplaceAllString(line, "")
 	return strings.Join(strings.FieldsFunc(line, func(r rune) bool {
-		return r == ' ' || r == '▸' || r == '▾' || r == '└'
+		return r == ' ' || r == '▸' || r == '▾'
 	}), " ")
 }
 
@@ -168,14 +146,8 @@ func release(t *testing.T, letBuild chan<- struct{}) {
 	}
 }
 
-// fakeClock is the time as a test has it, from 10:00.
-type fakeClock struct{ now time.Time }
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)}
-}
-
-func (c *fakeClock) Now() time.Time { return c.now }
+// tenOClock is when the tests' views open.
+var tenOClock = time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
 
 func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	r := readReport(fullStatusLedger(t), "p")
@@ -195,38 +167,23 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 			t.Errorf("the text's line %q isn't in the view:\n%s", l, strings.Join(screen(m), "\n"))
 		}
 	}
-	// Every line of the tree, the ones the text only counts too, under the line
-	// it's under in the tree.
+	// Every line of the tree, the ones the text only counts too, with its
+	// columns, under the line it's under in the tree.
 	parents, _ := treeOf(reportLines(r))
 	for i, l := range m.shown {
-		if got, want := parentOf(m, i), parents[l.head]; got != want {
-			t.Errorf("%q is under %q, want %q", l.head, got, want)
+		if !strings.HasSuffix(view[i], words(l.tail)) {
+			t.Errorf("%q isn't in the view with its columns %q", l.head, l.tail)
+		}
+		parent := ""
+		if j := m.above(i); j >= 0 {
+			parent = m.shown[j].head
+		}
+		if want := parents[l.head]; parent != want {
+			t.Errorf("%q is under %q, want %q", l.head, parent, want)
 		}
 	}
 	if len(m.shown) != len(parents) {
 		t.Errorf("the view shows %d lines, want the tree's %d", len(m.shown), len(parents))
-	}
-	// Every task, the ones the text only counts too, with its columns.
-	var rows []taskRow
-	var each func(rs []taskRow)
-	each = func(rs []taskRow) {
-		for _, row := range rs {
-			rows = append(rows, row)
-			each(row.Kids)
-		}
-	}
-	for _, p := range r.Projects {
-		for _, g := range p.Goals {
-			for _, group := range g.Groups {
-				each(group.Rows)
-			}
-		}
-		each(p.Rows)
-	}
-	for _, row := range rows {
-		if i := lineOf(m, row.Task.ID()); i < 0 || !strings.HasSuffix(view[i], words(rowColumns(row))) {
-			t.Errorf("%s isn't in the view with its columns %q", row.Task.ID(), rowColumns(row))
-		}
 	}
 }
 
@@ -309,13 +266,13 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	feed.pullLedger = func() { pulls.Add(1); <-hang }
 	feed.readPRs = func() prReads { reads.Add(1); <-hang; return nil }
 	feed.build = func(r prReads) statusReport { <-letBuild; return build(r) }
-	clock := newFakeClock()
+	clock := tenOClock
 	m := newLiveStatus(feed)
-	m.now = clock.Now
+	m.now = func() time.Time { return clock }
 	msgs := make(chan tea.Msg, 8)
 
 	inBackground(m.Init(), msgs)
-	if got := bar(m); !strings.HasPrefix(got, "loading…") {
+	if got := m.bar(); !strings.HasPrefix(got, "loading…") {
 		t.Errorf("before its first report, the view says %q, want loading…", got)
 	}
 	press(m, "j", "down", "l", "enter", "h")
@@ -328,7 +285,7 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	if lineOf(m, "010-parent") < 0 {
 		t.Fatal("the first report isn't on show")
 	}
-	clock.now = clock.now.Add(buildEvery)
+	clock = clock.Add(buildEvery)
 	_, cmd := m.Update(beat{})
 	if !m.building.running {
 		t.Fatal("the view doesn't build a report when one is due")
@@ -349,7 +306,7 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	// A refresh, and a beat long after every job fell due again, start none of
 	// them a second time while the first is under way.
 	refresh := press(m, "r")
-	clock.now = clock.now.Add(time.Hour)
+	clock = clock.Add(time.Hour)
 	if _, later := m.Update(beat{}); refresh != nil || later != nil {
 		t.Error("the view started a job while the same one was under way")
 	}
@@ -372,16 +329,16 @@ func TestLiveStatusKeepsBuildingWhileGitHubAndTheLedgerHang(t *testing.T) {
 	feed := feedOf(c, "p", false)
 	feed.pullLedger = func() { <-hang }
 	feed.readPRs = func() prReads { <-hang; return nil }
-	clock := newFakeClock()
+	clock := tenOClock
 	m := newLiveStatus(feed)
-	m.now = clock.Now
+	m.now = func() time.Time { return clock }
 	msgs := make(chan tea.Msg, 8)
 	inBackground(m.Init(), msgs)
 	m.Update(next(t, msgs)) // the first report; the read and the pull still hang
 
 	reportTask(t, c, "p", "010-parent", false, "status: needs-input", "base: main", "branch: agent/parent")
 	for range 5 {
-		clock.now = clock.now.Add(time.Second)
+		clock = clock.Add(time.Second)
 		_, cmd := m.Update(beat{})
 		if cmd != nil {
 			inBackground(cmd, msgs)
@@ -441,16 +398,16 @@ exec `+realGit+` "$@"
 	g.git("commit", "-qm", "home")
 	before := homeState(t, c)
 
-	clock := newFakeClock()
-	start := clock.now
+	clock := tenOClock
+	start := clock
 	m := newLiveStatus(feedOf(c, "p", false))
-	m.now = clock.Now
+	m.now = func() time.Time { return clock }
 	var reads, pulls []time.Duration
 	var lastSync []bool // for each second, whether 013-risky's merge check went by the last sync
 	calls := 0
 	settle(m, m.Init())
 	for {
-		since := clock.now.Sub(start)
+		since := clock.Sub(start)
 		b, _ := os.ReadFile(log)
 		lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 		for _, l := range lines[calls:] {
@@ -468,8 +425,8 @@ exec `+realGit+` "$@"
 		if since == 2*time.Minute {
 			break
 		}
-		clock.now = clock.now.Add(time.Second)
-		switch clock.now.Sub(start) {
+		clock = clock.Add(time.Second)
+		switch clock.Sub(start) {
 		case 3 * time.Second: // GitHub stops answering, from here on
 			if err := os.WriteFile(ghFails, nil, 0o644); err != nil {
 				t.Fatal(err)
