@@ -60,7 +60,7 @@ func TestClaudeRunCostSaysWhatTheTranscriptDoesNotReport(t *testing.T) {
 	if got, want := cost.String(), "tokens not reported; 5s; model not reported, effort not reported"; got != want {
 		t.Errorf("cost = %q; want %q", got, want)
 	}
-	if _, err := claudeRunCost(reviewerTranscriptFile(t, reviewerTranscript+`{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "1 lines didn't read") {
+	if _, err := claudeRunCost(reviewerTranscriptFile(t, reviewerTranscript+`{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "lines that didn't read: 1") {
 		t.Errorf("a cut-off line gave %v; want an error saying one line didn't read", err)
 	}
 }

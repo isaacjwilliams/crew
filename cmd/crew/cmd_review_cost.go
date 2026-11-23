@@ -143,7 +143,7 @@ func claudeRunCost(path string) (runCost, error) {
 	// A line that doesn't read could hold a message's only usage, so the count
 	// would be short.
 	if unread > 0 {
-		return runCost{}, fmt.Errorf("%d lines didn't read", unread)
+		return runCost{}, fmt.Errorf("lines that didn't read: %d", unread)
 	}
 	if len(msgs.all) > 0 {
 		var sum claudeUsage
@@ -196,7 +196,7 @@ func scanLines(path, want string, f func(transcriptLine) bool) (unread int, err 
 		}
 	}
 	if err := lines.Err(); err != nil {
-		return unread, fmt.Errorf("%s: %v", path, err)
+		return unread, err
 	}
 	return unread, nil
 }
