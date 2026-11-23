@@ -267,10 +267,10 @@ func cmdRestack(c *Crew, args []string) error {
 	if !stacked && !idx.prOffBase(t) {
 		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
 	}
-	if !t.HandedOver() {
-		return notYet("%s hasn't been handed over: %s", t.ID(), rebasesBeforeHandOver)
-	}
 	if st := t.Status(); st != PROpen {
+		if !t.HandedOver() {
+			return notYet("%s hasn't been handed over: %s", t.ID(), rebasesBeforeHandOver)
+		}
 		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
 	}
 	if err := refuseIfPaused(p); err != nil {
@@ -327,16 +327,16 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 	if idx.parentNeedsRestack(t, repo) {
 		return fail("%s needs a restack itself (%s); restack it first, a stack goes bottom-up", pid, idx.restackReason(parent, repo))
 	}
-	if idx.restackReason(t, repo) == "" {
-		fmt.Printf("%s already sits on %s's latest commit; nothing to restack\n", t.ID(), pid)
-		return nil
-	}
 	if parent.Status() == Abandoned {
 		return fail("%s is abandoned; give %s another base with 'crew set %s base <branch>' and tell its worker", pid, t.ID(), t.ID())
 	}
 	r, err := idx.rebaseFor(t, parent, repo)
 	if err != nil {
 		return err
+	}
+	if r.reason == "" {
+		fmt.Printf("%s already sits on %s's latest commit; nothing to restack\n", t.ID(), pid)
+		return nil
 	}
 	if !again && t.Get("restack_sent") == r.onto {
 		return fail("%s's worker was already asked to restack onto %s; check its Open questions and log, or send it again with --again", t.ID(), cut(r.onto, 12))
