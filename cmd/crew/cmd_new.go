@@ -343,31 +343,17 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		pr = PREvidence(string(body))
 	}
 	first := !t.HandedOver()
-	// The PRs as GitHub has them now, which a first hand-over places the task by:
-	// its own, and its parent's, which may have merged since crew sync looked.
+	// The PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that the evidence and raiseRisk have to see, so
+	// either way origin is fetched.
 	var onGitHub, parentOnGitHub *gitHubPR
 	if first {
-		if t.PR() != "" {
-			read, err := readPR(p.Repo(), t.PR())
-			if err != nil {
-				return nil, fail("couldn't read the PR: gh pr view %s failed", t.PR())
-			}
-			onGitHub = &read
-		}
-		if parent, ok := c.branches(p.Name).parentOf(t); ok && parent.Status().InFlight() && parent.PR() != "" {
-			read, err := readPR(p.Repo(), parent.PR())
-			if err != nil {
-				return nil, fail("couldn't read %s's PR: gh pr view %s failed", parent.ID(), parent.PR())
-			}
-			parentOnGitHub = &read
-		}
+		onGitHub, parentOnGitHub, err = c.readPlace(p, t)
+	} else {
+		err = fetchOrigin(p.Repo())
 	}
-	// The PR's branch on origin may have commits from elsewhere, a suggestion
-	// applied on GitHub say, that the evidence and raiseRisk have to see. The
-	// fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
-	// in the refs a rebase is planned from.
-	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
+	if err != nil {
+		return nil, err
 	}
 	return func() error {
 		// Before the PR check: a worker whose parent merged can't open its PR on
@@ -413,6 +399,39 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	}, nil
 }
 
+// readPlace reads what refuseOffBase places a task by, before crew takes the
+// lock, so a slow network doesn't hold up other crew commands: the PRs of the
+// task and of its parent as GitHub has them now (the parent's may have merged
+// since crew sync looked), each nil when there's none to read, and then origin.
+// The fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
+// in the refs a rebase is planned from.
+func (c *Crew) readPlace(p *Project, t Task) (onGitHub, parentOnGitHub *gitHubPR, err error) {
+	if t.PR() != "" {
+		read, err := readPR(p.Repo(), t.PR())
+		if err != nil {
+			return nil, nil, fail("couldn't read the PR: gh pr view %s failed", t.PR())
+		}
+		onGitHub = &read
+	}
+	if parent, ok := c.branches(p.Name).parentOf(t); ok && parent.Status().InFlight() && parent.PR() != "" {
+		read, err := readPR(p.Repo(), parent.PR())
+		if err != nil {
+			return nil, nil, fail("couldn't read %s's PR: gh pr view %s failed", parent.ID(), parent.PR())
+		}
+		parentOnGitHub = &read
+	}
+	return onGitHub, parentOnGitHub, fetchOrigin(p.Repo())
+}
+
+// fetchOrigin fetches the project's clone from origin, for a check of the
+// branches as origin has them.
+func fetchOrigin(repo string) error {
+	if !gitOK(repo, "fetch", "--quiet", "origin") {
+		return fail("couldn't check the branch as origin has it: git fetch origin failed in %s", repo)
+	}
+	return nil
+}
+
 // refuseOffBase refuses a task's first hand-over while its branch or its PR
 // isn't where the task belongs now, and tells the worker how to move them, as
 // crew restack would (rebaseFor, afterPush). A stacked task's branch belongs on
@@ -420,9 +439,9 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 // task's PR targets its base. Before the first hand-over the worker's own
 // session is still making the branch, so it moves them itself; after it, crew
 // tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
-// and of its parent as GitHub has them now, or nil when crew didn't read one.
-// They were read before the lock, so each is recorded only in the task whose
-// PR it is: not in a new parent the task moved to meanwhile, say.
+// and of its parent as GitHub has them now, or nil when crew didn't read one
+// (readPlace). They were read before the lock, so each is recorded only in the
+// task whose PR it is: not in a new parent the task moved to meanwhile, say.
 // Call it with the lock held.
 func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR) error {
 	idx, repo := c.branches(p.Name), p.Repo()
