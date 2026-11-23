@@ -86,8 +86,8 @@ func watchStatus(feed statusFeed) error {
 }
 
 // job is one of the view's background jobs: building the report, or one of the
-// reads it's built from. It runs once at a time, at most every so
-// often, unless it's asked for sooner.
+// reads it's built from. It runs once at a time, at most every so often,
+// unless it's asked for sooner.
 type job struct {
 	every   time.Duration
 	running bool

@@ -132,7 +132,7 @@ func TestMergeCheck(t *testing.T) {
 			if tc.unbranch {
 				reads.branches = nil
 			}
-			s := &statusView{Crew: c, workersUnseen: tc.unseen, reads: reads, repo: repo, settings: settings, prs: map[string]prRead{}}
+			s := &statusView{Crew: c, workersUnseen: tc.unseen, reads: reads, settings: settings, prs: map[string]prRead{}}
 			s.branches = s.Crew.branches("p")
 			switch {
 			case tc.unread:

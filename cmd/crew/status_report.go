@@ -202,19 +202,24 @@ type branchReads map[string]branchRead
 
 // readBranches asks git about the branches of the tasks in flight in the
 // projects, in each project's clone here. Only a stacked task, or one whose PR
-// is off its base, runs git.
+// is off its base, runs git. A project with no clone here has nothing to say.
 func (c *Crew) readBranches(projects []string) branchReads {
 	reads := branchReads{}
 	for _, name := range projects {
-		p, err := c.loadProject(name)
-		if err != nil || p.Repo() == "" {
-			continue
+		repo := ""
+		if p, err := c.loadProject(name); err == nil {
+			repo = p.Repo()
 		}
 		idx := c.branches(name)
 		for _, t := range c.tasks(name) {
-			if t.Status().InFlight() {
-				reads[t.Path] = branchRead{idx.restackReason(t, p.Repo()), idx.retargetReason(t, p.Repo())}
+			if !t.Status().InFlight() {
+				continue
 			}
+			var b branchRead
+			if repo != "" {
+				b = branchRead{idx.restackReason(t, repo), idx.retargetReason(t, repo)}
+			}
+			reads[t.Path] = b
 		}
 	}
 	return reads
@@ -235,7 +240,6 @@ type statusView struct {
 	reads         statusReads // project picks out its own PRs as prs
 
 	branches Branches
-	repo     string            // the project's clone here, whose branches are read; empty when there's none
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
@@ -296,10 +300,7 @@ func (s *statusView) project(name string) projectReport {
 	tasks := s.tasks(name)
 	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), InScope: true}
 	s.branches = s.Crew.branches(name)
-	s.repo, s.settings, s.prs = "", s.settingsOf(name), s.reads.prs[name]
-	if p, err := s.loadProject(name); err == nil {
-		s.repo = p.Repo()
-	}
+	s.settings, s.prs = s.settingsOf(name), s.reads.prs[name]
 	if p, err := s.ledgerProject(name); err == nil {
 		r.Paused = p.Paused()
 	}
@@ -621,7 +622,7 @@ func (s *statusView) prNotes(t Task) []string {
 		notes = append(notes, "("+prs+")")
 	}
 	if t.Status().InFlight() {
-		b, read := s.branchRead(t)
+		b, read := s.branchesOf(t)
 		if !read {
 			notes = append(notes, "branches not read yet")
 		}
@@ -638,14 +639,12 @@ func (s *statusView) prNotes(t Task) []string {
 	return notes
 }
 
-// branchRead is what git last said of t's branches, and false when they haven't
-// been read yet. A task with no clone here has none to read.
-func (s *statusView) branchRead(t Task) (branchRead, bool) {
-	if s.repo == "" {
-		return branchRead{}, true
-	}
-	b, ok := s.reads.branches[t.Path]
-	return b, ok
+// branchesOf is what git last said of t's branches, and false when they haven't
+// been read yet: before the first read, or for a task that went in flight
+// since the last one.
+func (s *statusView) branchesOf(t Task) (branchRead, bool) {
+	b, read := s.reads.branches[t.Path]
+	return b, read
 }
 
 // learning is what a draft is still learning: how many items under Still to
