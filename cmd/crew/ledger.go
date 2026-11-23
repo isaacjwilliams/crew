@@ -1012,16 +1012,25 @@ func (t Task) UserChecks() map[int]bool {
 			checks[i+1] = true
 		}
 	}
-	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
-		if !strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
-			continue
-		}
-		for _, m := range userCheckDecision.FindAllStringSubmatch(l, -1) {
+	for _, l := range t.UserDecisions() {
+		if m := userCheckDecision.FindStringSubmatch(l); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			checks[n] = true
 		}
 	}
 	return checks
+}
+
+// UserDecisions is the items under ## Decisions that record the user's own
+// call: the "- " lines that end "(user)".
+func (t Task) UserDecisions() []string {
+	var lines []string
+	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
+		if strings.HasPrefix(l, "- ") && strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // Evidence is what one place the user reads, the task's ## Evidence or its PR
@@ -1049,7 +1058,8 @@ func itemNumber(line string) (int, string) {
 
 // evidenceItem is the item whose numbered line goes on with rest, with the
 // lines under it: the commit named by the first "(on <sha>)" in rest, and what
-// the item says after it. What comes before is the criterion, not evidence.
+// the item says after it. What comes before is the criterion, not evidence, and
+// so is all of rest when it names no commit.
 func evidenceItem(rest, under string) EvidenceItem {
 	m := evidenceCommit.FindStringSubmatchIndex(rest)
 	if m == nil {
@@ -1152,7 +1162,7 @@ func (t Task) Evidence() Evidence {
 	e := Evidence{}
 	for _, entry := range t.evidenceEntries() {
 		if n, rest := itemNumber(strings.TrimPrefix(entry.heading, "### ")); n > 0 {
-			e[n] = evidenceItem(rest, entry.body)
+			e[n] = evidenceItem(rest, entry.body())
 		}
 	}
 	return e
@@ -1163,52 +1173,43 @@ func (t Task) Evidence() Evidence {
 // templates/pr-body.md has them, and the lines under it, up to the next item.
 func PREvidence(body string) Evidence {
 	e := Evidence{}
-	n, rest, under := 0, "", []string(nil)
-	record := func() {
-		if n > 0 {
-			e[n] = evidenceItem(rest, strings.Join(under, "\n"))
-		}
+	evidence := section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")
+	for _, entry := range splitEntries(evidence, func(l string) bool { n, _ := itemNumber(l); return n > 0 }) {
+		n, rest := itemNumber(entry.heading)
+		e[n] = evidenceItem(rest, entry.body())
 	}
-	for l, fenced := range markdownLines(section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")) {
-		if m, r := itemNumber(l); m > 0 && !fenced {
-			record()
-			n, rest, under = m, r, nil
-		} else {
-			under = append(under, l)
-		}
-	}
-	record()
 	return e
 }
 
-// evidenceEntry is an entry under ## Evidence: its heading, such as "### 1. the
-// criterion (on <sha>)", and the lines under it.
+// evidenceEntry is an entry of evidence: the line it starts on, such as
+// "### 1. the criterion (on <sha>)", and the lines under it.
 type evidenceEntry struct {
-	heading, body string
+	heading string
+	lines   []string
 }
 
-// evidenceEntries is each entry under ## Evidence that has something under it.
-// A heading inside a fenced block is output, not an entry.
-func (t Task) evidenceEntries() []evidenceEntry {
+func (e evidenceEntry) body() string { return strings.Join(e.lines, "\n") }
+
+// splitEntries splits text into entries, each from an unfenced line that starts
+// one up to the next. A line inside a fenced block is output, never a start.
+func splitEntries(text string, starts func(string) bool) []evidenceEntry {
 	var entries []evidenceEntry
-	var entry *evidenceEntry
-	var body []string
-	record := func() {
-		if entry != nil && len(body) > 0 {
-			entry.body = strings.Join(body, "\n")
-			entries = append(entries, *entry)
+	for l, fenced := range markdownLines(text) {
+		if starts(l) && !fenced {
+			entries = append(entries, evidenceEntry{heading: strings.TrimRight(l, " \t")})
+		} else if len(entries) > 0 {
+			last := &entries[len(entries)-1]
+			last.lines = append(last.lines, l)
 		}
 	}
-	for l, fenced := range markdownLines(t.Section("## Evidence")) {
-		if strings.HasPrefix(l, "### ") && !fenced {
-			record()
-			entry, body = &evidenceEntry{heading: strings.TrimRight(l, " \t")}, nil
-		} else if entry != nil {
-			body = append(body, l)
-		}
-	}
-	record()
 	return entries
+}
+
+// evidenceEntries is each "### " entry under ## Evidence that has something
+// under it.
+func (t Task) evidenceEntries() []evidenceEntry {
+	entries := splitEntries(t.Section("## Evidence"), func(l string) bool { return strings.HasPrefix(l, "### ") })
+	return slices.DeleteFunc(entries, func(e evidenceEntry) bool { return len(e.lines) == 0 })
 }
 
 // markdownLines yields each line of text, and whether it's inside a fenced
