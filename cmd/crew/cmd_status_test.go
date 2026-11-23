@@ -40,11 +40,11 @@ p
       3  004-next                         ready                                           -      dispatch by hand
       4  005-next                         ready                                           -      dispatch by hand
       5  006-next                         ready                                           -      dispatch by hand
-         … (2 more)
+      … (2 more)
     parked
          009-parked                       draft                                           -      1 open question(s)
   010-parent                              working                                         -      
-  └ 011-child                             draft                                           -      1 open question(s)
+    └ 011-child                           draft                                           -      1 open question(s)
   013-risky                               pr-open                                         #9     not yet: no security review yet (couldn't read GitHub; as of the last sync)  high
   014-later                               pr-open                                         #12    not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
   015-earlier                             pr-open                                         #5     not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
