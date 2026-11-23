@@ -20,10 +20,11 @@ func costsDay(t *testing.T, s string) time.Time {
 }
 
 // assistantLine is a transcript's line for one content block of an assistant
-// message, in the shape Claude Code writes it: the message's ID, model and
-// usage, and the block. A million output tokens of Opus cost $20.
+// message, in the shape Claude Code writes it in a session run by claude: the
+// message's ID, model and usage, and the block. A million output tokens of
+// Opus cost $20.
 func assistantLine(id, model string, at time.Time, output int, block string) string {
-	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":%q,"model":%q,"content":[%s],`+
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"entrypoint":"cli","message":{"id":%q,"model":%q,"content":[%s],`+
 		`"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":%d}}}`+"\n",
 		at.Format(time.RFC3339Nano), id, model, block, output)
 }
@@ -202,20 +203,29 @@ func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 	}
 }
 
-// The transcripts are complete from when the oldest of them with a message was
-// last written: Claude Code deletes a session once it has been idle for a
-// while, so any session that's gone was last written before then. A session
-// still running may hold older messages, and an empty transcript may be older.
-func TestCostsAreCompleteFromTheOldestTranscriptsLastWrite(t *testing.T) {
+// The transcripts are complete from when the oldest session Claude Code
+// deletes by age was last written: it deletes a session once its transcript
+// has gone unwritten for a while, so any session that's gone was last written
+// before then. A session still running may hold older messages, and its
+// subagents' transcripts go with it, however old. Claude Code keeps an empty
+// transcript, and a session last run from Claude Desktop, at any age.
+func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 	dir := t.TempDir()
 	opus := "claude-opus-5-5"
+	text := `{"type":"text"}`
 	writeTranscript(t, dir, "-crew-lead/empty.jsonl")
-	writeTranscript(t, dir, "-crew-lead/oldest.jsonl", assistantLine("msg_1", opus, costsDay(t, "2026-10-22 09:00"), 1, `{"type":"text"}`))
-	writeTranscript(t, dir, "-crew-lead/running.jsonl", assistantLine("msg_2", opus, costsDay(t, "2026-10-20 09:00"), 1, `{"type":"text"}`))
+	writeTranscript(t, dir, "-crew-lead/oldest.jsonl", assistantLine("msg_1", opus, costsDay(t, "2026-10-22 09:00"), 1, text))
+	writeTranscript(t, dir, "-crew-lead/running.jsonl", assistantLine("msg_2", opus, costsDay(t, "2026-10-20 09:00"), 1, text))
+	writeTranscript(t, dir, "-crew-lead/running/subagents/agent-a.jsonl", assistantLine("msg_3", opus, costsDay(t, "2026-10-01 09:00"), 1, text))
+	writeTranscript(t, dir, "-crew-lead/desktop.jsonl",
+		assistantLine("msg_4", opus, costsDay(t, "2026-09-30 09:00"), 1, text),
+		strings.Replace(assistantLine("msg_5", opus, costsDay(t, "2026-10-01 09:00"), 1, text), `"cli"`, `"claude-desktop"`, 1))
 	for path, at := range map[string]string{
-		"empty.jsonl":   "2026-09-18 09:00",
-		"oldest.jsonl":  "2026-10-22 17:00",
-		"running.jsonl": "2026-11-23 09:00",
+		"empty.jsonl":                     "2026-09-18 09:00",
+		"oldest.jsonl":                    "2026-10-22 17:00",
+		"running.jsonl":                   "2026-11-23 09:00",
+		"running/subagents/agent-a.jsonl": "2026-10-01 09:00",
+		"desktop.jsonl":                   "2026-10-01 09:00",
 	} {
 		if err := os.Chtimes(filepath.Join(dir, "-crew-lead", path), time.Time{}, costsDay(t, at)); err != nil {
 			t.Fatal(err)
@@ -227,6 +237,22 @@ func TestCostsAreCompleteFromTheOldestTranscriptsLastWrite(t *testing.T) {
 	}
 	if want := costsDay(t, "2026-10-22 17:00"); !ts.completeFrom.Equal(want) {
 		t.Errorf("complete from %v; want %v, when oldest.jsonl was last written", ts.completeFrom, want)
+	}
+
+	// With no session to date them by, the transcripts are complete only from
+	// when they were read.
+	began := time.Now()
+	if err := os.Remove(filepath.Join(dir, "-crew-lead", "oldest.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "-crew-lead", "running.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if ts, err = scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}}); err != nil {
+		t.Fatal(err)
+	}
+	if ts.completeFrom.Before(began) {
+		t.Errorf("complete from %v, with no session to date them by; want no earlier than when they were read, %v", ts.completeFrom, began)
 	}
 }
 

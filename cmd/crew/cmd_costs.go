@@ -160,11 +160,11 @@ type charge struct {
 // once, and the time from which they hold every message.
 type transcripts struct {
 	charges []*charge
-	// completeFrom is when the oldest transcript with a message in it was last
-	// written. Claude Code deletes a session once it has been idle for
-	// cleanupPeriodDays, so a session that's gone was last written before
-	// then, and every message sent since is here. Claude Code keeps an empty
-	// transcript, however old, so those don't count.
+	// completeFrom is when the oldest session Claude Code deletes by age was
+	// last written (sessionWritten). It deletes a session, its subagents'
+	// transcripts with it, once the session's own transcript has gone unwritten
+	// for cleanupPeriodDays, so every message sent since then is here. With no
+	// such session, it's when the scan ran: there's no telling.
 	completeFrom time.Time
 	unread       int // the lines that didn't read
 }
@@ -172,7 +172,7 @@ type transcripts struct {
 // scanTranscripts charges every message in the transcripts under dir, each
 // once, to its owner.
 func scanTranscripts(dir string, owners map[string]owner) (transcripts, error) {
-	s := costScan{byID: map[string]*charge{}}
+	s := costScan{transcripts: transcripts{completeFrom: time.Now()}, byID: map[string]*charge{}}
 	folders, err := os.ReadDir(dir)
 	if err != nil {
 		return transcripts{}, err
@@ -209,8 +209,10 @@ func (s *costScan) folder(dir string, o owner) error {
 	mains, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, path := range mains {
 		var run skillRun
+		var last transcriptLine
 		err := s.read(path, func(l transcriptLine) {
 			s.charge(o, l)
+			last = l
 			if o.task != "" {
 				for _, u := range l.toolUses() {
 					run.follow(u, skillAgents)
@@ -218,6 +220,9 @@ func (s *costScan) folder(dir string, o owner) error {
 			}
 		})
 		if err != nil {
+			return err
+		}
+		if err := s.sessionWritten(path, last); err != nil {
 			return err
 		}
 	}
@@ -259,26 +264,31 @@ func (s *costScan) charge(o owner, l transcriptLine) {
 }
 
 // read calls f with each assistant line of the transcript at path, in order.
-// If there were any, the transcripts are complete only from when it was last
-// written, at the earliest.
 func (s *costScan) read(path string, f func(transcriptLine)) error {
-	var messages bool
 	unread, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
 		if l.Type == "assistant" {
 			f(l)
-			messages = true
 		}
 		return true
 	})
 	s.unread += unread
-	if err != nil || !messages {
-		return err
+	return err
+}
+
+// sessionWritten takes the transcripts to be complete only from when the
+// session at path, whose last message is last, was last written, if Claude
+// Code deletes it by age: if it was last run from the command line. Claude
+// Code keeps a session last run from Claude Desktop or Cowork at any age, and
+// an empty transcript too, so those don't count.
+func (s *costScan) sessionWritten(path string, last transcriptLine) error {
+	if last.Entrypoint != "cli" && last.Entrypoint != "sdk-cli" {
+		return nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	if s.completeFrom.IsZero() || info.ModTime().Before(s.completeFrom) {
+	if info.ModTime().Before(s.completeFrom) {
 		s.completeFrom = info.ModTime()
 	}
 	return nil
@@ -314,9 +324,10 @@ func scanLines(path, want string, f func(transcriptLine) bool) (unread int, err 
 
 // transcriptLine is what crew costs reads from a line of a transcript.
 type transcriptLine struct {
-	Type      string
-	Timestamp time.Time
-	Message   struct {
+	Type       string
+	Timestamp  time.Time
+	Entrypoint string // how the session was run: "cli" for claude, "sdk-cli" for claude -p
+	Message    struct {
 		ID      string
 		Model   string
 		Usage   *claudeUsage
