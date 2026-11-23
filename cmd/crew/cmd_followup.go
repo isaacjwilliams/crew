@@ -231,7 +231,7 @@ func cmdAttach(c *Crew, args []string) error {
 // unless --again.
 //
 // A restack waits until the task is pr-open, as crew tick's does. Before its
-// first hand-over, the task's own worker runs the rebase (refuseOffParentsTip).
+// first hand-over, the task's own worker moves it (refuseOffBase).
 func cmdRestack(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
@@ -269,7 +269,7 @@ func cmdRestack(c *Crew, args []string) error {
 	}
 	if st := t.Status(); st != PROpen {
 		if !t.HandedOver() {
-			return notYet("%s hasn't been handed over: %s", t.ID(), rebasesBeforeHandOver)
+			return notYet("%s hasn't been handed over: %s", t.ID(), movesBeforeHandOver)
 		}
 		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
 	}
@@ -323,7 +323,7 @@ func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error
 // parent's latest commit, or onto what the parent merged into, and retarget
 // its PR when that's needed too. retarget is retargetReason's answer for t.
 func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarget string, again bool) error {
-	repo, base, pid := p.Repo(), t.Base(), parent.ID()
+	repo, pid := p.Repo(), parent.ID()
 	if idx.parentNeedsRestack(t, repo) {
 		return fail("%s needs a restack itself (%s); restack it first, a stack goes bottom-up", pid, idx.restackReason(parent, repo))
 	}
@@ -341,17 +341,8 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 	if !again && t.Get("restack_sent") == r.onto {
 		return fail("%s's worker was already asked to restack onto %s; check its Open questions and log, or send it again with --again", t.ID(), cut(r.onto, 12))
 	}
-	note := "Restack (" + r.reason + "): " + r.steps("follow your restack workflow")
-	retargetTo := ""
-	switch {
-	case r.newBase != base: // The parent merged: the task moves to what it merged into, PR and all.
-		retargetTo = r.newBase
-		note += r.newBaseSteps(t)
-	case retarget != "": // The task moved already, and its PR hasn't followed.
-		retargetTo = base
-		note += fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), base)
-	}
-	return c.startRestack(p, t, note, r.onto, retargetTo)
+	then, retargetTo := r.afterPush(t, retarget)
+	return c.startRestack(p, t, "Restack ("+r.reason+"): "+r.steps("follow your restack workflow")+then, r.onto, retargetTo)
 }
 
 // restackModel is the model a restack runs on, whatever the task's own: a

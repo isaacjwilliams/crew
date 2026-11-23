@@ -345,21 +345,28 @@ func (r rebase) steps(then string) string {
 		r.onto, r.baseSHA, then, r.onto, r.newBase, r.baseSHA, r.parent, r.branch, r.lease, r.branch)
 }
 
-// newBaseSteps tells the worker of t, whose parent merged, how to move the task
-// to what the parent merged into once it has pushed: its PR, when it has one,
-// and its base.
-func (r rebase) newBaseSteps(t Task) string {
-	retarget := ""
-	if t.PR() != "" {
-		retarget = fmt.Sprintf("`gh pr edit --base %s` and ", r.newBase)
+// afterPush tells the worker of t what to run once it has pushed the rebase,
+// when the task or its PR has to move to another branch too, and names that
+// branch (retargetTo). retarget is retargetReason's answer for t.
+func (r rebase) afterPush(t Task, retarget string) (then, retargetTo string) {
+	switch {
+	case r.newBase != t.Base(): // The parent merged: the task moves to what it merged into, PR and all.
+		pr := ""
+		if t.PR() != "" {
+			pr = fmt.Sprintf("`gh pr edit --base %s` and ", r.newBase)
+		}
+		return fmt.Sprintf(" Your base is now %s: after pushing, run %s`crew set %s base %s`.", r.newBase, pr, t.ID(), r.newBase), r.newBase
+	case retarget != "": // The task moved already, and its PR hasn't followed.
+		return fmt.Sprintf(" Your PR targets %s, not your base: after pushing, run `gh pr edit --base %s`.", t.Get("pr_base"), r.newBase), r.newBase
 	}
-	return fmt.Sprintf(" Your base is now %s: after pushing, run %s`crew set %s base %s`.", r.newBase, retarget, t.ID(), r.newBase)
+	return "", ""
 }
 
-// rebasesBeforeHandOver is why crew doesn't restack a task that hasn't been
-// handed over: crew hand-over refuses its first hand-over off its parent's
-// latest commit (refuseOffParentsTip), and gives its worker the rebase to run.
-const rebasesBeforeHandOver = "its own worker runs the rebase before its first hand-over; crew hand-over tells it how"
+// movesBeforeHandOver is why crew doesn't restack a task that hasn't been
+// handed over: crew hand-over refuses its first hand-over while its branch or
+// its PR is off the task's base (refuseOffBase), and tells its worker how to
+// move them.
+const movesBeforeHandOver = "its own worker moves its branch and PR before its first hand-over; crew hand-over tells it how"
 
 // parentNeedsRestack: a stack restacks bottom-up, and a parent that is about to
 // be rebased would only move this task again.

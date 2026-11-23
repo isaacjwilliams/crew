@@ -129,7 +129,7 @@ func cmdSync(c *Crew, args []string) error {
 				if reason := idx.restackReason(t, p.Repo()); reason != "" {
 					hint := fmt.Sprintf("run 'crew restack %s'", t.ID())
 					if !t.HandedOver() {
-						hint = rebasesBeforeHandOver
+						hint = movesBeforeHandOver
 					}
 					say("%s: needs a restack, %s (%s)", t.ID(), reason, hint)
 				}
