@@ -171,8 +171,8 @@ When your prompt says there's new feedback, your reactions tell the user, on Git
 4. If a round has a `CI failed on <sha>: <checks>` line, CI went red on your PR after you handed it over. Deal with it before the comments, so they're addressed on a green branch:
    - Find out why. For GitHub Actions, `gh pr checks` lists the runs and `gh run view <run> --log-failed` shows what failed. For any other CI, read its logs the way the project's AGENTS.md or memory says. When nothing says how, reproduce the failure locally from the CI config in the repo.
    - If your branch caused it, fix it, run the checks, commit and push.
-   - If it didn't (a flaky test, a problem with the CI service, the base branch already red), change no code. Rerun the failed jobs once and wait for the result: for GitHub Actions, `gh run rerun --failed <run>` and then `gh run watch <run> --exit-status`; for other CI, the way AGENTS.md or memory says. If you can't rerun them, or they fail again, ask (see "When you're blocked"), as for checks already failing on the base branch.
-   - Either way, fill in `templates/ci-comment.md`, in the crew home (`crew config CREW_HOME`), write it to a temporary file and post it with `crew ci-summary <task> <sha> <file>`, with the commit the line names, then tick the line. If you're asking, post it before you stop.
+   - If it didn't (a flaky test, a problem with the CI service, the base branch already red), change no code. Rerun the failed jobs once and wait for the result: for GitHub Actions, `gh run rerun --failed <run>` and then `gh run watch <run> --exit-status`; for other CI, the way AGENTS.md or memory says. If you can't rerun them, or they fail again, CI now waits on a person, to rerun it or to fix the base, and not on you: don't ask, and carry on with the round.
+   - Either way, fill in `templates/ci-comment.md`, in the crew home (`crew config CREW_HOME`), write it to a temporary file and post it with `crew ci-summary <task> <sha> <file>`, with the commit the line names. When your branch didn't cause it, add `--not-the-branch` (`crew ci-summary --not-the-branch <task> <sha> <file>`): crew counts only the rounds your branch caused before it asks the user about red CI. Then tick the line. Step 10 hands the PR back as usual, red CI and all: your comment says what CI needs, and the PR's row in `crew status` shows it's red.
 5. Address every comment. For each one:
    - make the change: once you've decided to, and before you start on it, react 🚀 with `crew react <task> rocket <id>` (name several IDs at once when you start on them together), or
    - if you believe the comment is mistaken or would cross a bound, don't change the code; explain why in your reply, or
@@ -220,7 +220,7 @@ Stop and ask for:
 - an objective or a gate that doesn't survive contact with the code;
 - a change the objective needs that would cross a bound (see "Stay in scope");
 - ambiguous acceptance criteria;
-- tests or checks that were already failing on the base branch;
+- tests or checks that were already failing on the base branch, during your first run (red CI in a review round goes as step 4 of "Workflow: review rounds" says);
 - anything irreversible.
 
 Don't stop for design choices: they're yours, within the project's rules. Record the ones a reviewer would ask about under Decisions.

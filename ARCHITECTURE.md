@@ -333,8 +333,9 @@ worker: crew react TASK eyes <every ID in the unsent rounds>
         → a "Conflicts with" line first: git fetch origin, git merge origin/<base>, resolve, run the checks,
           commit the merge, git push (never force) → tick the line; no PR comment
         → then a "CI failed on" line: find why (gh run view --log-failed for GitHub Actions, else as the project says)
-          → the branch caused it: fix, commit, push; or not: rerun the failed jobs once (gh run rerun --failed), ask if
-          still red → crew ci-summary TASK SHA FILE (templates/ci-comment.md) → tick the line
+          → the branch caused it: fix, commit, push; or not: rerun the failed jobs once (gh run rerun --failed), and
+          if still red, leave it to a person, without asking → crew ci-summary [--not-the-branch] TASK SHA FILE
+          (templates/ci-comment.md) → tick the line
         → address each comment, oldest round first (crew react TASK rocket <id> before changing code for it)
         → commit (no force-push) → push
         → crew reply TASK <id> "…" (if told to) → an "Automated review requested" line: a new pass → crew hand-over TASK
