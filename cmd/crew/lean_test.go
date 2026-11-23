@@ -101,14 +101,15 @@ func TestLeanSettingsReadYourSetupFromClaudeConfigDir(t *testing.T) {
 // chrome-devtools, isaacjwilliams-crew keeps nothing.
 func TestAProjectKeepsWhatKeepLoadedNames(t *testing.T) {
 	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir()}
 	ninja := &Project{Name: "ninja", Settings: Settings{"KEEP_LOADED": "stripe@claude-plugins-official chrome-devtools", "REPO": t.TempDir()}}
 	crew := &Project{Name: "crew", Settings: Settings{"REPO": t.TempDir()}}
 
-	got := leanOf(t, leanSettings(newObject(), "implementer", ninja.keepLoaded()))
+	got := leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(ninja)))
 	if !slices.Equal(got.plugins, []string{"frontend-design@claude-plugins-official"}) || got.servers != nil {
 		t.Errorf("ninja's workers turn off %v and deny %v, want only frontend-design off", got.plugins, got.servers)
 	}
-	got = leanOf(t, leanSettings(newObject(), "implementer", crew.keepLoaded()))
+	got = leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(crew)))
 	if !slices.Contains(got.plugins, "stripe@claude-plugins-official") || !slices.Equal(got.servers, []string{"chrome-devtools"}) {
 		t.Errorf("crew's workers keep %+v, want neither Stripe nor chrome-devtools", got)
 	}
@@ -120,15 +121,67 @@ func TestAProjectKeepsWhatKeepLoadedNames(t *testing.T) {
 	}
 }
 
-func TestAWorkerKeepsAServerOfYoursThatItsRepoAlsoDeclares(t *testing.T) {
-	fakeYourSetup(t)
+// Claude Code turns a plugin, skill or server off by its name, so one of yours
+// that shares a name with one the session gets from crew, the project or the
+// repo stays on, or theirs would go too.
+func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
+	home := fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, ".mcp.json"), []byte(`{"mcpServers": {"chrome-devtools": {"command": "npx"}}}`), 0o644); err != nil {
+	p := &Project{Name: "p", Settings: Settings{"REPO": repo}}
+	writeFile(t, &Crew{Home: home}, `{"mcpServers": {"chrome-devtools": {}, "p_trello": {}, "sentry": {}, "figma": {}},
+		"projects": {"`+repo+`": {"mcpServers": {"figma": {}}}}}`, ".claude.json")
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/pr-review/SKILL.md")
+	writeFile(t, c, "", ".claude/skills/pr-review/SKILL.md")
+	writeFile(t, c, `{"mcpServers": {"p_trello": {}}}`, "projects/p/mcp.local.json")
+	writeFile(t, c, `{"mcpServers": {"p_trello": {}, "q_sentry": {}}}`, leadMCPFile)
+	repoFiles := map[string]string{
+		".claude/skills/docx/SKILL.md": "",
+		".claude/skills/run/SKILL.md":  "",
+		".claude/settings.json":        `{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}`,
+		".mcp.json":                    `{"mcpServers": {"chrome-devtools": {}}}`,
+	}
+	for name, body := range repoFiles {
+		writeFile(t, &Crew{Home: repo}, body, name)
+	}
+
+	got := leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(p)))
+	if !slices.Equal(got.servers, []string{"sentry"}) {
+		t.Errorf("a worker denies %v, want only sentry: chrome-devtools is the repo's, p_trello the project's, figma local to the repo", got.servers)
+	}
+	for _, skill := range []string{"pr-review", "docx", "run"} {
+		if slices.Contains(got.skills, skill) {
+			t.Errorf("a worker turns off %s, which crew or the repo has too", skill)
+		}
+	}
+	if !slices.Equal(got.plugins, []string{"stripe@claude-plugins-official"}) {
+		t.Errorf("a worker turns off plugins %v, want only Stripe: the repo enables frontend-design", got.plugins)
+	}
+
+	flags, err := c.leadFlags("")
+	if err != nil {
 		t.Fatal(err)
 	}
-	p := &Project{Name: "p", Settings: Settings{"REPO": repo}}
-	if got := leanOf(t, leanSettings(newObject(), "implementer", p.keepLoaded())); got.servers != nil {
-		t.Errorf("denied %v: a server is turned off by name, so the repo's would go too", got.servers)
+	settings, err := parseJSON([]byte(flags[3]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = leanOf(t, settings.(*object))
+	if slices.Contains(got.servers, "p_trello") || slices.Contains(got.skills, "pr-review") {
+		t.Errorf("a lead denies %v and turns off %v, want p_trello and pr-review kept", got.servers, got.skills)
+	}
+}
+
+// A skill of yours that shares a name with a bundled one a role uses stays on
+// for that role.
+func TestARoleKeepsASkillOfYoursNamedForOneItUses(t *testing.T) {
+	home := fakeYourSetup(t)
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/simplify/SKILL.md")
+	if got := leanOf(t, leanSettings(newObject(), "implementer", nil)); slices.Contains(got.skills, "simplify") {
+		t.Errorf("a worker turns off simplify, which it uses")
+	}
+	if got := leanOf(t, leanSettings(newObject(), "goal-lead", nil)); !slices.Contains(got.skills, "simplify") {
+		t.Errorf("a goal lead keeps simplify, which it doesn't use")
 	}
 }
 

@@ -731,7 +731,7 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 		}
 		settings = addOnly(settings, more).(*object)
 	}
-	settings = leanSettings(settings, "implementer", p.keepLoaded())
+	settings = leanSettings(settings, "implementer", c.keepLoaded(p))
 	addPauseHook(settings)
 	return c.sessionSettings(settings, p), nil
 }
@@ -748,7 +748,7 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 		return "", err
 	}
 	lead.del("agent")
-	lead = leanSettings(lead, "goal-lead", p.keepLoaded())
+	lead = leanSettings(lead, "goal-lead", c.keepLoaded(p))
 	addPauseHook(lead)
 	return c.sessionSettings(lead, p), nil
 }

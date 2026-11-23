@@ -56,8 +56,9 @@ func cmdLead(c *Crew, args []string) error {
 // leadFlags is the flags a lead for proj ("" for every project) starts with,
 // besides its name: its permission mode, and --settings that turn off the other
 // projects' servers (leadMCPSettings) and what a lead doesn't use of yours
-// (leanSettings). A lead keeps what its projects' KEEP_LOADED name; it loads no
-// repo's .mcp.json, so it has no repo's servers to keep as a worker does.
+// (leanSettings). A lead keeps what its projects' KEEP_LOADED name, and what
+// shares a name with crew's skills and lead/.mcp.json's servers (theirs); it
+// works in no repo, so it has no repo's to keep as a worker does.
 func (c *Crew) leadFlags(proj string) ([]string, error) {
 	settings, flagSettings := c.Settings, newObject()
 	var keep []string
@@ -78,6 +79,7 @@ func (c *Crew) leadFlags(proj string) ([]string, error) {
 			return nil, err
 		}
 	}
+	keep = append(keep, c.theirs(c.path(leadMCPFile), "")...)
 	flagSettings = leanSettings(flagSettings, "lead", keep)
 	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(flagSettings, false)}, nil
 }

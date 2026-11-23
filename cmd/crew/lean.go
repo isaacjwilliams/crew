@@ -10,12 +10,15 @@ package main
 // so your own sessions load what they always did.
 //
 // What a session gets from crew and its project is never turned off: the home's
-// skills, the repo's own agents, skills and servers, and the project's servers
-// from its mcp.json. A project keeps more of yours with KEEP_LOADED. Built-in
+// skills, the repo's own agents, skills, plugins and servers, and the project's
+// servers from its mcp.json. Claude Code turns things off by name, so crew keeps
+// anything of yours that shares a name with one of those (theirs). A project
+// keeps more of yours with KEEP_LOADED. Built-in
 // tools and agent types a role doesn't use are denied in its agent file and its
 // settings file, which don't depend on what you've installed.
 
 import (
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -23,7 +26,8 @@ import (
 
 // bundledSkills are the skills Claude Code ships (as of 2.1.328), each with the
 // roles that use it; nil means no role does. Every other crew session has it
-// off. A skill Claude Code adds later stays on until it's listed here.
+// off, and a role keeps a skill of yours by the name of one it uses. A skill
+// Claude Code adds later stays on until it's listed here.
 var bundledSkills = map[string][]string{
 	// The implementer's exhale and its security review.
 	"simplify":        {"implementer"},
@@ -68,16 +72,11 @@ func leanSettings(settings *object, role string, keep []string) *object {
 			plugins.set(id, false)
 		}
 	}
-	off := slices.Clone(yours.skills)
-	for skill, roles := range bundledSkills {
-		if !slices.Contains(roles, role) {
-			off = append(off, skill)
-		}
-	}
+	off := slices.Concat(yours.skills, slices.Collect(maps.Keys(bundledSkills)))
 	slices.Sort(off)
 	skills := newObject()
-	for _, skill := range off {
-		if !kept(skill) {
+	for _, skill := range slices.Compact(off) {
+		if !kept(skill) && !slices.Contains(bundledSkills[skill], role) {
 			skills.set(skill, "off")
 		}
 	}
@@ -121,24 +120,12 @@ type yourSetup struct {
 func readYourSetup() yourSetup {
 	dir := claudeConfigDir()
 	var yours yourSetup
-	if settings, _ := readSettings(filepath.Join(dir, "settings.json")); settings != nil {
-		if enabled, ok := settings.vals["enabledPlugins"].(*object); ok {
-			for _, id := range enabled.keys {
-				if enabled.vals[id] == true {
-					yours.plugins = append(yours.plugins, id)
-				}
-			}
-			slices.Sort(yours.plugins)
-		}
-	}
+	yours.plugins = enabledPlugins(filepath.Join(dir, "settings.json"))
+	slices.Sort(yours.plugins)
 	// Personal skills are folders in ~/.claude/skills; synced ones sit two folders
 	// down in its synced/.
 	skills := filepath.Join(dir, "skills")
-	personal, _ := filepath.Glob(filepath.Join(skills, "*", "SKILL.md"))
-	synced, _ := filepath.Glob(filepath.Join(skills, "synced", "*", "*", "SKILL.md"))
-	for _, f := range append(personal, synced...) {
-		yours.skills = append(yours.skills, filepath.Base(filepath.Dir(f)))
-	}
+	yours.skills = append(skillsIn(skills), skillsIn(filepath.Join(skills, "synced", "*"))...)
 	if config, _ := readSettings(claudeGlobalConfig()); config != nil {
 		if servers, ok := config.vals["mcpServers"].(*object); ok {
 			yours.servers = slices.Sorted(slices.Values(servers.keys))
@@ -148,13 +135,61 @@ func readYourSetup() yourSetup {
 }
 
 // keepLoaded is what a worker or goal lead for p keeps of yours: what the
-// project's KEEP_LOADED names, and any server of yours that shares a name with
-// one in the repo's .mcp.json, since Claude Code turns servers off by name and
-// would take the repo's with it.
-func (p *Project) keepLoaded() []string {
+// project's KEEP_LOADED names, and what shares a name with what the session gets
+// from crew, the project and the repo.
+func (c *Crew) keepLoaded(p *Project) []string {
 	keep := strings.Fields(p.Settings["KEEP_LOADED"])
-	if repo, err := readMCPFile(filepath.Join(p.Repo(), ".mcp.json")); err == nil {
-		keep = append(keep, repo.keys...)
+	return append(keep, c.theirs(c.path("projects", p.Name, "mcp.local.json"), p.Repo())...)
+}
+
+// theirs is the names of what a session gets from crew and from repo, the repo
+// it works in ("" for a lead, which has none): crew's skills, the servers crew
+// gives it from servers (an mcp.json), and the repo's skills, the plugins its
+// settings enable, and its .mcp.json and local-scope servers. Claude Code turns
+// a plugin, skill or server off by its name, so turning off one of yours by one
+// of these names would turn theirs off too.
+func (c *Crew) theirs(servers, repo string) []string {
+	names := skillsIn(c.path(".claude", "skills"))
+	files := []string{servers}
+	if repo != "" {
+		names = append(names, skillsIn(filepath.Join(repo, ".claude", "skills"))...)
+		for _, f := range []string{"settings.json", "settings.local.json"} {
+			names = append(names, enabledPlugins(filepath.Join(repo, ".claude", f))...)
+		}
+		files = append(files, filepath.Join(repo, ".mcp.json"))
+		if config, _ := readSettings(claudeGlobalConfig()); config != nil {
+			names = append(names, config.child("projects").child(repo).child("mcpServers").keys...)
+		}
 	}
-	return keep
+	for _, f := range files {
+		if mcp, err := readMCPFile(f); err == nil {
+			names = append(names, mcp.keys...)
+		}
+	}
+	return names
+}
+
+// skillsIn is the names of the skills in dir: its folders with a SKILL.md.
+func skillsIn(dir string) []string {
+	var names []string
+	found, _ := filepath.Glob(filepath.Join(dir, "*", "SKILL.md"))
+	for _, f := range found {
+		names = append(names, filepath.Base(filepath.Dir(f)))
+	}
+	return names
+}
+
+// enabledPlugins is the ids of the plugins the settings file f turns on.
+func enabledPlugins(f string) []string {
+	var ids []string
+	if settings, _ := readSettings(f); settings != nil {
+		if enabled, ok := settings.vals["enabledPlugins"].(*object); ok {
+			for _, id := range enabled.keys {
+				if enabled.vals[id] == true {
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	return ids
 }
