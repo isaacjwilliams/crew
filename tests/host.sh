@@ -200,26 +200,34 @@ P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
 check "the lead's Remote Control server works on every project" '[[ $(grep " remote-control " "$SB/tower/claude-env.log" | tail -1) == "all claude remote-control "* ]]'
 # In DIR, run `lead ARGS` in bash, through the link install made, and print the
-# claude call it made.
+# claude call it made, with its --settings as {…}: lead_off shows the part of them
+# these checks are about, the project servers it switches off.
 lead_in() {
   (cd "$1" && tower env -u CREW_HOME bash -c "$SB/tower/.local/bin/lead $2") >/dev/null 2>&1 || return
-  tail -n 1 "$SB/tower/claude-env.log"
+  tail -n 1 "$SB/tower/claude-env.log" | sed 's/ --settings {.*}\( \|$\)/ --settings {…}\1/'
 }
+lead_off() { jq -c '.disabledMcpjsonServers' "$SB/tower/claude-settings.last"; }
 # Two projects with MCP servers. The second needs no clone here, and is never committed.
 mkdir -p "$TH/projects/shop"; touch "$TH/projects/shop/project.env"
 echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/shop"}}}' >"$TH/projects/shop/mcp.json"
 echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/web"}}}' >"$TH/projects/$P/mcp.json"
-off="{\"disabledMcpjsonServers\":[\"shop_tracker\"]}"
 check "lead outside a repo works on every project, and gets every project's MCP servers" \
-  '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto hello" && $(jq -c ".mcpServers | keys" "$TH/lead/.mcp.json") == "[\"${P}_tracker\",\"shop_tracker\"]" ]]'
-check "lead in a project's repo works on that project, with the other projects' servers off" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto --settings $off hello" ]]'
-check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto --settings $off -c" ]]'
+  '[[ $(lead_in "$SB/tower" "hello") == "all claude --name lead --permission-mode auto --settings {…} hello" && $(lead_off) == null && $(jq -c ".mcpServers | keys" "$TH/lead/.mcp.json") == "[\"${P}_tracker\",\"shop_tracker\"]" ]]'
+check "lead in a project's repo works on that project, with the other projects' servers off" '[[ $(lead_in "$SB/tower/webapp" "hello") == "$P claude --name lead-$P --permission-mode auto --settings {…} hello" && $(lead_off) == "[\"shop_tracker\"]" ]]'
+check "lead --project names the project, and passes the other arguments on" '[[ $(lead_in "$SB/tower" "--project $P -c") == "$P claude --name lead-$P --permission-mode auto --settings {…} -c" && $(lead_off) == "[\"shop_tracker\"]" ]]'
 check "lead starts claude in the home's lead/" '[[ $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
 rm "$TH/lead/.mcp.json"
 echo '{"mcpServers": {"tracker": {"type": "http", "url": "https://tracker.example/shop"}, "wiki": {"type": "http", "url": "https://wiki.example/shop"}}}' >"$TH/projects/shop/mcp.json"
-check "a project's lead syncs the servers before it switches the others off" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode auto --settings {\"disabledMcpjsonServers\":[\"shop_tracker\",\"shop_wiki\"]}" ]]'
+check "a project's lead syncs the servers before it switches the others off" '[[ $(lead_in "$SB/tower" "--project $P") == "$P claude --name lead-$P --permission-mode auto --settings {…}" && $(lead_off) == "[\"shop_tracker\",\"shop_wiki\"]" ]]'
 rm -r "$TH/projects/shop" "$TH/projects/$P/mcp.json"
-check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto" ]]'
+check "lead --project all works on every project, even in a repo" '[[ $(lead_in "$SB/tower/webapp" "--project all") == "all claude --name lead --permission-mode auto --settings {…}" && $(lead_off) == null ]]'
+check "a lead starts without what it doesn't use of yours, and keeps Artifact" \
+  '[[ $(jq -c "[.disableClaudeAiConnectors, .skillOverrides.simplify, .skillOverrides[\"artifact-design\"], has(\"enableArtifact\")]" "$SB/tower/claude-settings.last") == "[true,\"off\",null,false]" ]]'
+echo 'KEEP_LOADED="claude.ai"' >>"$TH/projects/$P/project.env"
+lead_in "$SB/tower" "--project $P" >/dev/null; one=$(jq -c "has(\"disableClaudeAiConnectors\")" "$SB/tower/claude-settings.last")
+lead_in "$SB/tower" "--project all" >/dev/null; all=$(jq -c "has(\"disableClaudeAiConnectors\")" "$SB/tower/claude-settings.last")
+check "a lead keeps what its project's KEEP_LOADED names, and a lead for every project what any project's does" '[[ $one == false && $all == false ]]'
+sed -i '/^KEEP_LOADED="claude.ai"$/d' "$TH/projects/$P/project.env"
 n=$(wc -l <"$SB/tower/claude-env.log")
 check "lead --project with an unknown project starts nothing" '! lead_in "$SB/tower" "--project nope" && ! lead_in "$SB/tower" "--project" && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'
 check "and so does a CREW_PROJECT that isn't a project" '! (cd "$SB/tower" && tower env CREW_PROJECT=nope "$SB/tower/.local/bin/lead" hello) >/dev/null 2>&1 && [[ $(wc -l <"$SB/tower/claude-env.log") == "$n" ]]'

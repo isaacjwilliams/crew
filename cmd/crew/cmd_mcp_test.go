@@ -143,7 +143,7 @@ func TestLeadMCPSettings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return s
+		return encodeJSON(s, false)
 	}
 	if got := lead("acme-app"); got != `{"disabledMcpjsonServers":[]}` {
 		t.Errorf("with no lead/.mcp.json: %s", got)

@@ -4,6 +4,7 @@ package main
 // running claude itself.
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -106,15 +107,28 @@ func (c *Crew) listAgents() (Agents, error) {
 	return as, nil
 }
 
+// claudeConfigDir is where Claude Code keeps your settings, skills and
+// transcripts: CLAUDE_CONFIG_DIR, or ~/.claude.
+func claudeConfigDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+// claudeGlobalConfig is Claude Code's own config file, which holds your
+// user-scope MCP servers: .claude.json in CLAUDE_CONFIG_DIR, or in your home
+// beside ~/.claude.
+func claudeGlobalConfig() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(cmp.Or(os.Getenv("CLAUDE_CONFIG_DIR"), home), ".claude.json")
+}
+
 // claudeTranscripts is where Claude Code keeps its sessions' transcripts, one
 // directory per working directory.
 func claudeTranscripts() string {
-	dir := os.Getenv("CLAUDE_CONFIG_DIR")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".claude")
-	}
-	return filepath.Join(dir, "projects")
+	return filepath.Join(claudeConfigDir(), "projects")
 }
 
 // transcript is the path of a session's transcript, or "" when there's none.
@@ -696,7 +710,8 @@ func addPauseHook(settings *object) {
 // workerSettings is the --settings value workers run with:
 // config/worker-settings.json, plus the project's projects/<p>/worker-settings.json
 // when it has one (allow rules or env for that project's test commands, say),
-// with the pause hook, as sessionSettings. The project file can only add:
+// without what a worker doesn't use of yours (leanSettings), with the pause
+// hook, as sessionSettings. The project file can only add:
 // objects are merged and arrays appended, but any value the shipped file sets
 // wins, so a project can't drop a deny rule. It also checks
 // WORKER_AUTOCOMPACT_WINDOW, so a bad value stops a dispatch before its
@@ -716,13 +731,15 @@ func (c *Crew) workerSettings(p *Project) (string, error) {
 		}
 		settings = addOnly(settings, more).(*object)
 	}
+	settings = leanSettings(settings, "implementer", c.keepLoaded(p))
 	addPauseHook(settings)
 	return c.sessionSettings(settings, p), nil
 }
 
 // goalLeadSettings is the --settings value goal leads run with: the lead's
-// settings, lead/.claude/settings.json, all but their "agent", with the pause
-// hook, as sessionSettings. The lead's session takes its agent from that file, a goal lead
+// settings, lead/.claude/settings.json, all but their "agent", without what a
+// goal lead doesn't use of yours (leanSettings), with the pause hook, as
+// sessionSettings. The lead's session takes its agent from that file, a goal lead
 // from --agent. Not the lead's settings.local.json: a goal lead works in its own
 // checkout.
 func (c *Crew) goalLeadSettings(p *Project) (string, error) {
@@ -731,6 +748,7 @@ func (c *Crew) goalLeadSettings(p *Project) (string, error) {
 		return "", err
 	}
 	lead.del("agent")
+	lead = leanSettings(lead, "goal-lead", c.keepLoaded(p))
 	addPauseHook(lead)
 	return c.sessionSettings(lead, p), nil
 }

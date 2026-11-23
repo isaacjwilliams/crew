@@ -1,0 +1,432 @@
+package main
+
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// fakeYourSetup gives a fake HOME a setup like the user's own: two plugins on and
+// one off, a personal skill, a skill synced from claude.ai, two command files and
+// a user-scope MCP server.
+func fakeYourSetup(t *testing.T) string {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	files := map[string]string{
+		".claude/settings.json": `{"enabledPlugins": {"stripe@claude-plugins-official": true,
+			"frontend-design@claude-plugins-official": true, "ruby-lsp@claude-plugins-official": false}}`,
+		".claude/skills/codex-review/SKILL.md":       "---\nname: codex-review\n---\n",
+		".claude/skills/synced/bucket/docx/SKILL.md": "---\nname: docx\n---\n",
+		".claude/commands/standup.md":                "",
+		".claude/commands/ci/init.md":                "",
+		".claude.json":                               `{"mcpServers": {"chrome-devtools": {"command": "npx"}}}`,
+	}
+	for name, body := range files {
+		writeFile(t, &Crew{Home: home}, body, name)
+	}
+	return home
+}
+
+// lean is what leanSettings turns off for role, as the names it lists under each key.
+type lean struct {
+	plugins, skills, servers  []string
+	connectorsOff, noArtifact bool
+}
+
+func leanOf(t *testing.T, settings *object) lean {
+	t.Helper()
+	var l lean
+	if plugins := settings.child("enabledPlugins"); plugins != nil {
+		for _, id := range plugins.keys {
+			if plugins.vals[id] == false {
+				l.plugins = append(l.plugins, id)
+			}
+		}
+	}
+	if skills := settings.child("skillOverrides"); skills != nil {
+		for _, name := range skills.keys {
+			if skills.vals[name] == "off" {
+				l.skills = append(l.skills, name)
+			}
+		}
+	}
+	servers, _ := settings.vals["deniedMcpServers"].([]any)
+	for _, s := range servers {
+		l.servers = append(l.servers, s.(*object).vals["serverName"].(string))
+	}
+	l.connectorsOff = settings.vals["disableClaudeAiConnectors"] == true
+	l.noArtifact = settings.vals["enableArtifact"] == false
+	return l
+}
+
+// leanOfFlags is leanOf the settings of a lead started with flags.
+func leanOfFlags(t *testing.T, flags []string) lean {
+	t.Helper()
+	return leanOfJSON(t, flags[slices.Index(flags, "--settings")+1])
+}
+
+// leanOfJSON is leanOf settings given as JSON.
+func leanOfJSON(t *testing.T, settings string) lean {
+	t.Helper()
+	v, err := parseJSON([]byte(settings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leanOf(t, v.(*object))
+}
+
+func TestLeanSettingsTurnOffWhatAWorkerDoesntUseOfYours(t *testing.T) {
+	fakeYourSetup(t)
+	got := leanOf(t, leanSettings(newObject(), "implementer", nil))
+	if want := []string{"frontend-design@claude-plugins-official", "stripe@claude-plugins-official"}; !slices.Equal(got.plugins, want) {
+		t.Errorf("plugins off = %v, want %v: only the ones your settings enable", got.plugins, want)
+	}
+	for _, skill := range []string{"codex-review", "docx", "standup", "ci:init", "claude-api", "artifact-design", "loop"} {
+		if !slices.Contains(got.skills, skill) {
+			t.Errorf("skill %s is on, want off: skills off = %v", skill, got.skills)
+		}
+	}
+	if !slices.IsSorted(got.skills) {
+		t.Errorf("skills off = %v, want them sorted, so the fingerprint doesn't change from launch to launch", got.skills)
+	}
+	if !slices.Equal(got.servers, []string{"chrome-devtools"}) || !got.connectorsOff || !got.noArtifact {
+		t.Errorf("lean = %+v, want chrome-devtools denied, the connectors and Artifact off", got)
+	}
+}
+
+func TestLeanSettingsReadYourSetupFromClaudeConfigDir(t *testing.T) {
+	setup := fakeYourSetup(t)
+	config := t.TempDir()
+	if err := os.Rename(filepath.Join(setup, ".claude"), filepath.Join(config, "settings")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(setup, ".claude.json"), filepath.Join(config, "settings", ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(config, "settings"))
+
+	got := leanOf(t, leanSettings(newObject(), "implementer", nil))
+	if len(got.plugins) != 2 || !slices.Contains(got.skills, "codex-review") || !slices.Equal(got.servers, []string{"chrome-devtools"}) {
+		t.Errorf("lean = %+v, want your plugins, skills and servers from CLAUDE_CONFIG_DIR turned off", got)
+	}
+}
+
+// Two projects like the user's: rolemodel-ninja-master keeps Stripe and
+// chrome-devtools, isaacjwilliams-crew keeps nothing.
+func TestAProjectKeepsWhatKeepLoadedNames(t *testing.T) {
+	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir()}
+	ninja := &Project{Name: "ninja", Settings: Settings{"KEEP_LOADED": "stripe@claude-plugins-official chrome-devtools", "REPO": t.TempDir()}}
+	crew := &Project{Name: "crew", Settings: Settings{"REPO": t.TempDir()}}
+
+	got := leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(ninja)))
+	if !slices.Equal(got.plugins, []string{"frontend-design@claude-plugins-official"}) || got.servers != nil {
+		t.Errorf("ninja's workers turn off %v and deny %v, want only frontend-design off", got.plugins, got.servers)
+	}
+	got = leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(crew)))
+	if !slices.Contains(got.plugins, "stripe@claude-plugins-official") || !slices.Equal(got.servers, []string{"chrome-devtools"}) {
+		t.Errorf("crew's workers keep %+v, want neither Stripe nor chrome-devtools", got)
+	}
+
+	// A plugin by its name alone, a skill, and the connectors.
+	got = leanOf(t, leanSettings(newObject(), "implementer", []string{"frontend-design", "docx", connectorsKeep}))
+	if slices.Contains(got.plugins, "frontend-design@claude-plugins-official") || slices.Contains(got.skills, "docx") || got.connectorsOff {
+		t.Errorf("lean = %+v, want frontend-design, docx and the connectors kept", got)
+	}
+}
+
+// Workers and goal leads start without what their role doesn't use of yours,
+// but for what their project's KEEP_LOADED names.
+func TestWorkersAndGoalLeadsStartWithoutWhatTheyDontUseOfYours(t *testing.T) {
+	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir()}
+	for _, f := range []string{"config/worker-settings.json", "lead/.claude/settings.json"} {
+		writeFile(t, c, "{}", f)
+	}
+	p := &Project{Name: "ninja", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir(), "KEEP_LOADED": "chrome-devtools"}}
+	worker, err := c.workerSettings(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalLead, err := c.goalLeadSettings(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for role, settings := range map[string]string{"a worker": worker, "a goal lead": goalLead} {
+		got := leanOfJSON(t, settings)
+		if len(got.plugins) != 2 || !got.connectorsOff || !got.noArtifact {
+			t.Errorf("%s starts with %+v, want your plugins, connectors and Artifact off", role, got)
+		}
+		if got.servers != nil {
+			t.Errorf("%s denies %v, want chrome-devtools kept for ninja", role, got.servers)
+		}
+	}
+}
+
+// What a session turns off of yours is in its fingerprint, so a skill you
+// install has crew start new sessions that leave it off.
+func TestInstallingASkillChangesWhatASessionLoads(t *testing.T) {
+	home := fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	writeFile(t, c, "{}", "config/worker-settings.json")
+	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir()}}
+	fingerprints := func() (worker, lead string) {
+		w, err := c.launchWorker(p, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags, err := c.leadFlags("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w.fingerprint, c.leadFingerprint(flags)
+	}
+	worker, lead := fingerprints()
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/pdf/SKILL.md")
+	if w, l := fingerprints(); w == worker || l == lead {
+		t.Errorf("after installing a skill, the worker's fingerprint changed: %t, the lead's: %t", w != worker, l != lead)
+	}
+}
+
+// A lead keeps what its projects' KEEP_LOADED name. A project whose settings are
+// broken doesn't stop the lead for every project, only a lead for that one.
+func TestALeadKeepsWhatItsProjectsKeepLoadedName(t *testing.T) {
+	fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	writeFile(t, c, "KEEP_LOADED=chrome-devtools\n", "projects/ninja/project.env")
+	writeFile(t, c, "not a setting\n", "projects/broken/project.env")
+
+	flags, err := c.leadFlags("")
+	if err != nil {
+		t.Fatalf("a lead for every project: %v", err)
+	}
+	if got := leanOfFlags(t, flags); got.servers != nil {
+		t.Errorf("the lead denies %v, want chrome-devtools kept for ninja", got.servers)
+	}
+	if _, err := c.leadFlags("broken"); err == nil {
+		t.Error("a lead for a project with broken settings started")
+	}
+}
+
+// Claude Code turns a plugin, skill or server off by its name, so one of yours
+// that shares a name with one the session gets from crew, the project or the
+// repo stays on, or theirs would go too.
+func TestASessionKeepsWhatOfYoursSharesANameWithTheirs(t *testing.T) {
+	home := fakeYourSetup(t)
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	repo := t.TempDir()
+	p := &Project{Name: "p", Settings: Settings{"REPO": repo}}
+	writeFile(t, &Crew{Home: home}, `{"mcpServers": {"chrome-devtools": {}, "p_trello": {}, "sentry": {}, "figma": {}},
+		"projects": {"`+repo+`": {"mcpServers": {"figma": {}}}}}`, ".claude.json")
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/pr-review/SKILL.md")
+	writeFile(t, c, "", ".claude/skills/pr-review/SKILL.md")
+	// Only the project's mcp.json: a launch writes mcp.local.json from it after it
+	// has built the session's settings.
+	writeFile(t, c, `{"mcpServers": {"trello": {}}}`, "projects/p/mcp.json")
+	writeFile(t, c, `{"mcpServers": {"p_trello": {}, "q_sentry": {}}}`, leadMCPFile)
+	repoFiles := map[string]string{
+		".claude/skills/docx/SKILL.md":       "",
+		".claude/skills/run/SKILL.md":        "",
+		".claude/commands/loop.md":           "",
+		".claude/commands/schedule/SKILL.md": "",
+		".claude/settings.json":              `{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}`,
+		".mcp.json":                          `{"mcpServers": {"chrome-devtools": {}}}`,
+	}
+	for name, body := range repoFiles {
+		writeFile(t, &Crew{Home: repo}, body, name)
+	}
+	// Claude Code follows links in a commands folder: crew's whole folder may be
+	// one, and so may a folder in the repo's, even one that leads back up.
+	crewCommands, shared := t.TempDir(), t.TempDir()
+	writeFile(t, &Crew{Home: crewCommands}, "", "claude-api.md")
+	writeFile(t, &Crew{Home: shared}, "", "init.md")
+	for link, target := range map[string]string{
+		c.path(".claude", "commands"):                    crewCommands,
+		filepath.Join(repo, ".claude", "commands", "ci"): shared,
+		filepath.Join(shared, "again"):                   shared,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := leanOf(t, leanSettings(newObject(), "implementer", c.keepLoaded(p)))
+	if !slices.Equal(got.servers, []string{"sentry"}) {
+		t.Errorf("a worker denies %v, want only sentry: chrome-devtools is the repo's, p_trello the project's, figma local to the repo", got.servers)
+	}
+	for _, skill := range []string{"pr-review", "docx", "run", "loop", "schedule", "claude-api", "ci:init"} {
+		if slices.Contains(got.skills, skill) {
+			t.Errorf("a worker turns off %s, which crew or the repo has too", skill)
+		}
+	}
+	if !slices.Equal(got.plugins, []string{"stripe@claude-plugins-official"}) {
+		t.Errorf("a worker turns off plugins %v, want only Stripe: the repo enables frontend-design", got.plugins)
+	}
+
+	flags, err := c.leadFlags("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = leanOfFlags(t, flags)
+	if slices.Contains(got.servers, "p_trello") || slices.Contains(got.skills, "pr-review") {
+		t.Errorf("a lead denies %v and turns off %v, want p_trello and pr-review kept", got.servers, got.skills)
+	}
+}
+
+// A skill of yours that shares a name with a bundled one a role uses stays on
+// for that role.
+func TestARoleKeepsASkillOfYoursNamedForOneItUses(t *testing.T) {
+	home := fakeYourSetup(t)
+	writeFile(t, &Crew{Home: home}, "", ".claude/skills/simplify/SKILL.md")
+	if got := leanOf(t, leanSettings(newObject(), "implementer", nil)); slices.Contains(got.skills, "simplify") {
+		t.Errorf("a worker turns off simplify, which it uses")
+	}
+	if got := leanOf(t, leanSettings(newObject(), "goal-lead", nil)); !slices.Contains(got.skills, "simplify") {
+		t.Errorf("a goal lead keeps simplify, which it doesn't use")
+	}
+}
+
+func TestOnlyLeadsKeepArtifact(t *testing.T) {
+	fakeYourSetup(t)
+	artifactSkills := []string{"artifact-capabilities", "artifact-design", "artifact-diagramming", "dataviz"}
+	for _, role := range []string{"lead", "goal-lead", "implementer"} {
+		got := leanOf(t, leanSettings(newObject(), role, nil))
+		for _, skill := range artifactSkills {
+			if slices.Contains(got.skills, skill) != (role != "lead") {
+				t.Errorf("%s: skill %s off = %v", role, skill, slices.Contains(got.skills, skill))
+			}
+		}
+		if got.noArtifact != (role != "lead") {
+			t.Errorf("%s: Artifact off = %v", role, got.noArtifact)
+		}
+	}
+}
+
+func TestLeanSettingsLeaveAValueTheSettingsAlreadyHave(t *testing.T) {
+	fakeYourSetup(t)
+	settings, err := parseJSON([]byte(`{"enabledPlugins": {"stripe@claude-plugins-official": true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := leanOf(t, leanSettings(settings.(*object), "implementer", nil))
+	if !slices.Equal(got.plugins, []string{"frontend-design@claude-plugins-official"}) {
+		t.Errorf("plugins off = %v, want Stripe left on, as the settings have it", got.plugins)
+	}
+}
+
+// What each role's instructions use. The launch must turn none of it off. Leads
+// and goal leads run crew followup, whose refusal for a busy worker offers
+// SendMessage.
+var roleUses = map[string]struct{ tools, agents, skills []string }{
+	"lead": {
+		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "Artifact", "SendMessage"},
+		agents: []string{"brief-reviewer", "general-purpose", "Explore", "claude-code-guide"},
+		skills: []string{"artifact-capabilities", "artifact-design", "artifact-diagramming", "dataviz"},
+	},
+	"goal-lead": {
+		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "SendMessage"},
+		agents: []string{"brief-reviewer", "general-purpose", "Explore", "claude-code-guide"},
+	},
+	"implementer": {
+		tools:  []string{"Bash", "Read", "Edit", "Write", "Grep", "Glob", "Skill", "Agent", "WebFetch", "WebSearch", "ToolSearch", "TaskCreate", "TaskUpdate"},
+		agents: []string{"casual-observer", "reviewer", "general-purpose", "Explore", "claude-code-guide"},
+		skills: []string{"pr-review", "simplify", "security-review"},
+	},
+}
+
+func TestEachRoleKeepsWhatItsInstructionsUse(t *testing.T) {
+	fakeYourSetup(t)
+	settingsFile := map[string]string{"lead": "lead/.claude/settings.json", "goal-lead": "lead/.claude/settings.json", "implementer": "config/worker-settings.json"}
+	for role, uses := range roleUses {
+		list := Doc{filepath.Join("../../agents", role+".md")}.Get("disallowedTools")
+		if list == "" {
+			t.Fatalf("agents/%s.md has no disallowedTools", role)
+		}
+		var disallowed []string
+		for tool := range strings.SplitSeq(list, ",") {
+			disallowed = append(disallowed, strings.TrimSpace(tool))
+		}
+		settings, err := readSettings(filepath.Join("../..", settingsFile[role]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var denied []string
+		for _, rule := range settings.child("permissions").vals["deny"].([]any) {
+			denied = append(denied, rule.(string))
+		}
+		off := leanOf(t, leanSettings(settings, role, nil))
+
+		for _, tool := range uses.tools {
+			if slices.Contains(disallowed, tool) || slices.Contains(denied, tool) || tool == "Artifact" && off.noArtifact {
+				t.Errorf("%s uses %s, but its launch turns it off", role, tool)
+			}
+		}
+		for _, agent := range uses.agents {
+			if slices.Contains(denied, "Agent("+agent+")") || slices.Contains(disallowed, "Agent("+agent+")") {
+				t.Errorf("%s uses the %s agent, but its launch denies it", role, agent)
+			}
+		}
+		for _, skill := range uses.skills {
+			if slices.Contains(off.skills, skill) || slices.Contains(denied, "Skill("+skill+")") {
+				t.Errorf("%s uses the %s skill, but its launch turns it off", role, skill)
+			}
+		}
+	}
+}
+
+// Every role's launch only reads your setup: nothing under ~/.claude, or in
+// ~/.claude.json, is written, moved or removed, and no .trash appears.
+func TestLaunchingASessionLeavesYourSetupAsItWas(t *testing.T) {
+	home := fakeYourSetup(t)
+	snapshot := func() map[string]string {
+		files := map[string]string{}
+		err := filepath.WalkDir(home, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			b, err := os.ReadFile(path)
+			info, _ := d.Info()
+			files[path] = string(b) + info.ModTime().String()
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return files
+	}
+	before := snapshot()
+
+	c := &Crew{Home: t.TempDir(), Settings: Settings{"LEAD_PERMISSION_MODE": "auto"}}
+	for _, f := range []string{"config/worker-settings.json", "lead/.claude/settings.json"} {
+		writeFile(t, c, "{}", f)
+	}
+	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_AUTOCOMPACT_WINDOW": "400k", "REPO": t.TempDir()}}
+	if _, err := c.workerSettings(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.goalLeadSettings(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.leadFlags(""); err != nil {
+		t.Fatal(err)
+	}
+
+	after := snapshot()
+	for path := range after {
+		if strings.Contains(path, ".trash") {
+			t.Errorf("%s appeared", path)
+		}
+	}
+	if len(after) != len(before) {
+		t.Errorf("your setup has %d files after the launches, %d before", len(after), len(before))
+	}
+	for path, was := range before {
+		if after[path] != was {
+			t.Errorf("%s changed", path)
+		}
+	}
+}

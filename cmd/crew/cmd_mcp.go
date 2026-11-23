@@ -192,18 +192,18 @@ func (c *Crew) writeLeadMCP() error {
 	return writeMCPFile(c.path(leadMCPFile), all)
 }
 
-// leadMCPSettings is the settings JSON a lead for one project starts with: every
-// server in lead/.mcp.json that isn't in the project's own mcp.local.json,
-// switched off. It goes by the lead's file as it is on disk, the one the session
-// loads, so a server a sync hasn't removed yet is switched off too.
-func (c *Crew) leadMCPSettings(proj string) (string, error) {
+// leadMCPSettings is the settings a lead for one project starts with, for its
+// servers: every server in lead/.mcp.json that isn't in the project's own
+// mcp.local.json, switched off. It goes by the lead's file as it is on disk, the
+// one the session loads, so a server a sync hasn't removed yet is switched off too.
+func (c *Crew) leadMCPSettings(proj string) (*object, error) {
 	lead, err := readMCPFile(c.path(leadMCPFile))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	own, err := readMCPFile(c.path("projects", proj, "mcp.local.json"))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	off := []any{}
 	for _, name := range lead.keys {
@@ -213,7 +213,7 @@ func (c *Crew) leadMCPSettings(proj string) (string, error) {
 	}
 	o := newObject()
 	o.set("disabledMcpjsonServers", off)
-	return encodeJSON(o, false), nil
+	return o, nil
 }
 
 // readMCPFile is the servers in a file shaped like .mcp.json: a JSON object whose
