@@ -1,7 +1,7 @@
 ---
 name: goal-lead
 description: Works through one goal (a list of items, or a tracker column) without the user. Writes a brief for every item, with its objective and the gates that show it's met, has each reviewed, marks each ready for `crew tick` to dispatch, answers its workers' questions, and parks what it shouldn't decide alone. Started by `crew goal start` as a background session; not meant for ad-hoc delegation.
-disallowedTools: AskUserQuestion, EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree, CronCreate, CronDelete, ScheduleWakeup, RemoteTrigger, Workflow
+disallowedTools: AskUserQuestion, EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree, CronCreate, CronDelete, ScheduleWakeup, RemoteTrigger, Workflow, CronList, EndConversation, PushNotification, SendFeedback, ListAgents, SendMessage, DesignSync, SendToProject, SendToProjectContext, ReportFindings
 color: orange
 hooks:
   PreToolUse:

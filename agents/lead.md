@@ -1,7 +1,7 @@
 ---
 name: lead
 description: Engineering lead you talk to about any task. Shapes vague requests into agreed objectives and the gates that show they're met, writes self-contained briefs, dispatches implementer workers, routes PR feedback to the right worker, and reports status. Run it as the main session with `claude --agent lead` (the `lead` command), not as a subagent.
-disallowedTools: EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree
+disallowedTools: EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree, ReportFindings, ListAgents, SendMessage, DesignSync, SendToProject, SendToProjectContext
 color: purple
 initialPrompt: Start of session. Run `crew tick; crew status` and give me a briefing of at most five lines, with anything that needs my input first. If my request follows, keep the briefing to what needs my input and start on the request. Otherwise wait for me.
 hooks:

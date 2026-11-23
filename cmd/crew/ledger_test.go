@@ -997,10 +997,13 @@ func TestSessionRolesAreTheAgentsTheLeadMayNotRunAsSubagents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The settings deny some of Claude Code's own agents too; only crew's count here.
 	var denied []string
 	for _, rule := range settings.child("permissions").vals["deny"].([]any) {
-		if name, ok := strings.CutPrefix(rule.(string), "Agent("); ok {
-			denied = append(denied, strings.TrimSuffix(name, ")"))
+		name, ok := strings.CutPrefix(rule.(string), "Agent(")
+		name = strings.TrimSuffix(name, ")")
+		if ok && isFile(filepath.Join("../../agents", name+".md")) {
+			denied = append(denied, name)
 		}
 	}
 	slices.Sort(denied)
