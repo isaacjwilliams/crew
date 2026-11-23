@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,6 +117,12 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	return c
 }
 
+// readReport is the report crew status builds for the projects in
+// scope, after asking GitHub for their PRs.
+func readReport(c *Crew, inScope ...string) statusReport {
+	return buildReport(c, inScope, false, c.readPRs(inScope))
+}
+
 func rowIDs(rows []taskRow) []string {
 	var ids []string
 	for _, r := range rows {
@@ -125,7 +132,7 @@ func rowIDs(rows []taskRow) []string {
 }
 
 func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
-	r := buildReport(statusLedger(t), []string{"p"}, false)
+	r := readReport(statusLedger(t), "p")
 	p := r.Projects[0]
 	if p.Name != "p" || !p.InScope || len(p.Goals) != 1 {
 		t.Fatalf("project p = %+v", p)
@@ -153,12 +160,12 @@ func TestBuildReportGroupsAGoalsTasks(t *testing.T) {
 
 func TestBuildReportCountsOnlyTasksThatCanStillMerge(t *testing.T) {
 	c := statusLedger(t)
-	before := buildReport(c, []string{"p"}, false).Projects[0].Goals[0]
+	before := readReport(c, "p").Projects[0].Goals[0]
 	goal := []string{"goal: 001-launch", "base: main"}
 	reportTask(t, c, "p", "016-merged", false, slices.Concat(goal, []string{"status: merged"})...)
 	reportTask(t, c, "p", "017-abandoned", false, slices.Concat(goal, []string{"status: abandoned"})...)
 	reportTask(t, c, "p", "018-spike", false, slices.Concat(goal, []string{"status: done", "kind: spike"})...)
-	g := buildReport(c, []string{"p"}, false).Projects[0].Goals[0]
+	g := readReport(c, "p").Projects[0].Goals[0]
 	// Only the merged task adds to the counts, not the abandoned task or the spike.
 	if g.Total != before.Total+1 || g.Merged != before.Merged+1 {
 		t.Errorf("goal counts: %d of %d merged, want %d of %d", g.Merged, g.Total, before.Merged+1, before.Total+1)
@@ -166,7 +173,7 @@ func TestBuildReportCountsOnlyTasksThatCanStillMerge(t *testing.T) {
 }
 
 func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
-	p := buildReport(statusLedger(t), []string{"p"}, false).Projects[0]
+	p := readReport(statusLedger(t), "p").Projects[0]
 	if got, want := rowIDs(p.Rows), []string{"010-parent", "012-idea", "013-risky", "014-later", "015-earlier"}; !slices.Equal(got, want) {
 		t.Fatalf("rows outside the goal = %v, want %v", got, want)
 	}
@@ -192,7 +199,7 @@ func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 }
 
 func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
-	r := buildReport(statusLedger(t), []string{"p"}, false)
+	r := readReport(statusLedger(t), "p")
 	if len(r.Projects) != 2 || r.Projects[1].Name != "q" {
 		t.Fatalf("projects = %+v, want p then q", r.Projects)
 	}
@@ -205,5 +212,59 @@ func TestBuildReportCountsOnlyWhatWaitsInOtherProjects(t *testing.T) {
 	}
 	if r.ReadOnlyOn != "" || r.Workers != (slots{used: 1, limit: 3}) || r.NoneDispatch {
 		t.Errorf("crew-wide: read-only on %q, workers %+v, none dispatch %v", r.ReadOnlyOn, r.Workers, r.NoneDispatch)
+	}
+}
+
+func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
+	c := statusLedger(t)
+	writeFile(t, c, "REPO="+t.TempDir()+"\n", "projects", "p", "project.env") // so gh could be run for p's PRs
+	ghCalls := c.path("gh-calls")
+	writeFile(t, c, "#!/bin/sh\necho \"$@\" >>"+ghCalls+"\nexit 1\n", "bin", "gh")
+	// GitHub didn't answer for 013-risky's PR, answered for 014-later's, and
+	// wasn't asked for 015-earlier's.
+	prs := prReads{"p": {
+		"https://github.com/o/r/pull/9":  {err: errors.New("gh: no answer")},
+		"https://github.com/o/r/pull/12": {pr: gitHubPR{State: "OPEN", Base: "main", CI: ciPassing, MergeState: "CLEAN"}},
+	}}
+	for build := 1; build <= 2; build++ {
+		checks := map[string]string{}
+		for _, row := range buildReport(c, []string{"p"}, false, prs).Projects[0].Rows {
+			if row.Merge != nil {
+				checks[row.Task.ID()] = row.Merge.String()
+			}
+		}
+		if got := checks["013-risky"]; !strings.HasSuffix(got, "(couldn't read GitHub; as of the last sync)") {
+			t.Errorf("build %d: 013-risky's merge check = %q, want it to go by the last sync", build, got)
+		}
+		if got := checks["014-later"]; got == "" || strings.Contains(got, "GitHub") {
+			t.Errorf("build %d: 014-later's merge check = %q, want it to go by GitHub's answer", build, got)
+		}
+		if got := checks["015-earlier"]; got != "not yet: PR not read on GitHub yet" {
+			t.Errorf("build %d: 015-earlier's merge check = %q, want it not read yet", build, got)
+		}
+	}
+	if calls, err := os.ReadFile(ghCalls); err == nil {
+		t.Errorf("building the report ran gh:\n%s", calls)
+	}
+}
+
+func TestReadPRsKeepsEachProjectsPRsApart(t *testing.T) {
+	c := statusLedger(t)
+	// p's and q's tasks both name PR 12, each in its own repository: open in
+	// p's, merged in q's.
+	for project, state := range map[string]string{"p": "OPEN", "q": "MERGED"} {
+		repo := t.TempDir()
+		writeFile(t, c, "REPO="+repo+"\n", "projects", project, "project.env")
+		writeFile(t, c, `{"state":"`+state+`","baseRefName":"main","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}`, filepath.Base(repo)+".json")
+		reportTask(t, c, project, "020-twelve", false, "status: pr-open", "base: main", "pr: 12")
+	}
+	writeFile(t, c, "#!/bin/sh\ncat "+c.Home+"/$(basename \"$PWD\").json\n", "bin", "gh")
+	r := readReport(c, "p", "q")
+	for i, wantClosed := range []string{"", "merged"} {
+		for _, row := range r.Projects[i].Rows {
+			if row.Task.ID() == "020-twelve" && row.Merge.Closed != wantClosed {
+				t.Errorf("%s's PR 12: closed = %q, want %q", r.Projects[i].Name, row.Merge.Closed, wantClosed)
+			}
+		}
 	}
 }

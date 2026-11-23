@@ -1,7 +1,7 @@
 package main
 
 // Whether the user can merge a pr-open task's PR now. crew status judges it from
-// the PR as GitHub has it when status runs, and from what crew knows of the task.
+// the PR as GitHub answered when last asked, and from what crew knows of the task.
 
 import (
 	"fmt"
@@ -44,18 +44,23 @@ func (m mergeCheck) String() string {
 }
 
 // mergeCheck works out whether a pr-open task's PR can merge now, from the PR as
-// GitHub has it now (prs), or as crew sync last recorded it when GitHub couldn't
-// be read. It's nil for a task that isn't pr-open.
+// GitHub had it when crew last asked (prs), or as crew sync last recorded it when
+// GitHub didn't answer. It's nil for a task that isn't pr-open.
 func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	if t.Status() != PROpen {
 		return nil
 	}
-	if t.PR() == "" {
+	ref := t.PR()
+	if ref == "" {
 		return &mergeCheck{InTheWay: []string{"no PR"}}
 	}
+	read, asked := s.prs[ref]
+	if !asked {
+		return &mergeCheck{InTheWay: []string{"PR not read on GitHub yet"}}
+	}
 	m := &mergeCheck{}
-	pr, live := s.prs[t.Path]
-	if !live {
+	pr := read.pr
+	if read.err != nil {
 		pr, m.LastSync = syncedPR(t), true
 	}
 	switch pr.State {
@@ -122,28 +127,47 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	return m
 }
 
+// prRead is what GitHub answered when crew asked for a PR: the PR, or the error.
+type prRead struct {
+	pr  gitHubPR
+	err error
+}
+
+// prReads are what GitHub answered for each project's PRs: a project's name →
+// a PR as its tasks name it → the answer. A PR is named within its project's
+// repository, so two projects can name different PRs the same way.
+type prReads map[string]map[string]prRead
+
 // readPRs asks GitHub for the PR of every pr-open task in the projects, all at
-// once, and keys them by task file. A PR GitHub didn't answer for is left out.
-func (s *statusView) readPRs(projects []string) map[string]gitHubPR {
-	prs := map[string]gitHubPR{}
+// once.
+func (c *Crew) readPRs(projects []string) prReads {
+	prs := prReads{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, name := range projects {
-		p, err := s.loadProject(name)
-		if err != nil {
-			continue
-		}
-		for _, t := range s.tasks(name) {
-			if t.Status() != PROpen || t.PR() == "" {
+		p, projectErr := c.loadProject(name)
+		reads := map[string]prRead{}
+		prs[name] = reads
+		for _, t := range c.tasks(name) {
+			if t.Status() != PROpen {
 				continue
 			}
-			wg.Go(func() {
-				if pr, err := readPR(p.Repo(), t.PR()); err == nil {
-					mu.Lock()
-					prs[t.Path] = pr
-					mu.Unlock()
-				}
-			})
+			ref := t.PR()
+			if ref == "" {
+				continue
+			}
+			keep := func(pr gitHubPR, err error) {
+				mu.Lock()
+				reads[ref] = prRead{pr, err}
+				mu.Unlock()
+			}
+			// A project crew can't read GitHub for here is as if GitHub didn't
+			// answer: its checks go by the last sync.
+			if projectErr != nil {
+				keep(gitHubPR{}, projectErr)
+				continue
+			}
+			wg.Go(func() { keep(readPR(p.Repo(), ref)) })
 		}
 	}
 	wg.Wait()

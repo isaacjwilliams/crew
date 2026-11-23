@@ -349,11 +349,11 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
       3  150-todo-doc-triage         ready                      -
       4  151-recaptcha-create-assess ready                      -
       5  153-drop-stale-secondary-sa ready                      -
-         … (5 more)
+      … (5 more)
     waiting on other tasks
          158-division-results-versio ready                      -      priority 2  after 146
          160-retire-course-leader-bo ready                      -      after 11 tasks
-         └ 165-remove-course-leader- ready                      -
+        └ 165-remove-course-leader-b ready                      -
     parked
          154-final-invoice-on-cancel draft                      -      1 open question(s)
 ```
@@ -556,8 +556,8 @@ crew status              # a stack is listed bottom first, each task under its p
 
 ```
   044-separate-season-management     pr-open        #311   (open)
-  └ 045-season-admin                 pr-open        #312   (draft)
-    └ 046-season-picker              working        -
+    └ 045-season-admin               pr-open        #312   (draft)
+      └ 046-season-picker            working        -
 ```
 
 - **Trying a stack locally.** The top task's branch contains everything below it. Its worktree is `crew get 046 worktree`, or check out `crew get 046 branch` yourself.
