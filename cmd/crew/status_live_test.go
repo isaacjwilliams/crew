@@ -265,7 +265,7 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	build := feed.build
 	feed.pullLedger = func() { pulls.Add(1); <-hang }
 	feed.readPRs = func() prReads { reads.Add(1); <-hang; return nil }
-	feed.build = func(r prReads) (statusReport, error) { <-letBuild; return build(r) }
+	feed.build = func(r statusReads) (statusReport, error) { <-letBuild; return build(r) }
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }
@@ -608,7 +608,7 @@ func TestLiveStatusListsWorkersAndReadsBranchesWhenDue(t *testing.T) {
 	feed := feedOf(l.Crew, "p", false)
 	var builds atomic.Int32
 	build := feed.build
-	feed.build = func(r prReads) (statusReport, error) { builds.Add(1); return build(r) }
+	feed.build = func(r statusReads) (statusReport, error) { builds.Add(1); return build(r) }
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }

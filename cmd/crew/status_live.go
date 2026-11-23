@@ -31,7 +31,7 @@ type statusFeed struct {
 	readPRs    func() prReads
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
-	build func(prReads) (statusReport, error)
+	build func(statusReads) (statusReport, error)
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -41,7 +41,7 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	return statusFeed{
 		pullLedger: c.catchUpLedger,
 		readPRs:    func() prReads { return c.readPRs(c.projects(scope)) },
-		build: func(reads prReads) (statusReport, error) {
+		build: func(reads statusReads) (statusReport, error) {
 			// The shared settings are read again for each report, so a change
 			// to crew.env shows while the view is open.
 			now := *c
@@ -105,12 +105,12 @@ func (j *job) starts(now time.Time) bool {
 type liveStatus struct {
 	feed statusFeed
 	now  func() time.Time
-	// reads is the PRs as GitHub last answered. It's nil before the first read
-	// ends, so the first report says the PRs aren't read yet, until the read
-	// that ends builds another.
-	reads prReads
+	// reads is what the reports are built from besides the ledger. Its PRs are
+	// nil before the first read of GitHub ends, so the first report says the
+	// PRs aren't read yet, until the read that ends builds another.
+	reads statusReads
 
-	building, reading, pulling job
+	building, readingGitHub, pulling job
 
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
@@ -147,7 +147,7 @@ type (
 func newLiveStatus(feed statusFeed) *liveStatus {
 	return &liveStatus{
 		feed: feed, now: time.Now,
-		building: job{every: buildEvery}, reading: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
+		building: job{every: buildEvery}, readingGitHub: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
 		open: map[string]bool{}, width: 80, height: 24,
 	}
 }
@@ -161,7 +161,7 @@ func (m *liveStatus) startDue() tea.Cmd {
 	if m.pulling.starts(now) {
 		cmds = append(cmds, func() tea.Msg { feed.pullLedger(); return ledgerPulled{} })
 	}
-	if m.reading.starts(now) {
+	if m.readingGitHub.starts(now) {
 		cmds = append(cmds, func() tea.Msg { return prsRead{feed.readPRs()} })
 	}
 	if m.building.starts(now) {
@@ -188,8 +188,8 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.building.ask()
 		return m, m.startDue()
 	case prsRead:
-		m.reading.running = false
-		m.reads = msg.reads
+		m.readingGitHub.running = false
+		m.reads.prs = msg.reads
 		m.building.ask()
 		return m, m.startDue()
 	case reportBuilt:
@@ -246,7 +246,7 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	case "r":
 		// A read or pull under way may have started before what the user
 		// wants to see, so another follows it. Each builds when it ends.
-		m.reading.ask()
+		m.readingGitHub.ask()
 		m.pulling.ask()
 		return m.startDue()
 	}
@@ -378,7 +378,7 @@ func (m *liveStatus) bar() string {
 	if m.lines != nil {
 		state = "updated " + m.builtAt.Format("15:04:05")
 	}
-	if m.reading.running {
+	if m.readingGitHub.running {
 		state += ", reading GitHub…"
 	}
 	if m.settingsErr != nil {

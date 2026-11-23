@@ -133,8 +133,8 @@ func (r taskRow) stackAsks() bool {
 // buildReport works out what crew status shows: the projects in scope in full,
 // and only what waits on the user in the others. The projects in scope come
 // first, in the order given, then the rest. doneToo adds finished goals and
-// tasks. reads are the open PRs as GitHub last had them (readPRs).
-func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusReport {
+// tasks. reads are what it's built from besides the ledger.
+func buildReport(c *Crew, inScope []string, doneToo bool, reads statusReads) statusReport {
 	var r statusReport
 	if holder := c.holder(); holder != c.Host {
 		r.ReadOnlyOn = cmp.Or(holder, "no machine")
@@ -165,6 +165,12 @@ func buildReport(c *Crew, inScope []string, doneToo bool, reads prReads) statusR
 	return r
 }
 
+// statusReads are what a report is built from besides the ledger, each as last
+// read.
+type statusReads struct {
+	prs prReads // every project's PRs as GitHub answered (readPRs)
+}
+
 // statusView builds a report. The fields from branches on belong to the project
 // it's on: project sets them afresh for each one, and the methods that work out
 // rows, notes and caps read them.
@@ -177,7 +183,7 @@ type statusView struct {
 	// busy or idle: another machine runs the crew, or claude agents failed. It's
 	// empty when they can be seen.
 	workersUnseen string
-	reads         prReads // every project's PRs as GitHub answered (readPRs); project picks out its own as prs
+	reads         statusReads // project picks out its own PRs as prs
 
 	branches Branches
 	repo     string            // the project's clone here, for restack reasons; empty when there's none
@@ -241,7 +247,7 @@ func (s *statusView) project(name string) projectReport {
 	tasks := s.tasks(name)
 	r := projectReport{Name: name, Waiting: s.waiting(name, tasks), InScope: true}
 	s.branches = s.Crew.branches(name)
-	s.repo, s.settings, s.prs = "", s.settingsOf(name), s.reads[name]
+	s.repo, s.settings, s.prs = "", s.settingsOf(name), s.reads.prs[name]
 	if p, err := s.loadProject(name); err == nil {
 		s.repo = p.Repo()
 	}

@@ -39,7 +39,7 @@ func cmdStatus(c *Crew, args []string) error {
 	feed := feedOf(c, scope, doneToo)
 	if plain || !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		feed.pullLedger()
-		r, err := feed.build(feed.readPRs())
+		r, err := feed.build(statusReads{prs: feed.readPRs()})
 		if err != nil {
 			warn("went by the settings crew started with: %v", err)
 		}

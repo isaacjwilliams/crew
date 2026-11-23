@@ -120,7 +120,7 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 // readReport is the report crew status builds for the projects in
 // scope, after asking GitHub for their PRs.
 func readReport(c *Crew, inScope ...string) statusReport {
-	return buildReport(c, inScope, false, c.readPRs(inScope))
+	return buildReport(c, inScope, false, statusReads{prs: c.readPRs(inScope)})
 }
 
 func rowIDs(rows []taskRow) []string {
@@ -228,7 +228,7 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 	}}
 	for build := 1; build <= 2; build++ {
 		checks := map[string]string{}
-		for _, row := range buildReport(c, []string{"p"}, false, prs).Projects[0].Rows {
+		for _, row := range buildReport(c, []string{"p"}, false, statusReads{prs: prs}).Projects[0].Rows {
 			if row.Merge != nil {
 				checks[row.Task.ID()] = row.Merge.String()
 			}
