@@ -320,6 +320,41 @@ func cmdHandOver(c *Crew, args []string) error {
 	return nil
 }
 
+// crew check-base TASK: whether the task's branch and PR are where the task
+// belongs, as its first hand-over will check them (refuseOffBase). Its worker
+// runs it before each costly step of its first run, such as a review, so the
+// step reads the branch as it will be handed over, and not commits a rebase
+// replaces. It refuses with the commands that move them, and says nothing is
+// to move otherwise. After the first hand-over, crew tick restacks the task.
+func cmdCheckBase(c *Crew, args []string) error {
+	if len(args) == 0 {
+		return usage("crew check-base TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	if t.HandedOver() {
+		return fail("%s has been handed over: crew restacks it when its base moves", t.ID())
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	onGitHub, parentOnGitHub, err := c.readPlace(p, t)
+	if err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "carry on"); err != nil {
+		return err
+	}
+	fmt.Println("nothing to move: carry on")
+	return nil
+}
+
 // handOverPR checks a build is ready for the user: the evidence they read, in
 // the task and the PR body, shows every acceptance criterion holding on the
 // code they would merge (checkEvidence), a high-risk task has a security
@@ -359,7 +394,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		// Before the PR check: a worker whose parent merged can't open its PR on
 		// the parent's branch once GitHub has deleted it.
 		if first {
-			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub); err != nil {
+			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "hand over again"); err != nil {
 				return err
 			}
 		}
@@ -432,18 +467,19 @@ func fetchOrigin(repo string) error {
 	return nil
 }
 
-// refuseOffBase refuses a task's first hand-over while its branch or its PR
-// isn't where the task belongs now, and tells the worker how to move them, as
-// crew restack would (rebaseFor, afterPush). A stacked task's branch belongs on
-// its parent's latest commit, or on what the parent merged into, and every
-// task's PR targets its base. Before the first hand-over the worker's own
+// refuseOffBase refuses, before a task's first hand-over, while its branch or
+// its PR isn't where the task belongs now, and tells the worker how to move
+// them, as crew restack would (rebaseFor, afterPush). A stacked task's branch
+// belongs on its parent's latest commit, or on what the parent merged into, and
+// every task's PR targets its base. Before the first hand-over the worker's own
 // session is still making the branch, so it moves them itself; after it, crew
 // tick restacks the task. onGitHub and parentOnGitHub are the PRs of the task
 // and of its parent as GitHub has them now, or nil when crew didn't read one
 // (readPlace). They were read before the lock, so each is recorded only in the
 // task whose PR it is: not in a new parent the task moved to meanwhile, say.
-// Call it with the lock held.
-func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR) error {
+// then is what the worker does once a retarget is all it had to run, such as
+// "hand over again". Call it with the lock held.
+func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, then string) error {
 	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
 	// crew sync may not have looked since the worker opened or moved its PR,
@@ -465,7 +501,7 @@ func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHu
 	}
 	retarget := idx.retargetReason(t, repo)
 	if retarget != "" && idx.onBase(t, repo) {
-		return fail("your PR has to move before its first hand-over (%s): run `gh pr edit --base %s`, then hand over again", retarget, t.Base())
+		return fail("your PR has to move before its first hand-over (%s): run `gh pr edit --base %s`, then %s", retarget, t.Base(), then)
 	}
 	if !stacked {
 		if retarget != "" {
@@ -477,8 +513,8 @@ func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHu
 	if err != nil || r.reason == "" {
 		return err
 	}
-	then, _ := r.afterPush(t, retarget)
-	return fail("your branch has to move before its first hand-over (%s): %s%s", r.reason, r.steps(`follow "Stacked tasks" in your instructions`), then)
+	afterPush, _ := r.afterPush(t, retarget)
+	return fail("your branch has to move before its first hand-over (%s): %s%s", r.reason, r.steps(`follow "Stacked tasks" in your instructions`), afterPush)
 }
 
 // staleReview says why the task's newest automated review didn't read its

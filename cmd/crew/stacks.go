@@ -363,10 +363,11 @@ func (r rebase) afterPush(t Task, retarget string) (then, retargetTo string) {
 }
 
 // movesBeforeHandOver is why crew doesn't restack a task that hasn't been
-// handed over: crew hand-over refuses its first hand-over while its branch or
-// its PR is off the task's base (refuseOffBase), and tells its worker how to
-// move them.
-const movesBeforeHandOver = "its own worker moves its branch and PR before its first hand-over; crew hand-over tells it how"
+// handed over: its worker checks its branch and PR with crew check-base before
+// each costly step of its first run, and crew hand-over refuses its first
+// hand-over while they're off the task's base (refuseOffBase). Both tell the
+// worker how to move them.
+const movesBeforeHandOver = "its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how"
 
 // parentNeedsRestack: a stack restacks bottom-up, and a parent that is about to
 // be rebased would only move this task again.

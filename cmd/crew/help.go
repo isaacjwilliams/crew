@@ -106,6 +106,10 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    touches SENSITIVE_PATHS makes it high risk. Mark a
                                    spike done once its ## Report starts with "Answer:"
                                    (used by workers)
+  crew check-base TASK             Before a task's first hand-over: say whether its
+                                   branch holds its parent's latest commit and its PR
+                                   targets its base, and if not, give the commands
+                                   that move them (used by workers)
   crew reply TASK COMMENT_ID TEXT  Reply to a review comment, conversation comment or
                                    review summary on the task's PR (used by workers)
   crew react TASK eyes|rocket COMMENT_ID...
