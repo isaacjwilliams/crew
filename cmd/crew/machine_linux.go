@@ -9,5 +9,5 @@ func machineName() string { return shortHostname() }
 // installTools is how crew install suggests installing the tools it's missing.
 const installTools = "on CachyOS: sudo pacman -S --needed git github-cli curl"
 
-// ioctlGetTermios is the ioctl that reads a terminal's settings, for stdinIsTerminal.
+// ioctlGetTermios is the ioctl that reads a terminal's settings, for isTerminal.
 const ioctlGetTermios = syscall.TCGETS
