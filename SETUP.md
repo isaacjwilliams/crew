@@ -443,6 +443,8 @@ A high-risk task's worker also runs Claude Code's `/security-review` before hand
 
 **The worker's model and automated review.** The lead makes two more choices at intake, and names both in its summary. A task runs its worker on Sonnet (`model: sonnet`) unless the worker has to design structure, that is, decide what to add or change in the code's shape (a new command, file or data shape). Fixes and changes inside existing code, tests, docs, copy, and bumps or renames the gates spell out run on Sonnet; work that adds or changes structure runs on Claude Code's default model. The risk tier doesn't decide it. Goal leads apply the same rule. A task whose gates check everything a reviewer would can have its automated review turned off (`auto_review: no`). `crew status` shows both on the task's row: `model sonnet`, `automated review off`. Changing a task's model after dispatch takes effect the next time crew has something for its worker: it starts the worker fresh on the new model, and says so.
 
+**The worker's effort.** A task can also name the effort its worker runs at (`crew set <task> effort medium`; `low`, `medium`, `high`, `xhigh` or `max`). Without one, a worker runs at your own setting. It works as the model does: `crew status` shows `effort medium` on the task's row, and changing or clearing it starts the worker fresh at its next followup. A restack session runs at your own setting, and the worker that follows it at the task's effort.
+
 **Sensitive paths.** List the paths where a change always needs your close look, in the project's `projects/<project>/project.env`, as git pathspecs:
 
 ```sh

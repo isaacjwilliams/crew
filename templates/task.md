@@ -20,6 +20,7 @@ risk:
 pre_pr_review: {{PRE_PR_REVIEW}}
 pr_mode: {{PR_MODE}}
 model:
+effort:
 auto_review:
 worktree:
 pr:
@@ -34,6 +35,7 @@ worker_job:
 worker_session:
 worker_fingerprint:
 worker_model:
+worker_effort:
 review_rounds: 0
 last_round_sent: 0
 interrupted:

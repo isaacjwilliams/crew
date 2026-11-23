@@ -493,6 +493,10 @@ var missedBy = []string{"brief-review", "tests", "pre-pr-review", "security-revi
 // task without one runs on the session's default.
 var models = []string{"opus", "sonnet", "haiku"}
 
+// efforts are Claude Code's effort levels, which a task's worker can run at. A
+// task without one runs at the user's own setting.
+var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 // orList lists items as a sentence does: "low, medium or high".
 func orList[T ~string](items []T) string { return listJoin(items, " or ") }
 
@@ -583,6 +587,7 @@ func (t Task) WorkerJob() string { return t.Get("worker_job") }
 func (t Task) Goal() string      { return t.Get("goal") }
 func (t Task) Risk() Risk        { return Risk(t.Get("risk")) }
 func (t Task) Model() string     { return t.Get("model") }
+func (t Task) Effort() string    { return t.Get("effort") }
 
 // autoReviewOff, as a task's auto_review, turns its automated review off, while
 // the task isn't high risk: a high-risk PR is always reviewed. It's the only

@@ -58,7 +58,7 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	// Building the launcher reads the worker settings, so a bad one stops here,
 	// before anything changes.
-	start, err := c.launchWorker(p, t.Model())
+	start, err := c.launchWorker(p, t.Model(), t.Effort())
 	if err != nil {
 		return err
 	}
@@ -374,13 +374,14 @@ const restackModel = "sonnet"
 // exception to reading the whole task file first matches its opening.
 const restackPrompt = "You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs."
 
-// launchRestack is the launcher of a restack session: a worker on restackModel
-// that restackPrompt tells to run one restack and nothing else. Its fingerprint
-// takes in that prompt, since it's part of what the session loads. That sets a
-// restack session's fingerprint apart from a worker's, so followup can tell one
-// and start a fresh worker after it, even on a task whose model is restackModel.
+// launchRestack is the launcher of a restack session: a worker on restackModel,
+// at the user's own effort, that restackPrompt tells to run one restack and
+// nothing else. Its fingerprint takes in that prompt, since it's part of what
+// the session loads. That sets a restack session's fingerprint apart from a
+// worker's, so followup can tell one and start a fresh worker after it, even on
+// a task whose model is restackModel.
 func (c *Crew) launchRestack(p *Project) (launcher, error) {
-	l, err := c.launchWorker(p, restackModel)
+	l, err := c.launchWorker(p, restackModel, "")
 	if err != nil {
 		return l, err
 	}

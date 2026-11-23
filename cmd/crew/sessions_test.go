@@ -70,11 +70,11 @@ func TestAWorkerWithoutAModelLaunchesAsBefore(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Project{Name: "p", Dir: t.TempDir(), Settings: Settings{"WORKER_PERMISSION_MODE": "auto", "WORKER_AUTOCOMPACT_WINDOW": "400k"}}
-	unset, err := c.launchWorker(p, "")
+	unset, err := c.launchWorker(p, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sonnet, err := c.launchWorker(p, "sonnet")
+	sonnet, err := c.launchWorker(p, "sonnet", "medium")
 	if err != nil {
 		t.Fatal(err)
 	}
