@@ -68,12 +68,20 @@ type claudeUsage struct {
 	CacheWrite int `json:"cache_creation_input_tokens"`
 	CacheRead  int `json:"cache_read_input_tokens"`
 	Output     int `json:"output_tokens"`
+	// The cache writes kept for an hour, which cost more than the rest: those
+	// kept for five minutes, the API's default.
+	CacheWrites struct {
+		OneHour int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u claudeUsage) total() int { return u.Input + u.CacheWrite + u.CacheRead + u.Output }
 
 func (u claudeUsage) add(v claudeUsage) claudeUsage {
-	return claudeUsage{u.Input + v.Input, u.CacheWrite + v.CacheWrite, u.CacheRead + v.CacheRead, u.Output + v.Output}
+	sum := claudeUsage{Input: u.Input + v.Input, CacheWrite: u.CacheWrite + v.CacheWrite,
+		CacheRead: u.CacheRead + v.CacheRead, Output: u.Output + v.Output}
+	sum.CacheWrites.OneHour = u.CacheWrites.OneHour + v.CacheWrites.OneHour
+	return sum
 }
 
 func (u claudeUsage) String() string {

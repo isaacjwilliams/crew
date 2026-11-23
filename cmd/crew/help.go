@@ -156,6 +156,14 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    fix and revert since the date, traced to the
                                    task that caused it. Reads the ledger, and
                                    fetches the project's clone to read its reverts
+  crew costs [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+                                   What each step of crew's process cost from the
+                                   first day to the last, both included (default
+                                   the last 7 days), at API rates: its total, its
+                                   share of all spend, and its median per task over
+                                   the tasks that finished in those days. Reads this
+                                   machine's Claude Code transcripts, for every
+                                   project
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    raise to high the risk of tasks whose branch
