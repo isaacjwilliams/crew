@@ -2963,4 +2963,24 @@ check "branch caused, handed back, branch caused: a new red head is a question, 
 crew set "$CM" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
+# A note from the live view, in a terminal: down to the task's line (the cursor starts on the
+# first, and the view shows a line for each line the plain text has), n, the note, enter. Then,
+# with the view still open, crew set and crew tick: each would wait up to 30 seconds for a held
+# lock, so the 20 seconds they get would end with exit 124.
+VN=$(pr_task "Note from the view"); TVN=$(basename "$VN" .md); setstate "done" null; n=$(resumes)
+VP=$(basename "$(dirname "$(dirname "$VN")")")   # the task's project
+i=$(crew status --project "$VP" --plain | grep -v '^$' | grep -n "^ *$TVN " | cut -d: -f1)
+note="q r j k h l g G, then space"
+{
+  sleep 3; printf 'j%.0s' $(seq 2 "$i"); printf n; sleep 0.5; printf '%s\r' "$note"
+  wait_for "grep -q 'note from the user: $note' '$VN'"
+  s=$SECONDS; timeout 20 crew set "$VN" risk medium >/dev/null 2>&1; echo "set $? $((SECONDS - s))" >"$HOME/while-open"
+  s=$SECONDS; timeout 20 crew tick >/dev/null 2>&1; echo "tick $? $((SECONDS - s))" >>"$HOME/while-open"
+  printf q
+} | timeout 60 script -qec "crew status --project $VP" /dev/null >"$HOME/live-note.out" 2>&1; live=$?
+check "from the live view, a note with the view's own keys in it reaches the worker as typed, as the user's words, and the Log has it" \
+  '[[ $live == 0 && $(<"$HOME/live-note.out") != *"not sent"* && $(resumes) == $((n + 1)) && $(last_prompt) == *"Note from the user, in their own words: $note" && $(grep "note from the user" "$VN") == *"followup (resume): worker "*" — note from the user: $note" ]]'
+check "with the view still open after a note, crew set and crew tick take the lock at once" \
+  '[[ $(head -1 "$HOME/while-open") == "set 0 "* && $(tail -1 "$HOME/while-open") == "tick 0 "* && $(crew get "$VN" risk) == medium ]]'
+
 summary crew-e2e
