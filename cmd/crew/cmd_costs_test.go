@@ -490,6 +490,27 @@ func TestCostsLeaveOutTasksUnderWayWhileAnotherMachineRanTheCrew(t *testing.T) {
 	}
 }
 
+// A Log line's time is the clock of the machine that wrote it, with no zone.
+// Here, in New York, a task merged on a laptop in Los Angeles at 06:30 its
+// time, after the laptop took over at 04:00 there: 06:30 read in New York
+// would be before that.
+func TestCostsLeaveOutATaskThatFinishedOnAnotherMachinesClock(t *testing.T) {
+	local := time.Local
+	time.Local = time.FixedZone("EST", -5*60*60)
+	t.Cleanup(func() { time.Local = local })
+	at := func(s string) time.Time { return costsDay(t, s) }
+	tasks := map[string]Task{"p/west": finishedTask(t, "west", "2026-11-13 10:00", "2026-11-18 06:30")}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		{owner{stepWorker, "p/west"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
+	}}
+	elsewhere := []tenure{{holder: "laptop", from: time.Date(2026, 11, 18, 4, 0, 0, 0, time.FixedZone("PST", -8*60*60))}}
+	var out strings.Builder
+	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	if want := "Left out: 1 under way while laptop ran the crew.\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("report doesn't say %q:\n%s", want, out.String())
+	}
+}
+
 // The expected folders come from the encoder in Claude Code 2.1.328 itself.
 func TestTranscriptFolderCutsAndHashesWhatPassesTwoHundredCharacters(t *testing.T) {
 	at200 := "/" + strings.Repeat("a/", 99) + "b"

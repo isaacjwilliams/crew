@@ -550,9 +550,12 @@ func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, t
 		}
 		// A task with no created date is zero, so it counts as begun early.
 		created, _ := time.Parse(time.RFC3339, t.Get("created"))
-		var during []string // the machines that ran the crew while the task was under way
+		// The machines that ran the crew while the task was under way. Its
+		// finish may be on another machine's clock, so it runs to the latest
+		// that can be.
+		var during []string
 		for _, e := range elsewhere {
-			if e.during(created, finished) {
+			if e.during(created, latestMoment(finished)) {
 				during = append(during, e.holder)
 			}
 		}
@@ -567,6 +570,15 @@ func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, t
 		}
 	}
 	return whole, left
+}
+
+// latestMoment is the latest moment a time read from a Log line can be. The
+// line gives the clock of the machine that wrote it, with no time zone, and
+// LogEntries reads it on this machine's clock. Read in the zone furthest
+// behind UTC, twelve hours, it's the latest that clock time is anywhere.
+func latestMoment(logged time.Time) time.Time {
+	y, mo, d := logged.Date()
+	return time.Date(y, mo, d, logged.Hour(), logged.Minute(), 0, 0, time.FixedZone("UTC-12", -12*60*60))
 }
 
 // finishedAt is when the task last merged or was done, or zero if it isn't
