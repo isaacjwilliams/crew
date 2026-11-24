@@ -468,6 +468,7 @@ type leftOut struct {
 	underWay   int      // under way while another machine ran the crew
 	machines   []string // those other machines
 	unrated    int      // with a message there's no rate for
+	unspent    int      // with nothing spent in the transcripts: its sessions are somewhere else
 }
 
 // costsIn is the report on the transcripts from the first day to the last,
@@ -499,16 +500,19 @@ func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to
 		}
 	}
 	for _, spend := range whole {
-		if spend.unrated {
+		switch {
+		case spend.unrated:
 			leftOut.unrated++
-			continue
+		case len(spend.steps) == 0:
+			leftOut.unspent++
+		default:
+			total := 0.0
+			for step, cost := range spend.steps {
+				r.perTask[step] = append(r.perTask[step], cost)
+				total += cost
+			}
+			r.taskTotals = append(r.taskTotals, total)
 		}
-		total := 0.0
-		for step, cost := range spend.steps {
-			r.perTask[step] = append(r.perTask[step], cost)
-			total += cost
-		}
-		r.taskTotals = append(r.taskTotals, total)
 	}
 	r.leftOut = leftOut
 	slices.Sort(r.rated)
@@ -668,6 +672,9 @@ func (l leftOut) reasons() []string {
 	}
 	if l.unrated > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.unrated))
+	}
+	if l.unspent > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d with nothing spent in this machine's transcripts", l.unspent))
 	}
 	return reasons
 }

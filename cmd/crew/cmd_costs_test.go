@@ -491,8 +491,9 @@ func TestCostsLeaveOutTasksUnderWayWhileAnotherMachineRanTheCrew(t *testing.T) {
 }
 
 // A task with a message at a model there's no rate for has a cost nobody
-// knows, so it's left out of every median, and counted.
-func TestCostsLeaveOutTasksWithAMessageThereIsNoRateFor(t *testing.T) {
+// knows, and one with nothing spent in the transcripts ran somewhere else, so
+// each is left out of every median, and counted.
+func TestCostsLeaveOutTasksWhoseCostIsUnknown(t *testing.T) {
 	at := func(s string) time.Time { return costsDay(t, s) }
 	spent := func(task, model string) *charge {
 		return &charge{owner{stepWorker, task}, &message{model, at("2026-11-18 09:00"), claudeUsage{Output: 500_000}}}
@@ -500,6 +501,7 @@ func TestCostsLeaveOutTasksWithAMessageThereIsNoRateFor(t *testing.T) {
 	tasks := map[string]Task{
 		"p/rated":   finishedTask(t, "rated", "2026-11-13 10:00", "2026-11-18 12:00"),
 		"p/unrated": finishedTask(t, "unrated", "2026-11-13 10:00", "2026-11-18 12:00"),
+		"p/unspent": finishedTask(t, "unspent", "2026-11-13 10:00", "2026-11-18 12:00"),
 	}
 	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
 		spent("p/rated", "claude-opus-5-5"), spent("p/unrated", "claude-opus-5-5"), spent("p/unrated", "claude-mystery-1"),
@@ -508,7 +510,7 @@ func TestCostsLeaveOutTasksWithAMessageThereIsNoRateFor(t *testing.T) {
 	costsIn(ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
 	for _, want := range []string{
 		"  All                $20   100%      1       $10\n",
-		"Left out: 1 with a message there's no rate for.\n",
+		"Left out: 1 with a message there's no rate for and 1 with nothing spent in this machine's transcripts.\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report doesn't say %q:\n%s", want, out.String())

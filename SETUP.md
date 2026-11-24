@@ -457,7 +457,7 @@ Below the table it says which tasks the medians count, and how many it left out.
 - **Claude Code deleted its older sessions.** Claude Code deletes a session once it has been idle for `cleanupPeriodDays` (30 by default), so the transcripts are complete from when the oldest session it would delete was last written. It keeps a session started or last continued in Claude Desktop or Cowork at any age, and an agent's transcript goes with its session, so those don't date the transcripts. A task begun before then is left out.
 - **Another machine ran the crew while the task was under way**, as the `host` file's history shows. That machine's sessions stay on it, so the task is left out.
 
-It can't see any other way spend goes missing. A brief review run by a lead on a machine that doesn't hold the lease is in that machine's transcripts, so its task's medians miss it. A task with a message at a model there's no rate for is left out too.
+It can't see any other way spend goes missing. A brief review run by a lead on a machine that doesn't hold the lease is in that machine's transcripts, so its task's medians miss it. A task with a message at a model there's no rate for is left out too, and so is one with nothing spent in this machine's transcripts: its sessions are somewhere else.
 
 Then it says from when the transcripts are complete, if the range starts earlier, gives the tokens of any model it has no rate for, which it doesn't price, and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
 
