@@ -856,6 +856,26 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	}
 }
 
+// TestFollowupCommandRunsInAProcessGroupOfItsOwn sends a note through a crew
+// that says its process ID, its process group's and its arguments.
+func TestFollowupCommandRunsInAProcessGroupOfItsOwn(t *testing.T) {
+	exe := t.TempDir() + "/crew"
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$$ $(ps -o pgid= -p $$) $*\" >&2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var errs strings.Builder
+	if code := runStep(followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first"), &errs); code != 0 {
+		t.Fatalf("the note's command exited %d: %s", code, errs.String())
+	}
+	said := strings.Fields(errs.String())
+	if len(said) < 2 || said[0] != said[1] {
+		t.Errorf("the note's crew followup runs in the view's process group, not one of its own: %q", errs.String())
+	}
+	if got, want := strings.Join(said[min(2, len(said)):], " "), "followup /l/tasks/016-both.md --note the tests first --from-user"; got != want {
+		t.Errorf("the note's command runs crew %q, want %q", got, want)
+	}
+}
+
 // TestBrowsePRKeepsGhOffTheScreen runs browsePR on a gh that prints, starts a
 // "browser" that keeps gh's output open, and fails when told to.
 func TestBrowsePRKeepsGhOffTheScreen(t *testing.T) {

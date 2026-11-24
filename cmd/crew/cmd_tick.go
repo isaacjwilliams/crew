@@ -97,7 +97,11 @@ func (c *Crew) step(errs *strings.Builder, args ...string) int {
 	if err != nil {
 		return 1
 	}
-	cmd := exec.Command(exe, args...)
+	return runStep(exec.Command(exe, args...), errs)
+}
+
+// runStep runs a step's command, as step says.
+func runStep(cmd *exec.Cmd, errs *strings.Builder) int {
 	cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
 	if errs != nil {
 		cmd.Stderr = errs

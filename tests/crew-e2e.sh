@@ -598,9 +598,6 @@ setstate "done" null; touch "$HOME/reopen-on-resume"; sess=$(crew get 1 worker_s
 { sleep 0.5; crew followup 1 --note "reader gone" 2>&1 >/dev/null; } | true
 copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
 check "a followup whose stderr nobody reads any more still records the session it started, and its note" '[[ $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(grep -c "reader gone" "$F1") == 1 ]]'
-setstate "done" null; touch "$HOME/hangup-on-launch"
-crew followup 1 --note "terminal closed" >/dev/null 2>&1
-check "a followup whose terminal closes as it starts the worker still records its note" '[[ ! -e $HOME/hangup-on-launch && $(grep -c "terminal closed" "$F1") == 1 ]]'
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
 check "a resume whose process first reports a new session ID keeps the recorded session" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]]'

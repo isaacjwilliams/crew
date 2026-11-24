@@ -8,10 +8,12 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
+	"os"
 	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -75,11 +77,24 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 		// The note goes through crew followup, in a process of its own, so
 		// the ledger's lock is held only while it runs.
 		sendNote: func(t Task, note string) (string, error) {
+			exe, err := os.Executable()
+			if err != nil {
+				return "", err
+			}
 			var errs strings.Builder
-			failed := c.step(&errs, "followup", t.Path, "--note", note, "--from-user") != 0
+			failed := runStep(followupCommand(exe, t, note), &errs) != 0
 			return followupOutcome(failed, errs.String())
 		},
 	}
+}
+
+// followupCommand is crew followup sending a note as the user's own words. It
+// runs in a process group of its own, so closing the view's terminal hangs up
+// neither followup nor the worker it starts before followup has recorded it.
+func followupCommand(exe string, t Task, note string) *exec.Cmd {
+	cmd := exec.Command(exe, "followup", t.Path, "--note", note, "--from-user")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
 }
 
 // followupOutcome reads what crew followup wrote to stderr. When it failed,
