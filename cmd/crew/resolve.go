@@ -118,17 +118,9 @@ func ambiguous(arg string, matches []string) string {
 // of them.
 func (c *Crew) resolve(kind, arg string) (string, error) {
 	if isFile(arg) {
-		abs, err := filepath.Abs(arg)
-		if err == nil {
-			abs, err = filepath.EvalSymlinks(abs)
-		}
-		return abs, err
+		return realPath(arg)
 	}
-	scopes := []string{""}
-	if p, _ := c.defaultProject(); p != "" {
-		scopes = []string{p, ""}
-	}
-	for _, p := range scopes {
+	for _, p := range c.searchOrder() {
 		if files := c.files(kind, p); len(files) > 0 {
 			f, matches := resolveIn(arg, files)
 			if f != "" {
@@ -140,6 +132,24 @@ func (c *Crew) resolve(kind, arg string) (string, error) {
 		}
 	}
 	return "", fail("no %s matches '%s'", strings.TrimSuffix(kind, "s"), arg)
+}
+
+// realPath is the absolute path a file's path leads to.
+func realPath(f string) (string, error) {
+	abs, err := filepath.Abs(f)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// searchOrder is the scopes a lookup tries in turn: the default project
+// (defaultProject), then every project.
+func (c *Crew) searchOrder() []string {
+	if p, _ := c.defaultProject(); p != "" {
+		return []string{p, ""}
+	}
+	return []string{""}
 }
 
 // isProposal says whether f, a file resolve found, is a proposal's: it's in a
