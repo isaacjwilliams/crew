@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -640,8 +641,11 @@ func (m *liveStatus) footLines() []string {
 		return nil
 	}
 	lines := strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
-	if most := max(1, m.height/2); len(lines) > most {
-		lines = append(lines[:1], lines[len(lines)-most+1:]...)
+	// Past half the screen, it keeps its first line and its last ones, and says
+	// how many it leaves out between them.
+	if most := max(3, m.height/2); len(lines) > most {
+		cut := len(lines) - most + 1
+		lines = slices.Concat(lines[:1], []string{"… " + strconv.Itoa(cut) + " lines not shown"}, lines[1+cut:])
 	}
 	return lines
 }

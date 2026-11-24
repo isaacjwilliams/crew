@@ -835,13 +835,14 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 		t.Errorf("the cursor's line isn't on screen above what crew said: %q", screen(m))
 	}
 
-	// A refusal longer than half the screen keeps its first line and its last.
+	// A refusal longer than half the screen keeps its first line and its last,
+	// and says how many it leaves out.
 	run.warnings, run.err = "", errors.New(strings.Repeat("claude's output\n", 20)+"crew: could not start a session (see output above)")
 	press(m, "n")
 	typeText(m, "and again")
 	finish(t, m, press(m, "enter"))
 	foot := strings.Split(footOnScreen(m), "\n")
-	if len(foot) != 6 || foot[0] != "crew followup failed; n on 016-both brings your note back:" || foot[5] != "crew: could not start a session (see output above)" {
+	if len(foot) != 6 || foot[0] != "crew followup failed; n on 016-both brings your note back:" || foot[1] != "… 17 lines not shown" || foot[2] != "claude's output" || foot[5] != "crew: could not start a session (see output above)" {
 		t.Errorf("on a screen 12 lines high, a long refusal shows as %q", foot)
 	}
 	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
