@@ -632,7 +632,8 @@ func (m *liveStatus) bodyHeight() int {
 // footLines are the lines above the bar: the note the user is typing or, when
 // they aren't, what an action did, wrapped to the screen. They take at most
 // half of it, so a long one keeps its first line, which says what happened,
-// and its last ones, where a refusal ends.
+// and its last ones, where a refusal ends. When there's room, a line between
+// them says how many it leaves out.
 func (m *liveStatus) footLines() []string {
 	if m.note != nil {
 		return []string{m.note.input.View()}
@@ -641,11 +642,12 @@ func (m *liveStatus) footLines() []string {
 		return nil
 	}
 	lines := strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
-	// Past half the screen, it keeps its first line and its last ones, and says
-	// how many it leaves out between them.
-	if most := max(3, m.height/2); len(lines) > most {
-		cut := len(lines) - most + 1
-		lines = slices.Concat(lines[:1], []string{"… " + strconv.Itoa(cut) + " lines not shown"}, lines[1+cut:])
+	if most := max(1, m.height/2); len(lines) > most {
+		last := lines[len(lines)-most+1:]
+		if most >= 3 {
+			last = slices.Concat([]string{"… " + strconv.Itoa(len(lines)-most+1) + " lines not shown"}, last[1:])
+		}
+		lines = slices.Concat(lines[:1], last)
 	}
 	return lines
 }

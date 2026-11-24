@@ -482,8 +482,6 @@ func offered(m *liveStatus) string {
 	return strings.TrimSpace(keys)
 }
 
-// footOnScreen is the lines above the bar, as the screen shows them, without
-// their style or the spaces after them.
 // cursorOnScreen is the words of the line in the cursor's style, looked for in
 // the body above what the view says, on a screen as high as the terminal. It's
 // "" when the cursor's line isn't there.
@@ -501,6 +499,8 @@ func cursorOnScreen(t *testing.T, m *liveStatus) string {
 	return ""
 }
 
+// footOnScreen is the lines above the bar, as the screen shows them, without
+// their style or the spaces after them.
 func footOnScreen(m *liveStatus) string {
 	lines := screen(m)
 	foot := lines[len(lines)-1-len(m.footLines()) : len(lines)-1]
@@ -847,6 +847,12 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	}
 	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
 		t.Errorf("the cursor's line isn't on screen above a long refusal: %q", screen(m))
+	}
+
+	// On a screen 4 lines high, it leaves room for the cursor's line and the bar.
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 4})
+	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
+		t.Errorf("on a screen 4 lines high, the cursor's line isn't on screen above a long refusal: %q", screen(m))
 	}
 }
 
