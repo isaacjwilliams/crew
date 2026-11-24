@@ -1026,12 +1026,21 @@ out=$(crew sync)
 check "after a merge, a PR GitHub already moved to what the parent merged into isn't sent back" \
   '[[ $out == *"010-season-admin: needs a restack, 009-season-model merged"* && $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
 git update-ref -d refs/remotes/origin/agent/season-model; rm -f "$HOME/gh-pr-base-22"
-crew set 10 auto_review no
+crew set 10 auto_review no; crew set 10 pre_pr_review no
+check "a task with pre_pr_review no gives its worker no, until it's high risk" '[[ $(crew config PRE_PR_REVIEW --task 10) == no ]]'
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
 check "a raise by sync turns the task's automated review back on, and logs why" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew config AUTO_REVIEWS --task 10) == 3 && $(tail -1 "$F10") == *" — risk → high: touches admin.txt; automated review back on" ]]'
+check "a raise after the PR is open turns pre_pr_review's passes back on for the worker, and says nothing of them" \
+  '[[ $(crew config PRE_PR_REVIEW --task 10) == yes && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
+crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
+check "a raise before the PR is open logs that the pre-PR passes are back on" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* && $(crew config PRE_PR_REVIEW --task 10) == yes ]]'
+crew set 10 risk low; crew set 10 pre_pr_review yes; out=$(crew sync 2>&1); rm "$HOME/gh-no-pr"; crew set 10 pr https://github.com/isaac/webapp/pull/22
+check "a raise of a task with pre_pr_review yes says nothing of the pre-PR passes, even before its PR is open" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'

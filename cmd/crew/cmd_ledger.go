@@ -18,7 +18,8 @@ var configKeys = []string{"MAX_WORKERS", "GOAL_MAX_IN_FLIGHT", "BRANCH_PREFIX", 
 
 // crew config [KEY] [--project P|--task T]: the effective settings, with the
 // overrides of P or the default project (defaultProject), or of T's project,
-// with the AUTO_REVIEWS T's worker reads (the one setting a task can change).
+// with the AUTO_REVIEWS and PRE_PR_REVIEW T's worker reads (the settings a task
+// can change).
 func cmdConfig(c *Crew, args []string) error {
 	key, name, task := "", "", ""
 	for len(args) > 0 {
@@ -54,6 +55,7 @@ func cmdConfig(c *Crew, args []string) error {
 	if task != "" {
 		settings = settings.clone()
 		settings["AUTO_REVIEWS"] = t.AutoReviews(settings["AUTO_REVIEWS"])
+		settings["PRE_PR_REVIEW"] = t.PrePRReview()
 	}
 	value := func(k string) string {
 		switch k {

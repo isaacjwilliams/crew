@@ -621,6 +621,20 @@ func (t Task) AutoReviews(project string) string {
 	return project
 }
 
+// PrePRReviewOff: the lead turned the task's pre-PR passes (the worker's
+// /simplify and casual observer) off, and the task isn't high risk.
+func (t Task) PrePRReviewOff() bool {
+	return t.Get("pre_pr_review") == "no" && t.Risk() != RiskHigh
+}
+
+// PrePRReview is whether the worker runs its pre-PR passes: "yes" or "no".
+func (t Task) PrePRReview() string {
+	if t.PrePRReviewOff() {
+		return "no"
+	}
+	return "yes"
+}
+
 // AwaitsAutomatedReview: the task has a PR and automated review should run on
 // it (project is the project's AUTO_REVIEWS), but no review is recorded yet. A
 // task without a PR (pr_mode none) has nothing to review.

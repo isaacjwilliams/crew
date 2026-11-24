@@ -15,7 +15,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │      implementer workers   (background sessions, one per task,
            │                    │         each in ~/agent-work/<project>/<task>)
            │                    │  ├─ tests that pin old behaviour first, a /simplify pass once checks pass
-           │                    │  ├─ casual-observer pass before the PR (both off when pre_pr_review is no)
+           │                    │  ├─ casual-observer pass before the PR (both off when pre_pr_review is no, unless the task is high risk)
            │                    │  ├─ evidence for each criterion, push branch, open draft PR
            │                    ▼  └─ automated review of the PR, fixes, a summary comment
            └── review/merge ── GitHub PRs
@@ -506,7 +506,7 @@ A high-risk task's worker also runs Claude Code's `/security-review` before hand
 SENSITIVE_PATHS="db/migrate config/credentials :(glob)app/**/auth*"
 ```
 
-When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review (as every hand-over does while automated review is on); the worker's model stays as it was. A task raised after its hand-over says `not yet: no security review yet` in `crew status`, and `(no security review yet)` on its `to review:` line, until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
+When a task's branch changes a file that matches one, crew raises its tier to `high` and logs which file: when the worker hands over, and at every `crew sync` after that, so a fix made in a review round counts too. Crew never lowers a tier. A raise also turns the task's automated review back on if the lead turned it off, and says so in the same log line, and the worker's hand-over then waits for a review (as every hand-over does while automated review is on); a task raised before its PR is open gets its worker's pre-PR passes back too, if the lead turned them off, and the log line says so; the worker's model stays as it was. A task raised after its hand-over says `not yet: no security review yet` in `crew status`, and `(no security review yet)` on its `to review:` line, until its worker has run one; the lead sends the worker back to run it. If crew can't check, for a pathspec git rejects say, the hand-over is refused until you fix `SENSITIVE_PATHS`.
 
 **In `crew status`**, each open PR's row says whether you can merge it now, and the look it needs:
 
