@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implements one ledger task in its own git worktree, runs a casual-observer pass before opening a PR when its task asks for one, and automated review after, and addresses review rounds on that PR. Dispatched by `crew dispatch` / `crew followup` as a background session; not meant for ad-hoc delegation.
+description: Implements one ledger task in its own git worktree, runs its /simplify and casual-observer passes before opening a PR unless the task turns them off, runs automated review after, and addresses review rounds on that PR. Dispatched by `crew dispatch` / `crew followup` as a background session; not meant for ad-hoc delegation.
 disallowedTools: AskUserQuestion, EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree, CronCreate, CronDelete, ScheduleWakeup, RemoteTrigger, Workflow, CronList, EndConversation, PushNotification, SendFeedback, ListAgents, SendMessage, DesignSync, SendToProject, SendToProjectContext
 color: blue
 hooks:
