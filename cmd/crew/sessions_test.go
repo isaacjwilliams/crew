@@ -149,7 +149,6 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 		{"entries written after it", own + `{"type":"user"}` + "\n" + fmt.Sprintf(`{"type":"last-prompt","timestamp":%q}`, later.Format(time.RFC3339)) + "\n\n"},
 		{"a subagent's reply after it", own + reply(later, 20_000, `"isSidechain":true,`)},
 		{"an API error after it", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339)) + "\n"},
-		{"a line that doesn't read and isn't a reply", own + "{not json\n"},
 		{"a copy of it with its counts zeroed", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"msg_%d","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339), at.Unix()) + "\n"},
 	} {
 		writeTranscript(t, dir, "s1.jsonl", c.transcript)
@@ -162,9 +161,16 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 	if _, _, ok := lastRequest(path); ok {
 		t.Error("lastRequest found a request in a transcript without one")
 	}
-	// Cut off mid-write, say: it may be a later request than the one before it.
-	writeTranscript(t, dir, "s1.jsonl", own+`{"type":"assistant","timestamp":`+"\n")
-	if _, _, ok := lastRequest(path); ok {
-		t.Error("lastRequest gave the last reply it could read, though a reply after it doesn't read")
+	// A reply cut off as it was written may be a later request than the one
+	// before it. Claude Code writes its type after its message.
+	for _, cut := range []string{
+		`{"parentUuid":"p1","isSidechain":false,"message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,`,
+		`{"type":"assistant","timestamp":`,
+		"{not json",
+	} {
+		writeTranscript(t, dir, "s1.jsonl", own+cut+"\n")
+		if _, _, ok := lastRequest(path); ok {
+			t.Errorf("lastRequest gave the last reply it could read, though a line after it doesn't read: %s", cut)
+		}
 	}
 }
