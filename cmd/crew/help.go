@@ -156,8 +156,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    PRs to review, cheapest look first. For one
                                    project, it ends with what's waiting on you in the
                                    others. In a terminal it stays open, as a tree
-                                   you can fold, and keeps itself up to date;
-                                   --plain prints the text instead
+                                   you can fold, and keeps itself up to date; on a
+                                   task, o opens its PR and n sends its worker a
+                                   note. --plain prints the text instead
   crew stats [--since YYYY-MM-DD] [--all|--project P]
                                    For each task merged since the date (default 30
                                    days ago): your review rounds and comments, how

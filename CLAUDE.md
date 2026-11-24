@@ -46,8 +46,8 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
 
 ## Conventions
 
-- **Shipped code** is Go, on the standard library and Charm's bubbletea and lipgloss for `crew status`'s live view, plus three `sh` files in `bin/` (the launcher `crew`, the hook forwarder `crew-guard` and the `lead` shim) and the fish completions.
-  - Runtime dependencies are git, gh, claude and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add other Go modules (Charm's bubbles is the one exception, should the live view need it), Python or Node.
+- **Shipped code** is Go, on the standard library and Charm's bubbletea, lipgloss and bubbles for `crew status`'s live view, plus three `sh` files in `bin/` (the launcher `crew`, the hook forwarder `crew-guard` and the `lead` shim) and the fish completions.
+  - Runtime dependencies are git, gh, claude and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add other Go modules, Python or Node.
   - `gofmt` and `go vet` are the Go lint. Keep shellcheck clean at `-S warning` for `bin/` and `tests/`.
   - Linux is the reference, and crew runs on macOS too. Code that runs a system's own tools goes in a `_linux.go` file with a `_darwin.go` beside it; the parsing and choices around it go in a neutral file, so `go test` on Linux covers them. The shell suites are Linux-only; the release workflow runs `go test` on macOS.
   - **Services** are `systemd/` units on Linux and `launchd/` plists on a Mac, one plist per `.service`. `services_linux.go` and `services_darwin.go` define the same functions and are the only places crew runs `systemctl` or `launchctl`; callers never branch on the system. A change to a unit needs the same change to its plist: `services_test.go` checks that they agree.
