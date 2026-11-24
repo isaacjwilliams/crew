@@ -31,6 +31,7 @@ complete -c crew -n "__fish_seen_subcommand_from feedback" -l since -r
 complete -c crew -n "__fish_seen_subcommand_from ci-summary" -l not-the-branch -d 'The branch didn\'t cause it: the round doesn\'t count toward MAX_CI_FIXES'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l fresh -d 'Start a new worker instead of resuming'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l note -r
+complete -c crew -n "__fish_seen_subcommand_from followup" -l from-user -d "Give the note as your own words, not the lead's"
 complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a restack the worker already has'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks and done spikes with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force

@@ -561,6 +561,9 @@ sed -i "s/^status: .*/status: pr-open/" "$F1"; setstate "done" null  # crew set 
 check "note-only followup moves a pr-open task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 setstate "done" null
 check "note-only followup keeps a working task working and logs no status line" 'n=$(grep -c "status → " "$F1"); crew followup 1 --note "carry on" >/dev/null && [[ $(crew get 1 status) == working && $(grep -c "status → " "$F1") == "$n" ]]'
+setstate "done" null
+check "a note --from-user reaches the worker as the user's own words, and the Log says it's theirs" 'crew followup 1 --note "rename it" --from-user >/dev/null && p=$(grep -- "--resume" "$HOME/claude-calls.log" | tail -1) && [[ $p == *"Note from the user, in their own words: rename it"* && $p != *"Note from the lead"* && $(tail -1 "$F1") == *"followup (resume): worker "*" — note from the user: rename it" ]]'
+check "--from-user without a note is a usage error" '! crew followup 1 --from-user 2>/dev/null'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 rm -f "$HOME/fail-resume"

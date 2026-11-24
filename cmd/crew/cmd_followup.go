@@ -12,31 +12,33 @@ import (
 	"time"
 )
 
-// crew followup TASK [--fresh] [--note TEXT]
+// crew followup TASK [--fresh] [--note TEXT [--from-user]]
 func cmdFollowup(c *Crew, args []string) error {
 	if err := need("claude"); err != nil {
 		return err
 	}
-	var arg, note string
-	fresh := false
+	var arg string
+	var with followupWith
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--fresh":
-			fresh, args = true, args[1:]
+			with.fresh, args = true, args[1:]
 		case args[0] == "--note" && len(args) > 1:
-			note, args = args[1], args[2:]
+			with.note, args = args[1], args[2:]
+		case args[0] == "--from-user":
+			with.fromUser, args = true, args[1:]
 		default:
 			arg, args = args[0], args[1:]
 		}
 	}
-	if arg == "" {
-		return usage("crew followup TASK [--fresh] [--note TEXT]")
+	if arg == "" || (with.fromUser && with.note == "") {
+		return usage("crew followup TASK [--fresh] [--note TEXT [--from-user]]")
 	}
 	t, err := c.resolveTask(arg)
 	if err != nil {
 		return err
 	}
-	return c.followup(t, followupWith{fresh: fresh, note: note})
+	return c.followup(t, with)
 }
 
 // followupWith is what a followup's caller adds to what the task itself holds
@@ -44,13 +46,16 @@ func cmdFollowup(c *Crew, args []string) error {
 type followupWith struct {
 	fresh   bool   // start a fresh worker rather than resume the last one
 	stalled bool   // tell the worker its turn ended mid-task (crew nudge)
-	note    string // a note from the lead
+	note    string // a note from the lead, or from the user when fromUser
+	// fromUser: the note is in the user's own words, as crew status's live
+	// view sends it, not the lead's.
+	fromUser bool
 }
 
 // followup resumes a task's worker with the review rounds it hasn't been sent, a
-// note from the lead, word that a pause cut its last turn short (interrupted), or
-// word that its turn ended mid-task (stalled), or several of these; or starts a
-// fresh worker when with.fresh is set or the resume fails.
+// note from the lead or the user, word that a pause cut its last turn short
+// (interrupted), or word that its turn ended mid-task (stalled), or several of
+// these; or starts a fresh worker when with.fresh is set or the resume fails.
 func (c *Crew) followup(t Task, with followupWith) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -123,7 +128,10 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if with.stalled {
 		prompt += " " + stalledNote
 	}
-	if with.note != "" {
+	switch {
+	case with.fromUser:
+		prompt += " Note from the user, in their own words: " + with.note
+	case with.note != "":
 		prompt += " Note from the lead (also check Decisions in the task file): " + with.note
 	}
 	if err := c.lock(); err != nil {
@@ -167,7 +175,10 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if with.stalled {
 		msg += ", as its turn ended mid-task"
 	}
-	if with.note != "" {
+	switch {
+	case with.fromUser:
+		msg += " — note from the user: " + with.note
+	case with.note != "":
 		msg += " — note: " + with.note
 	}
 	t.Log(msg)
