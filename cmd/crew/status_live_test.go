@@ -663,7 +663,7 @@ func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	typeText(m, "own ")
 	reportTask(t, c, "p", "016-both", false, "status: merged", "pr: https://github.com/o/r/pull/16", "worktree: /wt/both")
 	m.Update(reportBuilt{report: readReport(c, "p")})
-	if l := m.shown[m.cursor]; l.task == nil || l.task.ID() == "016-both" {
+	if l := m.shown[m.cursor]; l.row == nil || l.row.Task.ID() == "016-both" {
 		t.Fatalf("the cursor is on %q, want another task's line", l.head)
 	}
 	typeText(m, "worker")

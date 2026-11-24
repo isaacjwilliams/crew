@@ -188,8 +188,8 @@ type action struct {
 	key  string
 	name string // what the bar calls it
 	// refuses says why the line's task doesn't take the action, or "" when it
-	// does. task is nil on a line that isn't a task's.
-	refuses func(m *liveStatus, task *Task) string
+	// does. row is nil on a line that isn't a task's.
+	refuses func(m *liveStatus, row *taskRow) string
 	start   func(m *liveStatus, task Task) tea.Cmd
 }
 
@@ -397,19 +397,19 @@ func (m *liveStatus) press(key string) tea.Cmd {
 // take the action, says why.
 func (m *liveStatus) act(a action) tea.Cmd {
 	l, _ := m.current()
-	if why := a.refuses(m, l.task); why != "" {
+	if why := a.refuses(m, l.row); why != "" {
 		m.said = why
 		return nil
 	}
-	return a.start(m, *l.task)
+	return a.start(m, l.row.Task)
 }
 
-func (m *liveStatus) refusesOpenPR(t *Task) string {
+func (m *liveStatus) refusesOpenPR(r *taskRow) string {
 	switch {
-	case t == nil:
+	case r == nil:
 		return "put the cursor on a task to open its PR"
-	case t.PR() == "":
-		return t.ID() + " has no PR"
+	case r.Task.PR() == "":
+		return r.Task.ID() + " has no PR"
 	}
 	return ""
 }
@@ -419,10 +419,12 @@ func (m *liveStatus) openPR(t Task) tea.Cmd {
 	return func() tea.Msg { return prOpened{t, open(t.PR())} }
 }
 
-func (m *liveStatus) refusesNote(t *Task) string {
-	switch {
-	case t == nil:
+func (m *liveStatus) refusesNote(r *taskRow) string {
+	if r == nil {
 		return "put the cursor on a task to send its worker a note"
+	}
+	t := r.Task
+	switch {
 	case !t.Dispatched():
 		return t.ID() + " has no worker: it hasn't been dispatched"
 	case t.Status().Finished():
@@ -638,7 +640,7 @@ func (m *liveStatus) bar() string {
 	keys := "↑↓ move  ←→ fold"
 	l, _ := m.current()
 	for _, a := range actions {
-		if a.refuses(m, l.task) == "" {
+		if a.refuses(m, l.row) == "" {
 			keys += "  " + a.key + " " + a.name
 		}
 	}
