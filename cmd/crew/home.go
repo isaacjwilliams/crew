@@ -45,6 +45,12 @@ type Crew struct {
 
 	ledgerLock *os.File // held from lock until unlock or the end of the process
 	login      string   // the GitHub login crew acts for, once looked up
+
+	// inProcess is set on the Crew an operation runs on inside a long-lived
+	// crew process (runInProcess): it writes nothing to the terminal, and keeps
+	// its warnings for the caller.
+	inProcess bool
+	warnings  []string
 }
 
 func newCrew() (*Crew, error) {

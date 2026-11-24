@@ -8,6 +8,7 @@ package main
 // for it.
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -152,8 +153,8 @@ func (c *Crew) goalStart(g Goal) error {
 	g.Set("lead_name", name)
 	l, err := c.launchSession(start, g.Doc, co, fmt.Sprintf("You are the goal lead for goal %s in project %s.\nGoal file: %s\nYour working directory is a checkout of origin/%s; read the code there.\nRead the goal file completely, then follow your workflow for a new goal.",
 		g.ID(), p.Name, g.Path, p.DefaultBranch()), false)
-	if err == errNotStarted {
-		return fail("could not start the goal lead (see output above)")
+	if errors.As(err, new(notStarted)) {
+		return fail("could not start the goal lead; %v", err)
 	} else if err != nil {
 		return err
 	}

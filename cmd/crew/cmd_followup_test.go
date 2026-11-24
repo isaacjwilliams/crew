@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +117,79 @@ func (f followupCrew) claudeSays(t *testing.T, out string, code int) {
 	writeFile(t, f.Crew, fmt.Sprintf("#!/bin/sh\n[ \"$1\" = agents ] && { echo '[]'; exit 0; }\necho '%s'\nexit %d\n", out, code), "bin", "claude")
 }
 
+// resumable records the task's worker as one followup would resume: started by
+// the launcher followup builds now.
+func (f followupCrew) resumable(t *testing.T, task Task) {
+	t.Helper()
+	p, err := f.loadProject("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := f.launchWorker(p, task.Model(), task.Effort())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := task.Set("worker_fingerprint", start.fingerprint); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// followupInProcess runs followup as code inside a long-lived crew process
+// does, and fails the test if it writes to the process's stdout or stderr, or
+// leaves the ledger lock held when it returns.
+func (f followupCrew) followupInProcess(t *testing.T, task Task, with followupWith) (followupSent, []string, error) {
+	t.Helper()
+	said := watchTerminal(t)
+	sent, warnings, err := runInProcess(f.Crew, func(op *Crew) (followupSent, error) { return op.followup(task, with) })
+	if out := said(); out != "" {
+		t.Errorf("followup wrote to the terminal:\n%s", out)
+	}
+	lock, lockErr := flock(f.path(".crew.lock"), 0)
+	if lockErr != nil {
+		t.Errorf("the ledger lock is still held after followup returned: %v", lockErr)
+	} else {
+		lock.Close()
+	}
+	return sent, warnings, err
+}
+
+// watchTerminal swaps the process's stdout and stderr for a pipe until the
+// function it returns is called, which gives back what was written to either.
+func watchTerminal(t *testing.T) func() string {
+	t.Helper()
+	stdout, stderr := os.Stdout, os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout, os.Stderr = w, w
+	read := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		read <- string(b)
+	}()
+	return func() string {
+		os.Stdout, os.Stderr = stdout, stderr
+		w.Close()
+		defer r.Close()
+		return <-read
+	}
+}
+
+// refused fails the test unless err is a refusal: an error with a reason, not
+// one of the outcomes that are neither sent nor refused.
+func refused(t *testing.T, err error) {
+	t.Helper()
+	switch {
+	case err == nil:
+		t.Fatal("followup sent the note")
+	case errors.As(err, new(unrecordedSession)), errors.As(err, new(worktreeError)):
+		t.Fatalf("followup ended in %T, want a refusal: %v", err, err)
+	case strings.TrimSpace(err.Error()) == "":
+		t.Fatal("followup refused without a reason")
+	}
+}
+
 func lastLog(task Task) string {
 	es := task.LogEntries()
 	if len(es) == 0 {
@@ -127,7 +202,11 @@ func TestFollowupSendsANote(t *testing.T) {
 	f := newFollowupCrew(t, "git")
 	f.workers(t, "done", false)
 	task := f.task(t)
-	if err := f.followup(task, followupWith{note: "carry on"}); err != nil {
+	if err := f.noteRefusal(task); err != nil {
+		t.Errorf("asked first, followup would refuse a note: %v", err)
+	}
+	sent, warnings, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+	if err != nil {
 		t.Fatalf("followup refused: %v", err)
 	}
 	if got := lastLog(task); !strings.HasPrefix(got, "followup (fresh") || !strings.HasSuffix(got, "— note: carry on") {
@@ -135,6 +214,49 @@ func TestFollowupSendsANote(t *testing.T) {
 	}
 	if task.WorkerJob() == "w1" || task.WorkerJob() == "" {
 		t.Errorf("worker_job is %q, want the fresh worker's", task.WorkerJob())
+	}
+	want := followupSent{job: task.WorkerJob(), mode: "fresh: its instructions or settings changed"}
+	if sent != want || len(warnings) != 0 {
+		t.Errorf("followup sent %+v with warnings %q, want %+v and none", sent, warnings, want)
+	}
+}
+
+// A worker whose session won't resume gets a fresh one, and followup's caller
+// hears why.
+func TestFollowupSendsANoteWithWarnings(t *testing.T) {
+	f := newFollowupCrew(t, "git")
+	f.workers(t, "done", false)
+	task := f.task(t)
+	f.resumable(t, task)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "fail-resume"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sent, warnings, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+	if err != nil {
+		t.Fatalf("followup refused: %v", err)
+	}
+	if sent.mode != "fresh" || sent.job != task.WorkerJob() {
+		t.Errorf("followup sent %+v, want a fresh worker, %s", sent, task.WorkerJob())
+	}
+	want := "couldn't resume session w1-session, so crew started a fresh one instead; claude said:\nError: session not found"
+	if len(warnings) != 1 || warnings[0] != want {
+		t.Errorf("followup warned %q, want %q", warnings, want)
+	}
+}
+
+// A second followup from the same process finds the ledger lock free, as do
+// other crew commands.
+func TestFollowupTwiceInOneProcess(t *testing.T) {
+	f := newFollowupCrew(t, "git")
+	task := f.task(t)
+	for _, note := range []string{"first", "second"} {
+		f.workers(t, "done", false)
+		if _, _, err := f.followupInProcess(t, task, followupWith{note: note}); err != nil {
+			t.Fatalf("followup with the %s note refused: %v", note, err)
+		}
+		if got := lastLog(task); !strings.HasSuffix(got, "— note: "+note) {
+			t.Errorf("the Log says %q, want the %s note", got, note)
+		}
 	}
 }
 
@@ -167,9 +289,13 @@ func TestFollowupRefusals(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(f)
 			}
-			err := f.followup(task, followupWith{note: "carry on"})
-			if err == nil || err.Error() != tc.want {
-				t.Errorf("followup said %v, want %q", err, tc.want)
+			_, _, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+			refused(t, err)
+			if err.Error() != tc.want {
+				t.Errorf("followup said %q, want %q", err, tc.want)
+			}
+			if ask := f.noteRefusal(task); ask == nil || ask.Error() != err.Error() {
+				t.Errorf("asked first, followup said %v, want %q", ask, err)
 			}
 		})
 	}
@@ -179,9 +305,10 @@ func TestFollowupWhenClaudeStartsNoSession(t *testing.T) {
 	f := newFollowupCrew(t, "git")
 	f.claudeSays(t, "Error: out of credits", 1)
 	task := f.task(t)
-	err := f.followup(task, followupWith{note: "carry on"})
-	if err == nil || !strings.HasPrefix(err.Error(), "could not start a session") {
-		t.Errorf("followup said %v, want that it couldn't start a session", err)
+	_, _, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+	refused(t, err)
+	if want := "could not start a session; claude said:\nError: out of credits"; err.Error() != want {
+		t.Errorf("followup said %q, want %q", err, want)
 	}
 	if task.WorkerJob() != "w1" {
 		t.Errorf("worker_job is %q, want w1 still", task.WorkerJob())
@@ -192,8 +319,9 @@ func TestFollowupWhenClaudeStartsASessionCrewCantRecord(t *testing.T) {
 	f := newFollowupCrew(t, "git")
 	f.claudeSays(t, "backgrounded · not/a/job · stub", 0)
 	task := f.task(t)
-	err := f.followup(task, followupWith{note: "carry on"})
-	if err == nil || !strings.Contains(err.Error(), "claude started a session but crew can't read its job ID") {
+	_, _, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+	var unrecorded unrecordedSession
+	if !errors.As(err, &unrecorded) || unrecorded.output != "backgrounded · not/a/job · stub" {
 		t.Errorf("followup said %v, want that claude started a session crew couldn't record", err)
 	}
 	if task.WorkerJob() != "w1" {
@@ -210,8 +338,12 @@ func TestFollowupRebuildsAWorktreeThatIsntHere(t *testing.T) {
 			task := f.task(t, "worktree: /elsewhere/"+followupTask)
 			runIn(t, f.repo, "git", "worktree", "remove", f.worktree())
 			runIn(t, f.repo, "git", "branch", "-D", followupBranch)
-			if err := f.followup(task, followupWith{note: "carry on"}); err != nil {
+			sent, _, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+			if err != nil {
 				t.Fatalf("followup refused: %v", err)
+			}
+			if want := "recreated worktree from origin/" + followupBranch; sent.worktree != want {
+				t.Errorf("followup says the worktree came back %q, want %q", sent.worktree, want)
 			}
 			if task.Worktree() != f.worktree() || !isDir(f.worktree()) {
 				t.Errorf("the worktree is %q (made: %v), want %s", task.Worktree(), isDir(f.worktree()), f.worktree())
@@ -226,7 +358,10 @@ func TestFollowupRebuildsAWorktreeThatIsntHere(t *testing.T) {
 // A task whose worktree isn't here and can't be made: git finds its branch
 // checked out elsewhere, and wt has hooks that need approval.
 func TestFollowupWhenTheWorktreeCantBeMade(t *testing.T) {
-	for _, tool := range []string{"git", "worktrunk"} {
+	for tool, want := range map[string]string{
+		"git":       "git couldn't create the worktree: fatal: '" + followupBranch + "' is already used by worktree at",
+		"worktrunk": "✗ Cannot prompt for approval in non-interactive environment",
+	} {
 		t.Run(tool, func(t *testing.T) {
 			f := newFollowupCrew(t, tool)
 			f.workers(t, "done", false)
@@ -240,8 +375,9 @@ func TestFollowupWhenTheWorktreeCantBeMade(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := f.followup(task, followupWith{note: "carry on"}); err == nil {
-				t.Fatal("followup sent the note")
+			_, _, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+			if !errors.As(err, new(worktreeError)) || !strings.Contains(err.Error(), want) {
+				t.Errorf("followup said %v, want a worktreeError that says %q", err, want)
 			}
 			if task.WorkerJob() != "w1" || isDir(f.worktree()) {
 				t.Errorf("worker_job is %q and the worktree made: %v; want w1 and none", task.WorkerJob(), isDir(f.worktree()))
