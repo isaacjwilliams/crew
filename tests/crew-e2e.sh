@@ -2497,6 +2497,15 @@ rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 
+# crew show prints a ledger file as it is on disk, and crew path prints its path.
+shows() {  # file arg...: crew show arg... prints file, and crew path arg... its path
+  local f=$1; shift
+  [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
+}
+TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
+check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first" \
+  'shows "$F1" 1 && shows "$TM" "$TMI" && shows "$TM" project-mem && shows "$TM" "#9104" && shows "$TM" "$TM"'
+
 # MCP servers for one project: its mcp.json, expanded into its git-ignored
 # mcp.local.json, which its workers and goal leads start with.
 M2=$L/projects/$P2/mcp.json; ML2=$L/projects/$P2/mcp.local.json
