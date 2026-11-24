@@ -593,6 +593,11 @@ setstate "done" null; touch "$HOME/reopen-on-resume"
 out=$(crew followup 1 --note "reopened" 2>&1)
 copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
 check "a copy started anyway, by a process that opened again before the resume, is recorded, with a warning" '[[ $out == *"started a copy of session $sess"* && $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(crew get 1 worker_job) == "$(jq -r ".[-1].id" "$HOME/agents.json")" ]]'
+# crew status runs followup with its stderr in a pipe, and may quit while it runs.
+setstate "done" null; touch "$HOME/reopen-on-resume"; sess=$(crew get 1 worker_session)
+{ sleep 0.5; crew followup 1 --note "reader gone" 2>&1 >/dev/null; } | true
+copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
+check "a followup whose stderr nobody reads any more still records the session it started, and its note" '[[ $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(grep -c "reader gone" "$F1") == 1 ]]'
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
 check "a resume whose process first reports a new session ID keeps the recorded session" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]]'

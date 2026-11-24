@@ -8,7 +8,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"slices"
+	"syscall"
 	"time"
 )
 
@@ -17,6 +19,10 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err := need("claude"); err != nil {
 		return err
 	}
+	// crew status reads what followup writes to stderr through a pipe, and
+	// may quit while it runs. Writing to a pipe nobody reads then fails, rather
+	// than killing followup between starting a worker and recording it.
+	signal.Ignore(syscall.SIGPIPE)
 	var arg string
 	var with followupWith
 	for len(args) > 0 {
