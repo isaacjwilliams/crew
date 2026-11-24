@@ -477,7 +477,7 @@ func (m *liveStatus) refusesNote(r *taskRow) string {
 		return "your note to " + t.ID() + "'s worker is still on its way"
 	case r.Worker.busy():
 		// crew followup would refuse it too.
-		return t.ID() + "'s worker is busy (" + r.Worker.stateText() + "): send it a note once it's idle"
+		return t.ID() + "'s worker is busy (" + r.Worker.stateText() + "), so it can't take a note now"
 	}
 	return ""
 }

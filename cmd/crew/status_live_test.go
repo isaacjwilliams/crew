@@ -533,7 +533,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 		{"workers running: 1/3", "o", "put the cursor on a task to open its PR"},
 		{"goal 001-launch", "n", "put the cursor on a task to send its worker a note"},
 		{"001-in-flight", "o", "001-in-flight has no PR"},
-		{"001-in-flight", "n", "001-in-flight's worker is busy (working): send it a note once it's idle"},
+		{"001-in-flight", "n", "001-in-flight's worker is busy (working), so it can't take a note now"},
 		{"012-idea", "n", "012-idea has no worker: it hasn't been dispatched"},
 		{"018-merged", "n", "018-merged is merged, so its worker is done"},
 	} {
