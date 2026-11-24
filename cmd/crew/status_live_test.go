@@ -446,9 +446,10 @@ func actionsReport(c *Crew) statusReport {
 // actionsRun is what the view's actions were given to run, in place of gh and
 // crew followup.
 type actionsRun struct {
-	opened []string // the PRs opened, by URL
-	notes  []string // the notes sent: "<task ID>: <note>"
-	err    error    // what each action returns
+	opened  []string // the PRs opened, by URL
+	notes   []string // the notes sent: "<task ID>: <note>"
+	err     error    // what each action returns
+	warning string   // what crew warned of when it sent a note
 }
 
 // actingOn is the live view showing r, with its actions recorded in run rather
@@ -458,9 +459,9 @@ func actingOn(r statusReport) (*liveStatus, *actionsRun) {
 	m.width, m.height = 200, 60
 	openAll(m)
 	m.feed.openPR = func(url string) error { run.opened = append(run.opened, url); return run.err }
-	m.feed.sendNote = func(t Task, note string) error {
+	m.feed.sendNote = func(t Task, note string) (string, error) {
 		run.notes = append(run.notes, t.ID()+": "+note)
-		return run.err
+		return run.warning, run.err
 	}
 	return m, run
 }
@@ -616,6 +617,14 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	}
 	if m.note != nil || footLineOnScreen(m) != "sent your note to 016-both's worker" {
 		t.Errorf("after sending, the view says %q", footLineOnScreen(m))
+	}
+
+	run.notes, run.warning = nil, "job w9 hasn't reported its session after 30s, so crew can't confirm it started"
+	press(m, "n")
+	typeText(m, "and one more thing")
+	finish(t, m, press(m, "enter"))
+	if got, want := footLineOnScreen(m), "sent your note to 016-both's worker, but: "+run.warning; got != want {
+		t.Errorf("when crew warns as it sends a note, the view says %q, want %q", got, want)
 	}
 
 	run.notes = nil

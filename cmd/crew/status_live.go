@@ -45,9 +45,10 @@ type statusFeed struct {
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
 	build func(statusReads) (statusReport, error)
-	// openPR's and sendNote's errors are a line each, for the view to show.
+	// openPR's and sendNote's errors are a line each, for the view to show,
+	// and so is the warning sendNote gives when crew sent the note but warned.
 	openPR   func(url string) error
-	sendNote func(t Task, note string) error
+	sendNote func(t Task, note string) (warning string, err error)
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -72,13 +73,14 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 		openPR: browsePR,
 		// The note goes through crew followup, in a process of its own, so
 		// the ledger's lock is held only while it runs.
-		sendNote: func(t Task, note string) error {
+		sendNote: func(t Task, note string) (string, error) {
 			var errs strings.Builder
-			if c.step(&errs, "followup", t.Path, "--note", note, "--from-user") != 0 {
-				_, why := splitRefusal(errs.String())
-				return errors.New(cmp.Or(why, "crew followup failed"))
+			failed := c.step(&errs, "followup", t.Path, "--note", note, "--from-user") != 0
+			_, last := splitRefusal(errs.String())
+			if failed {
+				return "", errors.New(cmp.Or(last, "crew followup failed"))
 			}
-			return nil
+			return last, nil
 		},
 	}
 }
@@ -224,9 +226,9 @@ type (
 		err  error
 	}
 	noteSent struct {
-		to   Task
-		text string
-		err  error
+		to            Task
+		text, warning string
+		err           error
 	}
 )
 
@@ -321,6 +323,8 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		case msg.err != nil:
 			m.unsent[msg.to.Path] = msg.text
 			m.said = "note not sent, n on " + msg.to.ID() + " brings it back: " + msg.err.Error()
+		case msg.warning != "":
+			m.said = "sent your note to " + msg.to.ID() + "'s worker, but: " + msg.warning
 		default:
 			m.said = "sent your note to " + msg.to.ID() + "'s worker"
 		}
@@ -494,7 +498,10 @@ func (m *liveStatus) sendNote() tea.Cmd {
 		return nil
 	}
 	m.said = "sending your note to " + to.ID() + "'s worker…"
-	return func() tea.Msg { return noteSent{to, text, send(to, text)} }
+	return func() tea.Msg {
+		warning, err := send(to, text)
+		return noteSent{to, text, warning, err}
+	}
 }
 
 func (m *liveStatus) current() (shownLine, bool) {
