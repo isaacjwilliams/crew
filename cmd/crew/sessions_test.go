@@ -106,8 +106,7 @@ func reply(at time.Time, tokens int, more string) string {
 func TestColdResumeTakesTheLastRequestPastAnHourWithABigContext(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "projects", "-home-me-work", "s1.jsonl")
-	os.MkdirAll(filepath.Dir(path), 0o755)
+	path := filepath.Join("projects", "-home-me-work", "s1.jsonl")
 	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
 		name   string
@@ -121,7 +120,7 @@ func TestColdResumeTakesTheLastRequestPastAnHourWithABigContext(t *testing.T) {
 		{"an hour to the second, with a big context", cacheLife, 143_201, ""},
 		{"recent, with a big context", 5 * time.Minute, 143_201, ""},
 	} {
-		os.WriteFile(path, []byte(`{"type":"user"}`+"\n"+reply(at, c.tokens, "")+`{"type":"user"}`+"\n"), 0o644)
+		writeTranscript(t, dir, path, `{"type":"user"}`+"\n", reply(at, c.tokens, ""), `{"type":"user"}`+"\n")
 		if got := coldResume("s1", at.Add(c.idle)); got != c.want {
 			t.Errorf("%s: coldResume = %q; want %q", c.name, got, c.want)
 		}
@@ -129,7 +128,7 @@ func TestColdResumeTakesTheLastRequestPastAnHourWithABigContext(t *testing.T) {
 	if got := coldResume("no-such-session", at.Add(9*time.Hour)); got != "" {
 		t.Errorf("a session with no transcript: coldResume = %q; want it to resume", got)
 	}
-	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"+`{"type":"system","subtype":"turn_duration"}`+"\n"), 0o644)
+	writeTranscript(t, dir, path, `{"type":"user"}`+"\n", `{"type":"system","subtype":"turn_duration"}`+"\n")
 	if got := coldResume("s1", at.Add(9*time.Hour)); got != "" {
 		t.Errorf("a transcript with no request: coldResume = %q; want it to resume", got)
 	}
@@ -140,7 +139,8 @@ func TestColdResumeTakesTheLastRequestPastAnHourWithABigContext(t *testing.T) {
 // zeroed, the session's subagents' requests and Claude Code's own messages
 // don't move it.
 func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s1.jsonl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s1.jsonl")
 	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 	later := at.Add(3 * time.Hour)
 	own := reply(at.Add(-time.Second), 120_000, "") + reply(at, 143_201, "")
@@ -152,13 +152,13 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 		{"a line that doesn't read", own + "{not json\n"},
 		{"a copy of it with its counts zeroed", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"msg_%d","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339), at.Unix()) + "\n"},
 	} {
-		os.WriteFile(path, []byte(c.transcript), 0o644)
+		writeTranscript(t, dir, "s1.jsonl", c.transcript)
 		gotAt, tokens, ok := lastRequest(path)
 		if !ok || !gotAt.Equal(at) || tokens != 143_201 {
 			t.Errorf("%s: lastRequest = %v, %d, %v; want %v, 143201, true", c.name, gotAt, tokens, ok, at)
 		}
 	}
-	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644)
+	writeTranscript(t, dir, "s1.jsonl", `{"type":"user"}`+"\n")
 	if _, _, ok := lastRequest(path); ok {
 		t.Error("lastRequest found a request in a transcript without one")
 	}

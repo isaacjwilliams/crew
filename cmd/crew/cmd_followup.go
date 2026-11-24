@@ -362,13 +362,12 @@ const restackModel = "sonnet"
 // implementer's exception for "You are picking up review rounds" says; any
 // other reads the whole task file and the branch first. Either is led to
 // changes an earlier session left uncommitted, which the branch doesn't show.
-func pickUpPrompt(t Task, project, wt string, rounds bool) string {
-	prompt := fmt.Sprintf("You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), project, t.Path, wt)
-	if rounds {
-		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
-			t.ID(), project, t.Path, wt)
+func pickUpPrompt(t Task, project, wt string, newRound bool) string {
+	opening, start := "You are picking up task %s in project %s, ", "Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."
+	if newRound {
+		opening, start = "You are picking up review rounds on task %s in project %s, ", "Start from the rounds named below and the task file's Decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need."
 	}
+	prompt := fmt.Sprintf(opening+"which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\n", t.ID(), project, t.Path, wt) + start
 	if out, _ := git(wt, "status", "--porcelain"); out != "" {
 		prompt += "\nAn earlier session left changes uncommitted in your worktree. Read git status and git diff before you act, and carry on from them: don't redo or discard them."
 	}
