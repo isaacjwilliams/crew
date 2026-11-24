@@ -266,6 +266,8 @@ check "a restack session's prompt opens the way the implementer's exception for 
   "grep -qF '\"You are restacking task %s in project %s: ' <<<\"\$SRC\" && grep -q 'A restack session, whose first message starts \"You are restacking task\", goes straight to \"Workflow: restack\"' $A/implementer.md"
 check "a fresh worker's prompt for review rounds opens the way the implementer's exception for it to reading the whole task file names it" \
   "grep -qF '\"You are picking up review rounds on task %s in project %s, ' <<<\"\$SRC\" && grep -q 'A session picking up review rounds, whose first message starts \"You are picking up review rounds\", goes straight to \"Workflow: review rounds\"' $A/implementer.md"
+check "a fresh worker's prompt for review rounds and the implementer's exception for it both have it read the brief's bounds" \
+  "grep -qF 'Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them' <<<\"\$SRC\" && grep -qF 'and the Goal, Acceptance criteria, Out of scope and Decisions it judges them against' $A/implementer.md"
 check "implementer records the new base only after pushing the restack" \
   "awk '/^## Workflow: restack/ {w=1} w && /git push --force-with-lease=/ && !p {p=NR} w && /crew set <task> base/ && !b {b=NR} END {exit !(p && b && p < b)}' $A/implementer.md"
 check "a retarget note is one the implementer's restack workflow knows: gh pr edit alone, and nothing to rebase" \

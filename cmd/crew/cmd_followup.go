@@ -368,7 +368,7 @@ const restackModel = "sonnet"
 
 // pickUpPrompt opens a fresh worker's first message, before its input: the
 // task and project, the task file and the worktree, and where to start. One
-// sent review rounds starts from them and the task's Decisions, as the
+// sent review rounds starts from them and the brief's bounds, as the
 // implementer's exception for "You are picking up review rounds" says; any
 // other reads the whole task file and the branch first. Either is led to
 // changes an earlier session left uncommitted, which the branch doesn't show.
@@ -376,7 +376,7 @@ func pickUpPrompt(t Task, project, wt string, newRound bool) string {
 	prompt := fmt.Sprintf("You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
 		t.ID(), project, t.Path, wt)
 	if newRound {
-		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
+		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
 			t.ID(), project, t.Path, wt)
 	}
 	if out, _ := git(wt, "status", "--porcelain"); out != "" {

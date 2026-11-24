@@ -569,8 +569,8 @@ check "note-only followup keeps a working task working and logs no status line" 
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 echo "half done" >"$(crew get 1 worktree)/wip.txt"
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
-check "a fresh worker sent a review round starts from the rounds and Decisions, not the whole task file" \
-  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Decisions. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
+check "a fresh worker sent a review round starts from the rounds and the brief's bounds, not the whole task file" \
+  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
 check "a fresh worker taking over a worktree with uncommitted changes is led to them before it acts" \
   '[[ $(last_launch) == *"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"New input for task "* ]]'
 rm "$(crew get 1 worktree)/wip.txt"
