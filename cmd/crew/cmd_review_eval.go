@@ -382,7 +382,7 @@ func startEvalRun(c *Crew, p *Project, rubric, selection string) (*evalRun, erro
 		p:        p,
 		started:  now,
 		tested:   evalSetup{rubric, shortHash(rubric), reviewer, shortHash(reviewer), version, selection},
-		checkout: filepath.Join(p.WorkRoot(), p.Name, "_eval"),
+		checkout: evalCheckout(p),
 		logs:     c.path("logs", "review-eval-"+p.Name+"-"+now.Format("20060102-150405")),
 	}
 	if err := os.MkdirAll(e.logs, 0o755); err != nil {
@@ -811,4 +811,9 @@ func compareEvals(prevFile string, prev evalSetup, prevVerdicts map[string]verdi
 		changed("the rubric", prev.rubricHash, now.rubricHash),
 		changed("the reviewer's prompt", prev.reviewerHash, now.reviewerHash),
 		changed("Claude Code", prev.claude, now.claude))
+}
+
+// evalCheckout is where review-eval runs the reviewer.
+func evalCheckout(p *Project) string {
+	return filepath.Join(p.WorkRoot(), p.Name, "_eval")
 }

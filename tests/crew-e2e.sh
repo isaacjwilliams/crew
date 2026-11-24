@@ -2687,6 +2687,34 @@ out=$(crew stats --project stats --since 2026-11-05 2>&1); st=$?
 check "without the project's clone, stats says it didn't check for reverts, and still reports" \
   '((st == 0)) && [[ $out == *"005-stats-fix fixes 004-stats-cause"*"  reverts: not checked (no clone of the project on this machine)" && $out != *"revert of"* ]]'
 
+# crew costs: each transcript folder is charged to the step the ledger gives it,
+# by the folder's name: the lead's, a task's worktree, a goal's checkout, the
+# gardener's and review-eval's, and any other folder is no part of crew's. A million output
+# tokens of Opus cost $20.
+WRS=$(crew config WORK_ROOT)/stats
+mkdir -p "$SP/goals" && cp "$L/templates/goal.md" "$SP/goals/001-costs-goal.md"
+crew commit "costs fixtures" >/dev/null
+costs_session() {  # dir sent output: a session in dir that sent one message, last written then
+  local f
+  f=$HOME/.claude/projects/$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')/s.jsonl
+  mkdir -p "${f%/*}"
+  printf '{"type":"assistant","timestamp":"%s","entrypoint":"cli","message":{"id":"msg_%s","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":%d}}}\n' "$2" "$RANDOM$RANDOM" "$3" >"$f"
+  touch -d "$2" "$f"
+}
+costs_session "$L/lead" 2026-11-05T13:00:00Z 50000
+costs_session "$WRS/001-stats-one" 2026-11-06T12:00:00Z 500000
+costs_session "$WRS/_goal-001-costs-goal" 2026-11-06T12:00:00Z 100000
+costs_session "$WRS/_gardener" 2026-11-06T12:00:00Z 150000
+costs_session "$WRS/_eval" 2026-11-06T12:00:00Z 50000
+costs_session "$SB/elsewhere" 2026-11-06T12:00:00Z 150000
+head=$(git -C "$L" rev-parse @); dirty=$(git -C "$L" status --porcelain)
+out=$(crew costs --from 2026-11-05 --to 2026-11-06 2>&1); st=$?; rows=$(tr -s ' ' <<<"$out")
+check "costs charges a task's worktree, the lead's, a goal's, the gardener's and review-eval's sessions to their steps, and any other folder's to other sessions" \
+  '((st == 0)) && [[ $rows == *" Worker sessions \$10 50%"* && $rows == *" Lead sessions \$1.00 5%"* && $rows == *" Goal-lead sessions \$2.00 10%"* && $rows == *" Gardener \$3.00 15%"* && $rows == *" Review eval \$1.00 5%"* && $rows == *" Other Claude Code sessions \$3.00 15%"* && $rows == *" All \$20 100%"* ]]'
+check "costs changes nothing in the home" '[[ $(git -C "$L" rev-parse @) == "$head" && $(git -C "$L" status --porcelain) == "$dirty" ]]'
+check "costs refuses a date it can't read, and a last day before the first" \
+  '[[ $(crew costs --from 11/05 2>&1) == *"--from takes a date, YYYY-MM-DD, not '"'"'11/05'"'"'"* && $(crew costs --from 2026-11-06 --to 2026-11-05 2>&1) == *"--to 2026-11-05 is before --from 2026-11-06"* ]]'
+
 # The misses agent, run by crew gardener: it reads the project's tasks merged after
 # misses.last that have a comment of the user's in a round after an automated
 # review. 090 has one; 091's only round after its review reports red CI; 092 has

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +28,19 @@ const reviewerTranscript = `{"type":"user","timestamp":"2026-11-17T03:42:54.662Z
 {"type":"user","timestamp":"2026-11-17T03:45:21.834Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
 `
 
+// reviewerTranscriptFile writes content to a new file in a temporary
+// directory, and returns its path.
+func reviewerTranscriptFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agent-a.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestClaudeRunCostCountsEachMessageOnce(t *testing.T) {
-	cost, err := claudeRunCost([]byte(reviewerTranscript))
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, reviewerTranscript))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,15 +54,32 @@ func TestClaudeRunCostCountsEachMessageOnce(t *testing.T) {
 // zeros, and a line that doesn't read is an error, since it could hold a
 // message's only usage.
 func TestClaudeRunCostSaysWhatTheTranscriptDoesNotReport(t *testing.T) {
-	cost, err := claudeRunCost([]byte(`{"type":"user","timestamp":"2026-11-17T03:42:54Z"}` + "\n" + `{"type":"user","timestamp":"2026-11-17T03:42:59Z"}` + "\n"))
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, `{"type":"user","timestamp":"2026-11-17T03:42:54Z"}`+"\n"+`{"type":"user","timestamp":"2026-11-17T03:42:59Z"}`+"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := cost.String(), "tokens not reported; 5s; model not reported, effort not reported"; got != want {
 		t.Errorf("cost = %q; want %q", got, want)
 	}
-	if _, err := claudeRunCost([]byte(reviewerTranscript + `{"type":"assistant","message":{"id":"msg_4","usa`)); err == nil || !strings.Contains(err.Error(), "line 12") {
-		t.Errorf("a cut-off line gave %v; want an error naming line 12", err)
+	cutOff := reviewerTranscriptFile(t, reviewerTranscript+`{"type":"assistant","message":{"id":"msg_4","usa`)
+	if _, err := claudeRunCost(cutOff); err == nil || !strings.Contains(err.Error(), cutOff+": lines that didn't read: 1") {
+		t.Errorf("a cut-off line gave %v; want an error naming %s and saying one line didn't read", err, cutOff)
+	}
+}
+
+// A message keeps its fullest usage, whichever copy comes last: a resumed
+// session may copy it with its counts zeroed.
+func TestClaudeRunCostKeepsAMessagesFullestUsage(t *testing.T) {
+	line := func(output int) string {
+		return `{"type":"assistant","timestamp":"2026-11-17T03:42:56Z","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":` +
+			strconv.Itoa(output) + `}}}` + "\n"
+	}
+	cost, err := claudeRunCost(reviewerTranscriptFile(t, line(500)+line(0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cost.tokens.total(); got != 500 {
+		t.Errorf("tokens = %d; want the 500 of the fuller copy, not the zeroed one written last", got)
 	}
 }
 
@@ -71,5 +101,16 @@ func TestCodexTokensReadsCompletedTurns(t *testing.T) {
 	write(started + `{"type":"item.started","item":{"type":"command_exe`)
 	if u := codexTokens(events); u != nil {
 		t.Errorf("a stalled run's tokens = %v; want none reported", u)
+	}
+}
+
+func TestScanLinesNamesTheTranscriptItCouldNotScan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 65<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := scanLines(path, "", func(transcriptLine) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), path+": ") {
+		t.Errorf("a line too long to scan gave %v; want an error naming %s", err, path)
 	}
 }
