@@ -7,7 +7,9 @@ package main
 
 import (
 	"os"
+	"slices"
 	"strings"
+	"time"
 )
 
 // leaseLost is made by a push that found on origin that another machine claimed
@@ -49,6 +51,47 @@ func (c *Crew) previousHolder() string {
 		}
 	}
 	return "another machine"
+}
+
+// A tenure is a stretch of time one machine ran the crew: from when the host
+// file came to name it until the file next changed. The holder's tenure hasn't
+// ended, so its to is zero.
+type tenure struct {
+	holder   string
+	from, to time.Time
+}
+
+// during reports whether the tenure overlaps the time from one moment to another.
+func (t tenure) during(from, to time.Time) bool {
+	return t.from.Before(to) && (t.to.IsZero() || t.to.After(from))
+}
+
+// tenuresElsewhere are the stretches of time another machine ran the crew,
+// oldest first, from the host file's history.
+func (c *Crew) tenuresElsewhere() ([]tenure, error) {
+	log, err := git(c.Home, "log", "--reverse", "--format=%H %aI", "--", "host")
+	if err != nil {
+		return nil, err
+	}
+	var tenures []tenure
+	for _, line := range strings.Split(log, "\n") {
+		commit, date, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, date)
+		if err != nil {
+			return nil, err
+		}
+		if n := len(tenures); n > 0 {
+			tenures[n-1].to = at
+		}
+		// After crew host down the file names no one, or is gone: a
+		// stretch when no machine ran the crew.
+		holder, _ := git(c.Home, "show", commit+":host")
+		tenures = append(tenures, tenure{holder: holder, from: at})
+	}
+	return slices.DeleteFunc(tenures, func(t tenure) bool { return t.holder == "" || t.holder == c.Host }), nil
 }
 
 // requireHost fails unless this machine holds the lease: the host file names it,

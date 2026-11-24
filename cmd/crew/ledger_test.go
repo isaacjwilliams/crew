@@ -879,6 +879,20 @@ func TestLogEntries(t *testing.T) {
 	}
 }
 
+// A message that quotes a comment's opener doesn't hide the lines after it,
+// such as the status line that says when a task merged.
+func TestLogEntriesReadPastAQuotedCommentOpener(t *testing.T) {
+	d := docWith(t, "---\nid: 1\n---\n## Log\n- 2026-11-01 09:00 — a '<!--' in grep's output hid entry 4\n"+
+		"- 2026-11-01 10:00 — status → merged\n")
+	var got []string
+	for _, e := range d.LogEntries() {
+		got = append(got, e.msg)
+	}
+	if want := []string{"a '<!--' in grep's output hid entry 4", "status → merged"}; !slices.Equal(got, want) {
+		t.Errorf("LogEntries = %q\nwant %q", got, want)
+	}
+}
+
 // Every status LEDGER.md documents is one crew knows, and the other way round.
 func TestStatusesMatchLedgerDoc(t *testing.T) {
 	b, err := os.ReadFile("../../LEDGER.md")
