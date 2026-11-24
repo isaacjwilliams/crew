@@ -117,9 +117,10 @@ func (c *Crew) followup(t Task, with followupWith) (followupSent, error) {
 	if err := c.lock(); err != nil {
 		return followupSent{}, err
 	}
-	// Again under the lock, on the same listing of the workers: a task merged or
-	// abandoned since crew tick looked at it, or while an earlier tick step read
-	// GitHub, keeps its worker stopped, and so does a pause.
+	// Again under the lock: a task merged or abandoned since crew tick looked at
+	// it, or while an earlier tick step read GitHub, keeps its worker stopped, and
+	// so does a pause. It reads the workers from the same listing, since listing
+	// them again would cost another claude agents call.
 	if err := c.followupRefusal(p, t, as); err != nil {
 		return followupSent{}, err
 	}

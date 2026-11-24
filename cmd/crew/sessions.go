@@ -521,7 +521,8 @@ func (e notStarted) Error() string { return e.why }
 
 // unrecordedSession is launchSession's error when claude started a session but
 // crew can't tell which: it holds claude's output. The session runs unrecorded,
-// so crew mustn't start another.
+// so crew mustn't start another, and followup's caller can tell it from a
+// refusal.
 type unrecordedSession struct{ output string }
 
 func (e unrecordedSession) Error() string {

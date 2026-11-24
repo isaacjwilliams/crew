@@ -250,7 +250,8 @@ func (c *Crew) ensureWorktree(p *Project, t Task) (string, error) {
 }
 
 // worktreeError is ensureWorktree's failure to make a task's worktree on this
-// machine, or to set it up. Its message is the failure's own.
+// machine, or to set it up, so followup's caller can tell it from a refusal.
+// Its message is the failure's own.
 type worktreeError struct{ err error }
 
 func (e worktreeError) Error() string { return e.err.Error() }

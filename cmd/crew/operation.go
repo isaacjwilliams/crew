@@ -5,7 +5,9 @@ package main
 // the command line and calls it; the operation does the work and returns what
 // happened as a value, with a refusal as its error. On the way, it tells the
 // user things only through its Crew: c.warn for what doesn't stop it, c.printf
-// for what it did. For a command run from a shell, those go to the terminal.
+// for what it did. For a command run from a shell, those go to the terminal. A
+// function on its path that has no Crew (a Project method, say) takes the
+// writer c.out() gives.
 //
 // runInProcess runs an operation on a Crew of its own, which writes nothing to
 // the terminal and keeps its warnings for the caller. That Crew takes the
