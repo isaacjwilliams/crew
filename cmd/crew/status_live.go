@@ -98,8 +98,8 @@ func browsePR(url string) error {
 	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
 		return nil
 	}
-	_, why := splitRefusal(out.String())
-	return errors.New(cmp.Or(why, err.Error()))
+	said := strings.TrimSpace(out.String())
+	return errors.New(cmp.Or(said[strings.LastIndex(said, "\n")+1:], err.Error()))
 }
 
 // watchStatus runs the live view until the user quits. Its beat comes from
@@ -584,6 +584,9 @@ func (m *liveStatus) noteSent(msg noteSent) {
 	delete(m.held, msg.to.Path)
 	to := msg.to.ID()
 	said, more := "", msg.warnings
+	if msg.err != nil {
+		more = append(more, msg.err.Error())
+	}
 	switch {
 	case msg.err == nil:
 		said = "sent your note to " + to + "'s worker (" + msg.sent.mode + ")"
@@ -595,11 +598,9 @@ func (m *liveStatus) noteSent(msg noteSent) {
 		}
 	case errors.As(msg.err, new(unrecordedSession)):
 		said = "sent your note to " + to + "'s worker, but crew couldn't record its session"
-		more = slices.Concat(more, []string{msg.err.Error()})
 	default:
 		m.held[msg.to.Path] = heldNote{text: msg.text}
 		said = "crew didn't send your note to " + to + "'s worker; n on " + to + " brings it back"
-		more = slices.Concat(more, []string{msg.err.Error()})
 	}
 	if len(more) > 0 {
 		said += ":\n" + strings.Join(more, "\n")
