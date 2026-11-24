@@ -484,6 +484,23 @@ func offered(m *liveStatus) string {
 
 // footOnScreen is the lines above the bar, as the screen shows them, without
 // their style or the spaces after them.
+// cursorOnScreen is the words of the line in the cursor's style, looked for in
+// the body above what the view says, on a screen as high as the terminal. It's
+// "" when the cursor's line isn't there.
+func cursorOnScreen(t *testing.T, m *liveStatus) string {
+	t.Helper()
+	lines := screen(m)
+	if len(lines) != m.height {
+		t.Fatalf("the view is %d lines high on a terminal %d lines high", len(lines), m.height)
+	}
+	for _, line := range lines[:len(lines)-1-len(m.footLines())] {
+		if strings.HasPrefix(line, "\x1b[7m") {
+			return words(line)
+		}
+	}
+	return ""
+}
+
 func footOnScreen(m *liveStatus) string {
 	lines := screen(m)
 	foot := lines[len(lines)-1-len(m.footLines()) : len(lines)-1]
@@ -814,7 +831,7 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	if got, want := strings.Join(strings.Fields(footOnScreen(m)), " "), "sent your note to 016-both's worker, but: "+resumed+" ledger commit failed (continuing)"; got != want {
 		t.Errorf("at 80 columns, the view says %q, want %q", got, want)
 	}
-	if !strings.Contains(words(screen(m)[m.cursor-m.top]), "016-both") {
+	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
 		t.Errorf("the cursor's line isn't on screen above what crew said: %q", screen(m))
 	}
 
@@ -827,7 +844,7 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	if len(foot) != 6 || foot[0] != "crew followup failed; n on 016-both brings your note back:" || foot[5] != "crew: could not start a session (see output above)" {
 		t.Errorf("on a screen 12 lines high, a long refusal shows as %q", foot)
 	}
-	if !strings.Contains(words(screen(m)[m.cursor-m.top]), "016-both") {
+	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
 		t.Errorf("the cursor's line isn't on screen above a long refusal: %q", screen(m))
 	}
 }
