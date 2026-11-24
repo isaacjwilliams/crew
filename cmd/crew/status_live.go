@@ -342,7 +342,7 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 			m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		}
 	case noteAsked:
-		// Only the latest n on a task opens a note.
+		// Only an n no key has followed opens a note.
 		if msg.to.Path != m.asking {
 			return nil
 		}
@@ -401,7 +401,8 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 }
 
 func (m *liveStatus) press(key string) tea.Cmd {
-	m.said = ""
+	// A key clears what the view said and calls off an n crew hasn't answered.
+	m.said, m.asking = "", ""
 	switch key {
 	case "q", "ctrl+c":
 		return m.quit()

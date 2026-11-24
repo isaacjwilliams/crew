@@ -598,8 +598,9 @@ func TestLiveStatusAsksCrewBeforeTheNoteIsWritten(t *testing.T) {
 	}
 }
 
-// Only the latest n opens a note: crew's answer about an earlier one doesn't.
-func TestLiveStatusOpensANoteForTheLatestAsk(t *testing.T) {
+// A key pressed while crew is asked about a note calls the ask off: crew's
+// answer opens a note only when no key has followed the n.
+func TestLiveStatusOpensANoteOnlyWhenNoKeyFollowsItsAsk(t *testing.T) {
 	m, _ := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	first := press(m, "n")
@@ -612,6 +613,18 @@ func TestLiveStatusOpensANoteForTheLatestAsk(t *testing.T) {
 	finish(t, m, second)
 	if m.note == nil || m.note.to.ID() != "017-stacked" {
 		t.Errorf("crew's answer about 017-stacked opened %v, want a note to it", m.note)
+	}
+
+	for _, key := range []string{"n", "j"} { // n refused on a merged task, and a key that only moves
+		m, _ = actingOn(actionsReport(actionsLedger(t)))
+		goTo(t, m, "016-both")
+		asked := press(m, "n")
+		goTo(t, m, "018-merged")
+		press(m, key)
+		finish(t, m, asked)
+		if m.note != nil {
+			t.Errorf("crew's answer about 016-both opened a note after %s on 018-merged", key)
+		}
 	}
 }
 
