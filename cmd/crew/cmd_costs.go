@@ -103,7 +103,7 @@ func cmdCosts(c *Crew, args []string) error {
 	if to.Before(from) {
 		return fail("--to %s is before --from %s", to.Format("2006-01-02"), from.Format("2006-01-02"))
 	}
-	owners, _, err := c.transcriptOwners()
+	owners, tasks, err := c.transcriptOwners()
 	if err != nil {
 		return err
 	}
@@ -111,10 +111,14 @@ func cmdCosts(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
+	elsewhere, err := c.tenuresElsewhere()
+	if err != nil {
+		return err
+	}
 	if ts.unread > 0 {
 		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", ts.unread)
 	}
-	costsIn(ts, from, to).print(os.Stdout)
+	costsIn(ts, tasks, elsewhere, from, to).print(os.Stdout)
 	return nil
 }
 
@@ -442,7 +446,8 @@ func subagentOf(path string) subagentMeta {
 	return meta
 }
 
-// costReport is what the steps cost over a range of days.
+// costReport is what the steps cost over a range of days, and what they cost
+// each task that finished in it.
 type costReport struct {
 	from, to     time.Time // the first and last day
 	completeFrom time.Time // from when this machine's transcripts hold every message
@@ -450,54 +455,159 @@ type costReport struct {
 	total        float64
 	unpriced     map[string]int // the tokens sent in the range of each model there's no rate for
 	rated        []string       // the models priced, for the rates the report gives
+	// What each task the medians count cost in each step it ran, and in all.
+	perTask    map[string][]float64
+	taskTotals []float64
+	leftOut    leftOut
+}
+
+// leftOut is the tasks that finished in the range but that the medians leave
+// out, by why.
+type leftOut struct {
+	begunEarly   int      // begun before the transcripts are complete
+	underWay     int      // under way while another machine ran the crew
+	machines     []string // those other machines
+	partlyPriced int      // with a message there's no rate for
 }
 
 // costsIn is the report on the transcripts from the first day to the last,
-// both included: it counts what was sent in the range.
-func costsIn(ts transcripts, from, to time.Time) costReport {
+// both included. A total counts what was sent in the range. A median counts
+// all that each of the wholeTasks spent, whenever it was sent, over the tasks
+// that ran the step, but not a task with a message there's no rate for.
+func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) costReport {
 	end := to.AddDate(0, 0, 1)
 	r := costReport{from: from, to: to, completeFrom: ts.completeFrom,
-		steps: map[string]float64{}, unpriced: map[string]int{}}
+		steps: map[string]float64{}, unpriced: map[string]int{}, perTask: map[string][]float64{}}
+	whole := r.wholeTasks(tasks, elsewhere, from, end)
 	for _, c := range ts.charges {
-		if c.at.Before(from) || !c.at.Before(end) {
+		sent, task := !c.at.Before(from) && c.at.Before(end), whole[c.task]
+		if !sent && task == nil {
 			continue
 		}
 		rt, priced := apiRates[c.model]
 		if !priced {
-			r.unpriced[c.model] += c.usage.total()
+			if sent {
+				r.unpriced[c.model] += c.usage.total()
+			}
+			if task != nil {
+				task.unpriced = true
+			}
 			continue
 		}
 		if !slices.Contains(r.rated, c.model) {
 			r.rated = append(r.rated, c.model)
 		}
 		cost := rt.dollars(c.usage)
-		r.steps[c.step] += cost
-		r.total += cost
+		if sent {
+			r.steps[c.step] += cost
+			r.total += cost
+		}
+		if task != nil {
+			task.steps[c.step] += cost
+		}
+	}
+	for _, t := range whole {
+		if t.unpriced {
+			r.leftOut.partlyPriced++
+			continue
+		}
+		total := 0.0
+		for step, cost := range t.steps {
+			r.perTask[step] = append(r.perTask[step], cost)
+			total += cost
+		}
+		r.taskTotals = append(r.taskTotals, total)
 	}
 	slices.Sort(r.rated)
+	slices.Sort(r.leftOut.machines)
+	r.leftOut.machines = slices.Compact(r.leftOut.machines)
 	return r
 }
 
-// print writes the report: a row for each step, with its total and its share
-// of all spend, then how far back the data goes, what wasn't priced and the
-// rates used.
+// taskSpend is what a task cost, by step, and whether a message of its has no
+// rate.
+type taskSpend struct {
+	steps    map[string]float64
+	unpriced bool
+}
+
+// wholeTasks are the tasks that merged or were done from one time to another
+// whose spend this machine's transcripts hold whole, by task ID
+// ("<project>/<task>"), each with nothing spent yet. It counts the others in
+// r.leftOut: a task begun before the transcripts are complete may have lost
+// sessions to Claude Code's age cleanup (a task with no created date counts as
+// one), and one under way while another machine ran the crew has sessions there.
+func (r *costReport) wholeTasks(tasks map[string]Task, elsewhere []tenure, from, to time.Time) map[string]*taskSpend {
+	whole := map[string]*taskSpend{}
+	for id, t := range tasks {
+		finished := finishedAt(t)
+		if finished.Before(from) || !finished.Before(to) {
+			continue
+		}
+		created, _ := time.Parse(time.RFC3339, t.Get("created"))
+		var during []string // the machines that ran the crew while the task was under way
+		for _, e := range elsewhere {
+			if e.during(created, finished) {
+				during = append(during, e.holder)
+			}
+		}
+		switch {
+		case created.Before(r.completeFrom):
+			r.leftOut.begunEarly++
+		case len(during) > 0:
+			r.leftOut.underWay++
+			r.leftOut.machines = append(r.leftOut.machines, during...)
+		default:
+			whole[id] = &taskSpend{steps: map[string]float64{}}
+		}
+	}
+	return whole
+}
+
+// finishedAt is when the task last merged or was done, or zero if it isn't
+// merged or done. Its Log runs oldest first, so the last change wins.
+func finishedAt(t Task) time.Time {
+	var at time.Time
+	if s := t.Status(); s != Merged && s != Done {
+		return at
+	}
+	for _, e := range withStatusLines(t.LogEntries()) {
+		if changedTo(Merged)(e) || changedTo(Done)(e) {
+			at = e.at
+		}
+	}
+	return at
+}
+
+// print writes the report: a row for each step, with its total, its share of
+// all spend and its median per task, then which tasks the medians count, how
+// far back the data goes, what wasn't priced and the rates used.
 func (r costReport) print(w io.Writer) {
 	fmt.Fprintf(w, "Spend from %s to %s, at API rates, from this machine's transcripts:\n\n",
 		r.from.Format("2006-01-02"), r.to.Format("2006-01-02"))
-	var agents []string
-	for name := range r.steps {
-		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) {
-			agents = append(agents, name)
-		}
-	}
+	// A step shows when something was spent on it in the range, or a task the
+	// medians count ran it.
+	agents := slices.Concat(slices.Collect(maps.Keys(r.steps)), slices.Collect(maps.Keys(r.perTask)))
+	agents = slices.DeleteFunc(agents, func(name string) bool {
+		return slices.Contains(taskSteps, name) || slices.Contains(sharedSteps, name)
+	})
 	slices.Sort(agents)
-	row := func(name string, total float64) []string { return []string{name, formatDollars(total), r.share(total)} }
+	agents = slices.Compact(agents)
+	// A row's median, and how many tasks it's over, show only when there are any.
+	row := func(name string, total float64, perTask []float64) []string {
+		cells := []string{name, formatDollars(total), r.share(total)}
+		if len(perTask) > 0 {
+			cells = append(cells, strconv.Itoa(len(perTask)), formatDollars(median(perTask)))
+		}
+		return cells
+	}
 	var rows [][]string
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
 		for _, name := range group {
-			if total, ok := r.steps[name]; ok {
-				groupRows = append(groupRows, row(name, total))
+			total, spent := r.steps[name]
+			if perTask := r.perTask[name]; spent || len(perTask) > 0 {
+				groupRows = append(groupRows, row(name, total, perTask))
 			}
 		}
 		if len(rows) > 0 && len(groupRows) > 0 {
@@ -505,9 +615,16 @@ func (r costReport) print(w io.Writer) {
 		}
 		rows = append(rows, groupRows...)
 	}
-	rows = append(rows, nil, row("All", r.total))
-	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}}, rows)
+	rows = append(rows, nil, row("All", r.total, r.taskTotals))
+	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}, {"", "tasks"}, {"median", "per task"}}, rows)
 
+	fmt.Fprintln(w, "\nA median is over the tasks that merged or were done in the range, counting all they spent, whenever they spent it: each step's over the tasks that ran it.")
+	fmt.Fprintf(w, "It counts only tasks this machine's transcripts hold whole: those begun since %s, from when they're complete, and not under way while another machine ran the crew.",
+		r.completeFrom.Local().Format(logTime))
+	if left := r.leftOut.reasons(); len(left) > 0 {
+		fmt.Fprintf(w, " Left out: %s.", andList(left))
+	}
+	fmt.Fprintln(w)
 	if r.from.Before(r.completeFrom) {
 		fmt.Fprintf(w, "\nThis machine's transcripts are complete only from %s: older sessions may have been deleted.\n", r.completeFrom.Local().Format(logTime))
 	}
@@ -520,6 +637,21 @@ func (r costReport) print(w io.Writer) {
 		fmt.Fprintf(w, "  %s: %g, %g, %g\n", model, rt.input, rt.output, rt.cacheRead)
 	}
 	fmt.Fprintln(w, "A cache write costs 1.25 times input when it's kept for five minutes, and twice input for an hour.")
+}
+
+// reasons says how many tasks were left out for each reason there is.
+func (l leftOut) reasons() []string {
+	var reasons []string
+	if l.begunEarly > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d begun before then", l.begunEarly))
+	}
+	if l.underWay > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d under way while %s ran the crew", l.underWay, orList(l.machines)))
+	}
+	if l.partlyPriced > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.partlyPriced))
+	}
+	return reasons
 }
 
 // share is the part of all spend that dollars is, as a person needs it: "61%",

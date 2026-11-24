@@ -433,24 +433,33 @@ It reads the ledger, and for reverts the default branch in the project's clone, 
 crew costs         # the last 7 days (--from YYYY-MM-DD, --to YYYY-MM-DD; both days included)
 ```
 
-What each step of crew's process cost over those days, at Anthropic's API rates, read from this machine's Claude Code transcripts for every project. Run it on the weeks before and after a change to see whether a step got cheaper.
+What each step of crew's process cost over those days, at Anthropic's API rates, read from this machine's Claude Code transcripts for every project, and what each step costs a task. Run it on the weeks before and after a change to see whether a step got cheaper.
 
 ```
-  step                         total  share
-  Brief review                   $97   5.8%
-  Worker sessions             $1,016    61%
-  Exhale                        $104   6.2%
+                                                      median
+  step                         total  share  tasks  per task
+  Brief review                   $97   5.8%     57     $0.74
+  Worker sessions             $1,016    61%     73     $8.93
+  Exhale                        $104   6.2%     45     $1.60
   …
   Lead sessions                 $160   9.6%
   Lead's agents                  $33     2%
   …
-  All                         $1,675   100%
+  All                         $1,675   100%     73       $13
 ```
 
 - **Steps**: a task's brief review, its worker's own sessions, then the agents the worker started, each its own step: `/simplify`'s are the exhale, the casual-observer is the pre-PR review, `/security-review`'s are the security review, the reviewer is the automated review, and any other agent is named by its type (`general-purpose`, say). Then what's no task's: the lead's sessions and the agents it started (other than brief reviews), the goal leads' the same way, the gardener's sessions (the misses agent's too), `crew review-eval`'s reviewer reruns, and the Claude Code sessions in any other folder: the user's own, and `crew review-eval`'s judge, which runs in the temp directory.
 - **total** and **share**: what was spent in those days, counted when each message was sent, and its part of all spend.
+- **median per task** and **tasks**: what a task that merged or was done in those days spent on the step, all of it, whenever it was sent, and how many tasks that is: the tasks that ran the step. A brief review counts toward its task, whichever lead ran it. The All row's median is of what each task spent in all. A step that's no task's has no median.
 
-Below the table it says from when the transcripts are complete, if the range starts earlier: Claude Code deletes a session once it has been idle for `cleanupPeriodDays` (30 by default), but keeps one started or last continued in Claude Desktop or Cowork at any age, so `crew costs` dates the transcripts by the sessions run only from the command line. Then it gives the tokens of any model it has no rate for, which it doesn't price, and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
+Below the table it says which tasks the medians count, and how many it left out. A median counts a task only when this machine's transcripts hold all of its spend, and `crew costs` can tell two ways they might not:
+
+- **Claude Code deleted its older sessions.** Claude Code deletes a session once it has been idle for `cleanupPeriodDays` (30 by default), so the transcripts are complete from when the oldest session it would delete was last written. It keeps a session started or last continued in Claude Desktop or Cowork at any age, and an agent's transcript goes with its session, so those don't date the transcripts. A task begun before then is left out.
+- **Another machine ran the crew while the task was under way**, as the `host` file's history shows. That machine's sessions stay on it, so the task is left out.
+
+It can't see any other way spend goes missing. A brief review run by a lead on a machine that doesn't hold the lease is in that machine's transcripts, so its task's medians miss it. A task with a message at a model there's no rate for is left out too.
+
+Then it says from when the transcripts are complete, if the range starts earlier, gives the tokens of any model it has no rate for, which it doesn't price, and the rates it used. Codex isn't counted. It changes nothing, and reads only this machine's transcripts: run it where the crew runs.
 
 ### What a worker's PR looks like
 
