@@ -189,8 +189,10 @@ func (c *Crew) resolveFile(arg, project string) (string, error) {
 	if isFile(arg) {
 		return realPath(arg)
 	}
-	scopes := c.searchOrder()
-	if project != "" {
+	var scopes []string
+	if project == "" {
+		scopes = c.searchOrder()
+	} else {
 		p, err := c.scope(project, false)
 		if err != nil {
 			return "", err

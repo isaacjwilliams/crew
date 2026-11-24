@@ -122,17 +122,44 @@ func cut(s string, n int) string {
 }
 
 // A showKind is a kind of ledger file crew show prints and crew path names: its
-// type word, the argument after it, if any, and whether it takes --project.
+// type word, the argument after it, if any, whether it takes --project, and how
+// to find the file.
 type showKind struct {
 	word, arg string
 	project   bool
+	find      func(c *Crew, arg, project string) (string, error)
 }
 
 // showKinds are the kinds crew show takes. With no type word, the argument is a
 // task, as for every command that takes TASK.
 var showKinds = []showKind{
-	{"task", "TASK", false}, {"proposal", "PROPOSAL", false}, {"goal", "GOAL", false},
-	{"memory", "", true}, {"memory-suggestions", "", true}, {"file", "NAME", true},
+	{"task", "TASK", false, ledgerKind("tasks")},
+	{"proposal", "PROPOSAL", false, ledgerKind("proposals")},
+	{"goal", "GOAL", false, ledgerKind("goals")},
+	{"memory", "", true, projectFile("memory.md")},
+	{"memory-suggestions", "", true, projectFile("memory-suggestions.md")},
+	{"file", "NAME", true, (*Crew).resolveFile},
+}
+
+// ledgerKind finds a task, goal or proposal, as resolve does.
+func ledgerKind(kind string) func(*Crew, string, string) (string, error) {
+	return func(c *Crew, arg, _ string) (string, error) { return c.resolve(kind, arg) }
+}
+
+// projectFile finds the project's file of that name, in the project crew memory
+// would pick.
+func projectFile(name string) func(*Crew, string, string) (string, error) {
+	return func(c *Crew, _, project string) (string, error) {
+		p, err := c.oneProject(project)
+		if err != nil {
+			return "", err
+		}
+		f := c.path("projects", p, name)
+		if !isFile(f) {
+			return "", fail("%s has no %s yet", p, name)
+		}
+		return f, nil
+	}
 }
 
 // usage is how to name a file of this kind to crew show or crew path (cmd).
@@ -183,7 +210,7 @@ func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
 		return "", usage("crew " + cmd + " [" + strings.Join(words, "|") + "] … (see 'crew help')")
 	}
 	k := showKinds[0] // task
-	if i := slices.IndexFunc(showKinds, func(k showKind) bool { return k.word == args[0] }); i >= 0 {
+	if i := slices.IndexFunc(showKinds, func(kind showKind) bool { return kind.word == args[0] }); i >= 0 {
 		k, args = showKinds[i], args[1:]
 	}
 	var project string
@@ -195,29 +222,10 @@ func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if (arg == "") != (k.arg == "") {
+	if (arg != "") != (k.arg != "") { // missing, or given to a kind that takes none
 		return "", usage(k.usage(cmd))
 	}
-	switch k.word {
-	case "task":
-		return c.resolve("tasks", arg)
-	case "proposal":
-		return c.resolve("proposals", arg)
-	case "goal":
-		return c.resolve("goals", arg)
-	case "file":
-		return c.resolveFile(arg, project)
-	default: // memory and memory-suggestions: the project's file of that name
-		p, err := c.oneProject(project)
-		if err != nil {
-			return "", err
-		}
-		f := c.path("projects", p, k.word+".md")
-		if !isFile(f) {
-			return "", fail("%s has no %s.md yet", p, k.word)
-		}
-		return f, nil
-	}
+	return k.find(c, arg, project)
 }
 
 func cmdFind(c *Crew, args []string) error {
