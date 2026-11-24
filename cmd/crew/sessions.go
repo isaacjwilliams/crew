@@ -270,8 +270,8 @@ func coldResume(session string, now time.Time) string {
 // subagent's requests don't count: they're in transcripts of their own, or
 // marked isSidechain. messages.add (cmd_review_cost.go) keeps each reply once,
 // with its fullest usage, and skips Claude Code's own messages, which have none.
-// A line that doesn't read gives no answer: it may be a reply cut off as it
-// was written, even the last request. It reads every line to find those, since
+// Any line that doesn't read, wherever it is, gives no answer: it may be a
+// reply cut off as it was written. It reads every line to find those, since
 // Claude Code writes a reply's type near the end of its line.
 func lastRequest(path string) (at time.Time, tokens int, ok bool) {
 	var ms messages
