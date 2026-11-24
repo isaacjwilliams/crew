@@ -50,7 +50,8 @@ type followupWith struct {
 // followup resumes a task's worker with the review rounds it hasn't been sent, a
 // note from the lead, word that a pause cut its last turn short (interrupted), or
 // word that its turn ended mid-task (stalled), or several of these; or starts a
-// fresh worker when with.fresh is set or the resume fails.
+// fresh worker when with.fresh is set, when the resume would cost more than a
+// fresh start (coldResume), or when relaunch finds it must.
 func (c *Crew) followup(t Task, with followupWith) error {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -133,14 +134,22 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
+	// Why crew starts a fresh worker where the caller didn't ask for one.
+	why := ""
+	switch {
+	case afterRestack:
+		why = "its last session only ran a restack"
+	case !with.fresh:
+		why = coldResume(t.Get("worker_session"), time.Now())
+	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, fmt.Sprintf(
 		"You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), p.Name, t.Path, wt), with.fresh || afterRestack)
+		t.ID(), p.Name, t.Path, wt), with.fresh || why != "")
 	if err != nil {
 		return err
 	}
-	if afterRestack {
-		l.mode = "fresh: its last session only ran a restack"
+	if why != "" {
+		l.mode = "fresh: " + why
 	}
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))

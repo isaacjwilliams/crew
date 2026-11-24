@@ -236,6 +236,49 @@ func (a Agent) turnStartedAfter(from int64) bool {
 	return false
 }
 
+// A session's prompt cache lasts an hour after its last request (cacheLife).
+// Resuming it after that writes its whole context to the cache again, which
+// costs more than a fresh session rebuilding from its task file once the
+// context reaches coldContext tokens. Both were measured on workers' rounds in
+// November 2026.
+const (
+	cacheLife   = time.Hour
+	coldContext = 100_000
+)
+
+// coldResume says why resuming a session at now would cost more than starting
+// it fresh: how long it has been idle, past cacheLife, and how big its context
+// is, at least coldContext. It's "" when resuming costs less, and when the
+// session's transcript can't say: there's none, or no request in it.
+func coldResume(session string, now time.Time) string {
+	at, tokens, ok := lastRequest(transcript(session))
+	idle := now.Sub(at)
+	if !ok || idle <= cacheLife || tokens < coldContext {
+		return ""
+	}
+	return fmt.Sprintf("idle %s, with %dk tokens of context", roughly(idle), (tokens+500)/1000)
+}
+
+// lastRequest finds the session's own last request in the transcript at path:
+// when its reply was written, and its context, the tokens it sent (input,
+// cache write and cache read). It goes by the reply's timestamp, not the
+// file's: a session writes other entries long after its last request. A
+// subagent's requests don't count: they're in transcripts of their own, or
+// marked isSidechain.
+func lastRequest(path string) (at time.Time, tokens int, ok bool) {
+	var ms messages
+	if _, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
+		if l.Type == "assistant" && !l.IsSidechain {
+			ms.add(l)
+		}
+		return true
+	}); err != nil || len(ms.all) == 0 {
+		return time.Time{}, 0, false
+	}
+	last := ms.all[len(ms.all)-1]
+	return last.at, last.usage.Input + last.usage.CacheWrite + last.usage.CacheRead, true
+}
+
 // open: its process is running.
 func (a Agent) open() bool { return a.PID }
 

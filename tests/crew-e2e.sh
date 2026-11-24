@@ -43,6 +43,11 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
   echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}' >>"$f"
   if [[ $2 == ended ]]; then echo '{"type":"system","subtype":"turn_duration"}' >>"$f"; fi
 }
+request() {  # session minutes tokens: the session's transcript ends with a turn whose last request was minutes ago and sent tokens of context
+  mkdir -p "$HOME/.claude/projects/stub"
+  printf '{"type":"assistant","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":500}}}\n{"type":"system","subtype":"turn_duration"}\n' \
+    "$(date -u -d "-$2 minutes" +%FT%T.000Z)" $(($3 - 1002)) >"$HOME/.claude/projects/stub/$1.jsonl"
+}
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
 # runs_on TASK MODEL: the latest launch runs the task's worker on MODEL: crew started it
@@ -680,6 +685,22 @@ check "a followup after the effort is cleared starts the worker fresh without --
   '[[ $out == *"(fresh: its effort changed from xhigh to the default)"* && $(last_launch) != *--effort* && -z $(crew get 1 worker_effort) ]]'
 sed -i '/^worker_effort:/d' "$F1"; out=$(followup1 "recorded before efforts")
 check "a worker recorded before crew kept efforts resumes when its task names none" '[[ $out == *"(resume)"* ]] && resumed'
+# A worker idle past its prompt cache's hour, with a big context, costs more to resume than to
+# start fresh. Its transcript was written just now: crew goes by its last request's timestamp.
+s=$(crew get 1 worker_session); request "$s" 540 143000; out=$(followup1 "after a night")
+check "a followup to a worker idle over an hour with a big context starts it fresh, and the Log says how idle and how big" \
+  '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* && $(tail -1 "$F1") == *"followup (fresh: idle 9h, with 143k tokens of context): worker "* && $(last_launch) == *"You are picking up task"* && $(crew get 1 worker_session) != "$s" ]]'
+s=$(crew get 1 worker_session); request "$s" 540 99000; out=$(followup1 "a small context")
+check "a followup to a worker idle over an hour with a small context resumes it" '[[ $out == *"(resume)"* ]] && resumed'
+request "$s" 5 143000; out=$(followup1 "a recent request")
+check "a followup to a worker with a big context whose last request was recent resumes it" '[[ $out == *"(resume)"* ]] && resumed'
+request "$s" 0 143000; subagent=$(sed 's/"type":"assistant"/&,"isSidechain":true/' "$HOME/.claude/projects/stub/$s.jsonl")
+request "$s" 540 143000; echo "$subagent" >>"$HOME/.claude/projects/stub/$s.jsonl"
+mkdir -p "$HOME/.claude/projects/stub/$s/subagents"; echo "$subagent" >"$HOME/.claude/projects/stub/$s/subagents/agent-a1.jsonl"
+out=$(followup1 "its subagent asked just now")
+check "a worker's subagents' requests don't count: a cold worker whose subagent made a request just now starts fresh" \
+  '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* ]]'
+rm -rf "$HOME/.claude/projects/stub/$s" "$HOME/.claude/projects/stub/$s.jsonl"
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
@@ -1863,6 +1884,10 @@ rm -f "$HOME/stop-noop"
 out=$(crew tick 2>&1)
 check "a later crew tick sends it once the process closes" \
   '[[ $out == *"goal $G: input sent to its goal lead"* && $(gget "$GF" unsent_notes) == 0 && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 3)) ]]'
+request "$gs" 540 143000; setstate "done" null
+crew goal note 1 "After a night" >/dev/null 2>&1
+check "a goal followup resumes its goal lead, however long it has been idle and however big its context" \
+  '[[ $(last_launch) == "claude --resume $gs "*"New input for goal $G"* && $(gget "$GF" lead_session) == "$gs" ]]'
 rm -f "$STUB/$gs.jsonl"
 rm -rf "$CO"; setstate "done" null   # as on a machine the goal moved to
 crew goal note 1 "Keep the header small" >/dev/null 2>&1

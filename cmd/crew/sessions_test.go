@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 // A session's turn has ended when its transcript, found under
@@ -87,5 +89,77 @@ func TestAWorkerWithoutAModelOrEffortLaunchesAsBefore(t *testing.T) {
 	// The model and effort are recorded and compared on their own, so they change neither.
 	if !slices.Equal(sonnet.flags, unset.flags) || sonnet.fingerprint != unset.fingerprint || sonnet.model != "sonnet" || sonnet.effort != "medium" {
 		t.Errorf("a model or effort changed the flags or fingerprint: %q %s, want %q %s", sonnet.flags, sonnet.fingerprint, unset.flags, unset.fingerprint)
+	}
+}
+
+// reply is a transcript entry of an assistant reply written at at, whose
+// request sent tokens of context: a few as input and cache write, the rest
+// read from cache. Its message ID is the time.
+func reply(at time.Time, tokens int, more string) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,%s"message":{"id":"msg_%d","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":500}}}`,
+		at.Format(time.RFC3339Nano), more, at.Unix(), tokens-1002) + "\n"
+}
+
+// A session whose last request was over an hour ago, with a context of 100k
+// tokens or more, costs more to resume than to start fresh. Below either
+// threshold, or when its transcript can't say, it resumes.
+func TestColdResumeTakesTheLastRequestPastAnHourWithABigContext(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "projects", "-home-me-work", "s1.jsonl")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name   string
+		idle   time.Duration
+		tokens int
+		want   string
+	}{
+		{"cold, with a big context", 9 * time.Hour, 143_201, "idle 9h, with 143k tokens of context"},
+		{"just past the hour, at 100k", cacheLife + time.Second, coldContext, "idle 1h, with 100k tokens of context"},
+		{"cold, with a small context", 9 * time.Hour, coldContext - 1, ""},
+		{"an hour to the second, with a big context", cacheLife, 143_201, ""},
+		{"recent, with a big context", 5 * time.Minute, 143_201, ""},
+	} {
+		os.WriteFile(path, []byte(`{"type":"user"}`+"\n"+reply(at, c.tokens, "")+`{"type":"user"}`+"\n"), 0o644)
+		if got := coldResume("s1", at.Add(c.idle)); got != c.want {
+			t.Errorf("%s: coldResume = %q; want %q", c.name, got, c.want)
+		}
+	}
+	if got := coldResume("no-such-session", at.Add(9*time.Hour)); got != "" {
+		t.Errorf("a session with no transcript: coldResume = %q; want it to resume", got)
+	}
+	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"+`{"type":"system","subtype":"turn_duration"}`+"\n"), 0o644)
+	if got := coldResume("s1", at.Add(9*time.Hour)); got != "" {
+		t.Errorf("a transcript with no request: coldResume = %q; want it to resume", got)
+	}
+}
+
+// The last request is the session's own last reply, by its timestamp, with
+// its fullest usage. Entries written after it, a copy of it with its counts
+// zeroed, the session's subagents' requests and Claude Code's own messages
+// don't move it.
+func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s1.jsonl")
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	later := at.Add(3 * time.Hour)
+	own := reply(at.Add(-time.Second), 120_000, "") + reply(at, 143_201, "")
+	for _, c := range []struct{ name, transcript string }{
+		{"its last reply ends the transcript", own},
+		{"entries written after it", own + `{"type":"user"}` + "\n" + fmt.Sprintf(`{"type":"last-prompt","timestamp":%q}`, later.Format(time.RFC3339)) + "\n\n"},
+		{"a subagent's reply after it", own + reply(later, 20_000, `"isSidechain":true,`)},
+		{"an API error after it", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339)) + "\n"},
+		{"a line that doesn't read", own + "{not json\n"},
+		{"a copy of it with its counts zeroed", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"msg_%d","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339), at.Unix()) + "\n"},
+	} {
+		os.WriteFile(path, []byte(c.transcript), 0o644)
+		gotAt, tokens, ok := lastRequest(path)
+		if !ok || !gotAt.Equal(at) || tokens != 143_201 {
+			t.Errorf("%s: lastRequest = %v, %d, %v; want %v, 143201, true", c.name, gotAt, tokens, ok, at)
+		}
+	}
+	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644)
+	if _, _, ok := lastRequest(path); ok {
+		t.Error("lastRequest found a request in a transcript without one")
 	}
 }
