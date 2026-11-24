@@ -8,43 +8,35 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"slices"
-	"syscall"
 	"time"
 )
 
-// crew followup TASK [--fresh] [--note TEXT [--from-user]]
+// crew followup TASK [--fresh] [--note TEXT]
 func cmdFollowup(c *Crew, args []string) error {
 	if err := need("claude"); err != nil {
 		return err
 	}
-	// crew status reads what followup writes to stderr through a pipe, and
-	// may quit while it runs. Writing to a pipe nobody reads then fails, rather
-	// than killing followup between starting a worker and recording it.
-	signal.Ignore(syscall.SIGPIPE)
-	var arg string
-	var with followupWith
+	var arg, note string
+	fresh := false
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--fresh":
-			with.fresh, args = true, args[1:]
+			fresh, args = true, args[1:]
 		case args[0] == "--note" && len(args) > 1:
-			with.note, args = args[1], args[2:]
-		case args[0] == "--from-user":
-			with.fromUser, args = true, args[1:]
+			note, args = args[1], args[2:]
 		default:
 			arg, args = args[0], args[1:]
 		}
 	}
-	if arg == "" || (with.fromUser && with.note == "") {
-		return usage("crew followup TASK [--fresh] [--note TEXT [--from-user]]")
+	if arg == "" {
+		return usage("crew followup TASK [--fresh] [--note TEXT]")
 	}
 	t, err := c.resolveTask(arg)
 	if err != nil {
 		return err
 	}
-	_, err = c.followup(t, with)
+	_, err = c.followup(t, followupWith{fresh: fresh, note: note})
 	return err
 }
 

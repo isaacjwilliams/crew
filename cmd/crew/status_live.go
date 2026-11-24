@@ -8,12 +8,10 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
-	"os"
 	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -47,11 +45,13 @@ type statusFeed struct {
 	readPRs      func() prReads
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
-	build func(statusReads) (statusReport, error)
-	// The view shows openPR's and sendNote's errors as they are, and the
-	// warnings sendNote gives, one to a line, when crew sent the note but warned.
-	openPR   func(url string) error
-	sendNote func(t Task, note string) (warnings string, err error)
+	build  func(statusReads) (statusReport, error)
+	openPR func(url string) error
+	// askNote is why crew would refuse a note for a task's worker now, asked
+	// before the user writes it (noteRefusal), and sendNote sends one in the
+	// user's own words (followup), with what crew warned about on the way.
+	askNote  func(t Task) error
+	sendNote func(t Task, note string) (followupSent, []string, error)
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -74,47 +74,16 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 			return buildReport(&now, c.projects(scope), doneToo, reads), err
 		},
 		openPR: browsePR,
-		// The note goes through crew followup, in a process of its own, so
-		// the ledger's lock is held only while it runs.
-		sendNote: func(t Task, note string) (string, error) {
-			exe, err := os.Executable()
-			if err != nil {
-				return "", err
-			}
-			var errs strings.Builder
-			failed := runCrewCommand(followupCommand(exe, t, note), &errs) != 0
-			return followupOutcome(failed, errs.String())
+		askNote: func(t Task) error {
+			_, _, err := runInProcess(c, func(in *Crew) (struct{}, error) { return struct{}{}, in.noteRefusal(t) })
+			return err
+		},
+		sendNote: func(t Task, note string) (followupSent, []string, error) {
+			return runInProcess(c, func(in *Crew) (followupSent, error) {
+				return in.followup(t, followupWith{note: note, fromUser: true})
+			})
 		},
 	}
-}
-
-// followupCommand is crew followup sending a note as the user's own words. It
-// runs in a session of its own, away from the view's terminal, as under crew
-// tick. So closing the terminal hangs up neither followup nor the worker it
-// starts before followup has recorded it, and a prompt for a password, from git
-// say, fails at once instead of waiting for keys the view takes.
-func followupCommand(exe string, t Task, note string) *exec.Cmd {
-	cmd := exec.Command(exe, "followup", t.Path, "--note", note, "--from-user")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd
-}
-
-// followupOutcome reads what crew followup wrote to stderr. When it failed,
-// that's all of it, as a shell shows it, since a refusal can point to claude's
-// output above it. When it sent the note, it's every warning crew gave, a line
-// each: claude's own notes on starting a session aren't crew's warnings.
-func followupOutcome(failed bool, stderr string) (warnings string, err error) {
-	stderr = strings.TrimRight(stderr, "\n")
-	if failed {
-		return "", errors.New(cmp.Or(stderr, "crew followup failed"))
-	}
-	var ws []string
-	for line := range strings.SplitSeq(stderr, "\n") {
-		if w, ok := strings.CutPrefix(line, "crew: "); ok {
-			ws = append(ws, w)
-		}
-	}
-	return strings.Join(ws, "\n"), nil
 }
 
 // browsePR opens a PR in the browser, with gh's output kept off the screen. A
@@ -193,9 +162,6 @@ type liveStatus struct {
 
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
-	// readOnlyOn is the machine that runs the crew, as of the latest report,
-	// when it isn't this one; empty when this machine runs it.
-	readOnlyOn string
 	// settingsErr is why the latest report went by the settings crew started
 	// with: the shared settings couldn't be read again.
 	settingsErr error
@@ -207,12 +173,18 @@ type liveStatus struct {
 	top           int         // the first line of shown on the screen
 	width, height int
 
-	note *noteDraft // the note the user is typing, if they are
+	// asking is the path of the task whose worker crew is being asked about
+	// taking a note, before the user writes it (askNote).
+	asking string
+	note   *noteDraft // the note the user is typing, if they are
 	// held is the notes the user finished that crew hasn't sent, by their
 	// task's path: one on its way, or one crew refused, for n on the task to
 	// bring back.
 	held map[string]heldNote
-	said string // what an action did, or why it couldn't
+	// quitting: the user quit while a note was on its way, so the view quits
+	// once it's sent (quit).
+	quitting bool
+	said     string // what an action did, or why it couldn't
 }
 
 // noteDraft is a note the user is typing to a task's worker.
@@ -224,7 +196,7 @@ type noteDraft struct {
 // heldNote is a note the user finished that crew hasn't sent.
 type heldNote struct {
 	text    string
-	sending bool // crew followup has it now
+	sending bool // followup has it now
 }
 
 // action is something the user can do to the task under the cursor, by its key.
@@ -239,7 +211,7 @@ type action struct {
 
 var actions = []action{
 	{key: "o", name: "open PR", refuses: (*liveStatus).refusesOpenPR, start: (*liveStatus).openPR},
-	{key: "n", name: "note", refuses: (*liveStatus).refusesNote, start: (*liveStatus).startNote},
+	{key: "n", name: "note", refuses: (*liveStatus).refusesNote, start: (*liveStatus).askNote},
 }
 
 // shownLine is a line on show, with how deep it is in the tree.
@@ -264,10 +236,17 @@ type (
 		task Task
 		err  error
 	}
+	// noteAsked is crew's answer to whether a task's worker takes a note now.
+	noteAsked struct {
+		to  Task
+		err error
+	}
 	noteSent struct {
-		to             Task
-		text, warnings string
-		err            error
+		to       Task
+		text     string
+		sent     followupSent
+		warnings []string
+		err      error
 	}
 	// noteInput is what a note's own command sent back (the clipboard, say),
 	// for the draft that started it.
@@ -363,16 +342,22 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		} else {
 			m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		}
+	case noteAsked:
+		// Only the latest n on a task opens a note.
+		if msg.to.Path != m.asking {
+			return nil
+		}
+		m.asking = ""
+		if msg.err != nil {
+			m.said = msg.err.Error()
+			return nil
+		}
+		m.said = ""
+		return m.startNote(msg.to)
 	case noteSent:
-		delete(m.held, msg.to.Path)
-		switch {
-		case msg.err != nil:
-			m.held[msg.to.Path] = heldNote{text: msg.text}
-			m.said = "crew followup failed; n on " + msg.to.ID() + " brings your note back:\n" + msg.err.Error()
-		case msg.warnings != "":
-			m.said = "sent your note to " + msg.to.ID() + "'s worker, but:\n" + msg.warnings
-		default:
-			m.said = "sent your note to " + msg.to.ID() + "'s worker"
+		m.noteSent(msg)
+		if m.quitting && !m.sendingNote() {
+			return tea.Quit
 		}
 		// The worker's line shows it at work on the note.
 		m.listingWorkers.ask()
@@ -402,7 +387,7 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 	if l, ok := m.current(); ok {
 		key = l.key
 	}
-	m.lines, m.builtAt, m.readOnlyOn = reportLines(r), at, r.ReadOnlyOn
+	m.lines, m.builtAt = reportLines(r), at
 	m.layOut()
 	i := slices.IndexFunc(m.shown, func(l shownLine) bool { return l.key == key })
 	if i < 0 {
@@ -415,7 +400,7 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	m.said = ""
 	switch key {
 	case "q", "ctrl+c":
-		return tea.Quit
+		return m.quit()
 	case "up", "k":
 		m.moveTo(m.cursor - 1)
 	case "down", "j":
@@ -480,25 +465,30 @@ func (m *liveStatus) openPR(t Task) tea.Cmd {
 	return func() tea.Msg { return prOpened{t, open(t.PR())} }
 }
 
+// refusesNote says why the line takes no note: it isn't a task's, the task has
+// no worker for followup to send one to, in followup's own words, or a note to
+// it is on its way already. Whether its worker takes one now is crew's to say
+// when the user asks for it (askNote).
 func (m *liveStatus) refusesNote(r *taskRow) string {
-	if r == nil {
-		return "put the cursor on a task to send its worker a note"
-	}
-	t := r.Task
 	switch {
-	case !t.Dispatched():
-		return t.ID() + " has no worker: it hasn't been dispatched"
-	case t.Status().Finished():
-		return t.ID() + " is " + string(t.Status()) + ", so its worker is done"
-	case m.readOnlyOn != "":
-		return "this machine can only read: crew runs on " + m.readOnlyOn
-	case m.held[t.Path].sending:
-		return "your note to " + t.ID() + "'s worker is still on its way"
-	case r.Worker.busy():
-		// crew followup would refuse it too.
-		return t.ID() + "'s worker is busy (" + r.Worker.stateText() + "), so it can't take a note now"
+	case r == nil:
+		return "put the cursor on a task to send its worker a note"
+	case m.held[r.Task.Path].sending:
+		return "your note to " + r.Task.ID() + "'s worker is still on its way"
+	}
+	if err := noWorker(r.Task); err != nil {
+		return err.Error()
 	}
 	return ""
+}
+
+// askNote asks crew whether t's worker takes a note now, so a refusal comes
+// before the user writes one, not after (noteAsked).
+func (m *liveStatus) askNote(t Task) tea.Cmd {
+	ask := m.feed.askNote
+	m.asking = t.Path
+	m.said = "asking crew whether " + t.ID() + "'s worker can take a note…"
+	return func() tea.Msg { return noteAsked{t, ask(t)} }
 }
 
 // startNote opens a line to type a note to t's worker in, with the note crew
@@ -530,7 +520,7 @@ func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "ctrl+c":
-			return tea.Quit
+			return m.quit()
 		case "esc":
 			m.note = nil
 			return nil
@@ -541,6 +531,27 @@ func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	m.note.input, cmd = m.note.input.Update(msg)
 	return m.note.own(cmd)
+}
+
+// quit quits, unless followup is sending a note: it runs in the view's process,
+// so quitting would end it, perhaps after it started the worker and before it
+// recorded it. Then the view quits once the note is sent, or at a second quit.
+func (m *liveStatus) quit() tea.Cmd {
+	if m.quitting || !m.sendingNote() {
+		return tea.Quit
+	}
+	m.quitting = true
+	m.said = "quitting once your note is sent; q again quits now"
+	return nil
+}
+
+func (m *liveStatus) sendingNote() bool {
+	for _, n := range m.held {
+		if n.sending {
+			return true
+		}
+	}
+	return false
 }
 
 // own has what cmd sends back come to this draft only.
@@ -561,9 +572,39 @@ func (m *liveStatus) sendNote() tea.Cmd {
 	m.held[to.Path] = heldNote{text: text, sending: true}
 	m.said = "sending your note to " + to.ID() + "'s worker…"
 	return func() tea.Msg {
-		warnings, err := send(to, text)
-		return noteSent{to, text, warnings, err}
+		sent, warnings, err := send(to, text)
+		return noteSent{to, text, sent, warnings, err}
 	}
+}
+
+// noteSent says what became of a note, with what crew warned about on the way.
+// A note crew didn't send waits for n on its task to bring it back. A session
+// claude started that crew couldn't record has the note, so it isn't kept.
+func (m *liveStatus) noteSent(msg noteSent) {
+	delete(m.held, msg.to.Path)
+	to := msg.to.ID()
+	said, more := "", msg.warnings
+	switch {
+	case msg.err == nil:
+		said = "sent your note to " + to + "'s worker (" + msg.sent.mode + ")"
+		if msg.sent.worktree != "" {
+			said += "; " + msg.sent.worktree
+		}
+		if len(more) > 0 {
+			said += ", but"
+		}
+	case errors.As(msg.err, new(unrecordedSession)):
+		said = "sent your note to " + to + "'s worker, but crew couldn't record its session"
+		more = slices.Concat(more, []string{msg.err.Error()})
+	default:
+		m.held[msg.to.Path] = heldNote{text: msg.text}
+		said = "crew didn't send your note to " + to + "'s worker; n on " + to + " brings it back"
+		more = slices.Concat(more, []string{msg.err.Error()})
+	}
+	if len(more) > 0 {
+		said += ":\n" + strings.Join(more, "\n")
+	}
+	m.said = said
 }
 
 func (m *liveStatus) current() (shownLine, bool) {

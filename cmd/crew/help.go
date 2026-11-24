@@ -84,10 +84,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
                                    collaborators' under Open questions for you
-  crew followup TASK [--fresh] [--note TEXT [--from-user]]
-                                   Resume the task's worker on the latest round/note;
-                                   --from-user gives the note as your own words,
-                                   not the lead's
+  crew followup TASK [--fresh] [--note TEXT]
+                                   Resume the task's worker on the latest round/note
   crew attach TASK                 Attach this terminal to the task's worker; a
                                    followup or tick that resumes the worker ends it
   crew restack TASK [--again]      Start a fresh worker on Sonnet to rebase a stacked

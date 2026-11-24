@@ -4,11 +4,11 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -445,12 +445,14 @@ func actionsReport(c *Crew) statusReport {
 }
 
 // actionsRun is what the view's actions were given to run, in place of gh and
-// crew followup.
+// followup.
 type actionsRun struct {
 	opened   []string // the PRs opened, by URL
+	asked    []string // the tasks crew was asked about taking a note, by ID
 	notes    []string // the notes sent: "<task ID>: <note>"
-	err      error    // what each action returns
-	warnings string   // what crew warned of when it sent a note
+	refusal  error    // crew's answer when asked about a note
+	err      error    // what opening a PR or sending a note returns
+	warnings []string // what crew warned of when it sent a note
 }
 
 // actingOn is the live view showing r, with its actions recorded in run rather
@@ -460,11 +462,22 @@ func actingOn(r statusReport) (*liveStatus, *actionsRun) {
 	m.width, m.height = 200, 60
 	openAll(m)
 	m.feed.openPR = func(url string) error { run.opened = append(run.opened, url); return run.err }
-	m.feed.sendNote = func(t Task, note string) (string, error) {
+	m.feed.askNote = func(t Task) error { run.asked = append(run.asked, t.ID()); return run.refusal }
+	m.feed.sendNote = func(t Task, note string) (followupSent, []string, error) {
 		run.notes = append(run.notes, t.ID()+": "+note)
-		return run.warnings, run.err
+		if run.err != nil {
+			return followupSent{}, run.warnings, run.err
+		}
+		return followupSent{job: "w9", mode: "resume"}, run.warnings, nil
 	}
 	return m, run
+}
+
+// startNote presses n, which asks crew whether the task takes a note, and
+// gives the view crew's answer.
+func startNote(t *testing.T, m *liveStatus) {
+	t.Helper()
+	finish(t, m, press(m, "n"))
 }
 
 // finish runs the command an action started, and gives the view its message.
@@ -522,7 +535,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 		}
 	}
 	takes := map[string]string{ // by the line's head; every other line takes neither
-		"001-in-flight": "",                  // in a goal's group, with a busy worker and no PR
+		"001-in-flight": "n note",            // in a goal's group, with a busy worker and no PR
 		"016-both":      "o open PR  n note", // a PR and a worker
 		"└ 017-stacked": "n note",            // stacked, with a worker
 		"013-risky":     "o open PR",         // a PR and no worker
@@ -543,7 +556,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 			cmd := press(m, a.key)
 			after := screen(m)
 			// The line that says why takes the place of the report's last line.
-			if cmd != nil || m.note != nil || len(run.opened)+len(run.notes) > 0 || !slices.Equal(before[:len(after)-2], after[:len(after)-2]) {
+			if cmd != nil || m.note != nil || len(run.opened)+len(run.asked)+len(run.notes) > 0 || !slices.Equal(before[:len(after)-2], after[:len(after)-2]) {
 				t.Errorf("%s on %q, which doesn't take it, changed something", a.key, l.head)
 			}
 			if footOnScreen(m) != m.said || m.said == "" {
@@ -555,9 +568,8 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 		{"workers running: 1/3", "o", "put the cursor on a task to open its PR"},
 		{"goal 001-launch", "n", "put the cursor on a task to send its worker a note"},
 		{"001-in-flight", "o", "001-in-flight has no PR"},
-		{"001-in-flight", "n", "001-in-flight's worker is busy (working), so it can't take a note now"},
-		{"012-idea", "n", "012-idea has no worker: it hasn't been dispatched"},
-		{"018-merged", "n", "018-merged is merged, so its worker is done"},
+		{"012-idea", "n", "012-idea has no worker yet; dispatch it first"},
+		{"018-merged", "n", "018-merged is merged; not resuming its worker"},
 	} {
 		goTo(t, m, tc.head)
 		press(m, tc.key)
@@ -567,24 +579,39 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 	}
 }
 
-func TestLiveStatusOnAMachineThatDoesntRunTheCrewOpensPRsButSendsNoNotes(t *testing.T) {
-	r := actionsReport(actionsLedger(t))
-	r.ReadOnlyOn = "laptop"
-	m, run := actingOn(r)
-	goTo(t, m, "read-only: crew runs on laptop")
-	if got := offered(m); got != "" {
-		t.Errorf("the read-only line offers %q", got)
+// A worker that can't take a note now (busy, say) is crew's to tell, when the
+// user asks for the note, and the view says so in crew's words.
+func TestLiveStatusAsksCrewBeforeTheNoteIsWritten(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "001-in-flight")
+	run.refusal = errors.New("worker w1 is busy (working). Wait for it, answer it in your terminal with crew attach 001-in-flight, or SendMessage crew-p-001-in-flight a note")
+	asking := press(m, "n")
+	if got, want := footOnScreen(m), "asking crew whether 001-in-flight's worker can take a note…"; got != want {
+		t.Errorf("while crew is asked, the view says %q, want %q", got, want)
 	}
+	finish(t, m, asking)
+	if m.note != nil || len(run.notes) > 0 || footOnScreen(m) != run.refusal.Error() {
+		t.Errorf("when crew refuses a note, the view opens %v, sends %q and says %q", m.note, run.notes, footOnScreen(m))
+	}
+	if !slices.Equal(run.asked, []string{"001-in-flight"}) {
+		t.Errorf("crew was asked about %q, want 001-in-flight", run.asked)
+	}
+}
+
+// Only the latest n opens a note: crew's answer about an earlier one doesn't.
+func TestLiveStatusOpensANoteForTheLatestAsk(t *testing.T) {
+	m, _ := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
-	if got := offered(m); got != "o open PR" {
-		t.Errorf("a task with a PR and a worker offers %q, want only to open its PR", got)
+	first := press(m, "n")
+	goTo(t, m, "└ 017-stacked")
+	second := press(m, "n")
+	finish(t, m, first)
+	if m.note != nil {
+		t.Fatalf("crew's answer about 016-both opened a note to %s after n on 017-stacked", m.note.to.ID())
 	}
-	if press(m, "n") != nil || m.note != nil || m.said != "this machine can only read: crew runs on laptop" {
-		t.Errorf("n on a machine that doesn't run the crew: note %v, says %q", m.note, m.said)
-	}
-	finish(t, m, press(m, "o"))
-	if !slices.Equal(run.opened, []string{"https://github.com/o/r/pull/16"}) || len(run.notes) > 0 {
-		t.Errorf("opened %v and sent %v, want only the PR opened", run.opened, run.notes)
+	finish(t, m, second)
+	if m.note == nil || m.note.to.ID() != "017-stacked" {
+		t.Errorf("crew's answer about 017-stacked opened %v, want a note to it", m.note)
 	}
 }
 
@@ -617,7 +644,7 @@ func TestLiveStatusOpensTheTasksPR(t *testing.T) {
 func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
-	press(m, "n")
+	startNote(t, m)
 	if m.note == nil || !strings.HasPrefix(footOnScreen(m), "note to 016-both:") {
 		t.Fatalf("n doesn't ask for a note: the line above the bar is %q", footOnScreen(m))
 	}
@@ -637,25 +664,25 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	if want := "016-both: " + note + " (pasted)"; !slices.Equal(run.notes, []string{want}) {
 		t.Errorf("sent %q, want %q", run.notes, want)
 	}
-	if m.note != nil || footOnScreen(m) != "sent your note to 016-both's worker" {
+	if m.note != nil || footOnScreen(m) != "sent your note to 016-both's worker (resume)" {
 		t.Errorf("after sending, the view says %q", footOnScreen(m))
 	}
 
-	run.notes, run.warnings = nil, "couldn't resume session 1b2a; starting a fresh session instead\nledger commit failed (continuing)"
-	press(m, "n")
+	run.notes, run.warnings = nil, []string{"couldn't resume session 1b2a; starting a fresh session instead", "ledger commit failed (continuing)"}
+	startNote(t, m)
 	typeText(m, "and one more thing")
 	finish(t, m, press(m, "enter"))
-	if got, want := footOnScreen(m), "sent your note to 016-both's worker, but:\n"+run.warnings; got != want {
+	if got, want := footOnScreen(m), "sent your note to 016-both's worker (resume), but:\n"+strings.Join(run.warnings, "\n"); got != want {
 		t.Errorf("when crew warns as it sends a note, the view says %q, want %q", got, want)
 	}
 
 	run.notes = nil
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "never mind")
 	if press(m, "esc") != nil || m.note != nil {
 		t.Error("esc leaves the note open")
 	}
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "   ")
 	if press(m, "enter") != nil || m.note != nil {
 		t.Error("enter on a blank note leaves it open, or sends it")
@@ -669,30 +696,48 @@ func TestLiveStatusKeepsANoteCrewDidntSend(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	run.err = errors.New("p is paused; 'crew resume --project p' lets its work go on")
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "the tests first")
 	finish(t, m, press(m, "enter"))
-	if got, want := footOnScreen(m), "crew followup failed; n on 016-both brings your note back:\n"+run.err.Error(); got != want {
+	if got, want := footOnScreen(m), "crew didn't send your note to 016-both's worker; n on 016-both brings it back:\n"+run.err.Error(); got != want {
 		t.Errorf("when crew refuses a note, the view says %q, want %q", got, want)
 	}
 
 	goTo(t, m, "└ 017-stacked")
-	press(m, "n")
+	startNote(t, m)
 	if got := m.note.input.Value(); got != "" {
 		t.Errorf("a note to another task starts with %q", got)
 	}
 	press(m, "esc")
 	goTo(t, m, "016-both")
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, ", please")
 	run.err, run.notes = nil, nil
 	finish(t, m, press(m, "enter"))
 	if want := []string{"016-both: the tests first, please"}; !slices.Equal(run.notes, want) {
 		t.Errorf("sent %q, want %q", run.notes, want)
 	}
-	press(m, "n")
+	startNote(t, m)
 	if got := m.note.input.Value(); got != "" {
 		t.Errorf("once the note is sent, n starts with %q", got)
+	}
+}
+
+// A session claude started that crew couldn't record has the note, so the view
+// doesn't keep it to send again.
+func TestLiveStatusKeepsNoNoteASessionTook(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	run.err = unrecordedSession{"backgrounded · not/a/job"}
+	startNote(t, m)
+	typeText(m, "the tests first")
+	finish(t, m, press(m, "enter"))
+	if got, want := footOnScreen(m), "sent your note to 016-both's worker, but crew couldn't record its session:\n"+run.err.Error(); got != want {
+		t.Errorf("when crew can't record the session it started, the view says %q, want %q", got, want)
+	}
+	startNote(t, m)
+	if got := m.note.input.Value(); got != "" {
+		t.Errorf("after a session took the note, n starts with %q", got)
 	}
 }
 
@@ -700,7 +745,7 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	run.err = errors.New("p is paused; 'crew resume --project p' lets its work go on")
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "the tests first")
 	sending := press(m, "enter")
 
@@ -716,9 +761,37 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 	}
 
 	finish(t, m, sending)
-	press(m, "n")
+	startNote(t, m)
 	if got := m.note.input.Value(); got != "the tests first" {
 		t.Errorf("once crew refuses the note, n starts with %q", got)
+	}
+}
+
+// followup runs in the view's process, so quitting while it sends a note waits
+// for it, unless the user quits again.
+func TestLiveStatusQuitsOnceANoteIsSent(t *testing.T) {
+	m, _ := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	sending := press(m, "enter")
+	if quits(press(m, "q")) {
+		t.Fatal("q quit the view while a note was on its way")
+	}
+	if got, want := footOnScreen(m), "quitting once your note is sent; q again quits now"; got != want {
+		t.Errorf("q while a note is on its way says %q, want %q", got, want)
+	}
+	if _, cmd := m.Update(sending()); !quits(cmd) {
+		t.Error("the view didn't quit once the note was sent")
+	}
+
+	m, _ = actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	press(m, "enter")
+	if quits(press(m, "ctrl+c")) || !quits(press(m, "q")) {
+		t.Error("a second quit while a note is on its way doesn't quit at once")
 	}
 }
 
@@ -728,7 +801,7 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 func TestLiveStatusGivesTheNoteWhatItsCommandsSendBack(t *testing.T) {
 	m, _ := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
-	press(m, "n")
+	startNote(t, m)
 	t.Setenv("PATH", t.TempDir())
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	finish(t, m, cmd)
@@ -742,12 +815,12 @@ func TestLiveStatusGivesTheNoteWhatItsCommandsSendBack(t *testing.T) {
 func TestLiveStatusGivesANoteOnlyWhatItsOwnCommandsSendBack(t *testing.T) {
 	m, _ := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
-	press(m, "n")
+	startNote(t, m)
 	t.Setenv("PATH", t.TempDir())
 	_, paste := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	press(m, "esc")
 	goTo(t, m, "└ 017-stacked")
-	press(m, "n")
+	startNote(t, m)
 	finish(t, m, paste)
 	if m.note.input.Err != nil {
 		t.Error("the clipboard's answer to a note that's gone reached the next one")
@@ -758,12 +831,12 @@ func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	c := actionsLedger(t)
 	m, run := actingOn(actionsReport(c))
 	goTo(t, m, "└ 017-stacked")
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "for the stacked task")
 	finish(t, m, press(m, "enter"))
 
 	goTo(t, m, "016-both")
-	press(m, "n")
+	startNote(t, m)
 	typeText(m, "for the PR's ")
 	// 016-both is stacked on 010-parent while the note is typed, so its line
 	// moves, and then merges, so its line goes and the cursor goes to the line
@@ -788,48 +861,17 @@ func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	}
 }
 
-func TestFollowupOutcomeTellsCrewsWarningsFromClaudesNotes(t *testing.T) {
-	note := "Note: session 7f3c started in the background\n"
-	slow := "crew: job w9 hasn't reported its session after 30s, so crew can't confirm it started\n"
-	resumed := "crew: couldn't resume session 1b2a; starting a fresh session instead\n"
-	claudeFailed := "Error: not logged in\n"
-	for _, tc := range []struct {
-		failed                bool
-		stderr, warnings, err string
-	}{
-		{false, "", "", ""},
-		{false, note, "", ""},
-		{false, note + slow, "job w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
-		{false, resumed + note + slow, "couldn't resume session 1b2a; starting a fresh session instead\njob w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
-		// A refusal shows whole, with the output of claude's it points to.
-		{true, resumed + claudeFailed + "crew: could not start a session (see output above)\n", "",
-			"crew: couldn't resume session 1b2a; starting a fresh session instead\nError: not logged in\ncrew: could not start a session (see output above)"},
-		{true, "crew: claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\nbackgrounded job ???\n", "",
-			"crew: claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\nbackgrounded job ???"},
-		{true, "", "", "crew followup failed"},
-	} {
-		warnings, err := followupOutcome(tc.failed, tc.stderr)
-		got := ""
-		if err != nil {
-			got = err.Error()
-		}
-		if warnings != tc.warnings || got != tc.err {
-			t.Errorf("followupOutcome(%v, %q) = %q, %v; want %q, %q", tc.failed, tc.stderr, warnings, err, tc.warnings, tc.err)
-		}
-	}
-}
-
 func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
 	goTo(t, m, "016-both")
 	resumed := "couldn't resume session 1b2a7c4e-90f1-4d2b-8e3a-5c6d7e8f9a0b; starting a fresh session instead"
-	run.warnings = resumed + "\nledger commit failed (continuing)"
-	press(m, "n")
+	run.warnings = []string{resumed, "ledger commit failed (continuing)"}
+	startNote(t, m)
 	typeText(m, "the tests first")
 	finish(t, m, press(m, "enter"))
 	// The first warning is wider than the screen, so it takes two lines.
-	if got, want := strings.Join(strings.Fields(footOnScreen(m)), " "), "sent your note to 016-both's worker, but: "+resumed+" ledger commit failed (continuing)"; got != want {
+	if got, want := strings.Join(strings.Fields(footOnScreen(m)), " "), "sent your note to 016-both's worker (resume), but: "+resumed+" ledger commit failed (continuing)"; got != want {
 		t.Errorf("at 80 columns, the view says %q, want %q", got, want)
 	}
 	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
@@ -838,12 +880,12 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 
 	// A refusal longer than half the screen keeps its first line and its last,
 	// and says how many it leaves out.
-	run.warnings, run.err = "", errors.New(strings.Repeat("claude's output\n", 20)+"crew: could not start a session (see output above)")
-	press(m, "n")
+	run.warnings, run.err = nil, errors.New("could not start a session; claude said:\n"+strings.Repeat("claude's output\n", 20)+"Error: out of credits")
+	startNote(t, m)
 	typeText(m, "and again")
 	finish(t, m, press(m, "enter"))
 	foot := strings.Split(footOnScreen(m), "\n")
-	if len(foot) != 6 || foot[0] != "crew followup failed; n on 016-both brings your note back:" || foot[1] != "… 17 lines not shown" || foot[2] != "claude's output" || foot[5] != "crew: could not start a session (see output above)" {
+	if len(foot) != 6 || foot[0] != "crew didn't send your note to 016-both's worker; n on 016-both brings it back:" || foot[1] != "… 18 lines not shown" || foot[2] != "claude's output" || foot[5] != "Error: out of credits" {
 		t.Errorf("on a screen 12 lines high, a long refusal shows as %q", foot)
 	}
 	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
@@ -857,34 +899,55 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	}
 }
 
-// TestFollowupCommandRunsInASessionOfItsOwn starts the note's command on a crew
-// that says its arguments and waits for its input to close.
-func TestFollowupCommandRunsInASessionOfItsOwn(t *testing.T) {
-	exe := t.TempDir() + "/crew"
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$*\" >&2\ncat >/dev/null\n"), 0o755); err != nil {
-		t.Fatal(err)
+// The view's feed asks about a note and sends it through followup, in the view's
+// own process: crew's refusals in its own words, and a note the worker and the
+// Log take as the user's, with nothing written over the view and the ledger
+// lock let go.
+func TestLiveStatusFeedSendsNotesThroughFollowup(t *testing.T) {
+	f := newFollowupCrew(t, "git")
+	task := f.task(t)
+	feed := feedOf(f.Crew, "p", false)
+
+	f.workers(t, "working", true)
+	if err := feed.askNote(task); err == nil || !strings.HasPrefix(err.Error(), "worker w1 is busy (working).") {
+		t.Errorf("asked about a busy worker, crew said %v", err)
 	}
-	cmd := followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first")
-	var said strings.Builder
-	cmd.Stderr = &said
-	input, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
+	f.workers(t, "done", false)
+	writeFile(t, f.Crew, "laptop\n", "host")
+	readOnly := "crew runs on laptop; this machine can only read (crew host up --take moves it here)"
+	if err := feed.askNote(task); err == nil || err.Error() != readOnly {
+		t.Errorf("asked on a machine that doesn't run the crew, crew said %v, want %q", err, readOnly)
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	if _, _, err := feed.sendNote(task, "the tests first"); err == nil || err.Error() != readOnly {
+		t.Errorf("sending on a machine that doesn't run the crew, crew said %v, want %q", err, readOnly)
 	}
-	// Go's syscall has no Getsid on Linux.
-	session, _, errno := syscall.Syscall(syscall.SYS_GETSID, uintptr(cmd.Process.Pid), 0, 0)
-	input.Close()
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("the note's command failed: %v: %s", err, said.String())
+	if got := lastLog(task); got != "" {
+		t.Errorf("a note crew refused is in the Log: %q", got)
 	}
-	if errno != 0 || int(session) != cmd.Process.Pid {
-		t.Errorf("the note's crew followup runs in session %d (%v), not one of its own", session, errno)
+
+	writeFile(t, f.Crew, "here\n", "host")
+	if err := feed.askNote(task); err != nil {
+		t.Fatalf("asked about an idle worker, crew said %v", err)
 	}
-	if got, want := strings.TrimSpace(said.String()), "followup /l/tasks/016-both.md --note the tests first --from-user"; got != want {
-		t.Errorf("the note's command runs crew %q, want %q", got, want)
+	said := watchTerminal(t)
+	sent, _, err := feed.sendNote(task, "the tests first")
+	if out := said(); out != "" {
+		t.Errorf("sending a note wrote over the view:\n%s", out)
+	}
+	if err != nil || sent.job != task.WorkerJob() {
+		t.Fatalf("sending a note gave %+v, %v; want it sent to %s", sent, err, task.WorkerJob())
+	}
+	if got := lastLog(task); !strings.HasSuffix(got, " — note from the user: the tests first") {
+		t.Errorf("the Log says %q, want the note from the user", got)
+	}
+	calls, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), "claude-calls.log"))
+	if err != nil || !strings.Contains(string(calls), "Note from the user, in their own words: the tests first") {
+		t.Errorf("the worker wasn't told the note is the user's own words:\n%s", calls)
+	}
+	if lock, err := flock(f.path(".crew.lock"), 0); err != nil {
+		t.Errorf("the ledger lock is still held after the note was sent: %v", err)
+	} else {
+		lock.Close()
 	}
 }
 

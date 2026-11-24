@@ -573,9 +573,6 @@ sed -i "s/^status: .*/status: pr-open/" "$F1"; setstate "done" null  # crew set 
 check "note-only followup moves a pr-open task back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 setstate "done" null
 check "note-only followup keeps a working task working and logs no status line" 'n=$(grep -c "status → " "$F1"); crew followup 1 --note "carry on" >/dev/null && [[ $(crew get 1 status) == working && $(grep -c "status → " "$F1") == "$n" ]]'
-setstate "done" null
-check "a note --from-user reaches the worker as the user's own words, and the Log says it's theirs" 'crew followup 1 --note "rename it" --from-user >/dev/null && p=$(grep -- "--resume" "$HOME/claude-calls.log" | tail -1) && [[ $p == *"Note from the user, in their own words: rename it"* && $p != *"Note from the lead"* && $(tail -1 "$F1") == *"followup (resume): worker "*" — note from the user: rename it" ]]'
-check "--from-user without a note is a usage error" '! crew followup 1 --from-user 2>/dev/null'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
 echo "half done" >"$(crew get 1 worktree)/wip.txt"
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
@@ -611,11 +608,6 @@ setstate "done" null; touch "$HOME/reopen-on-resume"
 out=$(crew followup 1 --note "reopened" 2>&1)
 copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
 check "a copy started anyway, by a process that opened again before the resume, is recorded, with a warning" '[[ $out == *"started a copy of session $sess"* && $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(crew get 1 worker_job) == "$(jq -r ".[-1].id" "$HOME/agents.json")" ]]'
-# crew status runs followup with its stderr in a pipe, and may quit while it runs.
-setstate "done" null; touch "$HOME/reopen-on-resume"; sess=$(crew get 1 worker_session)
-{ sleep 0.5; crew followup 1 --note "reader gone" 2>&1 >/dev/null; } | true
-copy=$(jq -r '.[-1].sessionId' "$HOME/agents.json")
-check "a followup whose stderr nobody reads any more still records the session it started, and its note" '[[ $(crew get 1 worker_session) == "$copy" && $copy != "$sess" && $(grep -c "reader gone" "$F1") == 1 ]]'
 setstate "done" null; touch "$HOME/placeholder-session"; sess=$(crew get 1 worker_session)
 out=$(crew followup 1 --note "placeholder" 2>&1)
 check "a resume whose process first reports a new session ID keeps the recorded session" '[[ $(crew get 1 worker_session) == "$sess" && $out != *copy* ]]'
@@ -3092,7 +3084,7 @@ note="q r j k h l g G, then space"
   printf q
 } | timeout 60 script -qec "crew status --project $VP" /dev/null >"$HOME/live-note.out" 2>&1; live=$?
 check "from the live view, a note with the view's own keys in it reaches the worker as typed, as the user's words, and the Log has it" \
-  '[[ $live == 0 && $(<"$HOME/live-note.out") != *"not sent"* && $(resumes) == $((n + 1)) && $(last_prompt) == *"Note from the user, in their own words: $note" && $(grep "note from the user" "$VN") == *"followup (resume): worker "*" — note from the user: $note" ]]'
+  '[[ $live == 0 && $(<"$HOME/live-note.out") != *"brings it back"* && $(resumes) == $((n + 1)) && $(last_prompt) == *"Note from the user, in their own words: $note" && $(grep "note from the user" "$VN") == *"followup (resume): worker "*" — note from the user: $note" ]]'
 check "with the view still open after a note, crew set and crew tick take the lock at once" \
   '[[ $(head -1 "$HOME/while-open") == "set 0 "* && $(tail -1 "$HOME/while-open") == "tick 0 "* && $(crew get "$VN" risk) == medium ]]'
 
