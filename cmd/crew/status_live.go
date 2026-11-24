@@ -694,25 +694,25 @@ func (m *liveStatus) bodyHeight() int {
 	return max(1, m.height-1-len(m.footLines()))
 }
 
-// footLines are the lines above the bar: the note the user is typing or, when
-// they aren't, what an action did, wrapped to the screen. They take at most
-// half of it, so a long one keeps its first line, which says what happened,
-// and its last ones, where a refusal ends. When there's room, a line between
-// them says how many it leaves out.
+// footLines are the lines above the bar: what an action did, wrapped to the
+// screen, and under it the note the user is typing, if they are. What an action
+// did takes at most half the screen, so a long one keeps its first line, which
+// says what happened, and its last ones, where a refusal ends. When there's
+// room, a line between them says how many it leaves out.
 func (m *liveStatus) footLines() []string {
-	if m.note != nil {
-		return []string{m.note.input.View()}
-	}
-	if m.said == "" {
-		return nil
-	}
-	lines := strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
-	if most := max(1, m.height/2); len(lines) > most {
-		last := lines[len(lines)-most+1:]
-		if most >= 3 {
-			last = slices.Concat([]string{"… " + strconv.Itoa(len(lines)-most+1) + " lines not shown"}, last[1:])
+	var lines []string
+	if m.said != "" {
+		lines = strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
+		if most := max(1, m.height/2); len(lines) > most {
+			last := lines[len(lines)-most+1:]
+			if most >= 3 {
+				last = slices.Concat([]string{"… " + strconv.Itoa(len(lines)-most+1) + " lines not shown"}, last[1:])
+			}
+			lines = slices.Concat(lines[:1], last)
 		}
-		lines = slices.Concat(lines[:1], last)
+	}
+	if m.note != nil {
+		lines = append(lines, m.note.input.View())
 	}
 	return lines
 }

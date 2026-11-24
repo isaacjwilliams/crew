@@ -836,6 +836,24 @@ func TestLiveStatusStaysOpenForWhatCrewSaysOfANote(t *testing.T) {
 	}
 }
 
+// TestLiveStatusSaysWhatBecameOfANoteAboveTheNextOne sends a note and starts
+// another before crew answers: what crew said of the first shows above the one
+// the user is typing.
+func TestLiveStatusSaysWhatBecameOfANoteAboveTheNextOne(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	sending := press(m, "enter")
+	goTo(t, m, "017-stacked")
+	startNote(t, m)
+	run.warnings = []string{"ledger commit failed (continuing)"}
+	m.Update(sending())
+	if got := footOnScreen(m); !strings.Contains(got, "ledger commit failed") || !strings.HasSuffix(got, "note to 017-stacked:") {
+		t.Errorf("what crew said of a note doesn't show above the next one: %q", got)
+	}
+}
+
 // TestLiveStatusGivesTheNoteWhatItsCommandsSendBack presses ctrl+v, which has
 // the note read the clipboard. With no clipboard tool on PATH, the read fails,
 // and the note has the error.
