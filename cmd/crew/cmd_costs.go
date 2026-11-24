@@ -79,8 +79,9 @@ func (r rate) dollars(u claudeUsage) float64 {
 // crew costs [--from YYYY-MM-DD] [--to YYYY-MM-DD]
 //
 // Prints what each step cost from the first day to the last, both included and
-// in local time: the last 7 days by default. It only reads, so it needs no lock
-// and runs on any machine, from the transcripts that machine has.
+// in local time (the last 7 days by default), and its median per task over the
+// tasks that finished then. It only reads, so it needs no lock and runs on any
+// machine, from the transcripts that machine has.
 func cmdCosts(c *Crew, args []string) error {
 	y, m, d := time.Now().Date()
 	to := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
