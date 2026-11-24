@@ -567,9 +567,13 @@ check "note-only followup moves a pr-open task back to working" 'crew followup 1
 setstate "done" null
 check "note-only followup keeps a working task working and logs no status line" 'n=$(grep -c "status → " "$F1"); crew followup 1 --note "carry on" >/dev/null && [[ $(crew get 1 status) == working && $(grep -c "status → " "$F1") == "$n" ]]'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
+echo "half done" >"$(crew get 1 worktree)/wip.txt"
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
-check "a fresh worker sent a review round is told to read the whole task file and the branch first" \
-  '[[ $(last_launch) == *"You are picking up task 001-saved-search-filters in project "*", which already has work on its branch."*"Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* ]]'
+check "a fresh worker sent a review round starts from the rounds and Decisions, not the whole task file" \
+  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Decisions. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
+check "a fresh worker taking over a worktree with uncommitted changes is led to them before it acts" \
+  '[[ $(last_launch) == *"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"New input for task "* ]]'
+rm "$(crew get 1 worktree)/wip.txt"
 rm -f "$HOME/fail-resume"
 setstate "done" 4242; job=$(crew get 1 worker_job); sess=$(crew get 1 worker_session); rows=$(jq length "$HOME/agents.json")
 out=$(crew followup 1 --note "open but idle" 2>&1)
@@ -652,8 +656,13 @@ out=$(followup1 "still on sonnet")
 check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
 out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
 check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
-check "a fresh worker sent a note is told to read the whole task file and the branch first" \
-  '[[ $(last_launch) == *"You are picking up task 001-"*"Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."*"Note from the lead"*"fresh on sonnet" ]]'
+check "a fresh worker sent a note, in a worktree with nothing uncommitted, is told to read the whole task file and the branch first, and nothing of uncommitted changes" \
+  '[[ $(last_launch) == *"You are picking up task 001-"*"Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."*"Note from the lead"*"fresh on sonnet" && $(last_launch) != *uncommitted* ]]'
+echo "half done" >"$(crew get 1 worktree)/wip.txt"
+out=$(setstate "done" null; crew followup 1 --fresh --note "after a question" 2>&1)
+check "a fresh worker sent a note, in a worktree with uncommitted changes, is led to them before it acts" \
+  '[[ $(last_launch) == *"Read the whole task file"*"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"Note from the lead"*"after a question" ]]'
+rm "$(crew get 1 worktree)/wip.txt"
 sess=$(crew get 1 worker_session); transcript "$sess" ended
 for _ in {1..40}; do echo '{"type":"system","subtype":"stop_hook_summary"}' >>"$HOME/.claude/projects/stub/$sess.jsonl"; done
 touch "$HOME/fresh-transcript"; SECONDS=0
