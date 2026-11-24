@@ -84,8 +84,8 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 }
 
 // browsePR opens a PR in the browser, with gh's output kept off the screen. A
-// browser that gh starts may keep gh's output open, so it isn't waited on for
-// long once gh has ended.
+// browser that gh starts may hold on to gh's output, so browsePR stops waiting
+// for it a second after gh ends.
 func browsePR(url string) error {
 	var out bytes.Buffer
 	cmd := exec.Command("gh", "pr", "view", url, "--web")
@@ -160,7 +160,7 @@ type liveStatus struct {
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
 	// readOnlyOn is the machine that runs the crew, as of the latest report,
-	// when it isn't this one.
+	// when it isn't this one; empty when this machine runs it.
 	readOnlyOn string
 	// settingsErr is why the latest report went by the settings crew started
 	// with: the shared settings couldn't be read again.
@@ -185,7 +185,8 @@ type noteDraft struct {
 
 // action is something the user can do to the task under the cursor, by its key.
 type action struct {
-	key, name string
+	key  string
+	name string // what the bar calls it
 	// refuses says why the line's task doesn't take the action, or "" when it
 	// does. task is nil on a line that isn't a task's.
 	refuses func(m *liveStatus, task *Task) string
@@ -193,8 +194,8 @@ type action struct {
 }
 
 var actions = []action{
-	{"o", "open PR", (*liveStatus).refusesOpenPR, (*liveStatus).openPR},
-	{"n", "note", (*liveStatus).refusesNote, (*liveStatus).startNote},
+	{key: "o", name: "open PR", refuses: (*liveStatus).refusesOpenPR, start: (*liveStatus).openPR},
+	{key: "n", name: "note", refuses: (*liveStatus).refusesNote, start: (*liveStatus).startNote},
 }
 
 // shownLine is a line on show, with how deep it is in the tree.
@@ -279,6 +280,7 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// update does what msg asks, and returns what to run next.
 func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -435,8 +437,8 @@ func (m *liveStatus) refusesNote(t *Task) string {
 func (m *liveStatus) startNote(t Task) tea.Cmd {
 	input := textinput.New()
 	input.Prompt = "note to " + t.ID() + ": "
-	// In the terminal's own colours, like the rest of the view, with a cursor
-	// that doesn't blink.
+	// No styles: the terminal's own colours, like the rest of the view, and a
+	// cursor that doesn't blink (Cursor.Blink is false).
 	input.SetStyles(textinput.Styles{})
 	m.note = &noteDraft{to: t, input: input}
 	m.note.input.SetWidth(m.noteWidth())
