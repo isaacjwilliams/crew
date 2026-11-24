@@ -1033,17 +1033,22 @@ check "sync checks a stacked task from base_sha when its merged parent's branch 
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
 check "a raise by sync turns the task's automated review back on, and logs why" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew config AUTO_REVIEWS --task 10) == 3 && $(tail -1 "$F10") == *" — risk → high: touches admin.txt; automated review back on" ]]'
-# The same task, raised again after its PR is open, then before it opens (no PR for sync to find), then with pre_pr_review yes.
+# The same task, raised again after its PR is open, then as if it hadn't handed over and had no PR yet
+# (nothing for sync to find), then with pr_mode none, handed over, and with pre_pr_review yes.
 check "a raise after the PR is open turns pre_pr_review's passes back on for the worker, and says nothing of them" \
   '[[ $(crew config PRE_PR_REVIEW --task 10) == yes && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
-crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
+sed -i 's/status → pr-open/status → xpr-open/' "$F10"; crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
 check "a raise before the PR is open logs that the pre-PR passes are back on" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* && $(crew config PRE_PR_REVIEW --task 10) == yes ]]'
-crew set 10 risk low; crew set 10 pr_mode none; out=$(crew sync 2>&1); crew set 10 pr_mode draft
-check "a raise of a task that makes no PR says nothing of the pre-PR passes: it hands over without opening one" \
-  '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(crew config PRE_PR_REVIEW --task 10) == yes && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
-crew set 10 risk low; crew set 10 pre_pr_review yes; out=$(crew sync 2>&1); rm "$HOME/gh-no-pr"; crew set 10 pr https://github.com/isaac/webapp/pull/22
+crew set 10 risk low; crew set 10 pr_mode none; out=$(crew sync 2>&1)
+check "a raise of a task that makes no PR, before it hands over, logs that the pre-PR passes are back on" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* ]]'
+crew set 10 risk low; crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; out=$(crew sync 2>&1)
 check "a raise of a task with pre_pr_review yes says nothing of the pre-PR passes, even before its PR is open" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
+sed -i 's/status → xpr-open/status → pr-open/' "$F10"
+crew set 10 risk low; crew set 10 pre_pr_review no; crew set 10 pr_mode none; out=$(crew sync 2>&1); crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; rm "$HOME/gh-no-pr"; crew set 10 pr https://github.com/isaac/webapp/pull/22
+check "a raise of a task that makes no PR, after it hands over, says nothing of the pre-PR passes" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
