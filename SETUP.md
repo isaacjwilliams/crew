@@ -15,7 +15,7 @@ Everything lives in one private git repo of yours, your **crew home**, cloned to
            │      implementer workers   (background sessions, one per task,
            │                    │         each in ~/agent-work/<project>/<task>)
            │                    │  ├─ tests that pin old behaviour first, a /simplify pass once checks pass
-           │                    │  ├─ casual-observer pass before the PR
+           │                    │  ├─ casual-observer pass before the PR (both off when pre_pr_review is no)
            │                    │  ├─ evidence for each criterion, push branch, open draft PR
            │                    ▼  └─ automated review of the PR, fixes, a summary comment
            └── review/merge ── GitHub PRs
@@ -496,7 +496,7 @@ Every task has a risk tier, which says how closely you need to look at its PR. T
 
 A high-risk task's worker also runs Claude Code's `/security-review` before handing the PR over, and records what it found beside the rest of its evidence. Each PR's Risk section opens with its tier and look.
 
-**The worker's model and automated review.** The lead makes two more choices at intake, and names both in its summary. A task runs its worker on Sonnet (`model: sonnet`) unless the worker has to design structure, that is, decide what to add or change in the code's shape (a new command, file or data shape). Fixes and changes inside existing code, tests, docs, copy, and bumps or renames the gates spell out run on Sonnet; work that adds or changes structure runs on Claude Code's default model. The risk tier doesn't decide it. Goal leads apply the same rule. A task whose gates check everything a reviewer would can have its automated review turned off (`auto_review: no`). `crew status` shows both on the task's row: `model sonnet`, `automated review off`. Changing a task's model after dispatch takes effect the next time crew has something for its worker: it starts the worker fresh on the new model, and says so.
+**The worker's model and automated review.** The lead makes more choices at intake, and names them in its summary. A task runs its worker on Sonnet (`model: sonnet`) unless the worker has to design structure, that is, decide what to add or change in the code's shape (a new command, file or data shape). Fixes and changes inside existing code, tests, docs, copy, and bumps or renames the gates spell out run on Sonnet; work that adds or changes structure runs on Claude Code's default model. The risk tier doesn't decide it. Goal leads apply the same rule. A task whose gates check everything a reviewer would can have its automated review turned off (`auto_review: no`) and its worker's pre-PR passes (`/simplify` and the casual observer) too (`pre_pr_review: no`). `crew status` shows the model and the automated review on the task's row: `model sonnet`, `automated review off`; the pre-PR passes show only in the lead's summary and the task's `pre_pr_review`. Changing a task's model after dispatch takes effect the next time crew has something for its worker: it starts the worker fresh on the new model, and says so.
 
 **The worker's effort.** A task can also name the effort its worker runs at (`crew set <task> effort medium`; `low`, `medium`, `high`, `xhigh` or `max`). Without one, a worker runs at your own setting. It works as the model does: `crew status` shows `effort medium` on the task's row, and changing or clearing it starts the worker fresh at its next followup. A restack session runs at your own setting, and the worker that follows it at the task's effort.
 
@@ -750,7 +750,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `WORKER_PERMISSION_MODE` | `auto` | `auto`, `acceptEdits`, or `default` |
 | `WORKER_AUTOCOMPACT_WINDOW` | `400k` | How full a worker's conversation gets before Claude Code compacts it: 100k to 1M tokens, or `auto` for Claude Code's default (about 967k on a 1M model). Applies to workers started after you change it |
 | `LEAD_PERMISSION_MODE` | `auto` | For `lead` and goal leads: `auto`, `acceptEdits`, or `default` |
-| `PRE_PR_REVIEW` | `yes` | Default for new tasks: casual-observer pass before the PR |
+| `PRE_PR_REVIEW` | `yes` | Default for new tasks: the worker's `/simplify` and casual-observer passes before the PR (`no` skips both) |
 | `PR_MODE` | `draft` | Default for new tasks: `draft`, `ready` (a draft until its first hand-over, then marked ready), or `none` (push only) |
 | `REPLY_TO_THREADS` | `yes` | Workers reply to your review comments: in the thread, or quoting a conversation comment or review summary |
 | `MAX_REVIEW_ROUNDS` | 4 | Warn after this many rounds of your review (the plan may need a rethink); rounds that only report red CI or a conflict don't count |
