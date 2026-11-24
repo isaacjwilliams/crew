@@ -1056,7 +1056,16 @@ setstate "done" null; hand_over 10; n=$(launches)
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 setstate working 4242; out=$(crew restack 10 --again 2>&1)
 check "restack starts nothing while the task's worker is busy" '[[ $out == *"is busy (working)"* && $(launches) == "$n" && $(crew get 10 status) == pr-open ]]'
-setstate "done" null
+setstate "done" 4242; touch "$HOME/stop-noop"; job=$(crew get 10 worker_job); log=$(section "$F10" "## Log")
+out=$(crew restack 10 --again 2>&1); st=$?
+check "a restack sends nothing while the worker's process won't close, starts no session beside it, records nothing, and says how to get past it" \
+  '((st == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(launches) == "$n" && $(crew get 10 status) == pr-open && $(crew get 10 restack_sent) == "$T9b" && $(section "$F10" "## Log") == "$log" ]]'
+rm -f "$HOME/stop-noop"; setstate "done" null
+jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+out=$(crew restack 10 --again 2>&1); st=$?
+check "a restack sends nothing to a worker busy again by the time crew would replace it, and records nothing" \
+  '((st == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it"* && $(launches) == "$n" && $(crew get 10 status) == pr-open && $(crew get 10 restack_sent) == "$T9b" && $(section "$F10" "## Log") == "$log" ]]'
+rm -f "$HOME/agents-next"; setstate "done" null
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(launches) == $((n + 1)) ]] && restacked 10'
 (cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; hand_over 10
 check "evidence stays current through a restack, though the rebased branch no longer holds the commit it ran on" \
@@ -1930,8 +1939,13 @@ rm -f "$STUB/$gs.jsonl"
 rm -rf "$CO"; setstate "done" null   # as on a machine the goal moved to
 crew goal note 1 "Keep the header small" >/dev/null 2>&1
 check "a goal followup brings back a goal lead's checkout that isn't here" '[[ -d $CO && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) && $(last_launch) == "claude --resume "*"New input for goal $G"* ]]'
-before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; install_agents; setstate "done" null
+before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; install_agents
+gj=$(gget "$GF" lead_job); gs=$(gget "$GF" lead_session); n=$(launches); setstate "done" 4242; touch "$HOME/stop-noop"
 out=$(crew goal note 1 "Keep the footer small" 2>&1)
+check "a goal lead started fresh for a changed setup isn't, while the old one's process won't close: the note is counted, and the message says how to get past it" \
+  '[[ $out == *"job $gj is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(gget "$GF" unsent_notes) == 1 && $(gget "$GF" lead_session) == "$gs" && $(gget "$GF" lead_fingerprint) == "$before" && $(launches) == "$n" ]]'
+rm -f "$HOME/stop-noop"; setstate "done" null
+out=$(crew goal note 1 "And the nav small" 2>&1)
 check "a goal followup after agents/goal-lead.md changes starts the goal lead fresh, records the new fingerprint, and logs why" \
   '[[ $out == *"input sent to its goal lead (fresh: its instructions or settings changed)"* && $(gget "$GF" lead_fingerprint) != "$before" && $(tail -1 "$GF") == *"followup (fresh: its instructions or settings changed): goal lead "* && $(last_launch) == *"--agent goal-lead "*"is already under way"* ]]'
 git -C "$L" checkout -q -- agents; install_agents; setstate "done" null
