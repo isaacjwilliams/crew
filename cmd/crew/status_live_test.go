@@ -795,6 +795,47 @@ func TestLiveStatusQuitsOnceANoteIsSent(t *testing.T) {
 	}
 }
 
+// TestLiveStatusStaysOpenForWhatCrewSaysOfANote quits while two notes are on
+// their way. crew refuses the first, so the view stays open with its reason and
+// the note held for n, and quits only when the user quits again.
+func TestLiveStatusStaysOpenForWhatCrewSaysOfANote(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	refused := press(m, "enter")
+	goTo(t, m, "017-stacked")
+	startNote(t, m)
+	typeText(m, "rebase")
+	sent := press(m, "enter")
+	press(m, "q")
+	run.err = errors.New("p is paused")
+	if _, cmd := m.Update(refused()); quits(cmd) {
+		t.Fatal("the view quit while a note was still on its way")
+	}
+	if got := footOnScreen(m); !strings.Contains(got, "p is paused") {
+		t.Errorf("once crew refuses the note, the view says %q", got)
+	}
+	run.err = nil
+	if _, cmd := m.Update(sent()); quits(cmd) {
+		t.Error("the view quit once the other note was sent, losing the one crew refused")
+	}
+	if !quits(press(m, "q")) {
+		t.Error("q doesn't quit once no note is on its way")
+	}
+
+	m, run = actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	sending := press(m, "enter")
+	press(m, "q")
+	run.warnings = []string{"ledger commit failed (continuing)"}
+	if _, cmd := m.Update(sending()); quits(cmd) {
+		t.Error("the view quit before the user read what crew warned of")
+	}
+}
+
 // TestLiveStatusGivesTheNoteWhatItsCommandsSendBack presses ctrl+v, which has
 // the note read the clipboard. With no clipboard tool on PATH, the read fails,
 // and the note has the error.

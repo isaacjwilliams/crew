@@ -355,6 +355,11 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		return m.startNote(msg.to)
 	case noteSent:
 		m.finishNote(msg)
+		// What crew says of a note it refused, or sent with a warning, stays
+		// on screen until the user quits again.
+		if msg.err != nil || len(msg.warnings) > 0 {
+			m.quitting = false
+		}
 		if m.quitting && !m.sendingNote() {
 			return tea.Quit
 		}
@@ -534,7 +539,8 @@ func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 
 // quit quits, unless followup is sending a note: it runs in the view's process,
 // so quitting would end it, perhaps after it started the worker and before it
-// recorded it. Then the view quits once the note is sent, or at a second quit.
+// recorded it. Then the view quits once the note is sent with nothing to say
+// of it, or at a second quit.
 func (m *liveStatus) quit() tea.Cmd {
 	if m.quitting || !m.sendingNote() {
 		return tea.Quit
