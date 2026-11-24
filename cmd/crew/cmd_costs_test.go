@@ -68,7 +68,7 @@ func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 	writeTranscript(t, dir, "-crew-lead/s2.jsonl",
 		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 0, `{"type":"text"}`))
 
-	ts, err := scanTranscripts(dir, map[string]string{"-crew-lead": stepLead})
+	ts, err := scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,9 +101,9 @@ func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 
 	at := costsDay(t, "2026-11-18 10:00")
 	charges := []*charge{
-		{stepLead, &message{"claude-opus-5-5", at, u}},
-		{stepLead, &message{"claude-haiku-5-5", at, u}},
-		{stepLead, &message{"claude-mystery-1", at, u}},
+		{owner{step: stepLead}, &message{"claude-opus-5-5", at, u}},
+		{owner{step: stepLead}, &message{"claude-haiku-5-5", at, u}},
+		{owner{step: stepLead}, &message{"claude-mystery-1", at, u}},
 	}
 	r := costsIn(transcripts{charges: charges}, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
 	var out strings.Builder
@@ -122,9 +122,10 @@ func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 // A subagent is charged to its step: in a task's worktree, /simplify's and
 // /security-review's agents to theirs, crew's review agents to theirs, even
 // when the worker starts them straight after a skill's, and the worker's own
-// to a step named by the agent, whatever it was asked to do. A brief review is
-// its own step, whoever ran it, and a lead's or goal lead's other agents are
-// charged to a step for them.
+// to a step named by the agent, whatever it was asked to do, and all of them
+// to the task. A brief review is its own step, charged to the task whose file
+// it was given, whoever ran it, and a lead's or goal lead's other agents are
+// charged to a step for them and to no task.
 func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 	dir := t.TempDir()
 	at := costsDay(t, "2026-11-18 10:00")
@@ -171,45 +172,47 @@ func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 	subagent(task, "reviewer", "reviewer", "t10", "Scope: the PR.", 16)
 	subagent(task, "explore", "Explore", "t11", "Find it.", 17)
 	subagent(task, "unrecorded", "", "", "Do it.", 18)
-	subagent("-crew-lead", "brief", "brief-reviewer", "t12", "Review /home/u/crew/projects/p/tasks/001-a.md.", 20)
+	subagent("-crew-lead", "brief", "brief-reviewer", "t12", "/home/u/crew/projects/p/tasks/001-a.md", 20)
 	subagent("-crew-lead", "helper", "general-purpose", "t13", "Look at /home/u/crew/projects/p/tasks/001-a.md.", 21)
 	subagent("-work-p-_goal-g", "helper", "Explore", "t16", "Look around.", 25)
 	subagent("-work-p-_goal-g", "plan", "plan-reviewer", "t14", "Review /home/v/crew/projects/p/tasks/002-b.md.", 22)
 	subagent("-home-u-Code-elsewhere", "reviewer", "reviewer", "t15", "Review it.", 23)
+	subagent("-crew-lead", "unnamed-brief", "brief-reviewer", "t17", "Review the brief I pasted.", 26)
 
-	ts, err := scanTranscripts(dir, map[string]string{
-		task:              stepWorker,
-		"-crew-lead":      stepLead,
-		"-work-p-_goal-g": stepGoalLead,
+	ts, err := scanTranscripts(dir, map[string]owner{
+		task:              {stepWorker, "p/001-a"},
+		"-crew-lead":      {step: stepLead},
+		"-work-p-_goal-g": {step: stepGoalLead},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[int]string{}
+	got := map[int]owner{}
 	for _, c := range ts.charges {
-		got[c.usage.Output] = c.step
+		got[c.usage.Output] = c.owner
 	}
-	for output, want := range map[int]string{
-		1:  stepWorker,
-		10: "general-purpose",
-		11: stepExhale,
-		12: stepExhale,
-		13: "general-purpose",
-		14: stepSecurityReview,
-		15: stepPrePRReview,
-		16: stepAutomatedReview,
-		17: "Explore",
-		18: "unnamed agent",
-		19: "test-review",
-		20: stepBriefReview,
-		21: stepLeadAgents,
-		22: stepBriefReview,
-		23: stepOther,
-		24: stepExhale,
-		25: stepGoalLeadAgents,
+	for output, want := range map[int]owner{
+		1:  {stepWorker, "p/001-a"},
+		10: {"general-purpose", "p/001-a"},
+		11: {stepExhale, "p/001-a"},
+		12: {stepExhale, "p/001-a"},
+		13: {"general-purpose", "p/001-a"},
+		14: {stepSecurityReview, "p/001-a"},
+		15: {stepPrePRReview, "p/001-a"},
+		16: {stepAutomatedReview, "p/001-a"},
+		17: {"Explore", "p/001-a"},
+		18: {"unnamed agent", "p/001-a"},
+		19: {"test-review", "p/001-a"},
+		20: {stepBriefReview, "p/001-a"},
+		21: {step: stepLeadAgents},
+		22: {stepBriefReview, "p/002-b"},
+		23: {step: stepOther},
+		24: {stepExhale, "p/001-a"},
+		25: {step: stepGoalLeadAgents},
+		26: {step: stepBriefReview},
 	} {
 		if got[output] != want {
-			t.Errorf("the message with %d output tokens is charged to %q; want %q", output, got[output], want)
+			t.Errorf("the message with %d output tokens is charged to %+v; want %+v", output, got[output], want)
 		}
 	}
 }
@@ -250,7 +253,7 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ts, err := scanTranscripts(dir, map[string]string{"-crew-lead": stepLead})
+	ts, err := scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +270,7 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "-crew-lead", "running.jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	if ts, err = scanTranscripts(dir, map[string]string{"-crew-lead": stepLead}); err != nil {
+	if ts, err = scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}}); err != nil {
 		t.Fatal(err)
 	}
 	if ts.completeFrom.Before(began) {

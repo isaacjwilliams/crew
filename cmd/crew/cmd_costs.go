@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,11 +103,11 @@ func cmdCosts(c *Crew, args []string) error {
 	if to.Before(from) {
 		return fail("--to %s is before --from %s", to.Format("2006-01-02"), from.Format("2006-01-02"))
 	}
-	steps, err := c.transcriptSteps()
+	owners, _, err := c.transcriptOwners()
 	if err != nil {
 		return err
 	}
-	ts, err := scanTranscripts(claudeTranscripts(), steps)
+	ts, err := scanTranscripts(claudeTranscripts(), owners)
 	if err != nil {
 		return err
 	}
@@ -117,25 +118,33 @@ func cmdCosts(c *Crew, args []string) error {
 	return nil
 }
 
-// transcriptSteps is the step each folder Claude Code keeps crew's transcripts
-// in is charged to. A folder not listed is no part of crew's.
-func (c *Crew) transcriptSteps() (map[string]string, error) {
+// owner is who a transcript folder's sessions are charged to: a step, and for a
+// task's worktree the task, as "<project>/<task ID>".
+type owner struct{ step, task string }
+
+// transcriptOwners is the owner of each folder Claude Code keeps crew's
+// transcripts in, and every task in the ledger, by the name its owner gives it.
+// A folder not listed is no part of crew's.
+func (c *Crew) transcriptOwners() (map[string]owner, map[string]Task, error) {
 	projects, err := c.ledgerProjects("")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	steps := map[string]string{transcriptFolder(c.path("lead")): stepLead}
+	owners := map[string]owner{transcriptFolder(c.path("lead")): {step: stepLead}}
+	tasks := map[string]Task{}
 	for _, p := range projects {
-		steps[transcriptFolder(gardenerCheckout(p))] = stepGardener
-		steps[transcriptFolder(evalCheckout(p))] = stepReviewEval
+		owners[transcriptFolder(gardenerCheckout(p))] = owner{step: stepGardener}
+		owners[transcriptFolder(evalCheckout(p))] = owner{step: stepReviewEval}
 		for _, g := range c.goals(p.Name) {
-			steps[transcriptFolder(goalCheckout(p, g))] = stepGoalLead
+			owners[transcriptFolder(goalCheckout(p, g))] = owner{step: stepGoalLead}
 		}
 		for _, t := range c.tasks(p.Name) {
-			steps[transcriptFolder(p.taskWorktree(t))] = stepWorker
+			id := p.Name + "/" + t.ID()
+			tasks[id] = t
+			owners[transcriptFolder(p.taskWorktree(t))] = owner{stepWorker, id}
 		}
 	}
-	return steps, nil
+	return owners, tasks, nil
 }
 
 // transcriptFolder is the folder Claude Code keeps the transcripts of sessions
@@ -171,9 +180,9 @@ func abs(n int64) int64 {
 	return n
 }
 
-// A charge is one API message, and the step it's charged to.
+// A charge is one API message, and the step and task it's charged to.
 type charge struct {
-	step string
+	owner
 	*message
 }
 
@@ -191,8 +200,8 @@ type transcripts struct {
 }
 
 // scanTranscripts charges every message in the transcripts under dir, each
-// once, to the step of its folder in steps.
-func scanTranscripts(dir string, steps map[string]string) (transcripts, error) {
+// once, to the owner of its folder in owners.
+func scanTranscripts(dir string, owners map[string]owner) (transcripts, error) {
 	s := costScan{transcripts: transcripts{completeFrom: time.Now()}}
 	folders, err := os.ReadDir(dir)
 	if err != nil {
@@ -202,11 +211,11 @@ func scanTranscripts(dir string, steps map[string]string) (transcripts, error) {
 		if !f.IsDir() {
 			continue
 		}
-		step, ok := steps[f.Name()]
+		o, ok := owners[f.Name()]
 		if !ok {
-			step = stepOther
+			o = owner{step: stepOther}
 		}
-		if err := s.folder(filepath.Join(dir, f.Name()), step); err != nil {
+		if err := s.folder(filepath.Join(dir, f.Name()), o); err != nil {
 			return transcripts{}, err
 		}
 	}
@@ -220,18 +229,18 @@ type costScan struct {
 	messages messages
 }
 
-// folder charges the sessions in a transcript folder to its step: its main
+// folder charges the sessions in a transcript folder to its owner o: its main
 // sessions, then their subagents. In a worker's folder, each subagent is
 // charged to its own step (subagentStep), which needs the main sessions read
 // first: they show which Agent calls a skill made.
-func (s *costScan) folder(dir, step string) error {
+func (s *costScan) folder(dir string, o owner) error {
 	skillAgents := map[string]string{} // the step of each Agent call a skill made, by the call's ID
 	mains, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, path := range mains {
 		var run skillRun
 		err := s.read(path, func(l transcriptLine) {
-			s.charge(step, l)
-			if step == stepWorker {
+			s.charge(o, l)
+			if o.step == stepWorker {
 				for _, u := range l.toolUses() {
 					run.follow(u, skillAgents)
 				}
@@ -246,18 +255,21 @@ func (s *costScan) folder(dir, step string) error {
 	}
 	agents, _ := filepath.Glob(filepath.Join(dir, "*", "subagents", "agent-*.jsonl"))
 	for _, path := range agents {
-		agentStep := subagentStep(path, step, skillAgents)
-		if err := s.read(path, func(l transcriptLine) { s.charge(agentStep, l) }); err != nil {
+		ao, err := subagentOwner(path, o, skillAgents)
+		if err != nil {
+			return err
+		}
+		if err := s.read(path, func(l transcriptLine) { s.charge(ao, l) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// charge charges the message on line l to step, unless it was charged already.
-func (s *costScan) charge(step string, l transcriptLine) {
+// charge charges the message on line l to o, unless it was charged already.
+func (s *costScan) charge(o owner, l transcriptLine) {
 	if m, isNew := s.messages.add(l); isNew {
-		s.charges = append(s.charges, &charge{step, m})
+		s.charges = append(s.charges, &charge{o, m})
 	}
 }
 
@@ -350,6 +362,41 @@ func (r *skillRun) follow(u toolUse, agents map[string]string) {
 	case r.agentsStarted:
 		r.step = "" // any other tool call, after the skill's agents, closes the window
 	}
+}
+
+// subagentOwner is who the subagent whose transcript is at path is charged to,
+// when it ran in a folder owned by o: its step (subagentStep), and o's task. A
+// brief review is charged to the task whose file its prompt names instead,
+// wherever it ran: a lead or a goal lead gives it the file's path and nothing
+// else.
+func subagentOwner(path string, o owner, skillAgents map[string]string) (owner, error) {
+	step := subagentStep(path, o.step, skillAgents)
+	if step != stepBriefReview {
+		return owner{step, o.task}, nil
+	}
+	prompt, err := firstPrompt(path)
+	if err != nil {
+		return owner{}, err
+	}
+	if m := briefTask.FindStringSubmatch(prompt); m != nil {
+		return owner{step, m[1] + "/" + m[2]}, nil
+	}
+	return owner{step: step}, nil
+}
+
+// briefTask is the task file a brief reviewer's prompt names, under whichever
+// home it ran in: ".../projects/<project>/tasks/<task ID>.md".
+var briefTask = regexp.MustCompile(`/projects/([^/\s]+)/tasks/([^/\s]+)\.md`)
+
+// firstPrompt is the text of the first prompt in the transcript at path. Claude
+// Code writes tool results and its own notices as user lines too, but only a
+// prompt as plain text.
+func firstPrompt(path string) (string, error) {
+	var prompt string
+	_, err := scanLines(path, `"type":"user"`, func(l transcriptLine) bool {
+		return l.Type != "user" || json.Unmarshal(l.Message.Content, &prompt) != nil
+	})
+	return prompt, err
 }
 
 // subagentStep is the step the subagent whose transcript is at path is charged
