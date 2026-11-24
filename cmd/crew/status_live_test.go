@@ -559,7 +559,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 			if cmd != nil || m.note != nil || len(run.opened)+len(run.asked)+len(run.notes) > 0 || !slices.Equal(before[:len(after)-2], after[:len(after)-2]) {
 				t.Errorf("%s on %q, which doesn't take it, changed something", a.key, l.head)
 			}
-			if footOnScreen(m) != m.said || m.said == "" {
+			if len(m.said) != 1 || footOnScreen(m) != m.said[0] {
 				t.Errorf("%s on %q doesn't say why in a line: %q", a.key, l.head, footOnScreen(m))
 			}
 		}
@@ -573,8 +573,8 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 	} {
 		goTo(t, m, tc.head)
 		press(m, tc.key)
-		if m.said != tc.says {
-			t.Errorf("%s on %q says %q, want %q", tc.key, tc.head, m.said, tc.says)
+		if got := footOnScreen(m); got != tc.says {
+			t.Errorf("%s on %q says %q, want %q", tc.key, tc.head, got, tc.says)
 		}
 	}
 }
@@ -1001,6 +1001,45 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 4})
 	if !strings.Contains(cursorOnScreen(t, m), "016-both") {
 		t.Errorf("on a screen 4 lines high, the cursor's line isn't on screen above a long refusal: %q", screen(m))
+	}
+}
+
+// TestLiveStatusKeepsEachOutcomesFirstLine opens a PR and then has crew refuse
+// a note at length: the foot keeps the first line of each, which says what
+// happened, and cuts the refusal's middle.
+func TestLiveStatusKeepsEachOutcomesFirstLine(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	refused := press(m, "enter")
+	opened := press(m, "o")
+	finish(t, m, opened)
+	run.err = errors.New("could not start a session; claude said:\n" + strings.Repeat("claude's output\n", 20) + "Error: out of credits")
+	finish(t, m, refused)
+	foot := strings.Split(footOnScreen(m), "\n")
+	if len(foot) != 6 || foot[0] != "opened 016-both's PR in the browser" || foot[1] != "crew didn't send your note to 016-both's worker; n on 016-both brings it back:" || foot[2] != "… 19 lines not shown" || foot[5] != "Error: out of credits" {
+		t.Errorf("on a screen 12 lines high, a PR opened and a long refusal show as %q", foot)
+	}
+}
+
+// TestLiveStatusFitsWhatsUnderWayOnAShortScreen has a note on its way, a quit
+// it held back and another note being typed on a screen 4 lines high: the
+// view still fits, with the note being typed and the bar on screen.
+func TestLiveStatusFitsWhatsUnderWayOnAShortScreen(t *testing.T) {
+	m, _ := actingOn(actionsReport(actionsLedger(t)))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 4})
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	press(m, "enter")
+	goTo(t, m, "017-stacked")
+	startNote(t, m)
+	press(m, "ctrl+c")
+	s := screen(m)
+	if len(s) != 4 || !strings.HasPrefix(s[2], "note to 017-stacked:") || !strings.Contains(s[3], "enter send") {
+		t.Errorf("on a screen 4 lines high, the view shows %q", s)
 	}
 }
 

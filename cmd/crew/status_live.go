@@ -183,7 +183,7 @@ type liveStatus struct {
 	// quitting is the quit key a note on its way held back, if it was the last
 	// key (quit).
 	quitting string
-	said     string // what actions did since the last key, or why they couldn't
+	said     []string // what actions did since the last key outside a note, or why they couldn't
 }
 
 // noteDraft is a note the user is typing to a task's worker.
@@ -397,7 +397,7 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	// A key clears what the view said, and calls off an n crew hasn't answered
 	// and a quit a note held back.
 	quitting := m.quitting != ""
-	m.said, m.asking, m.quitting = "", nil, ""
+	m.said, m.asking, m.quitting = nil, nil, ""
 	switch key {
 	case "q", "ctrl+c":
 		return m.quit(key, quitting)
@@ -611,10 +611,7 @@ func (m *liveStatus) finishNote(msg noteSent) {
 // say adds to what the view says until the next key, so what one action did
 // doesn't hide what another did just before.
 func (m *liveStatus) say(s string) {
-	if m.said != "" {
-		m.said += "\n"
-	}
-	m.said += s
+	m.said = append(m.said, s)
 }
 
 func (m *liveStatus) current() (shownLine, bool) {
@@ -697,37 +694,68 @@ func (m *liveStatus) bodyHeight() int {
 	return max(1, m.height-1-len(m.footLines()))
 }
 
+// How much a line above the bar is worth keeping when they don't all fit.
+const (
+	leaveOutFirst = iota // an outcome's later lines, and what's under way
+	leaveOutLast         // an outcome's first line, which says what happened, and the quit hint
+	neverLeaveOut        // the note being typed
+)
+
 // footLines are the lines above the bar: what actions did, wrapped to the
 // screen, then what crew is doing for the user now and a quit a note on its way
-// held back, then the note the user is typing, if they are. What actions did
-// takes at most half the screen, so a long one keeps its first line, which says
-// what happened, and its last ones, where a refusal ends. When there's room, a
-// line between them says how many it leaves out.
+// held back, then the note the user is typing, if they are. They take at most
+// half the screen. Past that, the view leaves out lines from the top, the ones
+// least worth keeping first, and says how many when there's room.
 func (m *liveStatus) footLines() []string {
-	var lines []string
-	if m.said != "" {
-		lines = strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
-		if most := max(1, m.height/2); len(lines) > most {
-			last := lines[len(lines)-most+1:]
-			if most >= 3 {
-				last = slices.Concat([]string{"… " + strconv.Itoa(len(lines)-most+1) + " lines not shown"}, last[1:])
-			}
-			lines = slices.Concat(lines[:1], last)
+	type footLine struct {
+		text  string
+		worth int
+	}
+	var all []footLine
+	for _, said := range m.said {
+		worth := leaveOutLast
+		for _, line := range strings.Split(lipgloss.Wrap(said, m.width, ""), "\n") {
+			all = append(all, footLine{line, worth})
+			worth = leaveOutFirst
 		}
 	}
 	if m.asking != nil {
-		lines = append(lines, "asking crew whether "+m.asking.ID()+"'s worker can take a note…")
+		all = append(all, footLine{"asking crew whether " + m.asking.ID() + "'s worker can take a note…", leaveOutFirst})
 	}
 	for _, path := range slices.Sorted(maps.Keys(m.held)) {
 		if n := m.held[path]; n.sending {
-			lines = append(lines, "sending your note to "+n.to.ID()+"'s worker…")
+			all = append(all, footLine{"sending your note to " + n.to.ID() + "'s worker…", leaveOutFirst})
 		}
 	}
 	if m.quitting != "" && m.sendingNote() {
-		lines = append(lines, "a note is still on its way; "+m.quitting+" again quits now")
+		all = append(all, footLine{"a note is still on its way; " + m.quitting + " again quits now", leaveOutLast})
 	}
 	if m.note != nil {
-		lines = append(lines, m.note.input.View())
+		all = append(all, footLine{m.note.input.View(), neverLeaveOut})
+	}
+
+	most := max(1, m.height/2)
+	over := len(all) - most
+	if over > 0 && most >= 3 {
+		over++ // for the line that says how many are left out
+	}
+	leftOut, count := make([]bool, len(all)), 0
+	for worth := leaveOutFirst; worth < neverLeaveOut; worth++ {
+		for i := range all {
+			if count < over && all[i].worth == worth {
+				leftOut[i] = true
+				count++
+			}
+		}
+	}
+	var lines []string
+	for i, l := range all {
+		switch {
+		case !leftOut[i]:
+			lines = append(lines, l.text)
+		case most >= 3 && !slices.Contains(leftOut[:i], true):
+			lines = append(lines, "… "+strconv.Itoa(count)+" lines not shown")
+		}
 	}
 	return lines
 }
