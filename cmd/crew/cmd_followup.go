@@ -77,6 +77,11 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if !t.Dispatched() {
 		return fail("%s has no worker yet; dispatch it first", t.ID())
 	}
+	// Only the machine that runs the crew resumes workers. lock checks that
+	// too, but only after ensureWorktree has added a worktree to the repo.
+	if err := c.requireHost(); err != nil {
+		return err
+	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
