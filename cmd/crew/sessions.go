@@ -236,6 +236,58 @@ func (a Agent) turnStartedAfter(from int64) bool {
 	return false
 }
 
+// A session's prompt cache lasts an hour after its last request (cacheLife).
+// Resuming it after that writes its whole context to the cache again, which
+// costs more than a fresh session rebuilding from its task file once the
+// context reaches coldContext tokens. Both were measured on workers' rounds in
+// November 2026.
+const (
+	cacheLife   = time.Hour
+	coldContext = 100_000
+)
+
+// coldResume says why resuming a session at now would cost more than starting
+// it fresh: how long it has been idle, past cacheLife, and how big its context
+// is, at least coldContext. It's "" when resuming costs less, and when the
+// session's transcript can't say: there's none, no request in it, or a line
+// in it that doesn't read.
+func coldResume(session string, now time.Time) string {
+	at, tokens, ok := lastRequest(transcript(session))
+	if !ok {
+		return ""
+	}
+	idle := now.Sub(at)
+	if idle <= cacheLife || tokens < coldContext {
+		return ""
+	}
+	return fmt.Sprintf("idle %s, with %dk tokens of context", roughly(idle), (tokens+500)/1000)
+}
+
+// lastRequest finds the session's own last request in the transcript at path:
+// when its reply was written, and its context, the tokens it sent (input,
+// cache write and cache read). It goes by the reply's timestamp, not the
+// file's: a session writes other entries long after its last request. A
+// subagent's requests don't count: they're in transcripts of their own, or
+// marked isSidechain. messages.add (cmd_review_cost.go) keeps each reply once,
+// with its fullest usage, and skips Claude Code's own messages, which have none.
+// Any line that doesn't read, wherever it is, gives no answer: it may be a
+// reply cut off as it was written. It reads every line to find those, since
+// Claude Code writes a reply's type near the end of its line.
+func lastRequest(path string) (at time.Time, tokens int, ok bool) {
+	var ms messages
+	unread, err := scanLines(path, "", func(l transcriptLine) bool {
+		if l.Type == "assistant" && !l.IsSidechain {
+			ms.add(l)
+		}
+		return true
+	})
+	if err != nil || unread > 0 || len(ms.all) == 0 {
+		return time.Time{}, 0, false
+	}
+	last := ms.all[len(ms.all)-1]
+	return last.at, last.usage.Input + last.usage.CacheWrite + last.usage.CacheRead, true
+}
+
 // open: its process is running.
 func (a Agent) open() bool { return a.PID }
 
@@ -319,11 +371,12 @@ func (c *Crew) stopJobs(jobs []string) []string {
 	return open
 }
 
-// closeSession stops a session's process, if it's open and idle, so that a resume
-// continues the session in place: resuming a session whose process is open starts
-// a copy of it ("already running in the background"). A background session keeps
-// its process open for about an hour after its turn ends. It returns the job whose
-// process stays open, and then nothing should resume the session.
+// closeSession stops a session's process, if it's open and idle, before
+// launchSession starts another for its file. Resuming a session whose process is
+// open starts a copy of it ("already running in the background"), and a fresh
+// session would work beside it. A background session keeps its process open for
+// about an hour after its turn ends. It returns the job whose process stays open,
+// and then nothing should be launched in its place.
 func (c *Crew) closeSession(session string) (open string) {
 	for _, a := range c.agents() {
 		if a.SessionID != session || !a.open() {
@@ -475,19 +528,27 @@ var (
 // (agent, model, effort, permission mode, settings, --add-dir), and passing any
 // launch flag again makes Claude Code start a copy under a new session instead
 // of continuing this one. A fresh session takes the one it replaces out of agent
-// view once it has started. Both refresh the project's MCP config first (refreshMCPConfig).
+// view once it has started. Both refresh the project's MCP config first
+// (refreshMCPConfig), and close the recorded session's process (closeSession).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {
 		return launch{}, err
 	}
 	session := d.Get(start.prefix + "_session")
+	// A process that's still open would make Claude Code start a copy of the
+	// session it resumes, and would work beside a fresh session in the same directory.
+	if session != "" {
+		if job := c.closeSession(session); job != "" {
+			clash := "a fresh session started now would work beside it"
+			if resume {
+				clash = "resuming its session now would start a copy of it"
+			}
+			return launch{}, fail("job %s is still running, so crew sent it nothing: %s. Stop it in claude agents, then try again", job, clash)
+		}
+	}
 	var cmd *exec.Cmd
 	if resume {
-		// A process that's still open would also make Claude Code start a copy.
-		if job := c.closeSession(session); job != "" {
-			return launch{}, fail("job %s is still running, so crew sent it nothing: resuming its session now would start a copy of it", job)
-		}
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag
