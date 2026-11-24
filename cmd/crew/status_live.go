@@ -176,7 +176,7 @@ type liveStatus struct {
 	// A note goes: n asks crew whether the worker takes one (asking), the
 	// user types it (note), enter hands it to followup (held, sending), and
 	// then it's gone, or held again, unsent, for n on its task to bring back.
-	asking string              // the path of the task crew is being asked about
+	asking *Task               // the task crew is being asked about, a copy for each n
 	note   *noteDraft          // the note the user is typing, if they are
 	held   map[string]heldNote // the notes crew hasn't sent, by task path
 	// quitting: the user quit while a note was on its way, so the view quits
@@ -237,7 +237,7 @@ type (
 	}
 	// noteAsked is crew's answer to whether a task's worker takes a note now.
 	noteAsked struct {
-		to  Task
+		to  *Task // the ask's own copy, which tells it from other asks
 		err error
 	}
 	noteSent struct {
@@ -342,17 +342,17 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 			m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		}
 	case noteAsked:
-		// Only an n no key has followed opens a note.
-		if msg.to.Path != m.asking {
+		// Only the latest n, if no key has followed it, opens a note.
+		if msg.to != m.asking {
 			return nil
 		}
-		m.asking = ""
+		m.asking = nil
 		if msg.err != nil {
 			m.said = msg.err.Error()
 			return nil
 		}
 		m.said = ""
-		return m.startNote(msg.to)
+		return m.startNote(*msg.to)
 	case noteSent:
 		m.finishNote(msg)
 		// What crew says of a note it refused, or sent with a warning, stays
@@ -402,7 +402,7 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 
 func (m *liveStatus) press(key string) tea.Cmd {
 	// A key clears what the view said and calls off an n crew hasn't answered.
-	m.said, m.asking = "", ""
+	m.said, m.asking = "", nil
 	switch key {
 	case "q", "ctrl+c":
 		return m.quit()
@@ -491,9 +491,9 @@ func (m *liveStatus) refusesNote(r *taskRow) string {
 // before the user writes one, not after (noteAsked).
 func (m *liveStatus) askNote(t Task) tea.Cmd {
 	ask := m.feed.askNote
-	m.asking = t.Path
+	m.asking = &t
 	m.said = "asking crew whether " + t.ID() + "'s worker can take a note…"
-	return func() tea.Msg { return noteAsked{t, ask(t)} }
+	return func() tea.Msg { return noteAsked{&t, ask(t)} }
 }
 
 // startNote opens a line to type a note to t's worker in, with the note crew

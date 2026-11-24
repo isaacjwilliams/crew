@@ -615,6 +615,22 @@ func TestLiveStatusOpensANoteOnlyWhenNoKeyFollowsItsAsk(t *testing.T) {
 		t.Errorf("crew's answer about 017-stacked opened %v, want a note to it", m.note)
 	}
 
+	// n again on the same task: crew's answer to the first n, a refusal, is
+	// for an ask the next key called off, and comes in before the second's.
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	run.refusal = errors.New("worker w2 is busy (working)")
+	refused := press(m, "n")()
+	press(m, "j")
+	goTo(t, m, "016-both")
+	run.refusal = nil
+	second = press(m, "n")
+	m.Update(refused)
+	finish(t, m, second)
+	if m.note == nil || strings.Contains(footOnScreen(m), "busy") {
+		t.Errorf("crew's answer to a called-off n on 016-both stood in for the next one's: note %v, saying %q", m.note, footOnScreen(m))
+	}
+
 	for _, key := range []string{"n", "j"} { // n refused on a merged task, and a key that only moves
 		m, _ = actingOn(actionsReport(actionsLedger(t)))
 		goTo(t, m, "016-both")
