@@ -320,7 +320,8 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 	at := func(s string) time.Time { return costsDay(t, s) }
 	// a spent $20 before the range and $20 in it, ran /simplify for $3 and had a
 	// brief review from the lead for $1: $44 in all. b spent $60 and had a brief
-	// review from a goal lead for $2: $62.
+	// review from a goal lead for $2: $62. Both brief reviews were before the
+	// range, so their step has a median but nothing spent in it.
 	writeTranscript(t, dir, "-work-p-a/s.jsonl",
 		dollarsLine("a1", at("2026-11-12 09:00"), 20, text),
 		dollarsLine("a2", at("2026-11-17 09:00"), 20, toolUseBlock("t1", "Skill", `{"skill":"simplify"}`)),
@@ -338,7 +339,7 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 	writeTranscript(t, dir, "-crew-lead/s.jsonl", dollarsLine("lead", at("2026-11-18 09:00"), 5, text))
 	brief("-crew-lead", "a", "brief-a", at("2026-11-10 09:00"), 1)
 	writeTranscript(t, dir, "-work-p-_goal-g/s.jsonl")
-	brief("-work-p-_goal-g", "b", "brief-b", at("2026-11-16 09:00"), 2)
+	brief("-work-p-_goal-g", "b", "brief-b", at("2026-11-14 09:00"), 2)
 	// Tasks that finished outside the range, or haven't, count in the totals only.
 	writeTranscript(t, dir, "-work-p-before/s.jsonl", dollarsLine("before", at("2026-11-15 09:00"), 100, text))
 	writeTranscript(t, dir, "-work-p-after/s.jsonl", dollarsLine("after", at("2026-11-20 09:00"), 100, text))
@@ -366,13 +367,13 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 
                                           median
   step             total  share  tasks  per task
-  Brief review     $2.00   0.7%      2     $1.50
+  Brief review     $0.00     0%      2     $1.50
   Worker sessions   $280    97%      2       $50
   Exhale           $3.00     1%      1     $3.00
 
   Lead sessions    $5.00   1.7%
 
-  All               $290   100%      2       $53
+  All               $288   100%      2       $53
 
 A median is over the tasks that merged or were done in the range, counting all they spent, whenever they spent it: each step's over the tasks that ran it.
 It counts only tasks this machine's transcripts hold whole: those begun since 2026-11-01 09:00, from when they're complete, and not under way while another machine ran the crew.

@@ -501,6 +501,8 @@ func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to
 		if sent {
 			r.steps[c.step] += cost
 			r.total += cost
+		} else {
+			r.steps[c.step] += 0 // the step has a row for its median, though nothing was sent in the range
 		}
 		if task != nil {
 			task.steps[c.step] += cost
@@ -519,8 +521,6 @@ func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to
 		r.taskTotals = append(r.taskTotals, total)
 	}
 	slices.Sort(r.rated)
-	slices.Sort(r.leftOut.machines)
-	r.leftOut.machines = slices.Compact(r.leftOut.machines)
 	return r
 }
 
@@ -568,11 +568,11 @@ func (r *costReport) wholeTasks(tasks map[string]Task, elsewhere []tenure, from,
 // merged or done. Its Log runs oldest first, so the last change wins.
 func finishedAt(t Task) time.Time {
 	var at time.Time
-	if s := t.Status(); s != Merged && s != Done {
+	if !t.Status().Delivered() {
 		return at
 	}
 	for _, e := range withStatusLines(t.LogEntries()) {
-		if changedTo(Merged)(e) || changedTo(Done)(e) {
+		if s, ok := e.status(); ok && s.Delivered() {
 			at = e.at
 		}
 	}
@@ -585,14 +585,13 @@ func finishedAt(t Task) time.Time {
 func (r costReport) print(w io.Writer) {
 	fmt.Fprintf(w, "Spend from %s to %s, at API rates, from this machine's transcripts:\n\n",
 		r.from.Format("2006-01-02"), r.to.Format("2006-01-02"))
-	// A step shows when something was spent on it in the range, or a task the
-	// medians count ran it.
-	agents := slices.Concat(slices.Collect(maps.Keys(r.steps)), slices.Collect(maps.Keys(r.perTask)))
-	agents = slices.DeleteFunc(agents, func(name string) bool {
-		return slices.Contains(taskSteps, name) || slices.Contains(sharedSteps, name)
-	})
+	var agents []string
+	for name := range r.steps {
+		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) {
+			agents = append(agents, name)
+		}
+	}
 	slices.Sort(agents)
-	agents = slices.Compact(agents)
 	// A row's median, and how many tasks it's over, show only when there are any.
 	row := func(name string, total float64, perTask []float64) []string {
 		cells := []string{name, formatDollars(total), r.share(total)}
@@ -605,9 +604,8 @@ func (r costReport) print(w io.Writer) {
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
 		for _, name := range group {
-			total, spent := r.steps[name]
-			if perTask := r.perTask[name]; spent || len(perTask) > 0 {
-				groupRows = append(groupRows, row(name, total, perTask))
+			if total, ok := r.steps[name]; ok {
+				groupRows = append(groupRows, row(name, total, r.perTask[name]))
 			}
 		}
 		if len(rows) > 0 && len(groupRows) > 0 {
@@ -646,7 +644,7 @@ func (l leftOut) reasons() []string {
 		reasons = append(reasons, fmt.Sprintf("%d begun before then", l.begunEarly))
 	}
 	if l.underWay > 0 {
-		reasons = append(reasons, fmt.Sprintf("%d under way while %s ran the crew", l.underWay, orList(l.machines)))
+		reasons = append(reasons, fmt.Sprintf("%d under way while %s ran the crew", l.underWay, orList(slices.Compact(slices.Sorted(slices.Values(l.machines))))))
 	}
 	if l.partlyPriced > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.partlyPriced))
