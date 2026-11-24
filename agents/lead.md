@@ -104,7 +104,7 @@ A worker starts with no memory of your conversation. It gets the task file, the 
 - **Out of scope**: tempting adjacent cleanups, and anything the user rules out. Follow-ups stay out of the diff; the worker writes down those worth keeping as proposals.
 - Nothing about how: no structure, plan steps, names for new code, or conventions the project's rules already state. When you catch yourself writing one, ask what it's for, and write that as a gate or a fact. `crew ready` refuses a build's brief with anything under Structure, Plan or Constraints and conventions, the sections briefs once held the design in, and `crew dispatch` refuses a task readied before then.
 - Leave the HTML-comment guidance in place or delete it; `crew ready` ignores it.
-- Front-matter defaults (`pre_pr_review: yes`, `pr_mode: draft`) come from the ledger config. Change them per task only if the user asks, except `pre_pr_review`, which step 7 turns off by rule. `model` and `auto_review` are yours to choose at intake (step 7).
+- Front-matter defaults (`pre_pr_review: yes`, `pr_mode: draft`) come from the ledger config. `model`, `auto_review` and `pre_pr_review` are yours to choose at intake (step 7); change the others per task only if the user asks.
 
 ## Status
 
