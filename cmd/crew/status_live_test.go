@@ -785,7 +785,7 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 	if m.note != nil {
 		t.Fatal("n started a second note to 016-both while one was on its way")
 	}
-	if got, want := footOnScreen(m), "your note to 016-both's worker is still on its way"; got != want {
+	if got, want := footOnScreen(m), "your note to 016-both's worker is still on its way\nsending your note to 016-both's worker…"; got != want {
 		t.Errorf("n says %q, want %q", got, want)
 	}
 
@@ -807,7 +807,7 @@ func TestLiveStatusQuitsOnceANoteIsSent(t *testing.T) {
 	if quits(press(m, "q")) {
 		t.Fatal("q quit the view while a note was on its way")
 	}
-	if got, want := footOnScreen(m), "quitting once your note is sent; q again quits now"; got != want {
+	if got, want := footOnScreen(m), "quitting once your note is sent; q again quits now\nsending your note to 016-both's worker…"; got != want {
 		t.Errorf("q while a note is on its way says %q, want %q", got, want)
 	}
 	if _, cmd := m.Update(sending()); !quits(cmd) {
@@ -862,6 +862,31 @@ func TestLiveStatusStaysOpenForWhatCrewSaysOfANote(t *testing.T) {
 	run.warnings = []string{"ledger commit failed (continuing)"}
 	if _, cmd := m.Update(sending()); quits(cmd) {
 		t.Error("the view quit before the user read what crew warned of")
+	}
+}
+
+// TestLiveStatusSaysWhatBecameOfEachNote sends two notes: crew refuses the
+// first and sends the second. Until the next key, the view says both.
+func TestLiveStatusSaysWhatBecameOfEachNote(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	startNote(t, m)
+	typeText(m, "the tests first")
+	refused := press(m, "enter")
+	goTo(t, m, "017-stacked")
+	startNote(t, m)
+	typeText(m, "rebase")
+	sent := press(m, "enter")
+	run.err = errors.New("p is paused")
+	m.Update(refused())
+	run.err = nil
+	m.Update(sent())
+	want := "crew didn't send your note to 016-both's worker; n on 016-both brings it back:\np is paused\nsent your note to 017-stacked's worker (resume)"
+	if got := footOnScreen(m); got != want {
+		t.Errorf("after both notes, the view says %q, want %q", got, want)
+	}
+	if press(m, "j"); footOnScreen(m) != "" {
+		t.Errorf("after a key, the view still says %q", footOnScreen(m))
 	}
 }
 
