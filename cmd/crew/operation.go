@@ -11,10 +11,9 @@ package main
 //
 // runInProcess runs an operation on a Crew of its own, which writes nothing to
 // the terminal, keeps its warnings for the caller, and reads the shared settings
-// afresh. That Crew takes the
-// ledger lock with a file of its own, so two operations running at once wait
-// for each other, as two processes do, and it lets go of the lock when the
-// operation returns.
+// afresh. That Crew takes the ledger lock with a file of its own, so two
+// operations running at once wait for each other, as two processes do, and it
+// lets go of the lock when the operation returns.
 //
 // followup is the first operation. A command joins when the live view needs it,
 // the same way: its path reports through c.warn and c.printf, it returns a
