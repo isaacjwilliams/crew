@@ -19,10 +19,10 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err := need("claude"); err != nil {
 		return err
 	}
-	// crew status reads what followup writes to stderr through a pipe, and
-	// may quit while it runs. Writing to a pipe nobody reads then fails, rather
-	// than killing followup between starting a worker and recording it.
-	signal.Ignore(syscall.SIGPIPE)
+	// crew status runs followup and reads its stderr through a pipe. The view
+	// may quit, or its terminal close, while followup runs: followup carries on
+	// rather than die between starting a worker and recording it.
+	signal.Ignore(syscall.SIGPIPE, syscall.SIGHUP)
 	var arg string
 	var with followupWith
 	for len(args) > 0 {

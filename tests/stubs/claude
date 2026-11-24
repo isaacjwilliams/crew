@@ -147,6 +147,8 @@ case ${1:-} in
               else . + [{id:$id, kind:"background", state:$st, pid:$pid, sessionId:$s, name:$name, cwd:$cwd} | status] end' \
         --arg id "$id" --arg s "$session" --arg st "$state" --argjson pid "$pid" --arg stat "$status" --arg cwd "$PWD" --arg name "${name:-untitled session}"
       if [[ -f $HOME/placeholder-session && $session == "$resume" ]]; then echo "$id" >"$HOME/placeholder-pending"; fi
+      # The terminal of the crew that started this closes as the worker starts.
+      if [[ -f $HOME/hangup-on-launch ]]; then rm "$HOME/hangup-on-launch"; kill -HUP "$PPID"; fi
       printf 'backgrounded · \e[36m%s\e[39m · stub\n' "$id"
     elif [[ -f $HOME/fail-agent && " $* " == *" --agent $(cat "$HOME/fail-agent") "* ]]; then
       echo "stub claude -p failed"; exit 1
