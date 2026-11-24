@@ -299,7 +299,7 @@ func cmdFeedback(c *Crew, args []string) error {
 		return nil
 	}
 	fmt.Print(round)
-	warnManyRounds(p, t)
+	c.warnManyRounds(p, t)
 	return nil
 }
 
@@ -339,11 +339,12 @@ func cmdReview(c *Crew, args []string) error {
 		return nil
 	}
 	if as, job := c.agents(), t.WorkerJob(); as.jobBusy(job) {
-		warnManyRounds(p, t) // otherwise followup warns
+		c.warnManyRounds(p, t) // otherwise followup warns
 		fmt.Printf("round %d asks for another automated review; crew tick sends it once worker %s is free (%s)\n", n, job, as.jobState(job))
 		return nil
 	}
-	return c.followup(t, followupWith{})
+	_, err = c.followup(t, followupWith{})
+	return err
 }
 
 // isReviewRequest: the comment's whole text is "crew review", in any case. Like
@@ -420,10 +421,10 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of
 // the user's feedback. Rounds that only report red CI or a conflict don't count.
-func warnManyRounds(p *Project, t Task) {
+func (c *Crew) warnManyRounds(p *Project, t Task) {
 	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil {
 		if n := t.FeedbackRounds(); n > max {
-			warn("%s has had %d rounds of review (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", t.ID(), n, max)
+			c.warn("%s has had %d rounds of review (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", t.ID(), n, max)
 		}
 	}
 }

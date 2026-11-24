@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -404,7 +405,7 @@ func (c *Crew) removeSession(job string) bool {
 		return false
 	}
 	if c.claude("rm", job).Run() != nil {
-		warn("couldn't remove job %s from agent view; delete it in claude agents", job)
+		c.warn("couldn't remove job %s from agent view; delete it in claude agents", job)
 	}
 	return true
 }
@@ -512,8 +513,21 @@ func (l launch) record(d Doc) {
 	}
 }
 
-// errNotStarted: claude started no session, so starting a fresh one instead is safe.
-var errNotStarted = &exitError{1, ""}
+// notStarted is launchSession's error when claude started no session, so
+// starting a fresh one instead is safe. It says why, with what claude said.
+type notStarted struct{ why string }
+
+func (e notStarted) Error() string { return e.why }
+
+// unrecordedSession is launchSession's error when claude started a session but
+// crew can't tell which: it holds claude's output. The session runs unrecorded,
+// so crew mustn't start another, and followup's caller can tell it from a
+// refusal.
+type unrecordedSession struct{ output string }
+
+func (e unrecordedSession) Error() string {
+	return "claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\n" + e.output
+}
 
 var (
 	ansiCode = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
@@ -578,29 +592,30 @@ func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bo
 		}
 	}
 	if job == "" {
-		fmt.Fprintln(os.Stderr, strings.TrimRight(out, "\n"))
-		return launch{}, errNotStarted
+		if out = strings.TrimSpace(out); out == "" {
+			return launch{}, notStarted{"claude said nothing"}
+		}
+		return launch{}, notStarted{"claude said:\n" + out}
 	}
 	// A session did start, so don't fall back to starting another one.
 	if !jobID.MatchString(job) {
-		return launch{}, fail("claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\n%s", strings.TrimRight(out, "\n"))
+		return launch{}, unrecordedSession{strings.TrimRight(out, "\n")}
 	}
 	for _, l := range strings.Split(out, "\n") {
 		if strings.HasPrefix(strings.ToLower(l), "note:") {
-			fmt.Fprintln(os.Stderr, l)
+			c.warn("claude says: %s", l)
 		}
 	}
 	started, ok := c.waitForLaunch(job, session, before)
 	switch {
 	case !ok:
-		warn("claude started job %s, but it failed straight away (see 'claude agents')", job)
-		return launch{}, errNotStarted
+		return launch{}, notStarted{fmt.Sprintf("claude started job %s, but it failed straight away (see 'claude agents')", job)}
 	case started == "":
-		warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
+		c.warn("job %s hasn't reported its session after 30s, so crew can't confirm it started or record its session; check 'claude agents', then record its session as %s_session in %s", job, start.prefix, d.Path)
 	case resume && started != session:
 		// closeSession left no process open, but one can open again before the
 		// resume reaches it, and then Claude Code starts a copy.
-		warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
+		c.warn("claude started a copy of session %s as %s; later followups resume the copy", session, started)
 	}
 	// A fresh session replaces the one the file records, so take that one out of
 	// agent view, unless someone is using it.
@@ -665,14 +680,14 @@ func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, f
 	}
 	if resume {
 		l, err := c.launchSession(start, d, wt, prompt, true)
-		if err != errNotStarted {
+		if !errors.As(err, new(notStarted)) {
 			return l, err
 		}
-		warn("couldn't resume session %s; starting a fresh session instead", session)
+		c.warn("couldn't resume session %s, so crew tried a fresh one instead; %v", session, err)
 	}
 	l, err := c.launchSession(start, d, wt, freshPrompt+"\n"+prompt, false)
-	if err == errNotStarted {
-		return l, fail("could not start a session (see output above)")
+	if errors.As(err, new(notStarted)) {
+		return l, fail("could not start a session; %v", err)
 	}
 	if why != "" {
 		l.mode = "fresh: " + why

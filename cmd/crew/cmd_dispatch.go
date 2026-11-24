@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -87,7 +88,7 @@ func cmdDispatch(c *Crew, args []string) error {
 		}
 		warn("git fetch origin %s failed; using local refs", base)
 	}
-	_, startSHA, err := p.setupWorktree(t, wt, branch, base)
+	_, startSHA, err := p.setupWorktree(t, wt, branch, base, c.out())
 	if err != nil {
 		return err
 	}
@@ -114,8 +115,8 @@ func cmdDispatch(c *Crew, args []string) error {
 		prompt += fmt.Sprintf("\nThis task is stacked on task %s%s: %s is that task's branch, not the default branch. Your PR targets %s; see \"Stacked tasks\" in your instructions.", parent.ID(), pr, base, base)
 	}
 	l, err := c.launchSession(start, t.Doc, wt, prompt, false)
-	if err == errNotStarted {
-		return fail("could not start the worker session (see output above)")
+	if errors.As(err, new(notStarted)) {
+		return fail("could not start the worker session; %v", err)
 	} else if err != nil {
 		return err
 	}

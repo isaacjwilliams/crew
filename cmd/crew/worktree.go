@@ -10,6 +10,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,18 +22,23 @@ func unknownTool(tool string) error {
 }
 
 // worktreeCreate makes a worktree at wt on branch: a new branch from startRef, or
-// the existing branch when startRef is empty.
-func (p *Project) worktreeCreate(wt, branch, startRef, logf string) error {
+// the existing branch when startRef is empty. It says on out that it's begun when
+// that can take a while, and a failure's error holds what the tool said.
+func (p *Project) worktreeCreate(wt, branch, startRef, logf string, out io.Writer) error {
 	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
 		return err
 	}
 	p.pruneWorktrees()
 	switch tool := p.Settings["WORKTREE_TOOL"]; tool {
 	case "git":
+		args := []string{"worktree", "add", "--quiet", wt, branch}
 		if startRef != "" {
-			return gitDo(p.Repo(), "worktree", "add", "--quiet", "--no-track", "-b", branch, wt, startRef)
+			args = []string{"worktree", "add", "--quiet", "--no-track", "-b", branch, wt, startRef}
 		}
-		return gitDo(p.Repo(), "worktree", "add", "--quiet", wt, branch)
+		if said, err := exec.Command("git", append([]string{"-C", p.Repo()}, args...)...).CombinedOutput(); err != nil {
+			return fail("git couldn't create the worktree: %s", strings.TrimSpace(string(said)))
+		}
+		return nil
 	case "worktrunk":
 		if err := need("wt"); err != nil {
 			return err
@@ -47,18 +53,17 @@ func (p *Project) worktreeCreate(wt, branch, startRef, logf string) error {
 		}
 		defer log.Close()
 		fmt.Fprintf(log, "== %s wt %s %s\n", now(), strings.Join(args, " "), branch)
-		fmt.Printf("Creating %s with Worktrunk (hook output: %s)\n", wt, logf)
+		fmt.Fprintf(out, "Creating %s with Worktrunk (hook output: %s)\n", wt, logf)
 		cmd := exec.Command("wt", append(append([]string{"-C", p.Repo()}, args...), branch)...)
 		cmd.Stderr = log
-		out, err := cmd.Output()
+		said, err := cmd.Output()
 		if err != nil {
-			tailTo(os.Stderr, logf, 15)
-			return fail("wt couldn't create the worktree (full output in %s). If its hooks need approval, run 'wt config approvals add' in %s.", logf, p.Repo())
+			return fail("wt couldn't create the worktree (full output in %s). If its hooks need approval, run 'wt config approvals add' in %s. It ended:\n%s", logf, p.Repo(), strings.Join(lastLines(logf, 15), "\n"))
 		}
 		var res struct {
 			Path string `json:"path"`
 		}
-		json.Unmarshal(out, &res)
+		json.Unmarshal(said, &res)
 		got, err1 := canonical(res.Path)
 		want, err2 := canonical(wt)
 		if res.Path == "" || err1 != nil || err2 != nil || got != want {
@@ -117,14 +122,19 @@ func openLog(path string) (*os.File, error) {
 
 // tailTo copies the last n lines of a file to w.
 func tailTo(w *os.File, path string, n int) {
+	for _, l := range lastLines(path, n) {
+		fmt.Fprintln(w, l)
+	}
+}
+
+// lastLines is the last n lines of a file.
+func lastLines(path string, n int) []string {
 	b, _ := os.ReadFile(path)
 	lines := splitLines(string(b))
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	for _, l := range lines {
-		fmt.Fprintln(w, l)
-	}
+	return lines
 }
 
 // How setupWorktree made a missing worktree.
@@ -144,7 +154,7 @@ const (
 // records it only after this succeeds) is left from a dispatch that failed while
 // creating it, where Worktrunk's setup hooks may not have finished, so it's
 // refused. Run it without the ledger lock: Worktrunk hooks can take minutes.
-func (p *Project) setupWorktree(t Task, wt, branch, base string) (from worktreeFrom, startSHA string, err error) {
+func (p *Project) setupWorktree(t Task, wt, branch, base string, out io.Writer) (from worktreeFrom, startSHA string, err error) {
 	repo := p.Repo()
 	if isDir(wt) {
 		if !gitOK(wt, "rev-parse", "--is-inside-work-tree") {
@@ -167,7 +177,7 @@ func (p *Project) setupWorktree(t Task, wt, branch, base string) (from worktreeF
 			}
 			startSHA, _ = git(repo, "rev-parse", "--verify", "--quiet", startRef+"^{commit}")
 		}
-		if err := p.worktreeCreate(wt, branch, startRef, p.worktreeLog(t)); err != nil {
+		if err := p.worktreeCreate(wt, branch, startRef, p.worktreeLog(t), out); err != nil {
 			return "", "", err
 		}
 	}
@@ -196,20 +206,22 @@ func (p *Project) worktreeLog(t Task) string {
 // $WORK_ROOT/<p>/<id>. After a failover the task file names another machine's
 // path, and the task's branch may be on origin only, or nowhere, if that machine
 // never pushed it: then the branch starts over from its base. It records the
-// path when it changes, and logs how a missing worktree came back. Run it without
-// the ledger lock.
-func (c *Crew) ensureWorktree(p *Project, t Task) error {
+// path when it changes, and logs how a missing worktree came back, which it
+// returns too ("" when it was here). Run it without the ledger lock.
+//
+// A worktree it can't make or set up is a worktreeError.
+func (c *Crew) ensureWorktree(p *Project, t Task) (string, error) {
 	wt := p.taskWorktree(t)
 	base := t.Base()
 	if base == "" {
 		base = p.DefaultBranch()
 	}
 	if !isDir(wt) && !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		warn("git fetch origin failed; using local refs")
+		c.warn("git fetch origin failed; using local refs")
 	}
-	from, startSHA, err := p.setupWorktree(t, wt, t.Branch(), base)
+	from, startSHA, err := p.setupWorktree(t, wt, t.Branch(), base, c.out())
 	if err != nil {
-		return err
+		return "", worktreeError{err}
 	}
 	msg := map[worktreeFrom]string{
 		fromLocalBranch:  "recreated worktree on the local branch " + t.Branch(),
@@ -219,10 +231,10 @@ func (c *Crew) ensureWorktree(p *Project, t Task) error {
 		msg = "started over: " + t.Branch() + " was never pushed from " + c.previousHolder()
 	}
 	if t.Worktree() == wt && msg == "" {
-		return nil
+		return "", nil
 	}
 	if err := c.lock(); err != nil {
-		return err
+		return "", err
 	}
 	defer c.unlock()
 	t.Set("worktree", wt)
@@ -234,5 +246,13 @@ func (c *Crew) ensureWorktree(p *Project, t Task) error {
 	}
 	t.Touch()
 	c.commit("worktree " + p.Name + "/" + t.ID())
-	return nil
+	return msg, nil
 }
+
+// worktreeError is ensureWorktree's failure to make a task's worktree on this
+// machine, or to set it up, so followup's caller can tell it from a refusal.
+// Its message is the failure's own.
+type worktreeError struct{ err error }
+
+func (e worktreeError) Error() string { return e.err.Error() }
+func (e worktreeError) Unwrap() error { return e.err }

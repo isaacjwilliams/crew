@@ -21,7 +21,7 @@ import (
 func (c *Crew) commit(msg string) {
 	top, _ := git(c.Home, "rev-parse", "--show-toplevel")
 	if real, err := filepath.EvalSymlinks(c.Home); err != nil || top != real {
-		warn("%s is not its own git repo; not committing", c.Home)
+		c.warn("%s is not its own git repo; not committing", c.Home)
 		return
 	}
 	var paths []string
@@ -34,14 +34,14 @@ func (c *Crew) commit(msg string) {
 		return
 	}
 	if !gitOK(c.Home, append([]string{"add", "-A", "--"}, paths...)...) {
-		warn("ledger commit failed (continuing)")
+		c.warn("ledger commit failed (continuing)")
 		return
 	}
 	if gitOK(c.Home, append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...) {
 		return
 	}
 	if !gitOK(c.Home, append([]string{"commit", "-qm", msg, "--"}, paths...)...) {
-		warn("ledger commit failed (continuing)")
+		c.warn("ledger commit failed (continuing)")
 		return
 	}
 	c.pushSoon()
@@ -133,7 +133,7 @@ func (c *Crew) pushSoon() {
 	os.MkdirAll(c.path("logs"), 0o755)
 	log, err := os.OpenFile(c.path("logs/push.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		warn("can't write %s, so the ledger isn't pushed until the next crew tick: %v", c.path("logs/push.log"), err)
+		c.warn("can't write %s, so the ledger isn't pushed until the next crew tick: %v", c.path("logs/push.log"), err)
 		return
 	}
 	defer log.Close()
