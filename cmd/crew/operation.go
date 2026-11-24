@@ -10,7 +10,8 @@ package main
 // writer c.out() gives.
 //
 // runInProcess runs an operation on a Crew of its own, which writes nothing to
-// the terminal and keeps its warnings for the caller. That Crew takes the
+// the terminal, keeps its warnings for the caller, and reads the shared settings
+// afresh. That Crew takes the
 // ledger lock with a file of its own, so two operations running at once wait
 // for each other, as two processes do, and it lets go of the lock when the
 // operation returns.
@@ -27,9 +28,16 @@ import (
 )
 
 // runInProcess runs op for code inside a long-lived crew process. It returns
-// op's result, what op warned about, and op's refusal.
+// op's result, what op warned about, and op's refusal. It reads the shared
+// settings again, as a crew process would, since crew.env may have changed
+// since the long-lived process started.
 func runInProcess[R any](c *Crew, op func(*Crew) (R, error)) (R, []string, error) {
-	in := &Crew{Home: c.Home, Settings: c.Settings, Host: c.Host, login: c.login, inProcess: true}
+	var none R
+	settings, err := sharedSettings(c.Home)
+	if err != nil {
+		return none, nil, err
+	}
+	in := &Crew{Home: c.Home, Settings: settings, Host: c.Host, login: c.login, inProcess: true}
 	defer in.unlock()
 	r, err := op(in)
 	return r, in.warnings, err

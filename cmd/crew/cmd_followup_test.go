@@ -260,6 +260,26 @@ func TestFollowupTwiceInOneProcess(t *testing.T) {
 	}
 }
 
+// A long-lived process outlives a change to crew.env, so each in-process
+// followup reads it again, as a crew followup process would.
+func TestFollowupReadsCrewEnvEachTime(t *testing.T) {
+	f := newFollowupCrew(t, "git")
+	task := f.task(t)
+	f.workers(t, "done", false)
+	if _, _, err := f.followupInProcess(t, task, followupWith{note: "first"}); err != nil {
+		t.Fatalf("the first followup refused: %v", err)
+	}
+	writeFile(t, f.Crew, "not a setting\n", "config", "crew.env")
+	f.workers(t, "done", false)
+	_, _, err := f.followupInProcess(t, task, followupWith{note: "second"})
+	if err == nil || !strings.Contains(err.Error(), "crew.env") {
+		t.Errorf("followup after crew.env went bad gave %v, want crew.env's error", err)
+	}
+	if got := lastLog(task); !strings.HasSuffix(got, "— note: first") {
+		t.Errorf("the Log says %q, want only the first note", got)
+	}
+}
+
 func TestFollowupRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
