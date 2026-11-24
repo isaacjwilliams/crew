@@ -82,7 +82,7 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 				return "", err
 			}
 			var errs strings.Builder
-			failed := runStep(followupCommand(exe, t, note), &errs) != 0
+			failed := runCrewCommand(followupCommand(exe, t, note), &errs) != 0
 			return followupOutcome(failed, errs.String())
 		},
 	}

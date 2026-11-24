@@ -90,18 +90,18 @@ func cmdTick(c *Crew, args []string) error {
 	return nil
 }
 
-// step runs a crew command in a process of its own and returns its exit code. Its
-// output is thrown away; its errors are shown, or collected in errs when it's set.
+// step runs a crew command in a process of its own, as runCrewCommand does.
 func (c *Crew) step(errs *strings.Builder, args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
 		return 1
 	}
-	return runStep(exec.Command(exe, args...), errs)
+	return runCrewCommand(exec.Command(exe, args...), errs)
 }
 
-// runStep runs a step's command, as step says.
-func runStep(cmd *exec.Cmd, errs *strings.Builder) int {
+// runCrewCommand runs a crew command and returns its exit code. Its output is
+// thrown away; its errors are shown, or collected in errs when it's set.
+func runCrewCommand(cmd *exec.Cmd, errs *strings.Builder) int {
 	cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
 	if errs != nil {
 		cmd.Stderr = errs

@@ -864,7 +864,7 @@ func TestFollowupCommandRunsInAProcessGroupOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var errs strings.Builder
-	if code := runStep(followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first"), &errs); code != 0 {
+	if code := runCrewCommand(followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first"), &errs); code != 0 {
 		t.Fatalf("the note's command exited %d: %s", code, errs.String())
 	}
 	said := strings.Fields(errs.String())
