@@ -2968,11 +2968,12 @@ rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr
 # with the view still open, crew set and crew tick: each would wait up to 30 seconds for a held
 # lock, so the 20 seconds they get would end with exit 124.
 VN=$(pr_task "Note from the view"); TVN=$(basename "$VN" .md); setstate "done" null; n=$(resumes)
-VP=$(basename "$(dirname "$(dirname "$VN")")")   # the task's project
+VP=$(crew get "$VN" project)
 i=$(crew status --project "$VP" --plain | grep -v '^$' | grep -n "^ *$TVN " | cut -d: -f1)
 note="q r j k h l g G, then space"
 {
-  sleep 3; printf 'j%.0s' $(seq 2 "$i"); printf n; sleep 0.5; printf '%s\r' "$note"
+  wait_for "grep -q '$TVN' '$HOME/live-note.out'"; printf 'j%.0s' $(seq 2 "$i"); printf n
+  wait_for "grep -q 'note to $TVN' '$HOME/live-note.out'"; printf '%s\r' "$note"
   wait_for "grep -q 'note from the user: $note' '$VN'"
   s=$SECONDS; timeout 20 crew set "$VN" risk medium >/dev/null 2>&1; echo "set $? $((SECONDS - s))" >"$HOME/while-open"
   s=$SECONDS; timeout 20 crew tick >/dev/null 2>&1; echo "tick $? $((SECONDS - s))" >>"$HOME/while-open"

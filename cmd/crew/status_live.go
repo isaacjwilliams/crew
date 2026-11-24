@@ -305,14 +305,16 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		m.show(msg.report, m.building.last)
 		return m.startDue()
 	case prOpened:
-		m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		if msg.err != nil {
 			m.said = "couldn't open " + msg.task.ID() + "'s PR: " + msg.err.Error()
+		} else {
+			m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		}
 	case noteSent:
-		m.said = "sent your note to " + msg.to.ID() + "'s worker"
 		if msg.err != nil {
 			m.said = "note not sent: " + msg.err.Error()
+		} else {
+			m.said = "sent your note to " + msg.to.ID() + "'s worker"
 		}
 		// The worker's line shows it at work on the note.
 		m.listingWorkers.ask()
