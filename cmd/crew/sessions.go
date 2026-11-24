@@ -249,7 +249,8 @@ const (
 // coldResume says why resuming a session at now would cost more than starting
 // it fresh: how long it has been idle, past cacheLife, and how big its context
 // is, at least coldContext. It's "" when resuming costs less, and when the
-// session's transcript can't say: there's none, or no request in it.
+// session's transcript can't say: there's none, no request in it, or a reply
+// in it that doesn't read.
 func coldResume(session string, now time.Time) string {
 	at, tokens, ok := lastRequest(transcript(session))
 	if !ok {
@@ -269,15 +270,17 @@ func coldResume(session string, now time.Time) string {
 // subagent's requests don't count: they're in transcripts of their own, or
 // marked isSidechain. messages.add (cmd_review_cost.go) keeps each reply once,
 // with its fullest usage, and skips Claude Code's own messages, which have none.
-// scanLines picks lines by their text, so the parsed type is checked again.
+// scanLines picks lines by their text, so the parsed type is checked again. A
+// reply that doesn't read may be the last request, so then there's no answer.
 func lastRequest(path string) (at time.Time, tokens int, ok bool) {
 	var ms messages
-	if _, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
+	unread, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
 		if l.Type == "assistant" && !l.IsSidechain {
 			ms.add(l)
 		}
 		return true
-	}); err != nil || len(ms.all) == 0 {
+	})
+	if err != nil || unread > 0 || len(ms.all) == 0 {
 		return time.Time{}, 0, false
 	}
 	last := ms.all[len(ms.all)-1]

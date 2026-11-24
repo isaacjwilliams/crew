@@ -149,7 +149,7 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 		{"entries written after it", own + `{"type":"user"}` + "\n" + fmt.Sprintf(`{"type":"last-prompt","timestamp":%q}`, later.Format(time.RFC3339)) + "\n\n"},
 		{"a subagent's reply after it", own + reply(later, 20_000, `"isSidechain":true,`)},
 		{"an API error after it", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339)) + "\n"},
-		{"a line that doesn't read", own + "{not json\n"},
+		{"a line that doesn't read and isn't a reply", own + "{not json\n"},
 		{"a copy of it with its counts zeroed", own + fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"msg_%d","model":"claude-opus-5-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`, later.Format(time.RFC3339), at.Unix()) + "\n"},
 	} {
 		writeTranscript(t, dir, "s1.jsonl", c.transcript)
@@ -161,5 +161,10 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 	writeTranscript(t, dir, "s1.jsonl", `{"type":"user"}`+"\n")
 	if _, _, ok := lastRequest(path); ok {
 		t.Error("lastRequest found a request in a transcript without one")
+	}
+	// Cut off mid-write, say: it may be a later request than the one before it.
+	writeTranscript(t, dir, "s1.jsonl", own+`{"type":"assistant","timestamp":`+"\n")
+	if _, _, ok := lastRequest(path); ok {
+		t.Error("lastRequest gave the last reply it could read, though a reply after it doesn't read")
 	}
 }
