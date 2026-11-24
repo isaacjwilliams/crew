@@ -2415,15 +2415,16 @@ calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && env -u CLAUDECODE 
 check "outside a repo, a task ID two projects share is ambiguous, naming each project, and attach runs no claude" \
   '[[ $out == *ambiguous*"($PJ)"*"($P2)"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "CREW_PROJECT resolves a task ID two projects share in its project" '[[ $(CREW_PROJECT=$P2 crew get "$(basename "$F1" .md)" project) == "$P2" ]]'
-# A busy worker's hint names its task so that it resolves back to that task here.
-cp "$HOME/agents.json" "$HOME/agents.bak"
+# A busy worker's hint names its task so that it resolves back to that task here. F1 has merged,
+# which followup says first, so for this it's waiting on review.
+cp "$HOME/agents.json" "$HOME/agents.bak"; sed -i "s/^status: .*/status: pr-open/" "$F1"
 jq --arg id "$(crew get "$F1" worker_job)" 'map(select(.id != $id)) + [{id: $id, state: "working", pid: 4242, sessionId: ($id + "-busy")}]' \
   "$HOME/agents.bak" >"$HOME/agents.json"
 out=$(CREW_PROJECT=$P2 crew followup "$F1" --note hi 2>&1); want="crew attach '$F1',"
 check "a busy worker's hint names its task by path where another project's task with that ID would win" '[[ $out == *"$want"* ]]'
 out=$(CREW_PROJECT=$PJ crew followup "$F1" --note hi 2>&1); want="crew attach $(basename "$F1" .md),"
 check "a busy worker's hint names its task by ID where that ID finds it" '[[ $out == *"$want"* ]]'
-mv "$HOME/agents.bak" "$HOME/agents.json"
+mv "$HOME/agents.bak" "$HOME/agents.json"; sed -i "s/^status: .*/status: merged/" "$F1"
 rm "$TWIN"
 out=$(CREW_PROJECT=$P2 crew status)
 check "CREW_PROJECT scopes status to its project, over the current directory's" '[[ $out == *"$NL$P2$NL"* && $out != *"$NL$PJ$NL"* ]]'

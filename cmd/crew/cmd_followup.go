@@ -198,14 +198,14 @@ type followupSent struct {
 }
 
 // followupRefusal is why followup would send t's worker nothing now, whatever
-// it was given to send, or nil when it would send: the task has no worker, its
-// worker is busy (as is what claude agents lists), it's finished, its project
-// is paused, or this machine doesn't run the crew. followup asks it before it
-// sends and again under the ledger lock, and noteRefusal for a caller that asks
-// first.
+// it was given to send, or nil when it would send: the task has no worker to
+// follow up (noWorker), its project is paused, its worker is busy (as is what
+// claude agents lists), or this machine doesn't run the crew. followup asks it
+// before it sends and again under the ledger lock, and noteRefusal for a caller
+// that asks first.
 func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
-	if !t.Dispatched() {
-		return fail("%s has no worker yet; dispatch it first", t.ID())
+	if err := noWorker(t); err != nil {
+		return err
 	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
@@ -217,10 +217,20 @@ func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
 	}
+	return c.requireHost()
+}
+
+// noWorker is why t has no worker for followup to send anything to, or nil when
+// it has one: it was never dispatched, or it's finished. The task file alone
+// says so, so crew status's live view asks it to offer a note.
+func noWorker(t Task) error {
+	if !t.Dispatched() {
+		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
-	return c.requireHost()
+	return nil
 }
 
 // noteRefusal is why followup would refuse a note for t now, or nil when it
