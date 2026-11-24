@@ -796,9 +796,9 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 	}
 }
 
-// followup runs in the view's process, so quitting while it sends a note waits
-// for it, unless the user quits again.
-func TestLiveStatusQuitsOnceANoteIsSent(t *testing.T) {
+// followup runs in the view's process, so a quit while it sends a note waits
+// for a second one, right after it. The view never quits by itself.
+func TestLiveStatusQuitsWhileANoteIsOnItsWayOnlyAtASecondQuit(t *testing.T) {
 	m, _ := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	startNote(t, m)
@@ -807,61 +807,47 @@ func TestLiveStatusQuitsOnceANoteIsSent(t *testing.T) {
 	if quits(press(m, "q")) {
 		t.Fatal("q quit the view while a note was on its way")
 	}
-	if got, want := footOnScreen(m), "quitting once your note is sent; q again quits now\nsending your note to 016-both's worker…"; got != want {
+	if got, want := footOnScreen(m), "your note is still on its way; q again quits now\nsending your note to 016-both's worker…"; got != want {
 		t.Errorf("q while a note is on its way says %q, want %q", got, want)
 	}
-	if _, cmd := m.Update(sending()); !quits(cmd) {
-		t.Error("the view didn't quit once the note was sent")
+	if _, cmd := m.Update(sending()); quits(cmd) {
+		t.Error("the view quit by itself once the note was sent")
+	}
+	if !quits(press(m, "q")) {
+		t.Error("q doesn't quit once the note is sent")
 	}
 
+	// A quit right after one quits at once; any other key calls it off.
+	for _, keys := range [][]string{{"q", "q"}, {"ctrl+c", "ctrl+c"}, {"q", "j", "q", "q"}} {
+		m, _ = actingOn(actionsReport(actionsLedger(t)))
+		goTo(t, m, "016-both")
+		startNote(t, m)
+		typeText(m, "the tests first")
+		press(m, "enter")
+		for i, key := range keys {
+			if got, want := quits(press(m, key)), i == len(keys)-1; got != want {
+				t.Errorf("after %v while a note was on its way, the view quit: %v, want %v", keys[:i+1], got, want)
+			}
+		}
+	}
+
+	// The same holds for ctrl+c while the user types another note.
 	m, _ = actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	startNote(t, m)
 	typeText(m, "the tests first")
 	press(m, "enter")
-	if quits(press(m, "ctrl+c")) || !quits(press(m, "q")) {
-		t.Error("a second quit while a note is on its way doesn't quit at once")
-	}
-}
-
-// TestLiveStatusStaysOpenForWhatCrewSaysOfANote quits while two notes are on
-// their way. crew refuses the first, so the view stays open with its reason and
-// the note held for n, and quits only when the user quits again.
-func TestLiveStatusStaysOpenForWhatCrewSaysOfANote(t *testing.T) {
-	m, run := actingOn(actionsReport(actionsLedger(t)))
-	goTo(t, m, "016-both")
-	startNote(t, m)
-	typeText(m, "the tests first")
-	refused := press(m, "enter")
 	goTo(t, m, "017-stacked")
 	startNote(t, m)
-	typeText(m, "rebase")
-	sent := press(m, "enter")
-	press(m, "q")
-	run.err = errors.New("p is paused")
-	if _, cmd := m.Update(refused()); quits(cmd) {
-		t.Fatal("the view quit while a note was still on its way")
+	if quits(press(m, "ctrl+c")) {
+		t.Error("ctrl+c while typing a note quit with another on its way")
 	}
-	if got := footOnScreen(m); !strings.Contains(got, "p is paused") {
-		t.Errorf("once crew refuses the note, the view says %q", got)
+	typeText(m, "r")
+	if quits(press(m, "ctrl+c")) {
+		t.Error("ctrl+c after typing quit at once, as if it came right after the first")
 	}
-	run.err = nil
-	if _, cmd := m.Update(sent()); quits(cmd) {
-		t.Error("the view quit once the other note was sent, losing the one crew refused")
-	}
-	if !quits(press(m, "q")) {
-		t.Error("q doesn't quit once no note is on its way")
-	}
-
-	m, run = actingOn(actionsReport(actionsLedger(t)))
-	goTo(t, m, "016-both")
-	startNote(t, m)
-	typeText(m, "the tests first")
-	sending := press(m, "enter")
-	press(m, "q")
-	run.warnings = []string{"ledger commit failed (continuing)"}
-	if _, cmd := m.Update(sending()); quits(cmd) {
-		t.Error("the view quit before the user read what crew warned of")
+	if !quits(press(m, "ctrl+c")) {
+		t.Error("a second ctrl+c in a row doesn't quit")
 	}
 }
 

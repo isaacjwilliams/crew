@@ -180,8 +180,7 @@ type liveStatus struct {
 	asking *Task               // the task crew is being asked about, a copy for each n
 	note   *noteDraft          // the note the user is typing, if they are
 	held   map[string]heldNote // the notes crew hasn't sent, by task path
-	// quitting: the user quit while a note was on its way, so the view quits
-	// once it's sent (quit).
+	// quitting: the last key was a quit that a note on its way held back (quit).
 	quitting bool
 	said     string // what actions did since the last key, or why they couldn't
 }
@@ -356,14 +355,6 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		return m.startNote(*msg.to)
 	case noteSent:
 		m.finishNote(msg)
-		// What crew says of a note it refused, or sent with a warning, stays
-		// on screen until the user quits again.
-		if msg.err != nil || len(msg.warnings) > 0 {
-			m.quitting = false
-		}
-		if m.quitting && !m.sendingNote() {
-			return tea.Quit
-		}
 		// The worker's line shows it at work on the note.
 		m.listingWorkers.ask()
 		return m.startDue()
@@ -402,11 +393,13 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 }
 
 func (m *liveStatus) press(key string) tea.Cmd {
-	// A key clears what the view said and calls off an n crew hasn't answered.
-	m.said, m.asking = "", nil
+	// A key clears what the view said, and calls off an n crew hasn't answered
+	// and a quit a note held back.
+	quitting := m.quitting
+	m.said, m.asking, m.quitting = "", nil, false
 	switch key {
 	case "q", "ctrl+c":
-		return m.quit()
+		return m.quit(key, quitting)
 	case "up", "k":
 		m.moveTo(m.cursor - 1)
 	case "down", "j":
@@ -523,9 +516,11 @@ func (m *liveStatus) noteWidth() int {
 // esc, which drops it, and ctrl+c, which quits.
 func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
+		quitting := m.quitting
+		m.quitting = false
 		switch key.String() {
 		case "ctrl+c":
-			return m.quit()
+			return m.quit("ctrl+c", quitting)
 		case "esc":
 			m.note = nil
 			return nil
@@ -538,16 +533,15 @@ func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	return m.note.own(cmd)
 }
 
-// quit quits, unless followup is sending a note: it runs in the view's process,
-// so quitting would end it, perhaps after it started the worker and before it
-// recorded it. Then the view quits once the note is sent with nothing to say
-// of it, or at a second quit.
-func (m *liveStatus) quit() tea.Cmd {
-	if m.quitting || !m.sendingNote() {
+// quit quits, unless followup is sending a note and the key before wasn't a
+// quit too: followup runs in the view's process, so quitting would end it,
+// perhaps after it started the worker and before it recorded it.
+func (m *liveStatus) quit(key string, again bool) tea.Cmd {
+	if again || !m.sendingNote() {
 		return tea.Quit
 	}
 	m.quitting = true
-	m.say("quitting once your note is sent; q again quits now")
+	m.say("your note is still on its way; " + key + " again quits now")
 	return nil
 }
 
