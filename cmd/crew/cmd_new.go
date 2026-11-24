@@ -410,7 +410,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		}
 		// A raise stands even when the hand-over is refused below: the branch
 		// touches a sensitive path whatever happens next.
-		raised, err := raiseRisk(t, p)
+		raised, err := raiseRisk(t, p, true)
 		if err != nil {
 			return fail("%v", err)
 		}

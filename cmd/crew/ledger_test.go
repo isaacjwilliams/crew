@@ -194,6 +194,22 @@ func TestAutomatedReviewOffAndAwaited(t *testing.T) {
 	}
 }
 
+// A task's pre_pr_review turns its pre-PR passes off only while it isn't high risk.
+func TestPrePRReviewOff(t *testing.T) {
+	for _, c := range []struct{ front, want string }{
+		{"risk: low", "yes"},
+		{"pre_pr_review: yes\nrisk: low", "yes"},
+		{"pre_pr_review: no\nrisk: low", "no"},
+		{"pre_pr_review: no\nrisk: medium", "no"},
+		{"pre_pr_review: no\nrisk: high", "yes"},
+	} {
+		task := Task{docWith(t, "---\n"+c.front+"\n---\n## Log\n")}
+		if got := task.PrePRReview(); got != c.want {
+			t.Errorf("%q: PrePRReview = %s, want %s", c.front, got, c.want)
+		}
+	}
+}
+
 // Four automated reviews over two passes: the first needs fixes, the second
 // fixes only a nitpick, but its Claude reviewer didn't report, the third is
 // clean though Codex failed, and the fourth, in a later pass, has no findings.

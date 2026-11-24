@@ -130,10 +130,12 @@ func (idx Branches) restackReason(t Task, repo string) string {
 // raiseRisk makes a task high risk when its own work (ownWork) changes a file
 // that matches one of the project's SENSITIVE_PATHS (git pathspecs), and logs
 // the first such file. When the raise turns the task's automated review back on
-// (AutomatedReviewOff), the line says so too. It never lowers a tier. It returns
-// the line it logged, or nothing, and an error when it couldn't look. Call it
-// with the lock held.
-func raiseRisk(t Task, p *Project) (string, error) {
+// (AutomatedReviewOff), the line says so too. It says the same of the pre-PR
+// passes (PrePRReviewOff) when the worker may not have reached them, and never
+// at its hand-over (handingOver), when they're behind it. It never lowers a
+// tier. It returns the line it logged, or nothing, and an error when it couldn't
+// look. Call it with the lock held.
+func raiseRisk(t Task, p *Project, handingOver bool) (string, error) {
 	pathspecs := strings.Fields(p.Settings["SENSITIVE_PATHS"])
 	if len(pathspecs) == 0 || t.Risk() == RiskHigh {
 		return "", nil
@@ -164,6 +166,12 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	}
 	if t.AutomatedReviewOff() && atoiOr0(p.Settings["AUTO_REVIEWS"]) > 0 {
 		line += "; automated review back on"
+	}
+	// The worker may not have reached its pre-PR passes while it has neither
+	// opened its PR nor handed over: a task that makes no PR (pr_mode none)
+	// never opens one, so only its hand-over tells.
+	if t.PrePRReviewOff() && !handingOver && t.PR() == "" && !t.HandedOver() {
+		line += "; pre-PR passes back on"
 	}
 	t.Set("risk", string(RiskHigh))
 	t.Touch()
