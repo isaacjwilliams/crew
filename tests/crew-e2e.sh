@@ -1498,7 +1498,10 @@ F16=$(crew new "Moved task" --branch moved-task); fill "$F16"; crew ready "$F16"
 WT16=$(crew get "$F16" worktree); work "$WT16" m.txt; T16=$(tip moved-task)
 git -C "$SB/webapp" worktree remove --force "$WT16"; git -C "$SB/webapp" branch -q -D agent/moved-task
 crew set "$F16" worktree "/elsewhere/agent-work/$(basename "$PD")/$(basename "$F16" .md)"
-setstate "done" null; crew followup "$F16" --note "carry on" >/dev/null 2>&1
+setstate "done" null; head=$(git -C "$L" rev-parse @); out=$(CREW_HOST=laptop crew followup "$F16" --note "carry on" 2>&1); st=$?
+check "on a machine that doesn't run the crew, a followup says which does, and adds no worktree" \
+  '((st == 1)) && [[ $out == *"crew runs on tower; this machine can only read"* && ! -d $WT16 && $(git -C "$L" rev-parse @) == "$head" ]] && ! git -C "$SB/webapp" rev-parse -q --verify refs/heads/agent/moved-task >/dev/null'
+crew followup "$F16" --note "carry on" >/dev/null 2>&1
 check "a followup brings back a worktree whose branch is on origin, at its pushed commit" '[[ $(git -C "$WT16" rev-parse HEAD) == "$T16" && $(git -C "$WT16" branch --show-current) == agent/moved-task ]]'
 check "and records this machine's path for it, saying how it came back" '[[ $(crew get "$F16" worktree) == "$WT16" ]] && grep -q "recreated worktree from origin/agent/moved-task" "$F16"'
 F17=$(crew new "Never pushed" --branch never-pushed); fill "$F17"; crew ready "$F17" >/dev/null; setstate "done" null; crew dispatch "$F17" >/dev/null
