@@ -86,6 +86,8 @@ func (c *Crew) tenuresElsewhere() ([]tenure, error) {
 		if n := len(tenures); n > 0 {
 			tenures[n-1].to = at
 		}
+		// After crew host down the file names no one, or is gone: a
+		// stretch when no machine ran the crew.
 		holder, _ := git(c.Home, "show", commit+":host")
 		tenures = append(tenures, tenure{holder: holder, from: at})
 	}

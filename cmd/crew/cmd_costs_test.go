@@ -375,7 +375,7 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 
   All               $288   100%      2       $53
 
-A median is over the tasks that merged or were done in the range, counting all they spent, whenever they spent it: each step's over the tasks that ran it.
+A step's median is over the tasks that merged or were done in the range and ran that step. It counts all a task spent, before the range too.
 It counts only tasks this machine's transcripts hold whole: those begun since 2026-11-01 09:00, from when they're complete, and not under way while another machine ran the crew.
 
 Anthropic's API rates`

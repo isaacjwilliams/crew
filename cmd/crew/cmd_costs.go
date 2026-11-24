@@ -464,86 +464,91 @@ type costReport struct {
 // leftOut is the tasks that finished in the range but that the medians leave
 // out, by why.
 type leftOut struct {
-	begunEarly   int      // begun before the transcripts are complete
-	underWay     int      // under way while another machine ran the crew
-	machines     []string // those other machines
-	partlyPriced int      // with a message there's no rate for
+	begunEarly int      // begun before the transcripts are complete
+	underWay   int      // under way while another machine ran the crew
+	machines   []string // those other machines
+	unrated    int      // with a message there's no rate for
 }
 
 // costsIn is the report on the transcripts from the first day to the last,
-// both included. A total counts what was sent in the range. A median counts
-// all that each of the wholeTasks spent, whenever it was sent, over the tasks
-// that ran the step, but not a task with a message there's no rate for.
+// both included. Its totals count what was sent in the range. Its medians count
+// all that each of the wholeTasks spent, whenever it was sent.
 func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) costReport {
 	end := to.AddDate(0, 0, 1)
 	r := costReport{from: from, to: to, completeFrom: ts.completeFrom,
 		steps: map[string]float64{}, unpriced: map[string]int{}, perTask: map[string][]float64{}}
-	whole := r.wholeTasks(tasks, elsewhere, from, end)
 	for _, c := range ts.charges {
-		sent, task := !c.at.Before(from) && c.at.Before(end), whole[c.task]
-		if !sent && task == nil {
+		if c.at.Before(from) || !c.at.Before(end) {
 			continue
 		}
-		rt, priced := apiRates[c.model]
-		if !priced {
-			if sent {
-				r.unpriced[c.model] += c.usage.total()
-			}
-			if task != nil {
-				task.unpriced = true
-			}
-			continue
-		}
-		if !slices.Contains(r.rated, c.model) {
-			r.rated = append(r.rated, c.model)
-		}
-		cost := rt.dollars(c.usage)
-		if sent {
+		if cost, ok := r.price(c); ok {
 			r.steps[c.step] += cost
 			r.total += cost
 		} else {
-			r.steps[c.step] += 0 // the step has a row for its median, though nothing was sent in the range
-		}
-		if task != nil {
-			task.steps[c.step] += cost
+			r.unpriced[c.model] += c.usage.total()
 		}
 	}
-	for _, t := range whole {
-		if t.unpriced {
-			r.leftOut.partlyPriced++
+	whole, leftOut := wholeTasks(tasks, elsewhere, ts.completeFrom, from, end)
+	for _, c := range ts.charges {
+		if spend := whole[c.task]; spend != nil {
+			if cost, ok := r.price(c); ok {
+				spend.steps[c.step] += cost
+			} else {
+				spend.unrated = true
+			}
+		}
+	}
+	for _, spend := range whole {
+		if spend.unrated {
+			leftOut.unrated++
 			continue
 		}
 		total := 0.0
-		for step, cost := range t.steps {
+		for step, cost := range spend.steps {
 			r.perTask[step] = append(r.perTask[step], cost)
 			total += cost
 		}
 		r.taskTotals = append(r.taskTotals, total)
 	}
+	r.leftOut = leftOut
 	slices.Sort(r.rated)
 	return r
 }
 
+// price is what a message cost, at its model's rate, which the report then
+// lists. ok is false when there's no rate for the model.
+func (r *costReport) price(c *charge) (cost float64, ok bool) {
+	rt, ok := apiRates[c.model]
+	if !ok {
+		return 0, false
+	}
+	if !slices.Contains(r.rated, c.model) {
+		r.rated = append(r.rated, c.model)
+	}
+	return rt.dollars(c.usage), true
+}
+
 // taskSpend is what a task cost, by step, and whether a message of its has no
-// rate.
+// rate, which leaves its cost unknown.
 type taskSpend struct {
-	steps    map[string]float64
-	unpriced bool
+	steps   map[string]float64
+	unrated bool
 }
 
 // wholeTasks are the tasks that merged or were done from one time to another
 // whose spend this machine's transcripts hold whole, by task ID
-// ("<project>/<task>"), each with nothing spent yet. It counts the others in
-// r.leftOut: a task begun before the transcripts are complete may have lost
-// sessions to Claude Code's age cleanup (a task with no created date counts as
-// one), and one under way while another machine ran the crew has sessions there.
-func (r *costReport) wholeTasks(tasks map[string]Task, elsewhere []tenure, from, to time.Time) map[string]*taskSpend {
-	whole := map[string]*taskSpend{}
+// ("<project>/<task>"), each with nothing spent yet, and how many it left out.
+// A task begun before the transcripts are complete may have lost sessions to
+// Claude Code's age cleanup, and one under way while another machine ran the
+// crew has sessions there.
+func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, to time.Time) (map[string]*taskSpend, leftOut) {
+	whole, left := map[string]*taskSpend{}, leftOut{}
 	for id, t := range tasks {
 		finished := finishedAt(t)
 		if finished.Before(from) || !finished.Before(to) {
 			continue
 		}
+		// A task with no created date is zero, so it counts as begun early.
 		created, _ := time.Parse(time.RFC3339, t.Get("created"))
 		var during []string // the machines that ran the crew while the task was under way
 		for _, e := range elsewhere {
@@ -552,16 +557,16 @@ func (r *costReport) wholeTasks(tasks map[string]Task, elsewhere []tenure, from,
 			}
 		}
 		switch {
-		case created.Before(r.completeFrom):
-			r.leftOut.begunEarly++
+		case created.Before(completeFrom):
+			left.begunEarly++
 		case len(during) > 0:
-			r.leftOut.underWay++
-			r.leftOut.machines = append(r.leftOut.machines, during...)
+			left.underWay++
+			left.machines = append(left.machines, during...)
 		default:
 			whole[id] = &taskSpend{steps: map[string]float64{}}
 		}
 	}
-	return whole
+	return whole, left
 }
 
 // finishedAt is when the task last merged or was done, or zero if it isn't
@@ -585,9 +590,11 @@ func finishedAt(t Task) time.Time {
 func (r costReport) print(w io.Writer) {
 	fmt.Fprintf(w, "Spend from %s to %s, at API rates, from this machine's transcripts:\n\n",
 		r.from.Format("2006-01-02"), r.to.Format("2006-01-02"))
+	// A step has a row when something was spent on it in the range, or it has
+	// a median.
 	var agents []string
-	for name := range r.steps {
-		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) {
+	for _, name := range slices.Concat(slices.Collect(maps.Keys(r.steps)), slices.Collect(maps.Keys(r.perTask))) {
+		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) && !slices.Contains(agents, name) {
 			agents = append(agents, name)
 		}
 	}
@@ -604,8 +611,9 @@ func (r costReport) print(w io.Writer) {
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
 		for _, name := range group {
-			if total, ok := r.steps[name]; ok {
-				groupRows = append(groupRows, row(name, total, r.perTask[name]))
+			total, spent := r.steps[name]
+			if perTask := r.perTask[name]; spent || len(perTask) > 0 {
+				groupRows = append(groupRows, row(name, total, perTask))
 			}
 		}
 		if len(rows) > 0 && len(groupRows) > 0 {
@@ -616,7 +624,7 @@ func (r costReport) print(w io.Writer) {
 	rows = append(rows, nil, row("All", r.total, r.taskTotals))
 	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}, {"", "tasks"}, {"median", "per task"}}, rows)
 
-	fmt.Fprintln(w, "\nA median is over the tasks that merged or were done in the range, counting all they spent, whenever they spent it: each step's over the tasks that ran it.")
+	fmt.Fprintln(w, "\nA step's median is over the tasks that merged or were done in the range and ran that step. It counts all a task spent, before the range too.")
 	fmt.Fprintf(w, "It counts only tasks this machine's transcripts hold whole: those begun since %s, from when they're complete, and not under way while another machine ran the crew.",
 		r.completeFrom.Local().Format(logTime))
 	if left := r.leftOut.reasons(); len(left) > 0 {
@@ -646,8 +654,8 @@ func (l leftOut) reasons() []string {
 	if l.underWay > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d under way while %s ran the crew", l.underWay, orList(slices.Compact(slices.Sorted(slices.Values(l.machines))))))
 	}
-	if l.partlyPriced > 0 {
-		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.partlyPriced))
+	if l.unrated > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.unrated))
 	}
 	return reasons
 }
