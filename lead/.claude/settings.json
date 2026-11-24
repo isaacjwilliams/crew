@@ -31,7 +31,10 @@
       "Agent(implementer)",
       "Agent(gardener)",
       "Agent(misses)",
-      "Agent(goal-lead)"
+      "Agent(goal-lead)",
+      "Agent(claude)",
+      "Agent(Plan)",
+      "Agent(statusline-setup)"
     ]
   },
   "hooks": {

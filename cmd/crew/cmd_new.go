@@ -320,22 +320,57 @@ func cmdHandOver(c *Crew, args []string) error {
 	return nil
 }
 
+// crew check-base TASK: whether the task's branch and PR are where the task
+// belongs, as its first hand-over will check them (refuseOffBase). Its worker
+// runs it before each costly step of its first run, such as a review, so the
+// step reads the branch as it will be handed over, and not commits a rebase
+// replaces. It refuses with the commands that move them, and says nothing is
+// to move otherwise. After the first hand-over, crew tick restacks the task.
+func cmdCheckBase(c *Crew, args []string) error {
+	if len(args) == 0 {
+		return usage("crew check-base TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	if t.HandedOver() {
+		return fail("%s has been handed over: crew restacks it when its base moves", t.ID())
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	onGitHub, parentOnGitHub, err := c.readTaskPRs(p, t)
+	if err != nil {
+		return err
+	}
+	if err := fetchOrigin(p.Repo()); err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "carry on"); err != nil {
+		return err
+	}
+	fmt.Println("nothing to move: carry on")
+	return nil
+}
+
 // handOverPR checks a build is ready for the user: the evidence they read, in
 // the task and the PR body, shows every acceptance criterion holding on the
 // code they would merge (checkEvidence), a high-risk task has a security
 // review (which a branch that touches a sensitive path needs), and automated
-// review has run, while it's on for the task. It reads the branch and the PR
-// body first, before crew hand-over takes the lock, so a slow network doesn't
-// hold up other crew commands.
+// review has run, while it's on for the task. At the first hand-over, the
+// branch and the PR are also where the task belongs (refuseOffBase), and the
+// automated review read the branch's own commits as they are now
+// (staleReview). It reads the branch and the PR first, before crew hand-over
+// takes the lock, so a slow network doesn't hold up other crew commands.
 func handOverPR(c *Crew, t Task) (func() error, error) {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
 		return nil, err
-	}
-	// The PR's branch on origin may have commits from elsewhere, a suggestion
-	// applied on GitHub say, that the evidence and raiseRisk have to see.
-	if !gitOK(p.Repo(), "fetch", "--quiet", "origin") {
-		return nil, fail("couldn't check the branch as origin has it: git fetch origin failed in %s", p.Repo())
 	}
 	var pr Evidence // nil without a PR: with pr_mode none, the worker opens none
 	if t.PR() != "" {
@@ -345,7 +380,28 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		}
 		pr = PREvidence(string(body))
 	}
+	first := !t.HandedOver()
+	var onGitHub, parentOnGitHub *gitHubPR
+	if first {
+		if onGitHub, parentOnGitHub, err = c.readTaskPRs(p, t); err != nil {
+			return nil, err
+		}
+	}
+	// The PR's branch on origin may have commits from elsewhere, a suggestion
+	// applied on GitHub say, that the evidence and raiseRisk have to see. The
+	// fetch comes after the PRs, as in crew sync, so a merge GitHub reported is
+	// in the refs a rebase is planned from.
+	if err := fetchOrigin(p.Repo()); err != nil {
+		return nil, err
+	}
 	return func() error {
+		// Before the PR check: a worker whose parent merged can't open its PR on
+		// the parent's branch once GitHub has deleted it.
+		if first {
+			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "hand over again"); err != nil {
+				return err
+			}
+		}
 		if t.PR() == "" && t.Get("pr_mode") != "none" {
 			return fail("task has no PR: record it with crew set %s pr <url>", t.ID())
 		}
@@ -368,8 +424,128 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		if t.AwaitsAutomatedReview(p.Settings["AUTO_REVIEWS"]) {
 			return fail("automated review hasn't run for this task: run a pass of automated review, then hand over again")
 		}
+		// Any rebase before the first hand-over, onto a parent that moved or onto
+		// a base the branch conflicted with, leaves the last review on commits the
+		// PR no longer holds. Later hand-overs skip this: a review round's commits
+		// aren't automated review's to read, and a restack changes no work of the
+		// task's own.
+		if first && atoiOr0(t.AutoReviews(p.Settings["AUTO_REVIEWS"])) > 0 {
+			if why := staleReview(t, p.Repo()); why != "" {
+				return fail("automated review %d no longer covers your branch: %s. Run a pass of automated review, then hand over again", t.NewestReview(), why)
+			}
+		}
 		return nil
 	}, nil
+}
+
+// readTaskPRs reads the PRs refuseOffBase places a task by, before crew takes
+// the lock, so a slow network doesn't hold up other crew commands: the task's
+// own and its parent's, as GitHub has them now (the parent's may have merged
+// since crew sync looked), each nil when there's none to read. Fetch origin
+// after it, so a merge GitHub reported is in the refs a rebase is planned from.
+func (c *Crew) readTaskPRs(p *Project, t Task) (*gitHubPR, *gitHubPR, error) {
+	var onGitHub, parentOnGitHub *gitHubPR
+	if t.PR() != "" {
+		read, err := readPR(p.Repo(), t.PR())
+		if err != nil {
+			return nil, nil, fail("couldn't read the PR: gh pr view %s failed", t.PR())
+		}
+		onGitHub = &read
+	}
+	if parent, ok := c.branches(p.Name).parentOf(t); ok && parent.Status().InFlight() && parent.PR() != "" {
+		read, err := readPR(p.Repo(), parent.PR())
+		if err != nil {
+			return nil, nil, fail("couldn't read %s's PR: gh pr view %s failed", parent.ID(), parent.PR())
+		}
+		parentOnGitHub = &read
+	}
+	return onGitHub, parentOnGitHub, nil
+}
+
+// fetchOrigin fetches the project's clone from origin, for a check of the
+// branches as origin has them.
+func fetchOrigin(repo string) error {
+	if !gitOK(repo, "fetch", "--quiet", "origin") {
+		return fail("couldn't check the branch as origin has it: git fetch origin failed in %s", repo)
+	}
+	return nil
+}
+
+// refuseOffBase refuses, before a task's first hand-over, while its branch or
+// its PR isn't where the task belongs now, and tells the worker how to move
+// them, as crew restack would (rebaseFor, afterPush). A stacked task's branch
+// belongs on its parent's latest commit, or on what the parent merged into, and
+// every task's PR targets its base. After the first hand-over, crew tick
+// restacks the task instead.
+//
+// It first records what onGitHub and parentOnGitHub say, as crew sync would:
+// the PRs of the task and its parent, read before the lock (readTaskPRs), or
+// nil when there was none to read. afterRetarget is what the worker does once a
+// retarget is all it had to run, such as "hand over again". Call it with the
+// lock held.
+func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, afterRetarget string) error {
+	idx, repo := c.branches(p.Name), p.Repo()
+	parent, stacked := idx.parentOf(t)
+	// crew sync may not have looked since the worker opened or moved its PR,
+	// since the parent merged, or since an earlier refusal's rebase moved the
+	// branch off base_sha.
+	changed := onGitHub != nil && onGitHub.record(t)
+	if stacked && parentOnGitHub != nil {
+		recorded, merged := parentOnGitHub.record(parent), parentOnGitHub.noteMerge(parent)
+		changed = changed || recorded || merged
+	}
+	if stacked && noteBaseSHA(t, parent, repo) {
+		changed = true
+	}
+	if changed {
+		c.commit("sync " + p.Name + "/" + t.ID())
+	}
+	if stacked && parent.Status() == Abandoned {
+		return fail("%s, the task your branch is stacked on, was abandoned, so your branch has nowhere to move before its first hand-over: ask what its base should be", parent.ID())
+	}
+	retarget := idx.retargetReason(t, repo)
+	if retarget != "" && idx.onBase(t, repo) {
+		return fail("your PR has to move before its first hand-over (%s): run `gh pr edit --base %s`, then %s", retarget, t.Base(), afterRetarget)
+	}
+	if !stacked {
+		if retarget != "" {
+			return fail("your PR has to move before its first hand-over (%s), but your branch doesn't start on %s, so the PR would bring other commits there: ask what to do", retarget, t.Base())
+		}
+		return nil
+	}
+	r, err := idx.rebaseFor(t, parent, repo)
+	if err != nil || r.reason == "" {
+		return err
+	}
+	afterPush, _ := r.afterPush(t, retarget)
+	return fail("your branch has to move before its first hand-over (%s): %s%s", r.reason, r.steps(`follow "Stacked tasks" in your instructions`), afterPush)
+}
+
+// staleReview says why the task's newest automated review didn't read its
+// branch's own commits as they are now, or nothing: it read from another fork
+// point than the branch has on its base now, or up to a commit the branch no
+// longer holds. A rebase after the review does both. A review whose range crew
+// can't read, or a branch with no fork point on origin's base, isn't judged.
+func staleReview(t Task, repo string) string {
+	reviews := t.AutomatedReviews()
+	if len(reviews) == 0 {
+		return ""
+	}
+	r, branch := reviews[len(reviews)-1], "refs/heads/"+t.Branch()
+	if r.Fork == "" {
+		return ""
+	}
+	fork, _ := git(repo, "merge-base", "refs/remotes/origin/"+t.Base(), branch)
+	if fork == "" {
+		return ""
+	}
+	if read, _ := git(repo, "rev-parse", "--verify", "--quiet", r.Fork+"^{commit}"); read == "" || read != fork {
+		return fmt.Sprintf("it read from %s, and your branch now leaves origin/%s at %s", cut(r.Fork, 12), t.Base(), cut(fork, 12))
+	}
+	if !gitOK(repo, "merge-base", "--is-ancestor", r.Head, branch) {
+		return fmt.Sprintf("your branch no longer holds %s, where it ended", cut(r.Head, 12))
+	}
+	return ""
 }
 
 // checkEvidence refuses evidence that can't reach the user. In the task's

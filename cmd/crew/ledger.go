@@ -809,6 +809,12 @@ func (t Task) PRNumber() string {
 // Dispatched: crew records a worker or a worktree for it.
 func (t Task) Dispatched() bool { return t.WorkerJob() != "" || t.Worktree() != "" }
 
+// HandedOver: the task has been in pr-open, which only crew hand-over moves it
+// to. Until then, its first run is still making the branch. It reads the Log's
+// first "status → pr-open", not the status: a task back at work on a review
+// round, or waiting on an answer after one, was handed over all the same.
+func (t Task) HandedOver() bool { return !firstHandOver(t.LogEntries()).IsZero() }
+
 // HasOpenPR: the task is in flight and has a PR that wasn't closed unmerged.
 // crew sync leaves the status of a task whose PR was closed as it was.
 func (t Task) HasOpenPR() bool {

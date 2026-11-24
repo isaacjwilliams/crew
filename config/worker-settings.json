@@ -41,6 +41,9 @@
       "Agent(gardener)",
       "Agent(misses)",
       "Agent(goal-lead)",
+      "Agent(claude)",
+      "Agent(Plan)",
+      "Agent(statusline-setup)",
       "Agent(brief-reviewer)"
     ]
   },

@@ -202,6 +202,27 @@ An MCP server you need for one project, such as its tracker, goes in `~/crew/pro
 - **Only you edit it.** Every lead starts these servers without asking you, so `crew-guard` stops every agent, the lead included, from editing `mcp.json` or `mcp.local.json`. An agent that thinks a server should change asks you.
 - **A broken `mcp.json`** stops the project's dispatches, with an error naming the file and the setting, until you fix it. Other projects carry on, and `crew doctor` reports it.
 
+### What crew's sessions load of yours
+
+Without a word from crew, a lead, goal lead or worker would load everything your own sessions load. Every plugin, skill, MCP server and connector takes room in each request it makes, mostly for tools the role never calls. So the sessions crew starts, from `lead`, `crew dispatch` and the rest, go without the parts of your setup that their role doesn't use:
+
+- the plugins your `~/.claude/settings.json` enables;
+- your skills in `~/.claude/skills`, your command files in `~/.claude/commands`, and the skills synced from claude.ai;
+- the skills Claude Code ships that the role doesn't use (workers keep `simplify` and `security-review`, leads keep the artifact skills);
+- your user-scope MCP servers (in `~/.claude.json`);
+- your claude.ai connectors;
+- the Artifact tool, for goal leads and workers. Leads keep it.
+
+What a session gets from crew or from the repo stays: crew's own skills and agents, the repo's agents, skills, plugins and servers, and the project's `mcp.json` servers. Claude Code turns things off by name, so anything of yours that shares a name with one of these stays too. crew turns things off only in the settings it starts each session with, so nothing under `~/.claude` changes and your own sessions load what they always did. That includes a `claude` you start in `~/crew/lead` yourself, and the phone lead: they load all of your setup.
+
+To keep something of yours for one project's sessions, name it in `KEEP_LOADED` in `~/crew/projects/<owner>-<repo>/project.env`: a plugin by its id or name, a skill or a server by its name, or `claude.ai` for all the connectors (crew can't turn them off one by one). For a project whose workers test payments in a browser:
+
+```sh
+KEEP_LOADED="stripe@claude-plugins-official chrome-devtools"
+```
+
+Its workers and goal leads keep them, and so does its project lead and a lead for every project. A session that's running keeps what it started with. When what a session would load changes (you edit the list, or install a plugin or skill), the next time crew sends a worker or goal lead something it starts a fresh session, and a lead tells you to start a new one.
+
 ## 4. AGENTS.md: how project conventions reach every agent
 
 You don't have to wire anything. Claude Code 2.1.277 and later reads `AGENTS.md` automatically, and every crew agent but the lead runs inside the repo or one of its worktrees:
@@ -240,7 +261,7 @@ lead -r         # pick an earlier conversation to continue
 
 **One project or all of them.** Run `lead` in a project's repo, or name the project with `--project`, and the lead works on that project: its briefing, `crew status`, `crew list`, `crew proposals` and new tasks are that project's, and a task number like 7 means that project's task 7. Its briefing still mentions anything waiting on you in the other projects, in a line each. Run `lead` anywhere else, or with `--project all`, and it covers every project you've registered; say which one you mean when more than one could fit, and the lead asks otherwise. `lead` passes the choice to the session as `CREW_PROJECT`, which `crew` reads; give `lead -c` the same `--project` as the conversation you continue.
 
-The lead runs in `~/crew/lead`, whose settings make the session the lead, so `cd ~/crew/lead && claude` is a lead too, for every project. It reads each project's code in its own copy, `~/agent-work/<project>/_lead`, which `crew checkout` keeps on the default branch, and reads the project's `AGENTS.md` there itself, since it isn't loaded for a session outside the repo. For the same reason it gets your user-level MCP servers but not a repo's own (`.mcp.json`); that repo's workers do. It also gets the servers each project declares for crew in its `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)): a lead for one project only that project's, and a lead for every project all of them.
+The lead runs in `~/crew/lead`, whose settings make the session the lead, so `cd ~/crew/lead && claude` is a lead too, for every project. It reads each project's code in its own copy, `~/agent-work/<project>/_lead`, which `crew checkout` keeps on the default branch, and reads the project's `AGENTS.md` there itself, since it isn't loaded for a session outside the repo. For the same reason it doesn't get a repo's own MCP servers (`.mcp.json`); that repo's workers do. It also gets the servers each project declares for crew in its `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)): a lead for one project only that project's, and a lead for every project all of them.
 
 **One conversation or many.** The lead keeps nothing important in its conversation. It opens a draft task as soon as you agree on a goal and writes each decision into it as you agree it, so any lead session can pick up where another left off ("let's continue 007"). Keep one long conversation if you like: Claude Code compacts it when it fills up, and after a compaction the lead rereads the task files rather than trusting its summary. Start a fresh `lead` when:
 
@@ -590,7 +611,7 @@ crew status              # a stack is listed bottom first, each task under its p
 ```
 
 - **Trying a stack locally.** The top task's branch contains everything below it. Its worktree is `crew get 046 worktree`, or check out `crew get 046 branch` yourself.
-- **When a lower PR changes** (a review round on 044, say), `crew sync` reports `045-…: needs a restack, 044-… moved`. `crew tick` then restacks 045 once its worker is idle: a fresh worker on Sonnet rebases 045's own commits onto 044's new tip and force-pushes its branch with a lease. Once that's pushed, 046 is next. `crew restack 045` does the same by hand, once 045 is `pr-open`. Restacks go bottom-up, and the same restack is never sent twice (`--again` overrides that).
+- **When a lower PR changes** (a review round on 044, say), `crew sync` reports `045-…: needs a restack, 044-… moved`. `crew tick` then restacks 045 once its worker is idle: a fresh worker on Sonnet rebases 045's own commits onto 044's new tip and force-pushes its branch with a lease. Once that's pushed, 046 is next. `crew restack 045` does the same by hand, once 045 is `pr-open`. If 044 moves or merges while 045's worker is still on its first run, 045's own worker rebases instead: it checks with `crew check-base` before each costly step (its reviews and its evidence), so they read the branch it will hand over, and `crew hand-over` won't let it hand over until its branch holds 044's latest commit. Both give it the commands, so it carries on without a question or a restack from you. Restacks go bottom-up, and the same restack is never sent twice (`--again` overrides that).
 - **When you merge the bottom PR**, `crew sync` reports `needs a restack, 044-… merged`, and `crew tick` has 045's worker rebase onto the default branch, cutting away 044's original commits (which a squash merge replaced), retarget the PR, and record the new base. Wait for that before you review or merge 045: until then its PR still shows 044's commits. Merge bottom-up.
 - **Moving a task onto another task's branch** (when the task below it is split, say) is `crew set 045 base <branch>`. Once that branch is on GitHub, `crew sync` reports `045-…: PR targets <old branch>, not <branch>`, and `crew tick` has 045's worker retarget its PR, with a rebase if its branch needs one. A task moved onto a branch that isn't another task's (`main`, when its parent was abandoned) gets a retarget only when its branch starts on that branch; otherwise `crew restack 045` says so, and its worker needs a note from you.
 - **A restack force-pushes the task's branch.** If you have it checked out somewhere, reset to the pushed branch rather than pulling.
@@ -733,6 +754,7 @@ Set these in `config/crew.env`; the defaults below come from `config/defaults.en
 | `AUTO_REVIEW_REBUTTALS` | 2 | Rounds between Codex and the reviewer agent in each review: `0`, `1` or `2`. With 1, a refutation made in round 1 can't be answered: round 1 is when each first sees the other's findings, so the answer would come in round 2 |
 | `SENSITIVE_PATHS` | empty | Git pathspecs, space-separated: a task whose branch changes a matching file becomes high risk (see [Risk tiers](#risk-tiers-what-look-each-pr-needs)). Set per project |
 | `EVIDENCE_REPO` | empty | A GitHub repo, as a git remote URL like `REMOTE`, that workers publish screenshots and other evidence to, to show them in their PRs (see [Screenshots in PRs](#screenshots-in-prs)). Set per project |
+| `KEEP_LOADED` | empty | Plugins, skills and MCP servers of yours that a project's sessions keep, space-separated, and `claude.ai` for your connectors (see [What crew's sessions load of yours](#what-crews-sessions-load-of-yours)). Set per project |
 | `WORKTREE_COPY` | empty | Gitignored files copied into each new worktree |
 | `WORKTREE_TOOL` | `git` | How task worktrees are created and removed: `git` or `worktrunk` (runs the repo's `wt` hooks). Usually set per project |
 | `GARDENER_LOOKBACK` | `14 days ago` | First-run range for a project |
@@ -745,7 +767,7 @@ Permission rules for each kind of session are in `lead/.claude/settings.json` (t
 
 To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick up changes within seconds.
 
-**MCP servers.** Workers and goal leads get every MCP server configured for the repo they run in: its `.mcp.json`, plus your local- and user-scope servers. A browser or an error tracker set up for one project is there for that project's crew and no other, with nothing to change in the crew. The lead doesn't run in a repo, so it gets none of a repo's own servers. Servers that a project's lead should have too, such as its tracker, go in the project's `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)). Their calls go through auto mode's classifier like shell commands. Your user-scope servers (claude.ai connectors, a payments API) reach every repo's workers too. To keep one project's workers off a server, add a `deny` rule such as `"mcp__claude_ai_Gmail"` to `projects/<project>/worker-settings.json`, or `"mcp__*"` for all of them.
+**MCP servers.** Workers and goal leads get every MCP server configured for the repo they run in: its `.mcp.json`, plus your local-scope servers. A browser or an error tracker set up for one project is there for that project's crew and no other, with nothing to change in the crew. The lead doesn't run in a repo, so it gets none of a repo's own servers. Servers that a project's lead should have too, such as its tracker, go in the project's `mcp.json` (see [MCP servers for one project](#mcp-servers-for-one-project)). Their calls go through auto mode's classifier like shell commands. Your user-scope servers and claude.ai connectors reach a project's sessions only when its `KEEP_LOADED` names them (see [What crew's sessions load of yours](#what-crews-sessions-load-of-yours)). To keep one project's workers off a server of the repo's, add a `deny` rule such as `"mcp__sentry"` to `projects/<project>/worker-settings.json`, or `"mcp__*"` for all of them.
 
 ## 10. Troubleshooting
 

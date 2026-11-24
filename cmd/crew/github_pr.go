@@ -10,6 +10,7 @@ import (
 
 // gitHubPR is a PR as GitHub reported it.
 type gitHubPR struct {
+	URL            string // the PR crew asked for
 	State          string // OPEN, MERGED or CLOSED
 	Draft          bool
 	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or empty
@@ -57,13 +58,17 @@ func readPR(repo, url string) (gitHubPR, error) {
 	case "UNKNOWN":
 		mergeable = mergeableUnknown
 	}
-	return gitHubPR{State: v.State, Draft: v.IsDraft, ReviewDecision: v.ReviewDecision, UpdatedAt: v.UpdatedAt,
+	return gitHubPR{URL: url, State: v.State, Draft: v.IsDraft, ReviewDecision: v.ReviewDecision, UpdatedAt: v.UpdatedAt,
 		Base: v.BaseRefName, CI: ci, Mergeable: mergeable, MergeState: v.MergeStateStatus}, nil
 }
 
-// record writes the PR into the task's front matter, and says whether that
-// changed anything.
+// record writes the PR into the front matter of t, the task whose PR it is,
+// and says whether that changed anything. It writes nothing into a task whose
+// PR is another, as when the ledger changed while crew waited for GitHub.
 func (pr gitHubPR) record(t Task) bool {
+	if pr.URL != t.PR() {
+		return false
+	}
 	changed := false
 	for _, kv := range []struct{ key, value string }{
 		{"pr_updated", pr.UpdatedAt},                    // for prMayHaveNewComments in crew tick
@@ -79,6 +84,19 @@ func (pr gitHubPR) record(t Task) bool {
 		}
 	}
 	return changed
+}
+
+// noteMerge marks t merged when this, its PR, is, and says whether it did.
+// crew sync does it for every task, and crew check-base and crew hand-over
+// for a first run's parent, which may have merged since sync last looked.
+func (pr gitHubPR) noteMerge(t Task) bool {
+	if pr.URL != t.PR() || pr.State != "MERGED" || t.Status() == Merged {
+		return false
+	}
+	t.SetStatus(Merged)
+	t.Touch()
+	t.Log("PR merged")
+	return true
 }
 
 // label words the PR's state for pr_state: merged, closed, draft or open, and,
@@ -104,7 +122,7 @@ func (pr gitHubPR) label() string {
 // reading pr_state back the way label wrote it. Its State is empty when sync
 // never read it.
 func syncedPR(t Task) gitHubPR {
-	pr := gitHubPR{UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable"),
+	pr := gitHubPR{URL: t.PR(), UpdatedAt: t.Get("pr_updated"), Base: t.Get("pr_base"), CI: ciState(t.Get("ci_state")), Mergeable: t.Get("mergeable"),
 		MergeState: strings.ToUpper(t.Get("merge_state"))}
 	state, decision, _ := strings.Cut(t.Get("pr_state"), ", ")
 	switch state {

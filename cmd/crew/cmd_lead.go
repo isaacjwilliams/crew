@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -39,29 +40,61 @@ func cmdLead(c *Crew, args []string) error {
 	// lead's --settings switch off the other projects' servers as it lists them.
 	// A project's problem is reported and doesn't stop the lead.
 	c.syncMCP()
-	name, sessionProject, settings, mcp := "lead", allProjects, c.Settings, []string{}
+	name, sessionProject := "lead", allProjects
 	if proj != "" {
 		name, sessionProject = "lead-"+proj, proj
-		if settings, err = c.projectSettings(proj); err != nil {
-			return err
-		}
-		off, err := c.leadMCPSettings(proj)
-		if err != nil {
-			return err
-		}
-		mcp = []string{"--settings", off}
 	}
-	flags := append([]string{"--name", name, "--permission-mode", settings["LEAD_PERMISSION_MODE"]}, mcp...)
-	cmd := c.claude(append(flags, claudeArgs...)...)
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(settings))
+	flags, err := c.leadFlags(proj)
+	if err != nil {
+		return err
+	}
+	cmd := c.claude(slices.Concat([]string{"--name", name}, flags, claudeArgs)...)
+	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(flags))
 	return c.execLead(cmd)
 }
 
-// leadFingerprint is the fingerprint of what a lead started with settings loads:
-// its permission mode, its settings file and its agent files (see fingerprint).
-func (c *Crew) leadFingerprint(settings Settings) string {
-	return c.fingerprint([]string{"--permission-mode", settings["LEAD_PERMISSION_MODE"]},
-		append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
+// leadFlags is the flags a lead for proj ("" for every project) starts with,
+// besides its name: its permission mode, and --settings that turn off the other
+// projects' servers (leadMCPSettings) and what a lead doesn't use of yours
+// (leanSettings). A lead keeps what its projects' KEEP_LOADED name, and what
+// shares a name with crew's skills and lead/.mcp.json's servers (theirs); it
+// works in no repo, so it has no repo's to keep as a worker does.
+func (c *Crew) leadFlags(proj string) ([]string, error) {
+	settings, flagSettings := c.Settings, newObject()
+	var keep []string
+	for _, p := range c.projects(proj) {
+		s, err := c.projectSettings(p)
+		if err != nil {
+			// A lead for every project starts without one whose settings are
+			// broken, as syncMCP does, which reports them.
+			if p != proj {
+				continue
+			}
+			return nil, err
+		}
+		keep = append(keep, strings.Fields(s["KEEP_LOADED"])...)
+		// A lead for one project takes its permission mode from that project.
+		if p == proj {
+			settings = s
+		}
+	}
+	if proj != "" {
+		var err error
+		if flagSettings, err = c.leadMCPSettings(proj); err != nil {
+			return nil, err
+		}
+	}
+	keep = append(keep, c.theirs(serversIn(c.path(leadMCPFile)), "")...)
+	flagSettings = leanSettings(flagSettings, "lead", keep)
+	return []string{"--permission-mode", settings["LEAD_PERMISSION_MODE"], "--settings", encodeJSON(flagSettings, false)}, nil
+}
+
+// leadFingerprint is the fingerprint of what a lead started with flags loads:
+// its flags, its settings file and its agent files (see fingerprint). The flags
+// list what the lead turns off of yours, so installing a plugin or skill changes
+// it too, and the hook asks for a new lead that leaves the new one off.
+func (c *Crew) leadFingerprint(flags []string) string {
+	return c.fingerprint(flags, append([]string{c.path("lead/.claude/settings.json")}, c.agentFiles("lead")...)...)
 }
 
 // crew lead --hook, the lead's SessionStart and UserPromptSubmit hook: Claude
@@ -90,13 +123,11 @@ func (c *Crew) leadHook(in io.Reader) error {
 	starting := input.Event == "SessionStart"
 	var out string
 	if started := os.Getenv("CREW_LEAD_FINGERPRINT"); started != "" && !starting {
-		settings := c.Settings
-		if proj != "" {
-			if settings, err = c.projectSettings(proj); err != nil {
-				return err
-			}
+		flags, err := c.leadFlags(proj)
+		if err != nil {
+			return err
 		}
-		if started != c.leadFingerprint(settings) {
+		if started != c.leadFingerprint(flags) {
 			out = fmt.Sprintf("crew's lead instructions or settings changed since this session started (crew is now %s). Tell the user once, briefly, that they should quit and start a new lead to get them.\n", c.crewVersion())
 		}
 	}
