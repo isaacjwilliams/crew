@@ -766,6 +766,32 @@ func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	}
 }
 
+func TestFollowupOutcomeTellsCrewsWarningsFromClaudesNotes(t *testing.T) {
+	note := "Note: session 7f3c started in the background\n"
+	slow := "crew: job w9 hasn't reported its session after 30s, so crew can't confirm it started\n"
+	resumed := "crew: couldn't resume session 1b2a; starting a fresh session instead\n"
+	for _, tc := range []struct {
+		failed               bool
+		stderr, warning, err string
+	}{
+		{false, "", "", ""},
+		{false, note, "", ""},
+		{false, note + slow, "job w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
+		{false, resumed + note + slow, "couldn't resume session 1b2a; starting a fresh session instead; job w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
+		{true, resumed + "crew: could not start a session (see output above)\n", "", "could not start a session (see output above)"},
+		{true, "", "", "crew followup failed"},
+	} {
+		warning, err := followupOutcome(tc.failed, tc.stderr)
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if warning != tc.warning || got != tc.err {
+			t.Errorf("followupOutcome(%v, %q) = %q, %v; want %q, %q", tc.failed, tc.stderr, warning, err, tc.warning, tc.err)
+		}
+	}
+}
+
 // TestBrowsePRKeepsGhOffTheScreen runs browsePR on a gh that prints, starts a
 // "browser" that keeps gh's output open, and fails when told to.
 func TestBrowsePRKeepsGhOffTheScreen(t *testing.T) {

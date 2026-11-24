@@ -76,13 +76,26 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 		sendNote: func(t Task, note string) (string, error) {
 			var errs strings.Builder
 			failed := c.step(&errs, "followup", t.Path, "--note", note, "--from-user") != 0
-			_, last := splitRefusal(errs.String())
-			if failed {
-				return "", errors.New(cmp.Or(last, "crew followup failed"))
-			}
-			return last, nil
+			return followupOutcome(failed, errs.String())
 		},
 	}
+}
+
+// followupOutcome reads what crew followup wrote to stderr: why it refused,
+// when it failed, or else every warning crew gave, in one line. claude's own
+// notes on starting a session aren't crew's warnings, so they're left out.
+func followupOutcome(failed bool, stderr string) (warning string, err error) {
+	if failed {
+		_, why := splitRefusal(stderr)
+		return "", errors.New(cmp.Or(why, "crew followup failed"))
+	}
+	var warnings []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if w, ok := strings.CutPrefix(line, "crew: "); ok {
+			warnings = append(warnings, w)
+		}
+	}
+	return strings.Join(warnings, "; "), nil
 }
 
 // browsePR opens a PR in the browser, with gh's output kept off the screen. A
