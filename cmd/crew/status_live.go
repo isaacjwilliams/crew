@@ -326,7 +326,7 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 			return m.typeNote(msg)
 		}
 		return m.press(msg.String())
-	case tea.PasteMsg:
+	default:
 		if m.note != nil {
 			return m.typeNote(msg)
 		}
@@ -453,7 +453,8 @@ func (m *liveStatus) noteWidth() int {
 	return max(1, m.width-lipgloss.Width(m.note.input.Prompt)-1)
 }
 
-// typeNote takes a key or a paste while the user types a note. Every key goes
+// typeNote takes a key, a paste, or what the note's own commands send back (a
+// paste from the clipboard, say) while the user types a note. Every key goes
 // into the note, the view's own keys included, but for enter, which sends it,
 // esc, which drops it, and ctrl+c, which quits.
 func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {

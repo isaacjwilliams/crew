@@ -641,6 +641,21 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	}
 }
 
+// TestLiveStatusGivesTheNoteWhatItsCommandsSendBack presses ctrl+v, which has
+// the note read the clipboard. With no clipboard tool on PATH, the read fails,
+// and the note has the error.
+func TestLiveStatusGivesTheNoteWhatItsCommandsSendBack(t *testing.T) {
+	m, _ := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	press(m, "n")
+	t.Setenv("PATH", t.TempDir())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	finish(t, m, cmd)
+	if m.note == nil || m.note.input.Err == nil {
+		t.Error("the clipboard's answer to ctrl+v didn't reach the note")
+	}
+}
+
 func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	c := actionsLedger(t)
 	m, run := actingOn(actionsReport(c))
