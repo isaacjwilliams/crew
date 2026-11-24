@@ -136,12 +136,13 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	// Why crew starts a fresh worker where the caller didn't ask for one: after
 	// a restack, or when resuming would cost more. A fresh start the caller
-	// asked for keeps the label relaunch gives it.
+	// asked for, or one a changed model, effort or settings needs, keeps the
+	// label relaunch gives it.
 	why := ""
 	switch {
 	case afterRestack:
 		why = "its last session only ran a restack"
-	case !with.fresh:
+	case !with.fresh && start.changedSince(t.Doc) == "":
 		why = coldResume(t.Get("worker_session"), time.Now())
 		if why == "" {
 			break

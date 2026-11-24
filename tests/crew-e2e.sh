@@ -721,7 +721,11 @@ jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >
 out=$(crew followup 1 --note "busy again" 2>&1); code=$?
 check "a followup to a cold worker that is busy again by the time crew would replace it sends nothing and starts no worker beside it" \
   '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(launches) == "$n" && $(crew get 1 worker_session) == "$s" ]]'
-rm -f "$HOME/agents-next" "$HOME/.claude/projects/stub/$s.jsonl"; mv "$HOME/agents.was" "$HOME/agents.json"
+rm -f "$HOME/agents-next"; mv "$HOME/agents.was" "$HOME/agents.json"
+crew set 1 effort xhigh; out=$(followup1 "cold, on a new effort")
+check "a cold worker whose effort changed too starts fresh, and the Log says its effort changed" \
+  '[[ $out == *"(fresh: its effort changed from the default to xhigh)"* && $(tail -1 "$F1") == *"(fresh: its effort changed from the default to xhigh)"* ]]'
+crew set 1 effort ""; followup1 "back to the default" >/dev/null; rm -f "$HOME/.claude/projects/stub/$s.jsonl"
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
