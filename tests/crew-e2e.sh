@@ -455,6 +455,13 @@ check "hand-over after a review round raises the risk of a branch whose own comm
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 check "a raise at the hand-over turns the task's automated review back on, and logs why" \
   '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
+# A task that makes no PR has no pr to tell its hand-over raise from a raise before its passes.
+sed -i 's/status → pr-open/status → xpr-open/' "$F1"   # as if it hadn't handed over before
+crew set 1 risk low; crew set 1 pre_pr_review no; crew set 1 pr_mode none; crew set 1 pr ""
+out=$(crew hand-over 1 2>&1)
+sed -i 's/status → xpr-open/status → pr-open/' "$F1"; crew set 1 pre_pr_review yes; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
+check "a raise at the hand-over of a task that makes no PR says nothing of the pre-PR passes: they're behind it" \
+  '[[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out != *"pre-PR passes"* ]]'
 sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
