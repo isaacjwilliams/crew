@@ -36,7 +36,8 @@ func cmdFollowup(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.followup(t, followupWith{fresh: fresh, note: note})
+	_, err = c.followup(t, followupWith{fresh: fresh, note: note})
+	return err
 }
 
 // followupWith is what a followup's caller adds to what the task itself holds
@@ -52,55 +53,46 @@ type followupWith struct {
 // word that its turn ended mid-task (stalled), or several of these; or starts a
 // fresh worker when with.fresh is set, when the resume would cost more than a
 // fresh start (coldResume), or when relaunch finds it must.
-func (c *Crew) followup(t Task, with followupWith) error {
+//
+// It's an operation (operation.go). A session claude started that crew couldn't
+// record ends in an unrecordedSession, and a worktree followup couldn't bring
+// back to this machine in a worktreeError.
+func (c *Crew) followup(t Task, with followupWith) (followupSent, error) {
 	p, err := c.loadProject(t.Project())
 	if err != nil {
-		return err
+		return followupSent{}, err
 	}
 	// Building the launcher reads the worker settings, so a bad one stops here,
 	// before anything changes.
 	start, err := c.launchWorker(p, t.Model(), t.Effort())
 	if err != nil {
-		return err
+		return followupSent{}, err
 	}
 	// A restack session ran one restack and nothing else, so the worker after it
 	// starts fresh, on the task's own model.
 	restack, err := c.launchRestack(p)
 	if err != nil {
-		return err
+		return followupSent{}, err
 	}
 	afterRestack := t.Get("worker_fingerprint") == restack.fingerprint
 	// A bad mcp.json would stop the launch; stop here instead, before anything changes.
 	if _, err := c.projectMCPServers(p.Name, p.Settings); err != nil {
-		return err
-	}
-	job := t.WorkerJob()
-	if !t.Dispatched() {
-		return fail("%s has no worker yet; dispatch it first", t.ID())
-	}
-	if err := refuseIfPaused(p); err != nil {
-		return err
+		return followupSent{}, err
 	}
 	as := c.agents()
+	if err := c.followupRefusal(p, t, as); err != nil {
+		return followupSent{}, err
+	}
 	rounds, sent := atoiOr0(t.Get("review_rounds")), atoiOr0(t.Get("last_round_sent"))
 	newRound, interrupted := rounds > sent, t.Get("interrupted") != ""
-	if as.jobBusy(job) {
-		// A round sent any other way would go out again: only crew records last_round_sent.
-		if newRound {
-			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
-		}
-		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
-	}
 	if !newRound && with.note == "" && !interrupted && !with.stalled {
-		return fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
+		return followupSent{}, fail("nothing new for %s: no new review round (run 'crew feedback %s') and no --note", t.ID(), t.ID())
 	}
-	if st := t.Status(); st.Finished() {
-		return fail("%s is %s; not resuming its worker", t.ID(), st)
-	}
-	warnManyRounds(p, t)
+	c.warnManyRounds(p, t)
 	// The worktree may not be on this machine: the task moved here, say.
-	if err := c.ensureWorktree(p, t); err != nil {
-		return err
+	rebuilt, err := c.ensureWorktree(p, t)
+	if err != nil {
+		return followupSent{}, err
 	}
 	wt := t.Worktree()
 
@@ -123,16 +115,14 @@ func (c *Crew) followup(t Task, with followupWith) error {
 		prompt += " Note from the lead (also check Decisions in the task file): " + with.note
 	}
 	if err := c.lock(); err != nil {
-		return err
+		return followupSent{}, err
 	}
 	// Again under the lock: a task merged or abandoned since crew tick looked at
-	// it, or while an earlier tick step read GitHub, keeps its worker stopped,
-	// and so does a pause.
-	if st := t.Status(); st.Finished() {
-		return fail("%s is %s; not resuming its worker", t.ID(), st)
-	}
-	if err := refuseIfPaused(p); err != nil {
-		return err
+	// it, or while an earlier tick step read GitHub, keeps its worker stopped, and
+	// so does a pause. It reads the workers from the same listing, since listing
+	// them again would cost another claude agents call.
+	if err := c.followupRefusal(p, t, as); err != nil {
+		return followupSent{}, err
 	}
 	// Why crew starts a fresh worker where the caller didn't ask for one: after
 	// a restack, or when resuming would cost more. A fresh start the caller
@@ -147,7 +137,7 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, pickUpPrompt(t, p.Name, wt, newRound), with.fresh || why != "")
 	if err != nil {
-		return err
+		return followupSent{}, err
 	}
 	if why != "" {
 		l.mode = "fresh: " + why
@@ -177,8 +167,56 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	}
 	t.Log(msg)
 	c.commit("followup " + p.Name + "/" + t.ID())
-	fmt.Printf("followup sent to %s → worker %s (%s)\n", t.ID(), l.job, l.mode)
-	return nil
+	c.printf("followup sent to %s → worker %s (%s)\n", t.ID(), l.job, l.mode)
+	return followupSent{job: l.job, mode: l.mode, worktree: rebuilt}, nil
+}
+
+// followupSent is what followup sent: the worker it went to and how ("resume",
+// "fresh" or "fresh: <why>"), as the task's Log says, and, when the task's
+// worktree wasn't on this machine, how followup brought it back.
+type followupSent struct {
+	job      string
+	mode     string
+	worktree string // "" when it was here
+}
+
+// followupRefusal is why followup would send t's worker nothing now, whatever
+// it was given to send, or nil when it would send: the task has no worker, its
+// worker is busy (as is what claude agents lists), it's finished, its project
+// is paused, or this machine doesn't run the crew. followup asks it before it
+// sends and again under the ledger lock, and noteRefusal for a caller that asks
+// first.
+func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
+	if !t.Dispatched() {
+		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
+	if err := refuseIfPaused(p); err != nil {
+		return err
+	}
+	if job := t.WorkerJob(); as.jobBusy(job) {
+		// A round sent any other way would go out again: only crew records last_round_sent.
+		if atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")) {
+			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
+		}
+		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
+	}
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
+	}
+	return c.requireHost()
+}
+
+// noteRefusal is why followup would refuse a note for t now, or nil when it
+// would send one, for a caller that asks before the user writes the note. It
+// gives followup's own reasons, with the workers as claude agents lists them
+// now. What only sending can find, such as claude starting no session, is
+// still followup's to report.
+func (c *Crew) noteRefusal(t Task) error {
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	return c.followupRefusal(p, t, c.agents())
 }
 
 // unsentRounds names the review rounds the task's worker hasn't been sent yet:
@@ -287,7 +325,7 @@ func cmdRestack(c *Crew, args []string) error {
 		return err
 	}
 	// On a machine the task moved to, its branch may be on origin only.
-	if err := c.ensureWorktree(p, t); err != nil {
+	if _, err := c.ensureWorktree(p, t); err != nil {
 		return err
 	}
 	if !gitOK(repo, "fetch", "--quiet", "origin") {
@@ -544,7 +582,7 @@ func cmdNudge(c *Crew, args []string) error {
 		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
 			"nudge: stalled again at "+head+"; for the lead")
 	}
-	if err := c.followup(t, followupWith{stalled: true}); err != nil {
+	if _, err := c.followup(t, followupWith{stalled: true}); err != nil {
 		return err
 	}
 	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.

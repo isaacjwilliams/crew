@@ -53,6 +53,7 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
   - **Services** are `systemd/` units on Linux and `launchd/` plists on a Mac, one plist per `.service`. `services_linux.go` and `services_darwin.go` define the same functions and are the only places crew runs `systemctl` or `launchctl`; callers never branch on the system. A change to a unit needs the same change to its plist: `services_test.go` checks that they agree.
   - Binaries are never committed. A release's workflow builds them (`.github/workflows/release.yml`), and `bin/crew` downloads the one for the home's `VERSION` into the gitignored `bin/release/`.
   - A command returns its refusal as an error: `fail` (exit 1), `notYet` (exit 4, a dispatch that only has to wait; `crew cleanup` also exits 4 (`exitNotYet`) for a task it leaves, which tick reads) or `exitQuietly(code)`. `warn` is for what doesn't stop it.
+- **Operations:** a command that code inside a long-lived crew process (`crew status`'s live view) calls directly is an operation. Follow "Operations" in `ARCHITECTURE.md`'s `crew` internals: on its path, report through `c.warn` and `c.printf`, never `warn` or `fmt.Print`, and return what happened as a value.
 - **`crew tick`** only runs other `crew` commands, each as a process of its own (`step`), so a refusal skips one step and not the rest. Give it new duties as `crew` commands first.
 - **`crew`** has one `cmd…` function per subcommand. A new subcommand also needs:
   - an entry in `commands` in `cmd/crew/main.go`;
