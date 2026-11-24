@@ -807,11 +807,14 @@ func TestLiveStatusQuitsWhileANoteIsOnItsWayOnlyAtASecondQuit(t *testing.T) {
 	if quits(press(m, "q")) {
 		t.Fatal("q quit the view while a note was on its way")
 	}
-	if got, want := footOnScreen(m), "your note is still on its way; q again quits now\nsending your note to 016-both's worker…"; got != want {
+	if got, want := footOnScreen(m), "sending your note to 016-both's worker…\na note is still on its way; q again quits now"; got != want {
 		t.Errorf("q while a note is on its way says %q, want %q", got, want)
 	}
 	if _, cmd := m.Update(sending()); quits(cmd) {
 		t.Error("the view quit by itself once the note was sent")
+	}
+	if got, want := footOnScreen(m), "sent your note to 016-both's worker (resume)"; got != want {
+		t.Errorf("once the note is sent, the view says %q, want %q", got, want)
 	}
 	if !quits(press(m, "q")) {
 		t.Error("q doesn't quit once the note is sent")
@@ -843,6 +846,9 @@ func TestLiveStatusQuitsWhileANoteIsOnItsWayOnlyAtASecondQuit(t *testing.T) {
 		t.Error("ctrl+c while typing a note quit with another on its way")
 	}
 	typeText(m, "r")
+	if strings.Contains(footOnScreen(m), "again quits now") {
+		t.Errorf("once a key calls off the quit, the view still says %q", footOnScreen(m))
+	}
 	if quits(press(m, "ctrl+c")) {
 		t.Error("ctrl+c after typing quit at once, as if it came right after the first")
 	}

@@ -180,8 +180,9 @@ type liveStatus struct {
 	asking *Task               // the task crew is being asked about, a copy for each n
 	note   *noteDraft          // the note the user is typing, if they are
 	held   map[string]heldNote // the notes crew hasn't sent, by task path
-	// quitting: the last key was a quit that a note on its way held back (quit).
-	quitting bool
+	// quitting is the quit key a note on its way held back, if it was the last
+	// key (quit).
+	quitting string
 	said     string // what actions did since the last key, or why they couldn't
 }
 
@@ -395,8 +396,8 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 func (m *liveStatus) press(key string) tea.Cmd {
 	// A key clears what the view said, and calls off an n crew hasn't answered
 	// and a quit a note held back.
-	quitting := m.quitting
-	m.said, m.asking, m.quitting = "", nil, false
+	quitting := m.quitting != ""
+	m.said, m.asking, m.quitting = "", nil, ""
 	switch key {
 	case "q", "ctrl+c":
 		return m.quit(key, quitting)
@@ -516,8 +517,8 @@ func (m *liveStatus) noteWidth() int {
 // esc, which drops it, and ctrl+c, which quits.
 func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		quitting := m.quitting
-		m.quitting = false
+		quitting := m.quitting != ""
+		m.quitting = ""
 		switch key.String() {
 		case "ctrl+c":
 			return m.quit("ctrl+c", quitting)
@@ -540,8 +541,7 @@ func (m *liveStatus) quit(key string, again bool) tea.Cmd {
 	if again || !m.sendingNote() {
 		return tea.Quit
 	}
-	m.quitting = true
-	m.say("your note is still on its way; " + key + " again quits now")
+	m.quitting = key
 	return nil
 }
 
@@ -698,11 +698,11 @@ func (m *liveStatus) bodyHeight() int {
 }
 
 // footLines are the lines above the bar: what actions did, wrapped to the
-// screen, then what crew is doing for the user now, then the note the user is
-// typing, if they are. What actions did takes at most half the screen, so a
-// long one keeps its first line, which says what happened, and its last ones,
-// where a refusal ends. When there's room, a line between them says how many
-// it leaves out.
+// screen, then what crew is doing for the user now and a quit a note on its way
+// held back, then the note the user is typing, if they are. What actions did
+// takes at most half the screen, so a long one keeps its first line, which says
+// what happened, and its last ones, where a refusal ends. When there's room, a
+// line between them says how many it leaves out.
 func (m *liveStatus) footLines() []string {
 	var lines []string
 	if m.said != "" {
@@ -722,6 +722,9 @@ func (m *liveStatus) footLines() []string {
 		if n := m.held[path]; n.sending {
 			lines = append(lines, "sending your note to "+n.to.ID()+"'s worker…")
 		}
+	}
+	if m.quitting != "" && m.sendingNote() {
+		lines = append(lines, "a note is still on its way; "+m.quitting+" again quits now")
 	}
 	if m.note != nil {
 		lines = append(lines, m.note.input.View())
