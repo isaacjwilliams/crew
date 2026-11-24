@@ -108,7 +108,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
 | `VERSION` | — | crew's version, `X.Y.Z`; `crew upgrade`, `crew install` and `crew doctor` show it |
 | `projects/.gitkeep` | — | Where the ledger goes |
 | `.gitignore` | — | Ignores what crew keeps per machine: `bin/release/`, `logs/`, `news/`, the `.crew*.lock` files, each project's `local.env` and `mcp.local.json`, the lead's `settings.local.json` and `.mcp.json`, and `tests/.tmp/` |
-| `fish/completions/crew.fish` | `~/.config/fish/completions/` | Subcommand, task-ID and proposal-ID completion |
+| `fish/completions/crew.fish` | `~/.config/fish/completions/` | Subcommand completion, with task, goal and proposal IDs, and `crew show`'s type words |
 | `fish/completions/lead.fish` | `~/.config/fish/completions/` | `lead --project` completion |
 | `systemd/crew-gardener.{service,timer}` | `~/.config/systemd/user/` | Weekly `crew gardener --all` (installed but not enabled) |
 | `systemd/crew-tick.{service,timer}` | `~/.config/systemd/user/` | `crew tick` every 3 minutes, `KillMode=process` so the sessions it resumes outlive the run (installed but not enabled) |
@@ -767,7 +767,11 @@ Go, in one package, on the standard library and, for `crew status`'s live view o
   - a number (`7` → `007-*`);
   - a unique substring.
 
-  It searches the default project first (see Project scope), then all projects, so a task number or ID two projects share resolves in a scoped session. Every project numbers its own tasks, so even an exact ID can match in two. On ambiguity it prints the candidates, each with its project, and fails. `taskArg` names a task for a command to paste, as `crew attach`'s hints do: by its ID when that resolves back to it from here, else by its path.
+  It searches the default project first (see Project scope), then all projects, so a task number or ID two projects share resolves in a scoped session. Every project numbers its own tasks, so even an exact ID can match in two. On ambiguity it prints the candidates, each with its project, and fails.
+
+  `crew show` and `crew path` name a file by a type word, then its argument (`showKinds`, `ledgerFile`). `task`, `proposal` and `goal` go through `resolve`. `memory` and `memory-suggestions` are that file of the project `crew memory` would pick (`oneProject`). `file` goes through `resolveFile`, which looks only directly inside the home's `reports/`, `logs/` and `news/*.log`, and a project's `review-eval/`, `retros/`, `runs/` and `verify/` (`freeFiles`), the default project first, as `resolve` does. It matches by name (`resolveName`): a whole name, with or without its extension, before a part of one. With no type word, the argument is a task.
+
+  `taskArg` names a task for a command to paste, as `crew attach`'s hints do: by its ID when that resolves back to it from here, else by its path.
 - **Sessions (`sessions.go`):**
   - `agents` returns what `claude agents --json --all` lists as `Agent`s, or nothing on failure. It reads each field on its own, so a field whose type changes loses only that field. It sets `TurnEnded` on a `working` session whose transcript (`transcript`: `~/.claude/projects/*/<session>.jsonl`) ends with the `turn_duration` entry Claude Code writes when a turn ends (`turnEnded`), whether its process is still running or not. `quietFor` is how long ago the transcript last changed.
   - `busy` counts a job as busy while a turn runs (`state` working) or while its live process holds an open prompt, such as a permission request (`status` waiting). A `blocked` job without an open prompt ended its turn on a question for the user, so it takes a followup: the answer is what the followup sends. A background shell the worker started, such as a dev server, keeps its `state` working and its `status` busy after its turn ends, so a `working` job counts as mid-turn only until it has `TurnEnded`. `jobState` shows such a job as "idle, background task running". `runningWorkers` and `closeSession` use the same rule.

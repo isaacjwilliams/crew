@@ -2,14 +2,40 @@ set -l crew_cmds help version setup upgrade install project checkout host lead s
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
+set -l show_types task proposal goal memory memory-suggestions file
+# Whether the crew command being typed is one of the words given. It checks only
+# the word after crew, so crew show goal isn't taken for crew goal.
+function __crew_command
+    set -l words (commandline -opc)
+    contains -- "$words[2]" $argv
+end
+# Whether it's crew show or crew path, with one of the type words given typed
+# after it: '' for none yet.
+function __crew_showing
+    set -l words (commandline -opc)
+    contains -- "$words[2]" show path; and contains -- "$words[3]" $argv
+end
+# The names of the free-form files crew show file finds.
+function __crew_free_files
+    set -l h (crew config CREW_HOME 2>/dev/null); or return
+    set -l files $h/reports/* $h/logs/* $h/news/*.log $h/projects/*/{review-eval,retros,runs,verify}/*
+    path filter -f $files | path basename
+end
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
-complete -c crew -n "__fish_seen_subcommand_from ready hand-over check-base dispatch feedback followup attach restack nudge review ci-fix catch-up evidence show path find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
+complete -c crew -n "__fish_seen_subcommand_from ready hand-over check-base dispatch feedback followup attach restack nudge review ci-fix catch-up evidence find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
+complete -c crew -n "__crew_showing ''" -a "$show_types"
+complete -c crew -n "__crew_showing '' task" -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
+complete -c crew -n "__crew_showing proposal" -a "(crew proposals --any-status 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
+complete -c crew -n "__crew_showing goal" -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
+complete -c crew -n "__crew_showing file" -a "(__crew_free_files)"
+complete -c crew -n "__crew_showing memory memory-suggestions file" -l project -x -d 'Of this project' \
+    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
 complete -c crew -n "__fish_seen_subcommand_from evidence" -F
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__fish_seen_subcommand_from new propose proposals remember memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
+complete -c crew -n "__crew_command new propose proposals remember memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from config" -l task -x -d 'With this task\'s overrides too' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -17,7 +43,7 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
-complete -c crew -n "__fish_seen_subcommand_from memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
+complete -c crew -n "__crew_command memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
 complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike fix refine' -d 'What the task makes'
 complete -c crew -n "__fish_seen_subcommand_from new" -l informs -x -d 'The draft whose question this spike answers' \
     -a "(crew list --status draft 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -52,10 +78,12 @@ complete -c crew -n "__fish_seen_subcommand_from pause" -l force -d 'Stop its se
 complete -c crew -n "__fish_seen_subcommand_from pause" -l hook -d 'For a PostToolUse hook: tell a session to wrap up'
 complete -c crew -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from goal" -l goal -x -d 'Make it one of this goal\'s tasks' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
-complete -c crew -n "__fish_seen_subcommand_from goal; and not __fish_seen_subcommand_from $goal_cmds" -a "$goal_cmds"
-complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from start note cap followup done abandon path" \
+complete -c crew -n "__crew_command goal; and not __fish_seen_subcommand_from $goal_cmds" -a "$goal_cmds"
+complete -c crew -n "__crew_command goal; and __fish_seen_subcommand_from start note cap followup done abandon path" \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/goals/*.md 2>/dev/null | path change-extension '')"
-complete -c crew -n "__fish_seen_subcommand_from goal; and __fish_seen_subcommand_from new" -l max-in-flight -x -d 'How many of its tasks may be in flight at once'
+complete -c crew -n "__crew_command goal; and __fish_seen_subcommand_from new" -l project -x -d 'Work on this project' \
+    -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
+complete -c crew -n "__crew_command goal; and __fish_seen_subcommand_from new" -l max-in-flight -x -d 'How many of its tasks may be in flight at once'
 complete -c crew -n "__fish_seen_subcommand_from upgrade" -l yes -d 'Go ahead without asking'
 complete -c crew -n "__fish_seen_subcommand_from install" -l yes -d 'Answer yes to every question'
 complete -c crew -n "__fish_seen_subcommand_from install" -l no-fish -d 'Leave the fish files alone'

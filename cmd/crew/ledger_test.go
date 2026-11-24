@@ -1047,6 +1047,29 @@ func TestResolveIn(t *testing.T) {
 	}
 }
 
+func TestResolveName(t *testing.T) {
+	files := []string{"/h/news/2026-11-24.log", "/h/reports/2026-11-24-standup.md", "/h/retros/plan.md", "/h/verify/plan-b.md", "/h/logs/push.log"}
+	for arg, want := range map[string]string{
+		"2026-11-24":     "/h/news/2026-11-24.log",
+		"2026-11-24.log": "/h/news/2026-11-24.log",
+		"standup":        "/h/reports/2026-11-24-standup.md",
+		"plan":           "/h/retros/plan.md",
+		"plan.md":        "/h/retros/plan.md",
+		"plan-b":         "/h/verify/plan-b.md",
+		"push":           "/h/logs/push.log",
+	} {
+		if f, _ := resolveName(arg, files); f != want {
+			t.Errorf("resolveName(%q) = %q, want %s", arg, f, want)
+		}
+	}
+	if f, m := resolveName("2026", files); f != "" || len(m) != 2 {
+		t.Errorf("a part of two names: %q, %v", f, m)
+	}
+	if f, m := resolveName("news", files); f != "" || len(m) != 0 {
+		t.Errorf("a part of the directories, not of a name: %q, %v", f, m)
+	}
+}
+
 func TestFilesAreInNumberOrder(t *testing.T) {
 	c := &Crew{Home: t.TempDir()}
 	for _, f := range []string{"a/tasks/1000-x", "a/tasks/101-x", "a/tasks/100-x", "a/tasks/999-x", "b/tasks/002-x", "b/tasks/1001-x"} {

@@ -121,15 +121,39 @@ func cut(s string, n int) string {
 	return s
 }
 
-func cmdShow(c *Crew, args []string) error {
-	if len(args) == 0 {
-		return usage("crew show TASK")
+// A showKind is a kind of ledger file crew show prints and crew path names: its
+// type word, the argument after it, if any, and whether it takes --project.
+type showKind struct {
+	word, arg string
+	project   bool
+}
+
+// showKinds are the kinds crew show takes. With no type word, the argument is a
+// task, as for every command that takes TASK.
+var showKinds = []showKind{
+	{"task", "TASK", false}, {"proposal", "PROPOSAL", false}, {"goal", "GOAL", false},
+	{"memory", "", true}, {"memory-suggestions", "", true}, {"file", "NAME", true},
+}
+
+// usage is how to name a file of this kind to crew show or crew path (cmd).
+func (k showKind) usage(cmd string) string {
+	s := "crew " + cmd + " " + k.word
+	if k.arg != "" {
+		s += " " + k.arg
 	}
-	t, err := c.resolveTask(args[0])
+	if k.project {
+		s += " [--project P]"
+	}
+	return s
+}
+
+// crew show [TYPE] ARG: a ledger file as it is on disk.
+func cmdShow(c *Crew, args []string) error {
+	path, err := c.ledgerFile("show", args)
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(t.Path)
+	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -138,16 +162,62 @@ func cmdShow(c *Crew, args []string) error {
 	return err
 }
 
+// crew path [TYPE] ARG: the path of the file crew show prints.
 func cmdPath(c *Crew, args []string) error {
-	if len(args) == 0 {
-		return usage("crew path TASK")
-	}
-	t, err := c.resolveTask(args[0])
+	path, err := c.ledgerFile("path", args)
 	if err != nil {
 		return err
 	}
-	fmt.Println(t.Path)
+	fmt.Println(path)
 	return nil
+}
+
+// ledgerFile is the file args name for crew show or crew path (cmd): a type
+// word from showKinds and what follows it, or a task.
+func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
+	if len(args) == 0 {
+		var words []string
+		for _, k := range showKinds {
+			words = append(words, k.word)
+		}
+		return "", usage("crew " + cmd + " [" + strings.Join(words, "|") + "] … (see 'crew help')")
+	}
+	k := showKinds[0] // task
+	if i := slices.IndexFunc(showKinds, func(k showKind) bool { return k.word == args[0] }); i >= 0 {
+		k, args = showKinds[i], args[1:]
+	}
+	var project string
+	flags := map[string]*string{}
+	if k.project {
+		flags["--project"] = &project
+	}
+	arg, err := parseText(args, flags, k.usage(cmd))
+	if err != nil {
+		return "", err
+	}
+	if (arg == "") != (k.arg == "") {
+		return "", usage(k.usage(cmd))
+	}
+	switch k.word {
+	case "task":
+		return c.resolve("tasks", arg)
+	case "proposal":
+		return c.resolve("proposals", arg)
+	case "goal":
+		return c.resolve("goals", arg)
+	case "file":
+		return c.resolveFile(arg, project)
+	default: // memory and memory-suggestions: the project's file of that name
+		p, err := c.oneProject(project)
+		if err != nil {
+			return "", err
+		}
+		f := c.path("projects", p, k.word+".md")
+		if !isFile(f) {
+			return "", fail("%s has no %s.md yet", p, k.word)
+		}
+		return f, nil
+	}
 }
 
 func cmdFind(c *Crew, args []string) error {

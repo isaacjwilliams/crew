@@ -199,7 +199,6 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    follows up what the pause interrupted
   crew list [--all|--project P] [--status S]
                                    Compact task list
-  crew show TASK | crew path TASK  Print a task file / its path
   crew find TASK                   Print the resolved task id
   crew get TASK KEY                Read a front-matter field
   crew set TASK KEY VALUE...       Write a front-matter field (not status pr-open:
@@ -266,6 +265,20 @@ Project memory  (facts about a project you approved, which its agents load)
   crew memory --hook               The same for CREW_PROJECT, from a SessionStart
                                    hook (nothing for no project or all; always
                                    exits 0)
+
+Reading the ledger  (with no type word, the argument is a task, as for any TASK)
+  crew show [task] TASK            Print a task file
+  crew show proposal PROPOSAL      Print a proposal
+  crew show goal GOAL              Print a goal
+  crew show memory [--project P]   Print the project's memory.md as it is on disk
+  crew show memory-suggestions [--project P]
+                                   Print the project's memory-suggestions.md
+  crew show file NAME [--project P]
+                                   Print a file in the home's reports/ or logs/, a
+                                   news/<date>.log, or a file in a project's
+                                   review-eval/, retros/, runs/ or verify/, by its
+                                   name or a unique part of it
+  crew path ...                    Print the path of the file crew show would print
 
 MCP servers  (a project's own, from projects/<p>/mcp.json)
   crew mcp sync                    Rebuild each project's mcp.local.json and the

@@ -134,6 +134,86 @@ func (c *Crew) resolve(kind, arg string) (string, error) {
 	return "", fail("no %s matches '%s'", strings.TrimSuffix(kind, "s"), arg)
 }
 
+// freeFiles are the free-form files a user reads, for a project or every project
+// when it's empty: those directly inside the home's reports/ and logs/, each
+// news/<date>.log, and those directly inside the project's review-eval/,
+// retros/, runs/ and verify/.
+func (c *Crew) freeFiles(project string) []string {
+	if project == "" {
+		project = "*"
+	}
+	globs := []string{c.path("reports", "*"), c.path("logs", "*"), c.path("news", "*.log")}
+	for _, dir := range []string{"review-eval", "retros", "runs", "verify"} {
+		globs = append(globs, c.path("projects", project, dir, "*"))
+	}
+	var files []string
+	for _, g := range globs {
+		matches, _ := filepath.Glob(g)
+		for _, m := range matches {
+			if fi, err := os.Lstat(m); err == nil && fi.Mode().IsRegular() {
+				files = append(files, m)
+			}
+		}
+	}
+	return files
+}
+
+// resolveName picks the file arg names: one whose name is arg, with or without
+// its extension, or else one whose name contains arg. When more than one
+// matches, it returns them all and no file.
+func resolveName(arg string, files []string) (string, []string) {
+	var exact, partial []string
+	for _, f := range files {
+		name := filepath.Base(f)
+		switch {
+		case name == arg || strings.TrimSuffix(name, filepath.Ext(name)) == arg:
+			exact = append(exact, f)
+		case strings.Contains(name, arg):
+			partial = append(partial, f)
+		}
+	}
+	matches := exact
+	if len(matches) == 0 {
+		matches = partial
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	return "", matches
+}
+
+// resolveFile finds a free-form file (freeFiles): a path, or what resolveName
+// takes. It looks in the home's folders and those of project, or of the
+// default project first, then all of them.
+func (c *Crew) resolveFile(arg, project string) (string, error) {
+	if isFile(arg) {
+		return realPath(arg)
+	}
+	scopes := c.searchOrder()
+	if project != "" {
+		p, err := c.scope(project, false)
+		if err != nil {
+			return "", err
+		}
+		scopes = []string{p}
+	}
+	for _, p := range scopes {
+		f, matches := resolveName(arg, c.freeFiles(p))
+		if f != "" {
+			return f, nil
+		}
+		if len(matches) > 1 {
+			s := `"` + arg + `" is ambiguous:`
+			for _, m := range matches {
+				rel, _ := filepath.Rel(c.Home, m)
+				s += "\n  " + rel
+			}
+			return "", fail("%s", s)
+		}
+	}
+	return "", fail("no file matches '%s'", arg)
+}
+
 // realPath is the absolute path a file's path leads to.
 func realPath(f string) (string, error) {
 	abs, err := filepath.Abs(f)

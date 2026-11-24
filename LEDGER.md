@@ -37,6 +37,8 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
 
 `<project>` is `<owner>-<repo>` from the `origin` remote.
 
+`crew show` prints a file you'd read without your typing its path: a type word, then what names the file. `crew show task 7` (or `crew show 7`), `proposal <id>`, `goal <id>`, `memory`, `memory-suggestions`, and `file <name>` for a file in `reports/`, `logs/`, `news/` or a project's `review-eval/` (`crew help` lists them all). `crew path` takes the same and prints the path.
+
 Worktrees live outside both the ledger and the repo, at `$WORK_ROOT/<project>/<task-id>` (default `~/agent-work`). A task's `worktree` is this machine's path: when the task moves to another machine, `crew followup` makes the worktree there, from the branch on origin, and records the new path. A goal's goal lead reads the code in a detached checkout beside them, `$WORK_ROOT/<project>/_goal-<goal-id>`, and the lead in `$WORK_ROOT/<project>/_lead`, which `crew checkout <project>` brings up to date.
 
 ## One machine at a time
