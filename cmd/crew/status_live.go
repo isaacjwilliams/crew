@@ -89,11 +89,13 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 }
 
 // followupCommand is crew followup sending a note as the user's own words. It
-// runs in a process group of its own, so closing the view's terminal hangs up
-// neither followup nor the worker it starts before followup has recorded it.
+// runs in a session of its own, away from the view's terminal, as under crew
+// tick. So closing the terminal hangs up neither followup nor the worker it
+// starts before followup has recorded it, and a prompt for a password, from git
+// say, fails at once instead of waiting for keys the view takes.
 func followupCommand(exe string, t Task, note string) *exec.Cmd {
 	cmd := exec.Command(exe, "followup", t.Path, "--note", note, "--from-user")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return cmd
 }
 

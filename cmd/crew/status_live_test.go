@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -856,22 +857,33 @@ func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testi
 	}
 }
 
-// TestFollowupCommandRunsInAProcessGroupOfItsOwn sends a note through a crew
-// that says its process ID, its process group's and its arguments.
-func TestFollowupCommandRunsInAProcessGroupOfItsOwn(t *testing.T) {
+// TestFollowupCommandRunsInASessionOfItsOwn starts the note's command on a crew
+// that says its arguments and waits for its input to close.
+func TestFollowupCommandRunsInASessionOfItsOwn(t *testing.T) {
 	exe := t.TempDir() + "/crew"
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$$ $(ps -o pgid= -p $$) $*\" >&2\n"), 0o755); err != nil {
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$*\" >&2\ncat >/dev/null\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var errs strings.Builder
-	if code := runCrewCommand(followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first"), &errs); code != 0 {
-		t.Fatalf("the note's command exited %d: %s", code, errs.String())
+	cmd := followupCommand(exe, Task{Doc{Path: "/l/tasks/016-both.md"}}, "the tests first")
+	var said strings.Builder
+	cmd.Stderr = &said
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	said := strings.Fields(errs.String())
-	if len(said) < 2 || said[0] != said[1] {
-		t.Errorf("the note's crew followup runs in the view's process group, not one of its own: %q", errs.String())
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
-	if got, want := strings.Join(said[min(2, len(said)):], " "), "followup /l/tasks/016-both.md --note the tests first --from-user"; got != want {
+	// Go's syscall has no Getsid on Linux.
+	session, _, errno := syscall.Syscall(syscall.SYS_GETSID, uintptr(cmd.Process.Pid), 0, 0)
+	input.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("the note's command failed: %v: %s", err, said.String())
+	}
+	if errno != 0 || int(session) != cmd.Process.Pid {
+		t.Errorf("the note's crew followup runs in session %d (%v), not one of its own", session, errno)
+	}
+	if got, want := strings.TrimSpace(said.String()), "followup /l/tasks/016-both.md --note the tests first --from-user"; got != want {
 		t.Errorf("the note's command runs crew %q, want %q", got, want)
 	}
 }
