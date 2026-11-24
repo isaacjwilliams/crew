@@ -123,22 +123,24 @@ func cut(s string, n int) string {
 
 // A showKind is a kind of ledger file crew show prints and crew path names: its
 // type word, the argument after it, if any, whether it takes --project, and how
-// to find the file.
+// to find the file. find takes both the argument and --project, and each kind
+// uses what it needs.
 type showKind struct {
 	word, arg string
 	project   bool
 	find      func(c *Crew, arg, project string) (string, error)
 }
 
-// showKinds are the kinds crew show takes. With no type word, the argument is a
-// task, as for every command that takes TASK.
+// showKinds are the kinds crew show takes. The first, task, is what an argument
+// with no type word names, as for every command that takes TASK. A type word wins
+// over a task whose ID is that word: crew show task goal reaches the task.
 var showKinds = []showKind{
-	{"task", "TASK", false, ledgerKind("tasks")},
-	{"proposal", "PROPOSAL", false, ledgerKind("proposals")},
-	{"goal", "GOAL", false, ledgerKind("goals")},
-	{"memory", "", true, projectFile("memory.md")},
-	{"memory-suggestions", "", true, projectFile("memory-suggestions.md")},
-	{"file", "NAME", true, (*Crew).resolveFile},
+	{word: "task", arg: "TASK", find: ledgerKind("tasks")},
+	{word: "proposal", arg: "PROPOSAL", find: ledgerKind("proposals")},
+	{word: "goal", arg: "GOAL", find: ledgerKind("goals")},
+	{word: "memory", project: true, find: projectFile("memory.md")},
+	{word: "memory-suggestions", project: true, find: projectFile("memory-suggestions.md")},
+	{word: "file", arg: "NAME", project: true, find: (*Crew).resolveFile},
 }
 
 // ledgerKind finds a task, goal or proposal, as resolve does.
@@ -162,8 +164,8 @@ func projectFile(name string) func(*Crew, string, string) (string, error) {
 	}
 }
 
-// usage is how to name a file of this kind to crew show or crew path (cmd).
-func (k showKind) usage(cmd string) string {
+// synopsis is how to name a file of this kind to crew show or crew path (cmd).
+func (k showKind) synopsis(cmd string) string {
 	s := "crew " + cmd + " " + k.word
 	if k.arg != "" {
 		s += " " + k.arg
@@ -218,12 +220,12 @@ func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
 	if k.project {
 		flags["--project"] = &project
 	}
-	arg, err := parseText(args, flags, k.usage(cmd))
+	arg, err := parseText(args, flags, k.synopsis(cmd))
 	if err != nil {
 		return "", err
 	}
-	if (arg != "") != (k.arg != "") { // missing, or given to a kind that takes none
-		return "", usage(k.usage(cmd))
+	if given, takes := arg != "", k.arg != ""; given != takes {
+		return "", usage(k.synopsis(cmd))
 	}
 	return k.find(c, arg, project)
 }

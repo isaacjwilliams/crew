@@ -160,7 +160,8 @@ func (c *Crew) freeFiles(project string) []string {
 
 // resolveName picks the file arg names: one whose name is arg, with or without
 // its extension, or else one whose name contains arg. When more than one
-// matches, it returns them all and no file.
+// matches, it returns them all and no file. Unlike resolveIn, it knows nothing of
+// task numbers or PRs: these files are named freely.
 func resolveName(arg string, files []string) (string, []string) {
 	var exact, partial []string
 	for _, f := range files {
