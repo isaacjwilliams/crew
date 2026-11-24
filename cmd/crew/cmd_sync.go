@@ -111,7 +111,7 @@ func cmdSync(c *Crew, args []string) error {
 				if sensitive {
 					fetch()
 				}
-				if raised, err := raiseRisk(t, p); err != nil {
+				if raised, err := raiseRisk(t, p, false); err != nil {
 					warn("%s: %v", t.ID(), err)
 				} else if raised != "" {
 					changed = true

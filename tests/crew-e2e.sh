@@ -43,6 +43,11 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
   echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}' >>"$f"
   if [[ $2 == ended ]]; then echo '{"type":"system","subtype":"turn_duration"}' >>"$f"; fi
 }
+request() {  # session minutes tokens: the session's transcript ends with a turn whose last request was minutes ago and sent tokens of context
+  mkdir -p "$HOME/.claude/projects/stub"
+  printf '{"type":"assistant","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":500}}}\n{"type":"system","subtype":"turn_duration"}\n' \
+    "$(date -u -d "-$2 minutes" +%FT%T.000Z)" $(($3 - 1002)) >"$HOME/.claude/projects/stub/$1.jsonl"
+}
 last_launch() {  # the latest --bg call, with every line of its prompt
   awk '/^claude / {bg = / --bg /; if (bg) c = $0; next} bg {c = c "\n" $0} END {print c}' "$HOME/claude-calls.log"; }
 # runs_on TASK MODEL: the latest launch runs the task's worker on MODEL: crew started it
@@ -455,6 +460,13 @@ check "hand-over after a review round raises the risk of a branch whose own comm
   '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 check "a raise at the hand-over turns the task's automated review back on, and logs why" \
   '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
+# A task that makes no PR has no pr to tell its hand-over raise from a raise before its passes.
+sed -i 's/status → pr-open/status → xpr-open/' "$F1"   # as if it hadn't handed over before
+crew set 1 risk low; crew set 1 pre_pr_review no; crew set 1 pr_mode none; crew set 1 pr ""
+out=$(crew hand-over 1 2>&1)
+sed -i 's/status → xpr-open/status → pr-open/' "$F1"; crew set 1 pre_pr_review yes; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
+check "a raise at the hand-over of a task that makes no PR says nothing of the pre-PR passes: they're behind it" \
+  '[[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out != *"pre-PR passes"* ]]'
 sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
@@ -565,7 +577,13 @@ setstate "done" null
 check "a note --from-user reaches the worker as the user's own words, and the Log says it's theirs" 'crew followup 1 --note "rename it" --from-user >/dev/null && p=$(grep -- "--resume" "$HOME/claude-calls.log" | tail -1) && [[ $p == *"Note from the user, in their own words: rename it"* && $p != *"Note from the lead"* && $(tail -1 "$F1") == *"followup (resume): worker "*" — note from the user: rename it" ]]'
 check "--from-user without a note is a usage error" '! crew followup 1 --from-user 2>/dev/null'
 setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01-01T00:00:00Z >/dev/null
+echo "half done" >"$(crew get 1 worktree)/wip.txt"
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
+check "a fresh worker sent a review round starts from the rounds and the brief's bounds, not the whole task file" \
+  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
+check "a fresh worker taking over a worktree with uncommitted changes is led to them before it acts" \
+  '[[ $(last_launch) == *"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"New input for task "* ]]'
+rm "$(crew get 1 worktree)/wip.txt"
 rm -f "$HOME/fail-resume"
 setstate "done" 4242; job=$(crew get 1 worker_job); sess=$(crew get 1 worker_session); rows=$(jq length "$HOME/agents.json")
 out=$(crew followup 1 --note "open but idle" 2>&1)
@@ -586,8 +604,8 @@ check "followup continues a worker whose turn ended, though a shell it left runn
 rm -f "$HOME/.claude/projects/stub/$sess.jsonl"
 setstate "done" 4242; touch "$HOME/stop-noop"; n=$(resumes)
 out=$(crew followup 1 --note "stop didn't take" 2>&1); code=$?
-check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job" \
-  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
+check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job and how to get past it" \
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: resuming its session now would start a copy of it. Stop it in claude agents, then try again"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
 rm -f "$HOME/stop-noop"
 setstate "done" null; touch "$HOME/reopen-on-resume"
 out=$(crew followup 1 --note "reopened" 2>&1)
@@ -653,6 +671,13 @@ out=$(followup1 "still on sonnet")
 check "the next followup resumes it in place, passing no --model" '[[ $out == *"(resume)"* && $(last_launch) != *--model* ]] && resumed'
 out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
 check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
+check "a fresh worker sent a note, in a worktree with nothing uncommitted, is told to read the whole task file and the branch first, and nothing of uncommitted changes" \
+  '[[ $(last_launch) == *"You are picking up task 001-"*"Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."*"Note from the lead"*"fresh on sonnet" && $(last_launch) != *uncommitted* ]]'
+echo "half done" >"$(crew get 1 worktree)/wip.txt"
+out=$(setstate "done" null; crew followup 1 --fresh --note "after a question" 2>&1)
+check "a fresh worker sent a note, in a worktree with uncommitted changes, is led to them before it acts" \
+  '[[ $(last_launch) == *"Read the whole task file"*"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"Note from the lead"*"after a question" ]]'
+rm "$(crew get 1 worktree)/wip.txt"
 sess=$(crew get 1 worker_session); transcript "$sess" ended
 for _ in {1..40}; do echo '{"type":"system","subtype":"stop_hook_summary"}' >>"$HOME/.claude/projects/stub/$sess.jsonl"; done
 touch "$HOME/fresh-transcript"; SECONDS=0
@@ -684,6 +709,50 @@ check "a followup after the effort is cleared starts the worker fresh without --
   '[[ $out == *"(fresh: its effort changed from xhigh to the default)"* && $(last_launch) != *--effort* && -z $(crew get 1 worker_effort) ]]'
 sed -i '/^worker_effort:/d' "$F1"; out=$(followup1 "recorded before efforts")
 check "a worker recorded before crew kept efforts resumes when its task names none" '[[ $out == *"(resume)"* ]] && resumed'
+# A worker idle past its prompt cache's hour, with a big context, costs more to resume than to
+# start fresh. Its transcript was written just now: crew goes by its last request's timestamp.
+s=$(crew get 1 worker_session); request "$s" 540 143000; out=$(followup1 "after a night")
+check "a followup to a worker idle over an hour with a big context starts it fresh, and the Log says how idle and how big" \
+  '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* && $(tail -1 "$F1") == *"followup (fresh: idle 9h, with 143k tokens of context): worker "* && $(last_launch) == *"You are picking up task"* && $(crew get 1 worker_session) != "$s" ]]'
+s=$(crew get 1 worker_session); request "$s" 540 99000; out=$(followup1 "a small context")
+check "a followup to a worker idle over an hour with a small context resumes it" '[[ $out == *"(resume)"* ]] && resumed'
+request "$s" 5 143000; out=$(followup1 "a recent request")
+check "a followup to a worker with a big context whose last request was recent resumes it" '[[ $out == *"(resume)"* ]] && resumed'
+request "$s" 0 143000; subagent=$(sed 's/"type":"assistant"/&,"isSidechain":true/' "$HOME/.claude/projects/stub/$s.jsonl")
+request "$s" 540 143000; echo "$subagent" >>"$HOME/.claude/projects/stub/$s.jsonl"
+mkdir -p "$HOME/.claude/projects/stub/$s/subagents"; echo "$subagent" >"$HOME/.claude/projects/stub/$s/subagents/agent-a1.jsonl"
+out=$(followup1 "its subagent asked just now")
+check "a worker's subagents' requests don't count: a cold worker whose subagent made a request just now starts fresh" \
+  '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* ]]'
+rm -rf "$HOME/.claude/projects/stub/$s" "$HOME/.claude/projects/stub/$s.jsonl"
+# refuses_beside TASK WHY FOLLOWUP-ARG...: a followup that starts TASK's worker fresh, for WHY,
+# replaces the old worker only once its process has closed, as a resume would. While that
+# process won't close, or is busy again by the time crew would replace it, crew sends nothing,
+# starts no worker beside it, and says how to get past it.
+refuses_beside() {
+  local task=$1 why=$2 f job s n log out code; shift 2
+  f=$(crew path "$task"); job=$(crew get "$task" worker_job); s=$(crew get "$task" worker_session)
+  cp "$HOME/agents.json" "$HOME/agents.was"; n=$(launches); log=$(section "$f" "## Log")
+  setstate "done" 4242; touch "$HOME/stop-noop"
+  out=$(crew followup "$task" "$@" 2>&1); code=$?
+  check "a followup that starts a worker fresh ($why) sends nothing while the old one's process won't close, starts no worker beside it, and says how to get past it" \
+    '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(launches) == "$n" && $(crew get "$task" worker_session) == "$s" && $(section "$f" "## Log") == "$log" ]]'
+  rm -f "$HOME/stop-noop"; setstate "done" null
+  jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+  out=$(crew followup "$task" "$@" 2>&1); code=$?
+  check "a followup that starts a worker fresh ($why) sends nothing to one busy again by the time crew would replace it, and starts no worker beside it" \
+    '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it"* && $(launches) == "$n" && $(crew get "$task" worker_session) == "$s" && $(section "$f" "## Log") == "$log" ]]'
+  rm -f "$HOME/agents-next"; mv "$HOME/agents.was" "$HOME/agents.json"
+}
+s=$(crew get 1 worker_session); request "$s" 540 143000
+refuses_beside 1 "idle over an hour with a big context" --note "a cold worker"
+crew set 1 effort xhigh
+refuses_beside 1 "its effort changed" --note "a new effort"
+out=$(followup1 "cold, on a new effort")
+check "a cold worker whose effort changed too starts fresh, and the Log says its effort changed" \
+  '[[ $out == *"(fresh: its effort changed from the default to xhigh)"* && $(tail -1 "$F1") == *"(fresh: its effort changed from the default to xhigh)"* ]]'
+crew set 1 effort ""; followup1 "back to the default" >/dev/null; rm -f "$HOME/.claude/projects/stub/$s.jsonl"
+refuses_beside 1 "--fresh" --fresh --note "start afresh"
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
@@ -994,6 +1063,7 @@ check "status shows the restack a working task needs, and no merge check" \
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
+refuses_beside 10 "after a restack" --note "carry on"
 s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
 check "the next followup after a restack starts afresh on the task's model, the default here, and at its effort, and says why" \
   '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && $(last_launch) == *" --effort medium "* && $(crew get 10 worker_effort) == medium && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
@@ -1001,7 +1071,16 @@ setstate "done" null; hand_over 10; n=$(launches)
 check "restack won't send the same restack twice" '[[ $(crew restack 10 2>&1) == *"already asked"* && $(launches) == "$n" && $(crew get 10 restack_sent) == "$T9b" ]]'
 setstate working 4242; out=$(crew restack 10 --again 2>&1)
 check "restack starts nothing while the task's worker is busy" '[[ $out == *"is busy (working)"* && $(launches) == "$n" && $(crew get 10 status) == pr-open ]]'
-setstate "done" null
+setstate "done" 4242; touch "$HOME/stop-noop"; job=$(crew get 10 worker_job); log=$(section "$F10" "## Log")
+out=$(crew restack 10 --again 2>&1); st=$?
+check "a restack sends nothing while the worker's process won't close, starts no session beside it, records nothing, and says how to get past it" \
+  '((st == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(launches) == "$n" && $(crew get 10 status) == pr-open && $(crew get 10 restack_sent) == "$T9b" && $(section "$F10" "## Log") == "$log" ]]'
+rm -f "$HOME/stop-noop"; setstate "done" null
+jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+out=$(crew restack 10 --again 2>&1); st=$?
+check "a restack sends nothing to a worker busy again by the time crew would replace it, and records nothing" \
+  '((st == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it"* && $(launches) == "$n" && $(crew get 10 status) == pr-open && $(crew get 10 restack_sent) == "$T9b" && $(section "$F10" "## Log") == "$log" ]]'
+rm -f "$HOME/agents-next"; setstate "done" null
 check "restack --again sends it anyway" 'crew restack 10 --again >/dev/null && [[ $(launches) == $((n + 1)) ]] && restacked 10'
 (cd "$WT10" && git rebase -q --onto "$T9b" "$T9") && restack_push "$WT10"; hand_over 10
 check "evidence stays current through a restack, though the rebased branch no longer holds the commit it ran on" \
@@ -1034,12 +1113,30 @@ out=$(crew sync)
 check "after a merge, a PR GitHub already moved to what the parent merged into isn't sent back" \
   '[[ $out == *"010-season-admin: needs a restack, 009-season-model merged"* && $out != *"PR targets"* && $(crew status) != *"PR targets"* ]]'
 git update-ref -d refs/remotes/origin/agent/season-model; rm -f "$HOME/gh-pr-base-22"
-crew set 10 auto_review no
+crew set 10 auto_review no; crew set 10 pre_pr_review no
+check "a task with pre_pr_review no gives its worker no, until it's high risk" '[[ $(crew config PRE_PR_REVIEW --task 10) == no ]]'
 echo 'SENSITIVE_PATHS="admin.txt"' >>"$PE"; out=$(crew sync 2>&1)
 check "sync checks a stacked task from base_sha when its merged parent's branch is gone" \
   '[[ $(crew get 10 risk) == high && $out == *"010-season-admin: risk → high: touches admin.txt"* && $out != *"couldn'"'"'t check"* ]]'
 check "a raise by sync turns the task's automated review back on, and logs why" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on"* && $(crew config AUTO_REVIEWS --task 10) == 3 && $(tail -1 "$F10") == *" — risk → high: touches admin.txt; automated review back on" ]]'
+# The same task, raised again after its PR is open, then as if it hadn't handed over and had no PR yet
+# (nothing for sync to find), then with pr_mode none, handed over, and with pre_pr_review yes.
+check "a raise after the PR is open turns pre_pr_review's passes back on for the worker, and says nothing of them" \
+  '[[ $(crew config PRE_PR_REVIEW --task 10) == yes && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
+sed -i 's/status → pr-open/status → xpr-open/' "$F10"; crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
+check "a raise before the PR is open logs that the pre-PR passes are back on" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* && $(crew config PRE_PR_REVIEW --task 10) == yes ]]'
+crew set 10 risk low; crew set 10 pr_mode none; out=$(crew sync 2>&1)
+check "a raise of a task that makes no PR, before it hands over, logs that the pre-PR passes are back on" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* ]]'
+crew set 10 risk low; crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; out=$(crew sync 2>&1)
+check "a raise of a task with pre_pr_review yes says nothing of the pre-PR passes, even before its PR is open" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
+sed -i 's/status → xpr-open/status → pr-open/' "$F10"
+crew set 10 risk low; crew set 10 pre_pr_review no; crew set 10 pr_mode none; out=$(crew sync 2>&1); crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; rm "$HOME/gh-no-pr"; crew set 10 pr https://github.com/isaac/webapp/pull/22
+check "a raise of a task that makes no PR, after it hands over, says nothing of the pre-PR passes" \
+  '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
 sed -i '/^SENSITIVE_PATHS=/d' "$PE"; crew set 10 risk low; crew set 10 auto_review ""
 setstate "done" null
 check "restack goes bottom-up" '[[ $(crew restack 11 2>&1) == *"restack it first"* ]]'
@@ -1870,12 +1967,21 @@ rm -f "$HOME/stop-noop"
 out=$(crew tick 2>&1)
 check "a later crew tick sends it once the process closes" \
   '[[ $out == *"goal $G: input sent to its goal lead"* && $(gget "$GF" unsent_notes) == 0 && $(gget "$GF" lead_session) == "$gs" && $(resumes) == $((n + 3)) ]]'
+request "$gs" 540 143000; setstate "done" null
+crew goal note 1 "After a night" >/dev/null 2>&1
+check "a goal followup resumes its goal lead, however long it has been idle and however big its context" \
+  '[[ $(last_launch) == "claude --resume $gs "*"New input for goal $G"* && $(gget "$GF" lead_session) == "$gs" ]]'
 rm -f "$STUB/$gs.jsonl"
 rm -rf "$CO"; setstate "done" null   # as on a machine the goal moved to
 crew goal note 1 "Keep the header small" >/dev/null 2>&1
 check "a goal followup brings back a goal lead's checkout that isn't here" '[[ -d $CO && $(git -C "$CO" rev-parse HEAD) == $(git -C "$SB/webapp" rev-parse origin/main) && $(last_launch) == "claude --resume "*"New input for goal $G"* ]]'
-before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; install_agents; setstate "done" null
+before=$(gget "$GF" lead_fingerprint); echo "# changed" >>"$L/agents/goal-lead.md"; install_agents
+gj=$(gget "$GF" lead_job); gs=$(gget "$GF" lead_session); n=$(launches); setstate "done" 4242; touch "$HOME/stop-noop"
 out=$(crew goal note 1 "Keep the footer small" 2>&1)
+check "a goal lead started fresh for a changed setup isn't, while the old one's process won't close: the note is counted, and the message says how to get past it" \
+  '[[ $out == *"job $gj is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(gget "$GF" unsent_notes) == 1 && $(gget "$GF" lead_session) == "$gs" && $(gget "$GF" lead_fingerprint) == "$before" && $(launches) == "$n" ]]'
+rm -f "$HOME/stop-noop"; setstate "done" null
+out=$(crew goal note 1 "And the nav small" 2>&1)
 check "a goal followup after agents/goal-lead.md changes starts the goal lead fresh, records the new fingerprint, and logs why" \
   '[[ $out == *"input sent to its goal lead (fresh: its instructions or settings changed)"* && $(gget "$GF" lead_fingerprint) != "$before" && $(tail -1 "$GF") == *"followup (fresh: its instructions or settings changed): goal lead "* && $(last_launch) == *"--agent goal-lead "*"is already under way"* ]]'
 git -C "$L" checkout -q -- agents; install_agents; setstate "done" null
