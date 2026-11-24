@@ -188,8 +188,8 @@ reviewer's, with its path written out:
 > Earlier reviews of this PR are in `<earlier reviews path>`. Don't read it until you have written your findings.
 > Then mark each finding as the rubric's `Earlier reviews` section says.
 
-Write the prompt with the Write tool, not from a shell command: the briefing's directory is under `/tmp`, which Write
-may use. Then start Codex as a background Bash command, so you're told when it finishes:
+Write the prompt with the Write tool, not from a shell command: the briefing's directory is a temp directory, which
+Write may use. Then start Codex as a background Bash command, so you're told when it finishes:
 
 ```
 crew codex <review root> <briefing dir>/codex-prompt-0.md <briefing dir>/codex-answer-0
