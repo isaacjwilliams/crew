@@ -401,6 +401,8 @@ check "pr-review records each reviewer run's cost as crew prints it, a run that 
   "grep -q 'crew review-cost <agent id>' $SK/SKILL.md && grep -q 'the line .crew codex. wrote to .<out prefix>.cost.' $SK/SKILL.md && grep -q 'Never work out a cost yourself' $SK/SKILL.md && grep -q '^  - Round <n>, Codex: <its cost in that round>' $SK/SKILL.md && grep -q 'a run that failed or stalled included' $SK/SKILL.md"
 check "pr-review is one flow over the reviewers it launched: CODEX_REVIEW only decides whether Codex is launched, and Codex runs only through crew codex" \
   "[[ \$(grep -c CODEX_REVIEW $SK/SKILL.md) == 1 ]] && grep -q '^## 4. Launch the reviewers' $SK/SKILL.md && grep -q 'crew codex <review root> <briefing dir>/codex-prompt-0.md' $SK/SKILL.md && grep -q 'crew codex <review root> <briefing dir>/codex-prompt-<n>.md' $SK/SKILL.md && ! grep -rq 'crew codex reply' $SK $A $REPO_DIR/cmd && ! grep -qE '(^|[^-])codex (exec|resume)' $SK/SKILL.md"
+check "pr-review has the session start every crew codex as a lone command, so the Bash(crew *) rule approves it without the classifier" \
+  "grep -q 'Make that the whole command: no .cd. (every path is absolute), variables, redirects, heredocs' $SK/SKILL.md && grep -q 'Write the prompt with the Write tool' $SK/SKILL.md && grep -q 'then, as in step 4, run in the background and alone' $SK/SKILL.md"
 check "Codex, like the Claude reviewer, leaves commit messages until it has derived intent" \
   "grep -q '^> them until you have written your derived intent' $SK/SKILL.md && grep -qF 'git --no-optional-locks log --format=%H <range>' $SK/SKILL.md"
 check "rounds run only between two reviewers that reported, up to AUTO_REVIEW_REBUTTALS (2 by default), and both reviewers start fresh in each" \

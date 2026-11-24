@@ -188,11 +188,17 @@ reviewer's, with its path written out:
 > Earlier reviews of this PR are in `<earlier reviews path>`. Don't read it until you have written your findings.
 > Then mark each finding as the rubric's `Earlier reviews` section says.
 
-Then start it as a background Bash command, so you're told when it finishes:
+Write the prompt with the Write tool, not from a shell command: the briefing's directory is under `/tmp`, which Write
+may use. Then start Codex as a background Bash command, so you're told when it finishes:
 
 ```
 crew codex <review root> <briefing dir>/codex-prompt-0.md <briefing dir>/codex-answer-0
 ```
+
+Make that the whole command: no `cd` (every path is absolute), variables, redirects, heredocs or `;`/`&&` chains, and
+no other command in the same call. The `Bash(crew *)` rule approves a lone `crew` command without asking the
+permission classifier; anything added to it can send the call there, and the classifier may deny it. Don't wrap the
+launch to capture its output or exit status: the notice that tells you the command finished carries both.
 
 `crew codex` is the only way to run Codex: it keeps every run read-only, rounds included. Its report lands in
 `<briefing dir>/codex-answer-0.md`.
@@ -216,8 +222,9 @@ exactly as crew gives it:
 Never work out a cost yourself, from a transcript or a notice. When crew gives none (`crew review-cost` refuses, or
 there's no `.cost` file), the cost is `not reported: <why>`.
 
-A reviewer that fails, stalls or returns no report hasn't reported. For Codex, exit status 124 means it wrote nothing
-for 15 minutes and was stopped; any other non-zero status, or an empty report, is a failure. Note what happened for the
+A reviewer that fails, stalls or returns no report hasn't reported. For Codex, read the finished command's notice: exit
+status 124 means it wrote nothing for 15 minutes and was stopped; any other non-zero status is a failure, and the
+output says why. A zero status with an empty `<out prefix>.md` is a failure too. Note what happened for the
 record (step 8) and carry on with the reviewer that did report. Never invent what a review would have said. If neither
 reported, go straight to step 8 and record the review with no findings.
 
@@ -282,7 +289,7 @@ wait for both answers before you close the round.
 
 - **Codex's** items are the Claude reviewer's open findings that Codex didn't raise, the Claude reviewer's refutations
   of Codex's findings and its answers to Codex's refutations, and your counter-evidence on any open item. Write them to
-  `codex-round-<n>.md`, and this prompt to `codex-prompt-<n>.md`, then run, in the background,
+  `codex-round-<n>.md`, and this prompt to `codex-prompt-<n>.md`, then, as in step 4, run in the background and alone,
   `crew codex <review root> <briefing dir>/codex-prompt-<n>.md <briefing dir>/codex-answer-<n>`:
 
   > Rebuttal round <n> on the work described in `<briefing path>`, under the rubric at

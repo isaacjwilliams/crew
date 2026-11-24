@@ -28,13 +28,17 @@ func TestCodexStopsAStalledCodex(t *testing.T) {
 	defer func(limit time.Duration) { codexStallLimit = limit }(codexStallLimit)
 	codexStallLimit = 500 * time.Millisecond
 	began := time.Now()
-	err := cmdCodex(c, []string{dir, prompt, filepath.Join(dir, "out", "answer-0")})
+	out := filepath.Join(dir, "out", "answer-0")
+	err := cmdCodex(c, []string{dir, prompt, out})
 	if took := time.Since(began); took > 10*time.Second {
 		t.Errorf("took %s to stop a Codex that went quiet; want about the stall limit", took)
 	}
 	var exit *exitError
 	if !errors.As(err, &exit) || exit.code != exitCodexStalled {
 		t.Errorf("crew codex returned %v; want exit %d for a stall", err, exitCodexStalled)
+	}
+	if !isFile(out + ".cost") {
+		t.Error("a stalled run left no .cost file")
 	}
 }
 
