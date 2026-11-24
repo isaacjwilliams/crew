@@ -539,6 +539,25 @@ func TestCostsLeaveOutATaskThatFinishedOnAnotherMachinesClock(t *testing.T) {
 	}
 }
 
+// Here, in New York, a task merged at 10:00, and a laptop in New York took
+// over at 12:00: the task finished before then, on either clock.
+func TestCostsKeepATaskThatFinishedBeforeAnotherMachineTookOver(t *testing.T) {
+	local := time.Local
+	time.Local = time.FixedZone("EST", -5*60*60)
+	t.Cleanup(func() { time.Local = local })
+	at := func(s string) time.Time { return costsDay(t, s) }
+	tasks := map[string]Task{"p/a": finishedTask(t, "a", "2026-11-13 10:00", "2026-11-18 10:00")}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		{owner{stepWorker, "p/a"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
+	}}
+	elsewhere := []tenure{{holder: "laptop", from: at("2026-11-18 12:00")}}
+	var out strings.Builder
+	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	if strings.Contains(out.String(), "Left out") {
+		t.Errorf("report leaves out a task that finished before the laptop took over:\n%s", out.String())
+	}
+}
+
 // The expected folders come from the encoder in Claude Code 2.1.328 itself.
 func TestTranscriptFolderCutsAndHashesWhatPassesTwoHundredCharacters(t *testing.T) {
 	at200 := "/" + strings.Repeat("a/", 99) + "b"
