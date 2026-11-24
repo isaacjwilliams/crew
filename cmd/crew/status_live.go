@@ -174,7 +174,10 @@ type liveStatus struct {
 	width, height int
 
 	note *noteDraft // the note the user is typing, if they are
-	said string     // a line on what an action did, or why it couldn't
+	// unsent is the notes crew didn't send, by their task's path, for n on
+	// the task to bring back.
+	unsent map[string]string
+	said   string // a line on what an action did, or why it couldn't
 }
 
 // noteDraft is a note the user is typing to a task's worker.
@@ -221,8 +224,9 @@ type (
 		err  error
 	}
 	noteSent struct {
-		to  Task
-		err error
+		to   Task
+		text string
+		err  error
 	}
 )
 
@@ -231,7 +235,7 @@ func newLiveStatus(feed statusFeed) *liveStatus {
 		feed: feed, now: time.Now,
 		building: job{every: buildEvery}, listingWorkers: job{every: listWorkersEvery},
 		readingBranches: job{every: readBranchesEvery}, readingGitHub: job{every: readGitHubEvery}, pulling: job{every: pullLedgerEvery},
-		open: map[string]bool{}, width: 80, height: 24,
+		open: map[string]bool{}, unsent: map[string]string{}, width: 80, height: 24,
 	}
 }
 
@@ -313,9 +317,11 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 			m.said = "opened " + msg.task.ID() + "'s PR in the browser"
 		}
 	case noteSent:
-		if msg.err != nil {
-			m.said = "note not sent: " + msg.err.Error()
-		} else {
+		switch {
+		case msg.err != nil:
+			m.unsent[msg.to.Path] = msg.text
+			m.said = "note not sent, n on " + msg.to.ID() + " brings it back: " + msg.err.Error()
+		default:
 			m.said = "sent your note to " + msg.to.ID() + "'s worker"
 		}
 		// The worker's line shows it at work on the note.
@@ -431,17 +437,23 @@ func (m *liveStatus) refusesNote(r *taskRow) string {
 		return t.ID() + " is " + string(t.Status()) + ", so its worker is done"
 	case m.readOnlyOn != "":
 		return "this machine can only read: crew runs on " + m.readOnlyOn
+	case r.Worker.busy():
+		// crew followup would refuse it too.
+		return t.ID() + "'s worker is busy (" + r.Worker.stateText() + "): send it a note once it's idle"
 	}
 	return ""
 }
 
-// startNote opens a line to type a note to t's worker in.
+// startNote opens a line to type a note to t's worker in, with the note crew
+// didn't send to it, if there's one.
 func (m *liveStatus) startNote(t Task) tea.Cmd {
 	input := textinput.New()
 	input.Prompt = "note to " + t.ID() + ": "
 	// No styles: the terminal's own colours, like the rest of the view, and a
 	// cursor that doesn't blink (Cursor.Blink is false).
 	input.SetStyles(textinput.Styles{})
+	input.SetValue(m.unsent[t.Path])
+	delete(m.unsent, t.Path)
 	m.note = &noteDraft{to: t, input: input}
 	m.note.input.SetWidth(m.noteWidth())
 	return m.note.input.Focus()
@@ -482,7 +494,7 @@ func (m *liveStatus) sendNote() tea.Cmd {
 		return nil
 	}
 	m.said = "sending your note to " + to.ID() + "'s worker…"
-	return func() tea.Msg { return noteSent{to, send(to, text)} }
+	return func() tea.Msg { return noteSent{to, text, send(to, text)} }
 }
 
 func (m *liveStatus) current() (shownLine, bool) {

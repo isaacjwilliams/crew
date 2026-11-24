@@ -499,7 +499,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 		}
 	}
 	takes := map[string]string{ // by the line's head; every other line takes neither
-		"001-in-flight": "n note",            // in a goal's group, with a worker
+		"001-in-flight": "",                  // in a goal's group, with a busy worker and no PR
 		"016-both":      "o open PR  n note", // a PR and a worker
 		"└ 017-stacked": "n note",            // stacked, with a worker
 		"013-risky":     "o open PR",         // a PR and no worker
@@ -532,6 +532,7 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 		{"workers running: 1/3", "o", "put the cursor on a task to open its PR"},
 		{"goal 001-launch", "n", "put the cursor on a task to send its worker a note"},
 		{"001-in-flight", "o", "001-in-flight has no PR"},
+		{"001-in-flight", "n", "001-in-flight's worker is busy (working): send it a note once it's idle"},
 		{"012-idea", "n", "012-idea has no worker: it hasn't been dispatched"},
 		{"018-merged", "n", "018-merged is merged, so its worker is done"},
 	} {
@@ -592,9 +593,9 @@ func TestLiveStatusOpensTheTasksPR(t *testing.T) {
 
 func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
-	goTo(t, m, "001-in-flight")
+	goTo(t, m, "016-both")
 	press(m, "n")
-	if m.note == nil || !strings.HasPrefix(footLineOnScreen(m), "note to 001-in-flight:") {
+	if m.note == nil || !strings.HasPrefix(footLineOnScreen(m), "note to 016-both:") {
 		t.Fatalf("n doesn't ask for a note: the line above the bar is %q", footLineOnScreen(m))
 	}
 	if got := offered(m); !strings.HasSuffix(m.bar(), "enter send  esc cancel") || got != "" {
@@ -610,19 +611,11 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	}
 	m.Update(tea.PasteMsg{Content: " (pasted)"})
 	finish(t, m, press(m, "enter"))
-	if want := "001-in-flight: " + note + " (pasted)"; !slices.Equal(run.notes, []string{want}) {
+	if want := "016-both: " + note + " (pasted)"; !slices.Equal(run.notes, []string{want}) {
 		t.Errorf("sent %q, want %q", run.notes, want)
 	}
-	if m.note != nil || footLineOnScreen(m) != "sent your note to 001-in-flight's worker" {
+	if m.note != nil || footLineOnScreen(m) != "sent your note to 016-both's worker" {
 		t.Errorf("after sending, the view says %q", footLineOnScreen(m))
-	}
-
-	run.err = errors.New("001-in-flight's worker is busy (mid-turn); crew sent it nothing")
-	press(m, "n")
-	typeText(m, "again")
-	finish(t, m, press(m, "enter"))
-	if got := footLineOnScreen(m); got != "note not sent: "+run.err.Error() {
-		t.Errorf("when crew refuses, the view says %q", got)
 	}
 
 	run.notes = nil
@@ -638,6 +631,37 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	}
 	if run.notes != nil {
 		t.Errorf("esc or a blank note sent %q", run.notes)
+	}
+}
+
+func TestLiveStatusKeepsANoteCrewDidntSend(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	run.err = errors.New("p is paused; 'crew resume --project p' lets its work go on")
+	press(m, "n")
+	typeText(m, "the tests first")
+	finish(t, m, press(m, "enter"))
+	if got, want := footLineOnScreen(m), "note not sent, n on 016-both brings it back: "+run.err.Error(); got != want {
+		t.Errorf("when crew refuses a note, the view says %q, want %q", got, want)
+	}
+
+	goTo(t, m, "└ 017-stacked")
+	press(m, "n")
+	if got := m.note.input.Value(); got != "" {
+		t.Errorf("a note to another task starts with %q", got)
+	}
+	press(m, "esc")
+	goTo(t, m, "016-both")
+	press(m, "n")
+	typeText(m, ", please")
+	run.err, run.notes = nil, nil
+	finish(t, m, press(m, "enter"))
+	if want := []string{"016-both: the tests first, please"}; !slices.Equal(run.notes, want) {
+		t.Errorf("sent %q, want %q", run.notes, want)
+	}
+	press(m, "n")
+	if got := m.note.input.Value(); got != "" {
+		t.Errorf("once the note is sent, n starts with %q", got)
 	}
 }
 
