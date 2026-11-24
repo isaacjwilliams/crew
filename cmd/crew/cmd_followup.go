@@ -134,7 +134,9 @@ func (c *Crew) followup(t Task, with followupWith) error {
 	if err := refuseIfPaused(p); err != nil {
 		return err
 	}
-	// Why crew starts a fresh worker where the caller didn't ask for one.
+	// Why crew starts a fresh worker where the caller didn't ask for one: after
+	// a restack, or when resuming would cost more. A fresh start the caller
+	// asked for keeps the label relaunch gives it.
 	why := ""
 	switch {
 	case afterRestack:
@@ -363,11 +365,12 @@ const restackModel = "sonnet"
 // other reads the whole task file and the branch first. Either is led to
 // changes an earlier session left uncommitted, which the branch doesn't show.
 func pickUpPrompt(t Task, project, wt string, newRound bool) string {
-	opening, start := "You are picking up task %s in project %s, ", "Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."
+	prompt := fmt.Sprintf("You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
+		t.ID(), project, t.Path, wt)
 	if newRound {
-		opening, start = "You are picking up review rounds on task %s in project %s, ", "Start from the rounds named below and the task file's Decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need."
+		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
+			t.ID(), project, t.Path, wt)
 	}
-	prompt := fmt.Sprintf(opening+"which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\n", t.ID(), project, t.Path, wt) + start
 	if out, _ := git(wt, "status", "--porcelain"); out != "" {
 		prompt += "\nAn earlier session left changes uncommitted in your worktree. Read git status and git diff before you act, and carry on from them: don't redo or discard them."
 	}
@@ -375,8 +378,8 @@ func pickUpPrompt(t Task, project, wt string, newRound bool) string {
 }
 
 // restackPrompt opens a restack session's first message, before the note: the
-// task and project, then the task file and the worktree. implementer.md's
-// exception for it to reading the whole task file first matches its opening.
+// task and project, then the task file and the worktree. implementer.md lets a
+// session whose prompt opens this way skip reading the whole task file first.
 const restackPrompt = "You are restacking task %s in project %s: this session takes over as its worker, for the restack below and nothing else.\nTask file: %s\nWorktree (your working directory): %s\nDon't read the whole task file or review the branch first; read only what a step of your restack workflow needs."
 
 // launchRestack is the launcher of a restack session: a worker on restackModel,

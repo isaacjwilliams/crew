@@ -252,8 +252,11 @@ const (
 // session's transcript can't say: there's none, or no request in it.
 func coldResume(session string, now time.Time) string {
 	at, tokens, ok := lastRequest(transcript(session))
+	if !ok {
+		return ""
+	}
 	idle := now.Sub(at)
-	if !ok || idle <= cacheLife || tokens < coldContext {
+	if idle <= cacheLife || tokens < coldContext {
 		return ""
 	}
 	return fmt.Sprintf("idle %s, with %dk tokens of context", roughly(idle), (tokens+500)/1000)
@@ -264,7 +267,9 @@ func coldResume(session string, now time.Time) string {
 // cache write and cache read). It goes by the reply's timestamp, not the
 // file's: a session writes other entries long after its last request. A
 // subagent's requests don't count: they're in transcripts of their own, or
-// marked isSidechain.
+// marked isSidechain. messages.add (cmd_review_cost.go) keeps each reply once,
+// with its fullest usage, and skips Claude Code's own messages, which have none.
+// scanLines picks lines by their text, so the parsed type is checked again.
 func lastRequest(path string) (at time.Time, tokens int, ok bool) {
 	var ms messages
 	if _, err := scanLines(path, `"type":"assistant"`, func(l transcriptLine) bool {
