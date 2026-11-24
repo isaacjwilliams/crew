@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -99,5 +100,16 @@ func TestCodexTokensReadsCompletedTurns(t *testing.T) {
 	write(started + `{"type":"item.started","item":{"type":"command_exe`)
 	if u := codexTokens(events); u != nil {
 		t.Errorf("a stalled run's tokens = %v; want none reported", u)
+	}
+}
+
+func TestScanLinesNamesTheTranscriptItCouldNotScan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 65<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := scanLines(path, "", func(transcriptLine) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), path+": ") {
+		t.Errorf("a line too long to scan gave %v; want an error naming %s", err, path)
 	}
 }
