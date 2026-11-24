@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"regexp"
@@ -23,7 +24,8 @@ func liveOn(r statusReport) *liveStatus {
 
 // keyCodes are the keys press takes by name.
 var keyCodes = map[string]rune{"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight,
-	"enter": tea.KeyEnter, "end": tea.KeyEnd, "home": tea.KeyHome, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown}
+	"enter": tea.KeyEnter, "end": tea.KeyEnd, "home": tea.KeyHome, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown,
+	"esc": tea.KeyEscape}
 
 // press sends keys to the view, as a person types them, and returns the last
 // key's command.
@@ -35,6 +37,18 @@ func press(m *liveStatus, keys ...string) tea.Cmd {
 			key = tea.KeyPressMsg{Code: code}
 		}
 		_, cmd = m.Update(key)
+	}
+	return cmd
+}
+
+// typeText types text into the view, a key for each character.
+func typeText(m *liveStatus, text string) tea.Cmd {
+	var cmd tea.Cmd
+	for _, r := range text {
+		_, cmd = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		if quits(cmd) {
+			return cmd
+		}
 	}
 	return cmd
 }
@@ -408,6 +422,290 @@ func TestLiveStatusFitsTheScreen(t *testing.T) {
 		if m.cursor < m.top || m.cursor >= m.top+m.bodyHeight() || !strings.Contains(on, m.shown[m.cursor].head) {
 			t.Errorf("after %v, the cursor's line %q isn't on screen (lines %d to %d)", keys, m.shown[m.cursor].head, m.top, m.top+m.bodyHeight()-1)
 		}
+	}
+}
+
+// actionsLedger is statusLedger with tasks for each of the view's actions: one
+// with a PR and a worker, one stacked on it with a worker, and a merged one with
+// a PR.
+func actionsLedger(t *testing.T) *Crew {
+	t.Helper()
+	c := statusLedger(t)
+	reportTask(t, c, "p", "016-both", false, "status: pr-open", "pr: https://github.com/o/r/pull/16", "worktree: /wt/both", "base: main", "branch: agent/both")
+	reportTask(t, c, "p", "017-stacked", false, "status: working", "worktree: /wt/stacked", "base: agent/both", "branch: agent/stacked")
+	reportTask(t, c, "p", "018-merged", false, "status: merged", "pr: https://github.com/o/r/pull/18", "worktree: /wt/merged")
+	return c
+}
+
+// actionsReport is the report crew status --done builds from actionsLedger, so
+// the merged task is in it.
+func actionsReport(c *Crew) statusReport {
+	return buildReport(c, []string{"p"}, true, statusReads{prs: c.readPRs([]string{"p"}), workers: c.listWorkers(), branches: c.readBranches([]string{"p"})})
+}
+
+// actionsRun is what the view's actions were given to run, in place of gh and
+// crew followup.
+type actionsRun struct {
+	opened []string // the PRs opened, by URL
+	notes  []string // the notes sent: "<task ID>: <note>"
+	err    error    // what each action returns
+}
+
+// actingOn is the live view showing r, with its actions recorded in run rather
+// than run.
+func actingOn(r statusReport) (*liveStatus, *actionsRun) {
+	m, run := liveOn(r), &actionsRun{}
+	m.width, m.height = 200, 60
+	openAll(m)
+	m.feed.openPR = func(url string) error { run.opened = append(run.opened, url); return run.err }
+	m.feed.sendNote = func(t Task, note string) error {
+		run.notes = append(run.notes, t.ID()+": "+note)
+		return run.err
+	}
+	return m, run
+}
+
+// finish runs the command an action started, and gives the view its message.
+func finish(t *testing.T, m *liveStatus, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("the action started nothing")
+	}
+	m.Update(cmd())
+}
+
+// offered is what the bar offers to do to the line under the cursor.
+func offered(m *liveStatus) string {
+	_, keys, _ := strings.Cut(m.bar(), "←→ fold")
+	keys, _, _ = strings.Cut(keys, "r refresh")
+	return strings.TrimSpace(keys)
+}
+
+// footLineOnScreen is the line above the bar, as the screen shows it, without
+// its style or the spaces after it.
+func footLineOnScreen(m *liveStatus) string {
+	lines := screen(m)
+	return strings.TrimRight(ansiCodes.ReplaceAllString(lines[len(lines)-2], ""), " ")
+}
+
+func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	// Every kind of line the view shows, to check that each is on show.
+	for _, head := range []string{"workers running: 1/3", "p", "goal 001-launch", "in flight", "next, in dispatch order",
+		"parked", "1  002-next", "… (2 more)", "010-parent", "└ 011-child", "1 draft(s)  (crew list --project p --status draft)",
+		"012-idea", "to review: #5 low, #12 low, #9 high (no security review yet), #16 no risk tier", elsewhereHeading} {
+		if !slices.ContainsFunc(m.shown, func(l shownLine) bool { return l.head == head }) {
+			t.Errorf("no line %q on show", head)
+		}
+	}
+	takes := map[string]string{ // by the line's head; every other line takes neither
+		"001-in-flight": "n note",            // in a goal's group, with a worker
+		"016-both":      "o open PR  n note", // a PR and a worker
+		"└ 017-stacked": "n note",            // stacked, with a worker
+		"013-risky":     "o open PR",         // a PR and no worker
+		"018-merged":    "o open PR",         // finished, with a PR
+		"014-later":     "o open PR",
+		"015-earlier":   "o open PR",
+	}
+	for i, l := range m.shown {
+		m.moveTo(i)
+		if got := offered(m); got != takes[l.head] {
+			t.Errorf("on %q, the bar offers %q, want %q", l.head, got, takes[l.head])
+		}
+		for _, a := range actions {
+			if strings.Contains(takes[l.head], a.key+" ") {
+				continue
+			}
+			before := screen(m)
+			cmd := press(m, a.key)
+			after := screen(m)
+			// The line that says why takes the place of the report's last line.
+			if cmd != nil || m.note != nil || len(run.opened)+len(run.notes) > 0 || !slices.Equal(before[:len(after)-2], after[:len(after)-2]) {
+				t.Errorf("%s on %q, which doesn't take it, changed something", a.key, l.head)
+			}
+			if footLineOnScreen(m) != m.said || m.said == "" {
+				t.Errorf("%s on %q doesn't say why in a line: %q", a.key, l.head, footLineOnScreen(m))
+			}
+		}
+	}
+	for _, tc := range []struct{ head, key, says string }{
+		{"workers running: 1/3", "o", "put the cursor on a task to open its PR"},
+		{"goal 001-launch", "n", "put the cursor on a task to send its worker a note"},
+		{"001-in-flight", "o", "001-in-flight has no PR"},
+		{"012-idea", "n", "012-idea has no worker: it hasn't been dispatched"},
+		{"018-merged", "n", "018-merged is merged, so its worker is done"},
+	} {
+		goTo(t, m, tc.head)
+		press(m, tc.key)
+		if m.said != tc.says {
+			t.Errorf("%s on %q says %q, want %q", tc.key, tc.head, m.said, tc.says)
+		}
+	}
+}
+
+func TestLiveStatusOnAMachineThatDoesntRunTheCrewOpensPRsButSendsNoNotes(t *testing.T) {
+	r := actionsReport(actionsLedger(t))
+	r.ReadOnlyOn = "laptop"
+	m, run := actingOn(r)
+	goTo(t, m, "read-only: crew runs on laptop")
+	if got := offered(m); got != "" {
+		t.Errorf("the read-only line offers %q", got)
+	}
+	goTo(t, m, "016-both")
+	if got := offered(m); got != "o open PR" {
+		t.Errorf("a task with a PR and a worker offers %q, want only to open its PR", got)
+	}
+	if press(m, "n") != nil || m.note != nil || m.said != "this machine can only read: crew runs on laptop" {
+		t.Errorf("n on a machine that doesn't run the crew: note %v, says %q", m.note, m.said)
+	}
+	finish(t, m, press(m, "o"))
+	if !slices.Equal(run.opened, []string{"https://github.com/o/r/pull/16"}) || len(run.notes) > 0 {
+		t.Errorf("opened %v and sent %v, want only the PR opened", run.opened, run.notes)
+	}
+}
+
+func TestLiveStatusOpensTheTasksPR(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "013-risky")
+	finish(t, m, press(m, "o"))
+	if !slices.Equal(run.opened, []string{"https://github.com/o/r/pull/9"}) {
+		t.Errorf("opened %v, want 013-risky's PR", run.opened)
+	}
+	if got := footLineOnScreen(m); got != "opened 013-risky's PR in the browser" {
+		t.Errorf("after opening the PR, the view says %q", got)
+	}
+
+	run.err = errors.New("no browser found")
+	finish(t, m, press(m, "o"))
+	if got := footLineOnScreen(m); got != "couldn't open 013-risky's PR: no browser found" {
+		t.Errorf("when opening the PR fails, the view says %q", got)
+	}
+	if !strings.Contains(screen(m)[len(screen(m))-1], "o open PR") {
+		t.Error("the message took the bar's place")
+	}
+
+	goTo(t, m, "001-in-flight")
+	if press(m, "o") != nil || len(run.opened) != 2 {
+		t.Errorf("o on a task with no PR ran something: opened %v", run.opened)
+	}
+}
+
+func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "001-in-flight")
+	press(m, "n")
+	if m.note == nil || !strings.HasPrefix(footLineOnScreen(m), "note to 001-in-flight:") {
+		t.Fatalf("n doesn't ask for a note: the line above the bar is %q", footLineOnScreen(m))
+	}
+	if got := offered(m); !strings.HasSuffix(m.bar(), "enter send  esc cancel") || got != "" {
+		t.Errorf("while a note is typed, the bar is %q", m.bar())
+	}
+	cursor := m.cursor
+	const note = "q r j k h l g G, then space: r refresh"
+	if cmd := typeText(m, note); quits(cmd) {
+		t.Fatal("typing a note quit the view")
+	}
+	if m.cursor != cursor || run.opened != nil || run.notes != nil {
+		t.Errorf("typing a note moved the cursor or acted: at %d, want %d; opened %v", m.cursor, cursor, run.opened)
+	}
+	m.Update(tea.PasteMsg{Content: " (pasted)"})
+	finish(t, m, press(m, "enter"))
+	if want := "001-in-flight: " + note + " (pasted)"; !slices.Equal(run.notes, []string{want}) {
+		t.Errorf("sent %q, want %q", run.notes, want)
+	}
+	if m.note != nil || footLineOnScreen(m) != "sent your note to 001-in-flight's worker" {
+		t.Errorf("after sending, the view says %q", footLineOnScreen(m))
+	}
+
+	run.err = errors.New("001-in-flight's worker is busy (mid-turn); crew sent it nothing")
+	press(m, "n")
+	typeText(m, "again")
+	finish(t, m, press(m, "enter"))
+	if got := footLineOnScreen(m); got != "note not sent: "+run.err.Error() {
+		t.Errorf("when crew refuses, the view says %q", got)
+	}
+
+	run.notes = nil
+	press(m, "n")
+	typeText(m, "never mind")
+	if press(m, "esc") != nil || m.note != nil {
+		t.Error("esc leaves the note open")
+	}
+	press(m, "n")
+	typeText(m, "   ")
+	if press(m, "enter") != nil || m.note != nil {
+		t.Error("enter on a blank note leaves it open, or sends it")
+	}
+	if run.notes != nil {
+		t.Errorf("esc or a blank note sent %q", run.notes)
+	}
+}
+
+func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
+	c := actionsLedger(t)
+	m, run := actingOn(actionsReport(c))
+	goTo(t, m, "└ 017-stacked")
+	press(m, "n")
+	typeText(m, "for the stacked task")
+	finish(t, m, press(m, "enter"))
+
+	goTo(t, m, "016-both")
+	press(m, "n")
+	typeText(m, "for the PR's ")
+	// 016-both is stacked on 010-parent while the note is typed, so its line
+	// moves, and then merges, so its line goes and the cursor goes to the line
+	// that took its place.
+	reportTask(t, c, "p", "016-both", false, "status: pr-open", "pr: https://github.com/o/r/pull/16", "worktree: /wt/both", "base: agent/parent", "branch: agent/both")
+	m.Update(reportBuilt{report: actionsReport(c)})
+	if m.shown[m.cursor].head != "└ 016-both" {
+		t.Fatalf("016-both didn't move under 010-parent: the cursor is on %q", m.shown[m.cursor].head)
+	}
+	typeText(m, "own ")
+	reportTask(t, c, "p", "016-both", false, "status: merged", "pr: https://github.com/o/r/pull/16", "worktree: /wt/both")
+	m.Update(reportBuilt{report: readReport(c, "p")})
+	if l := m.shown[m.cursor]; l.task == nil || l.task.ID() == "016-both" {
+		t.Fatalf("the cursor is on %q, want another task's line", l.head)
+	}
+	typeText(m, "worker")
+	finish(t, m, press(m, "enter"))
+
+	want := []string{"017-stacked: for the stacked task", "016-both: for the PR's own worker"}
+	if !slices.Equal(run.notes, want) {
+		t.Errorf("sent %q, want %q", run.notes, want)
+	}
+}
+
+// TestBrowsePRKeepsGhOffTheScreen runs browsePR on a gh that prints, starts a
+// "browser" that keeps gh's output open, and fails when told to.
+func TestBrowsePRKeepsGhOffTheScreen(t *testing.T) {
+	bin := t.TempDir()
+	gh := `#!/bin/sh
+echo "$@" >"$(dirname "$0")/args"
+echo "Opening github.com/o/r/pull/9 in your browser."
+if [ -e "$(dirname "$0")/fail" ]; then echo "some noise" >&2; echo "no pull requests found" >&2; exit 1; fi
+sleep 30 &
+`
+	if err := os.WriteFile(bin+"/gh", []byte(gh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	start := time.Now()
+	if err := browsePR("https://github.com/o/r/pull/9"); err != nil {
+		t.Errorf("browsePR: %v", err)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("browsePR waited %v on the browser gh started", took)
+	}
+	if args, _ := os.ReadFile(bin + "/args"); string(args) != "pr view https://github.com/o/r/pull/9 --web\n" {
+		t.Errorf("gh ran with %q", args)
+	}
+
+	if err := os.WriteFile(bin+"/fail", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := browsePR("https://github.com/o/r/pull/9"); err == nil || err.Error() != "no pull requests found" {
+		t.Errorf("when gh fails, browsePR says %v, want gh's last line", err)
 	}
 }
 

@@ -1,13 +1,19 @@
 package main
 
 // crew status's live view: the lines the plain text prints (reportLines), in a
-// terminal, built again every few seconds, with folds the user opens and closes.
+// terminal, built again every few seconds, with folds the user opens and closes,
+// and actions the user takes on the task under the cursor.
 
 import (
+	"bytes"
+	"cmp"
+	"errors"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -28,8 +34,9 @@ const (
 
 // statusFeed is what crew status runs: pulling the ledger, listing the
 // workers, reading the tasks' branches, reading GitHub for the open PRs, and
-// building a report from those reads. The live view runs each in the
-// background, on its own, so one that hangs holds back none of the others.
+// building a report from those reads; and, for the user's actions, opening a PR
+// and sending a worker a note. The live view runs each in the background, on
+// its own, so one that hangs holds back none of the others.
 type statusFeed struct {
 	pullLedger   func()
 	listWorkers  func() *workerList
@@ -38,6 +45,9 @@ type statusFeed struct {
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
 	build func(statusReads) (statusReport, error)
+	// openPR's and sendNote's errors are a line each, for the view to show.
+	openPR   func(url string) error
+	sendNote func(t Task, note string) error
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -59,7 +69,34 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 			}
 			return buildReport(&now, c.projects(scope), doneToo, reads), err
 		},
+		openPR: browsePR,
+		// The note goes through crew followup, in a process of its own, so
+		// the ledger's lock is held only while it runs.
+		sendNote: func(t Task, note string) error {
+			var errs strings.Builder
+			if c.step(&errs, "followup", t.Path, "--note", note, "--from-user") != 0 {
+				_, why := splitRefusal(errs.String())
+				return errors.New(cmp.Or(why, "crew followup failed"))
+			}
+			return nil
+		},
 	}
+}
+
+// browsePR opens a PR in the browser, with gh's output kept off the screen. A
+// browser that gh starts may keep gh's output open, so it isn't waited on for
+// long once gh has ended.
+func browsePR(url string) error {
+	var out bytes.Buffer
+	cmd := exec.Command("gh", "pr", "view", url, "--web")
+	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.WaitDelay = time.Second
+	err := cmd.Run()
+	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	_, why := splitRefusal(out.String())
+	return errors.New(cmp.Or(why, err.Error()))
 }
 
 // watchStatus runs the live view until the user quits. Its beat comes from
@@ -122,6 +159,9 @@ type liveStatus struct {
 
 	lines   []statusLine // the latest report's; nil before the first
 	builtAt time.Time
+	// readOnlyOn is the machine that runs the crew, as of the latest report,
+	// when it isn't this one.
+	readOnlyOn string
 	// settingsErr is why the latest report went by the settings crew started
 	// with: the shared settings couldn't be read again.
 	settingsErr error
@@ -132,6 +172,29 @@ type liveStatus struct {
 	cursor        int         // the line it's on, in shown
 	top           int         // the first line of shown on the screen
 	width, height int
+
+	note *noteDraft // the note the user is typing, if they are
+	said string     // a line on what an action did, or why it couldn't
+}
+
+// noteDraft is a note the user is typing to a task's worker.
+type noteDraft struct {
+	to    Task // the task the note was started on, wherever its line goes
+	input textinput.Model
+}
+
+// action is something the user can do to the task under the cursor, by its key.
+type action struct {
+	key, name string
+	// refuses says why the line's task doesn't take the action, or "" when it
+	// does. task is nil on a line that isn't a task's.
+	refuses func(m *liveStatus, task *Task) string
+	start   func(m *liveStatus, task Task) tea.Cmd
+}
+
+var actions = []action{
+	{"o", "open PR", (*liveStatus).refusesOpenPR, (*liveStatus).openPR},
+	{"n", "note", (*liveStatus).refusesNote, (*liveStatus).startNote},
 }
 
 // shownLine is a line on show, with how deep it is in the tree.
@@ -151,6 +214,14 @@ type (
 	reportBuilt   struct {
 		report      statusReport
 		settingsErr error
+	}
+	prOpened struct {
+		task Task
+		err  error
+	}
+	noteSent struct {
+		to  Task
+		err error
 	}
 )
 
@@ -200,34 +271,63 @@ func (m *liveStatus) readEnded(j *job) tea.Cmd {
 }
 
 // Update starts a build as soon as a pull or a read ends, so what it brought in
-// shows at once; the beat starts each job again when it's due.
+// shows at once; the beat starts each job again when it's due. What it does may
+// change how many lines of the report fit, so it scrolls each time.
 func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := m.update(msg)
+	m.scroll()
+	return m, cmd
+}
+
+func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.scroll()
+		if m.note != nil {
+			m.note.input.SetWidth(m.noteWidth())
+		}
 	case beat:
-		return m, m.startDue()
+		return m.startDue()
 	case ledgerPulled:
-		return m, m.readEnded(&m.pulling)
+		return m.readEnded(&m.pulling)
 	case workersListed:
 		m.reads.workers = msg.workers
-		return m, m.readEnded(&m.listingWorkers)
+		return m.readEnded(&m.listingWorkers)
 	case branchesRead:
 		m.reads.branches = msg.branches
-		return m, m.readEnded(&m.readingBranches)
+		return m.readEnded(&m.readingBranches)
 	case prsRead:
 		m.reads.prs = msg.reads
-		return m, m.readEnded(&m.readingGitHub)
+		return m.readEnded(&m.readingGitHub)
 	case reportBuilt:
 		m.building.running = false
 		m.settingsErr = msg.settingsErr
 		m.show(msg.report, m.building.last)
-		return m, m.startDue()
+		return m.startDue()
+	case prOpened:
+		m.said = "opened " + msg.task.ID() + "'s PR in the browser"
+		if msg.err != nil {
+			m.said = "couldn't open " + msg.task.ID() + "'s PR: " + msg.err.Error()
+		}
+	case noteSent:
+		m.said = "sent your note to " + msg.to.ID() + "'s worker"
+		if msg.err != nil {
+			m.said = "note not sent: " + msg.err.Error()
+		}
+		// The worker's line shows it at work on the note.
+		m.listingWorkers.ask()
+		return m.startDue()
 	case tea.KeyPressMsg:
-		return m, m.press(msg.String())
+		if m.note != nil {
+			return m.typeNote(msg)
+		}
+		return m.press(msg.String())
+	case tea.PasteMsg:
+		if m.note != nil {
+			return m.typeNote(msg)
+		}
 	}
-	return m, nil
+	return nil
 }
 
 // show puts a new report on screen, with the cursor on the line it was on, or
@@ -237,7 +337,7 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 	if l, ok := m.current(); ok {
 		key = l.key
 	}
-	m.lines, m.builtAt = reportLines(r), at
+	m.lines, m.builtAt, m.readOnlyOn = reportLines(r), at, r.ReadOnlyOn
 	m.layOut()
 	i := slices.IndexFunc(m.shown, func(l shownLine) bool { return l.key == key })
 	if i < 0 {
@@ -247,6 +347,7 @@ func (m *liveStatus) show(r statusReport, at time.Time) {
 }
 
 func (m *liveStatus) press(key string) tea.Cmd {
+	m.said = ""
 	switch key {
 	case "q", "ctrl+c":
 		return tea.Quit
@@ -278,8 +379,103 @@ func (m *liveStatus) press(key string) tea.Cmd {
 		m.readingGitHub.ask()
 		m.pulling.ask()
 		return m.startDue()
+	default:
+		for _, a := range actions {
+			if key == a.key {
+				return m.act(a)
+			}
+		}
 	}
 	return nil
+}
+
+// act starts an action on the task under the cursor or, when its line doesn't
+// take the action, says why.
+func (m *liveStatus) act(a action) tea.Cmd {
+	l, _ := m.current()
+	if why := a.refuses(m, l.task); why != "" {
+		m.said = why
+		return nil
+	}
+	return a.start(m, *l.task)
+}
+
+func (m *liveStatus) refusesOpenPR(t *Task) string {
+	switch {
+	case t == nil:
+		return "put the cursor on a task to open its PR"
+	case t.PR() == "":
+		return t.ID() + " has no PR"
+	}
+	return ""
+}
+
+func (m *liveStatus) openPR(t Task) tea.Cmd {
+	open := m.feed.openPR
+	return func() tea.Msg { return prOpened{t, open(t.PR())} }
+}
+
+func (m *liveStatus) refusesNote(t *Task) string {
+	switch {
+	case t == nil:
+		return "put the cursor on a task to send its worker a note"
+	case !t.Dispatched():
+		return t.ID() + " has no worker: it hasn't been dispatched"
+	case t.Status().Finished():
+		return t.ID() + " is " + string(t.Status()) + ", so its worker is done"
+	case m.readOnlyOn != "":
+		return "this machine can only read: crew runs on " + m.readOnlyOn
+	}
+	return ""
+}
+
+// startNote opens a line to type a note to t's worker in.
+func (m *liveStatus) startNote(t Task) tea.Cmd {
+	input := textinput.New()
+	input.Prompt = "note to " + t.ID() + ": "
+	// In the terminal's own colours, like the rest of the view, with a cursor
+	// that doesn't blink.
+	input.SetStyles(textinput.Styles{})
+	m.note = &noteDraft{to: t, input: input}
+	m.note.input.SetWidth(m.noteWidth())
+	return m.note.input.Focus()
+}
+
+// noteWidth is how much of the note shows after its prompt: the rest of the
+// screen's width, less a column for the cursor.
+func (m *liveStatus) noteWidth() int {
+	return max(1, m.width-lipgloss.Width(m.note.input.Prompt)-1)
+}
+
+// typeNote takes a key or a paste while the user types a note. Every key goes
+// into the note, the view's own keys included, but for enter, which sends it,
+// esc, which drops it, and ctrl+c, which quits.
+func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "ctrl+c":
+			return tea.Quit
+		case "esc":
+			m.note = nil
+			return nil
+		case "enter":
+			return m.sendNote()
+		}
+	}
+	var cmd tea.Cmd
+	m.note.input, cmd = m.note.input.Update(msg)
+	return cmd
+}
+
+// sendNote sends the note the user typed, unless it's empty.
+func (m *liveStatus) sendNote() tea.Cmd {
+	to, text, send := m.note.to, strings.TrimSpace(m.note.input.Value()), m.feed.sendNote
+	m.note = nil
+	if text == "" {
+		return nil
+	}
+	m.said = "sending your note to " + to.ID() + "'s worker…"
+	return func() tea.Msg { return noteSent{to, send(to, text)} }
 }
 
 func (m *liveStatus) current() (shownLine, bool) {
@@ -356,8 +552,23 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 	return open && len(l.kids) > 0
 }
 
-// bodyHeight is how many lines of the report fit on screen, above the bar.
-func (m *liveStatus) bodyHeight() int { return max(1, m.height-1) }
+// bodyHeight is how many lines of the report fit on screen, above the bar and
+// the line above it, when there's one.
+func (m *liveStatus) bodyHeight() int {
+	if m.footLine() != "" {
+		return max(1, m.height-2)
+	}
+	return max(1, m.height-1)
+}
+
+// footLine is the line above the bar: the note the user is typing or, when
+// they aren't, what an action did; "" when there's neither.
+func (m *liveStatus) footLine() string {
+	if m.note != nil {
+		return m.note.input.View()
+	}
+	return m.said
+}
 
 // scroll moves the screen as little as keeps the cursor on it.
 func (m *liveStatus) scroll() {
@@ -381,6 +592,9 @@ func (m *liveStatus) View() tea.View {
 		}
 		b.WriteString(line + "\n")
 	}
+	if foot := m.footLine(); foot != "" {
+		b.WriteString(fit(foot, m.width) + "\n")
+	}
 	b.WriteString(fit(m.bar(), m.width))
 	v := tea.NewView(b.String())
 	v.AltScreen = true
@@ -401,7 +615,8 @@ func (l shownLine) text() string {
 	return l.statusLine.text(strings.Repeat("  ", l.depth)+marker+" ", idColumn+2)
 }
 
-// bar is the line at the bottom: how fresh the report is, and the keys.
+// bar is the line at the bottom: how fresh the report is, and the keys, with
+// the actions the line under the cursor takes.
 func (m *liveStatus) bar() string {
 	state := "loading…"
 	if m.lines != nil {
@@ -413,7 +628,17 @@ func (m *liveStatus) bar() string {
 	if m.settingsErr != nil {
 		state += ", on the settings crew started with: " + m.settingsErr.Error()
 	}
-	return state + "   ↑↓ move  ←→ fold  r refresh  q quit"
+	if m.note != nil {
+		return state + "   enter send  esc cancel"
+	}
+	keys := "↑↓ move  ←→ fold"
+	l, _ := m.current()
+	for _, a := range actions {
+		if a.refuses(m, l.task) == "" {
+			keys += "  " + a.key + " " + a.name
+		}
+	}
+	return state + "   " + keys + "  r refresh  q quit"
 }
 
 // fit cuts a line to the screen's width.

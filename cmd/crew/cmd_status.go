@@ -90,7 +90,8 @@ type statusLine struct {
 	head   string // what the line says; for a task or a goal, its ID
 	tail   string // a task's or goal's columns, lined up after its ID
 	kids   []statusLine
-	folded bool // the text shows only this line, which counts its kids
+	folded bool  // the text shows only this line, which counts its kids
+	task   *Task // the task the line is about; nil on every other line
 }
 
 // text is the line after the indent, with its columns, if any, starting after
@@ -375,7 +376,7 @@ func noNumber(taskRow) string { return "" }
 // rowLines is a task's line, with the tasks stacked on it under it. before is
 // what goes before its ID: its group's number column, or └ for a stacked task.
 func rowLines(r taskRow, before string) statusLine {
-	l := statusLine{key: "task " + r.Task.Path, head: before + r.Task.ID(), tail: rowColumns(r)}
+	l := statusLine{key: "task " + r.Task.Path, head: before + r.Task.ID(), tail: rowColumns(r), task: &r.Task}
 	for _, k := range r.Kids {
 		l.kids = append(l.kids, rowLines(k, "└ "))
 	}
