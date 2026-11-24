@@ -674,6 +674,32 @@ func TestLiveStatusKeepsANoteCrewDidntSend(t *testing.T) {
 	}
 }
 
+func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	run.err = errors.New("p is paused; 'crew resume --project p' lets its work go on")
+	press(m, "n")
+	typeText(m, "the tests first")
+	sending := press(m, "enter")
+
+	if got := offered(m); got != "o open PR" {
+		t.Errorf("while a note to 016-both is on its way, the bar offers %q", got)
+	}
+	press(m, "n")
+	if m.note != nil {
+		t.Fatal("n started a second note to 016-both while one was on its way")
+	}
+	if got, want := footLineOnScreen(m), "your note to 016-both's worker is still on its way"; got != want {
+		t.Errorf("n says %q, want %q", got, want)
+	}
+
+	finish(t, m, sending)
+	press(m, "n")
+	if got := m.note.input.Value(); got != "the tests first" {
+		t.Errorf("once crew refuses the note, n starts with %q", got)
+	}
+}
+
 // TestLiveStatusGivesTheNoteWhatItsCommandsSendBack presses ctrl+v, which has
 // the note read the clipboard. With no clipboard tool on PATH, the read fails,
 // and the note has the error.
