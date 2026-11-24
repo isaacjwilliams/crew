@@ -143,6 +143,14 @@ func (c *Crew) followup(t Task, with followupWith) error {
 		why = "its last session only ran a restack"
 	case !with.fresh:
 		why = coldResume(t.Get("worker_session"), time.Now())
+		if why == "" {
+			break
+		}
+		// A resume closes the worker's process first, and so does the fresh
+		// worker that takes its place: two would work in one worktree.
+		if job := c.closeSession(t.Get("worker_session")); job != "" {
+			return fail("job %s is still running, so crew sent it nothing: a fresh worker started now would work beside it", job)
+		}
 	}
 	l, err := c.relaunch(start, t.Doc, wt, prompt, pickUpPrompt(t, p.Name, wt, newRound), with.fresh || why != "")
 	if err != nil {

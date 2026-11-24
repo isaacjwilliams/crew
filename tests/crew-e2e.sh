@@ -710,6 +710,18 @@ out=$(followup1 "its subagent asked just now")
 check "a worker's subagents' requests don't count: a cold worker whose subagent made a request just now starts fresh" \
   '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* ]]'
 rm -rf "$HOME/.claude/projects/stub/$s" "$HOME/.claude/projects/stub/$s.jsonl"
+# A fresh worker takes the cold one's place only once its process has closed, as a resume would.
+s=$(crew get 1 worker_session); job=$(crew get 1 worker_job); request "$s" 540 143000; cp "$HOME/agents.json" "$HOME/agents.was"
+setstate "done" 4242; touch "$HOME/stop-noop"; n=$(launches)
+out=$(crew followup 1 --note "its process won't close" 2>&1); code=$?
+check "a followup to a cold worker whose process won't close sends nothing and starts no worker beside it" \
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh worker started now would work beside it"* && $(launches) == "$n" && $(crew get 1 worker_session) == "$s" && $(tail -1 "$F1") != *"won'"'"'t close"* ]]'
+rm -f "$HOME/stop-noop"; setstate "done" null
+jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+out=$(crew followup 1 --note "busy again" 2>&1); code=$?
+check "a followup to a cold worker that is busy again by the time crew would replace it sends nothing and starts no worker beside it" \
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(launches) == "$n" && $(crew get 1 worker_session) == "$s" ]]'
+rm -f "$HOME/agents-next" "$HOME/.claude/projects/stub/$s.jsonl"; mv "$HOME/agents.was" "$HOME/agents.json"
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.

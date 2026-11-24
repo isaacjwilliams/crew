@@ -333,7 +333,8 @@ you review on GitHub → tell the lead (or run it yourself):
                          #   → fresh worker instead, "(fresh: <why>)" in the log line and the output
                          # its last request (its transcript's last reply of its own, not a subagent's) was over an hour ago
                          #   with 100k tokens of context or more (coldResume) → fresh worker, "(fresh: idle 9h, with 143k
-                         #   tokens of context)": resuming would write that whole context to the cache again
+                         #   tokens of context)": resuming would write that whole context to the cache again; its process
+                         #   is closed first, as for a resume, and one that's busy again or won't close → refuse, send nothing
                          # resume: claude --resume <worker_session> --bg "<prompt>" in the worktree, with no launch flags:
                          #   the session keeps its own agent, permission mode, settings and --add-dir, and
                          #   passing any of them again makes Claude Code start a copy instead, as does an open process
