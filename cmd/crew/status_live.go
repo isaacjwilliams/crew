@@ -88,7 +88,7 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 
 // browsePR opens a PR in the browser, with gh's output kept off the screen. A
 // browser that gh starts may hold on to gh's output, so browsePR stops waiting
-// for it a second after gh ends.
+// for it a second after gh ends. When gh fails, its last line says why.
 func browsePR(url string) error {
 	var out bytes.Buffer
 	cmd := exec.Command("gh", "pr", "view", url, "--web")
@@ -173,14 +173,12 @@ type liveStatus struct {
 	top           int         // the first line of shown on the screen
 	width, height int
 
-	// asking is the path of the task whose worker crew is being asked about
-	// taking a note, before the user writes it (askNote).
-	asking string
-	note   *noteDraft // the note the user is typing, if they are
-	// held is the notes the user finished that crew hasn't sent, by their
-	// task's path: one on its way, or one crew refused, for n on the task to
-	// bring back.
-	held map[string]heldNote
+	// A note goes: n asks crew whether the worker takes one (asking), the
+	// user types it (note), enter hands it to followup (held, sending), and
+	// then it's gone, or held again, unsent, for n on its task to bring back.
+	asking string              // the path of the task crew is being asked about
+	note   *noteDraft          // the note the user is typing, if they are
+	held   map[string]heldNote // the notes crew hasn't sent, by task path
 	// quitting: the user quit while a note was on its way, so the view quits
 	// once it's sent (quit).
 	quitting bool
@@ -200,6 +198,7 @@ type heldNote struct {
 }
 
 // action is something the user can do to the task under the cursor, by its key.
+// The keys and the bar both read actions, so the bar offers what a key does.
 type action struct {
 	key  string
 	name string // what the bar calls it
@@ -355,7 +354,7 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		m.said = ""
 		return m.startNote(msg.to)
 	case noteSent:
-		m.noteSent(msg)
+		m.finishNote(msg)
 		if m.quitting && !m.sendingNote() {
 			return tea.Quit
 		}
@@ -465,10 +464,10 @@ func (m *liveStatus) openPR(t Task) tea.Cmd {
 	return func() tea.Msg { return prOpened{t, open(t.PR())} }
 }
 
-// refusesNote says why the line takes no note: it isn't a task's, the task has
-// no worker for followup to send one to, in followup's own words, or a note to
-// it is on its way already. Whether its worker takes one now is crew's to say
-// when the user asks for it (askNote).
+// refusesNote says why the line takes no note: it isn't a task's, a note to
+// its task is on its way already, or the task has no worker (noWorker).
+// Whether the worker takes a note now is crew's to say when the user asks for
+// one (askNote).
 func (m *liveStatus) refusesNote(r *taskRow) string {
 	switch {
 	case r == nil:
@@ -554,7 +553,8 @@ func (m *liveStatus) sendingNote() bool {
 	return false
 }
 
-// own has what cmd sends back come to this draft only.
+// own has what cmd sends back come to this draft only, so a paste started in a
+// draft the user has since cancelled doesn't land in the next one.
 func (d *noteDraft) own(cmd tea.Cmd) tea.Cmd {
 	if cmd == nil {
 		return nil
@@ -577,10 +577,10 @@ func (m *liveStatus) sendNote() tea.Cmd {
 	}
 }
 
-// noteSent says what became of a note, with what crew warned about on the way.
+// finishNote says what became of a note, with what crew warned about on the way.
 // A note crew didn't send waits for n on its task to bring it back. A session
 // claude started that crew couldn't record has the note, so it isn't kept.
-func (m *liveStatus) noteSent(msg noteSent) {
+func (m *liveStatus) finishNote(msg noteSent) {
 	delete(m.held, msg.to.Path)
 	to := msg.to.ID()
 	said, more := "", msg.warnings
