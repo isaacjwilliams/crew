@@ -367,11 +367,12 @@ func (c *Crew) stopJobs(jobs []string) []string {
 	return open
 }
 
-// closeSession stops a session's process, if it's open and idle, so that a resume
-// continues the session in place: resuming a session whose process is open starts
-// a copy of it ("already running in the background"). A background session keeps
-// its process open for about an hour after its turn ends. It returns the job whose
-// process stays open, and then nothing should resume the session.
+// closeSession stops a session's process, if it's open and idle, before
+// launchSession starts another for its file. Resuming a session whose process is
+// open starts a copy of it ("already running in the background"), and a fresh
+// session would work beside it. A background session keeps its process open for
+// about an hour after its turn ends. It returns the job whose process stays open,
+// and then nothing should be launched in its place.
 func (c *Crew) closeSession(session string) (open string) {
 	for _, a := range c.agents() {
 		if a.SessionID != session || !a.open() {
@@ -523,19 +524,27 @@ var (
 // (agent, model, effort, permission mode, settings, --add-dir), and passing any
 // launch flag again makes Claude Code start a copy under a new session instead
 // of continuing this one. A fresh session takes the one it replaces out of agent
-// view once it has started. Both refresh the project's MCP config first (refreshMCPConfig).
+// view once it has started. Both refresh the project's MCP config first
+// (refreshMCPConfig), and close the recorded session's process (closeSession).
 func (c *Crew) launchSession(start launcher, d Doc, wt, prompt string, resume bool) (launch, error) {
 	mcp, err := c.refreshMCPConfig(start.p)
 	if err != nil {
 		return launch{}, err
 	}
 	session := d.Get(start.prefix + "_session")
+	// A process that's still open would make Claude Code start a copy of the
+	// session it resumes, and would work beside a fresh session in the same directory.
+	if session != "" {
+		if job := c.closeSession(session); job != "" {
+			clash := "a fresh session started now would work beside it"
+			if resume {
+				clash = "resuming its session now would start a copy of it"
+			}
+			return launch{}, fail("job %s is still running, so crew sent it nothing: %s. Stop it in claude agents, then try again", job, clash)
+		}
+	}
 	var cmd *exec.Cmd
 	if resume {
-		// A process that's still open would also make Claude Code start a copy.
-		if job := c.closeSession(session); job != "" {
-			return launch{}, fail("job %s is still running, so crew sent it nothing: resuming its session now would start a copy of it", job)
-		}
 		cmd = c.claude("--resume", session, "--bg", prompt)
 	} else {
 		// --add-dir takes more than one value, so it must never be the last flag

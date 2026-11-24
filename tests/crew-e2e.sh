@@ -594,8 +594,8 @@ check "followup continues a worker whose turn ended, though a shell it left runn
 rm -f "$HOME/.claude/projects/stub/$sess.jsonl"
 setstate "done" 4242; touch "$HOME/stop-noop"; n=$(resumes)
 out=$(crew followup 1 --note "stop didn't take" 2>&1); code=$?
-check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job" \
-  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
+check "a followup to an idle worker whose process won't close sends nothing, starts no copy, and says so, naming the job and how to get past it" \
+  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: resuming its session now would start a copy of it. Stop it in claude agents, then try again"* && $(resumes) == "$n" && $(crew get 1 worker_job) == "$job" && $(crew get 1 worker_session) == "$sess" && $(jq length "$HOME/agents.json") == "$rows" && $(tail -1 "$F1") != *"stop didn'"'"'t take"* ]]'
 rm -f "$HOME/stop-noop"
 setstate "done" null; touch "$HOME/reopen-on-resume"
 out=$(crew followup 1 --note "reopened" 2>&1)
@@ -710,22 +710,34 @@ out=$(followup1 "its subagent asked just now")
 check "a worker's subagents' requests don't count: a cold worker whose subagent made a request just now starts fresh" \
   '[[ $out == *"(fresh: idle 9h, with 143k tokens of context)"* ]]'
 rm -rf "$HOME/.claude/projects/stub/$s" "$HOME/.claude/projects/stub/$s.jsonl"
-# A fresh worker takes the cold one's place only once its process has closed, as a resume would.
-s=$(crew get 1 worker_session); job=$(crew get 1 worker_job); request "$s" 540 143000; cp "$HOME/agents.json" "$HOME/agents.was"
-setstate "done" 4242; touch "$HOME/stop-noop"; n=$(launches)
-out=$(crew followup 1 --note "its process won't close" 2>&1); code=$?
-check "a followup to a cold worker whose process won't close sends nothing and starts no worker beside it" \
-  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh worker started now would work beside it"* && $(launches) == "$n" && $(crew get 1 worker_session) == "$s" && $(tail -1 "$F1") != *"won'"'"'t close"* ]]'
-rm -f "$HOME/stop-noop"; setstate "done" null
-jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
-out=$(crew followup 1 --note "busy again" 2>&1); code=$?
-check "a followup to a cold worker that is busy again by the time crew would replace it sends nothing and starts no worker beside it" \
-  '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing"* && $(launches) == "$n" && $(crew get 1 worker_session) == "$s" ]]'
-rm -f "$HOME/agents-next"; mv "$HOME/agents.was" "$HOME/agents.json"
-crew set 1 effort xhigh; out=$(followup1 "cold, on a new effort")
+# refuses_beside TASK WHY FOLLOWUP-ARG...: a followup that starts TASK's worker fresh, for WHY,
+# replaces the old worker only once its process has closed, as a resume would. While that
+# process won't close, or is busy again by the time crew would replace it, crew sends nothing,
+# starts no worker beside it, and says how to get past it.
+refuses_beside() {
+  local task=$1 why=$2 f job s n log out code; shift 2
+  f=$(crew path "$task"); job=$(crew get "$task" worker_job); s=$(crew get "$task" worker_session)
+  cp "$HOME/agents.json" "$HOME/agents.was"; n=$(launches); log=$(section "$f" "## Log")
+  setstate "done" 4242; touch "$HOME/stop-noop"
+  out=$(crew followup "$task" "$@" 2>&1); code=$?
+  check "a followup that starts a worker fresh ($why) sends nothing while the old one's process won't close, starts no worker beside it, and says how to get past it" \
+    '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it. Stop it in claude agents, then try again"* && $(launches) == "$n" && $(crew get "$task" worker_session) == "$s" && $(section "$f" "## Log") == "$log" ]]'
+  rm -f "$HOME/stop-noop"; setstate "done" null
+  jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
+  out=$(crew followup "$task" "$@" 2>&1); code=$?
+  check "a followup that starts a worker fresh ($why) sends nothing to one busy again by the time crew would replace it, and starts no worker beside it" \
+    '((code == 1)) && [[ $out == *"job $job is still running, so crew sent it nothing: a fresh session started now would work beside it"* && $(launches) == "$n" && $(crew get "$task" worker_session) == "$s" && $(section "$f" "## Log") == "$log" ]]'
+  rm -f "$HOME/agents-next"; mv "$HOME/agents.was" "$HOME/agents.json"
+}
+s=$(crew get 1 worker_session); request "$s" 540 143000
+refuses_beside 1 "idle over an hour with a big context" --note "a cold worker"
+crew set 1 effort xhigh
+refuses_beside 1 "its effort changed" --note "a new effort"
+out=$(followup1 "cold, on a new effort")
 check "a cold worker whose effort changed too starts fresh, and the Log says its effort changed" \
   '[[ $out == *"(fresh: its effort changed from the default to xhigh)"* && $(tail -1 "$F1") == *"(fresh: its effort changed from the default to xhigh)"* ]]'
 crew set 1 effort ""; followup1 "back to the default" >/dev/null; rm -f "$HOME/.claude/projects/stub/$s.jsonl"
+refuses_beside 1 "--fresh" --fresh --note "start afresh"
 row1() { crew status | grep "^  001-saved-search-filters "; }
 # A task's auto_review: the lead turns its automated review off, and the worker reads
 # how many reviews it may run from crew config --task.
@@ -1036,6 +1048,7 @@ check "status shows the restack a working task needs, and no merge check" \
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
+refuses_beside 10 "after a restack" --note "carry on"
 s10=$(crew get 10 worker_session); out=$(crew followup 10 --note "carry on")
 check "the next followup after a restack starts afresh on the task's model, the default here, and at its effort, and says why" \
   '[[ $(last_launch) == "claude --name "*"--agent implementer"* && $(last_launch) != *--model* && $(last_launch) == *" --effort medium "* && $(crew get 10 worker_effort) == medium && -z $(crew get 10 worker_model) && $(crew get 10 worker_session) != "$s10" && $out == *"(fresh: its last session only ran a restack)" ]]'
