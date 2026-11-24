@@ -198,7 +198,7 @@ crew codex <review root> <briefing dir>/codex-prompt-0.md <briefing dir>/codex-a
 Make that the whole command: no `cd` (every path is absolute), variables, redirects, heredocs or `;`/`&&` chains, and
 no other command in the same call. The `Bash(crew *)` rule approves a lone `crew` command without asking the
 permission classifier; anything added to it can send the call there, and the classifier may deny it. Don't wrap the
-launch to capture its output or exit status: the notice that tells you the command finished carries both.
+launch to capture its output or exit status: the completion notice carries both.
 
 `crew codex` is the only way to run Codex: it keeps every run read-only, rounds included. Its report lands in
 `<briefing dir>/codex-answer-0.md`.
@@ -222,7 +222,7 @@ exactly as crew gives it:
 Never work out a cost yourself, from a transcript or a notice. When crew gives none (`crew review-cost` refuses, or
 there's no `.cost` file), the cost is `not reported: <why>`.
 
-A reviewer that fails, stalls or returns no report hasn't reported. For Codex, read the finished command's notice: exit
+A reviewer that fails, stalls or returns no report hasn't reported. For Codex, read the completion notice: exit
 status 124 means it wrote nothing for 15 minutes and was stopped; any other non-zero status is a failure, and the
 output says why. A zero status with an empty `<out prefix>.md` is a failure too. Note what happened for the
 record (step 8) and carry on with the reviewer that did report. Never invent what a review would have said. If neither
