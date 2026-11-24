@@ -218,6 +218,7 @@ check "crew codex takes no subcommand: a stray argument is refused" '! crew code
 touch "$HOME/codex-fail"
 out=$(crew codex "$SB/webapp" "$SB/rev/prompt.md" "$SB/rev/answer-0" 2>&1); st=$?
 check "crew codex passes on a failing codex's status" '((st == 3)) && [[ $out == *"codex exited with status 3"* ]]'
+check "a Codex run that fails leaves its cost file, saying its tokens were not reported" '[[ $(cat "$SB/rev/answer-0.cost") == "tokens not reported; "* ]]'
 check "a Codex run that ends before its turn completes still reports its time, and says its tokens weren't reported" \
   '[[ $out == *"cost: tokens not reported; "*"s; gpt-6-astra at xhigh effort"* ]]'
 rm "$HOME/codex-fail"
