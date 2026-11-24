@@ -68,14 +68,14 @@ func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 	writeTranscript(t, dir, "-crew-lead/s2.jsonl",
 		assistantLine("msg_1", opus, costsDay(t, "2026-11-18 10:00"), 0, `{"type":"text"}`))
 
-	ts, err := scanTranscripts(dir, map[string]string{"-crew-lead": stepLead})
+	ts, err := scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ts.charges) != 5 || ts.unread != 1 {
 		t.Errorf("got %d charges and %d lines unread; want msg_1 and msg_3 to msg_6 charged, and the cut-off line unread", len(ts.charges), ts.unread)
 	}
-	r := costsIn(ts, from, to)
+	r := costsIn(ts, nil, nil, from, to)
 	if r.total != 60 || r.steps[stepLead] != 60 {
 		t.Errorf("total = $%v, lead = $%v; want $60 for msg_1, msg_4 and msg_5", r.total, r.steps[stepLead])
 	}
@@ -101,11 +101,11 @@ func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 
 	at := costsDay(t, "2026-11-18 10:00")
 	charges := []*charge{
-		{stepLead, &message{"claude-opus-5-5", at, u}},
-		{stepLead, &message{"claude-haiku-5-5", at, u}},
-		{stepLead, &message{"claude-mystery-1", at, u}},
+		{owner{step: stepLead}, &message{"claude-opus-5-5", at, u}},
+		{owner{step: stepLead}, &message{"claude-haiku-5-5", at, u}},
+		{owner{step: stepLead}, &message{"claude-mystery-1", at, u}},
 	}
-	r := costsIn(transcripts{charges: charges}, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
+	r := costsIn(transcripts{charges: charges}, nil, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
 	var out strings.Builder
 	r.print(&out)
 	for _, want := range []string{
@@ -122,9 +122,10 @@ func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 // A subagent is charged to its step: in a task's worktree, /simplify's and
 // /security-review's agents to theirs, crew's review agents to theirs, even
 // when the worker starts them straight after a skill's, and the worker's own
-// to a step named by the agent, whatever it was asked to do. A brief review is
-// its own step, whoever ran it, and a lead's or goal lead's other agents are
-// charged to a step for them.
+// to a step named by the agent, whatever it was asked to do, and all of them
+// to the task. A brief review is its own step, charged to the task whose file
+// it was given, whoever ran it, and a lead's or goal lead's other agents are
+// charged to a step for them and to no task.
 func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 	dir := t.TempDir()
 	at := costsDay(t, "2026-11-18 10:00")
@@ -171,45 +172,47 @@ func TestCostsChargeEachAgentToItsStep(t *testing.T) {
 	subagent(task, "reviewer", "reviewer", "t10", "Scope: the PR.", 16)
 	subagent(task, "explore", "Explore", "t11", "Find it.", 17)
 	subagent(task, "unrecorded", "", "", "Do it.", 18)
-	subagent("-crew-lead", "brief", "brief-reviewer", "t12", "Review /home/u/crew/projects/p/tasks/001-a.md.", 20)
+	subagent("-crew-lead", "brief", "brief-reviewer", "t12", "/home/u/crew/projects/p/tasks/001-a.md", 20)
 	subagent("-crew-lead", "helper", "general-purpose", "t13", "Look at /home/u/crew/projects/p/tasks/001-a.md.", 21)
 	subagent("-work-p-_goal-g", "helper", "Explore", "t16", "Look around.", 25)
 	subagent("-work-p-_goal-g", "plan", "plan-reviewer", "t14", "Review /home/v/crew/projects/p/tasks/002-b.md.", 22)
 	subagent("-home-u-Code-elsewhere", "reviewer", "reviewer", "t15", "Review it.", 23)
+	subagent("-crew-lead", "unnamed-brief", "brief-reviewer", "t17", "Review the brief I pasted.", 26)
 
-	ts, err := scanTranscripts(dir, map[string]string{
-		task:              stepWorker,
-		"-crew-lead":      stepLead,
-		"-work-p-_goal-g": stepGoalLead,
+	ts, err := scanTranscripts(dir, map[string]owner{
+		task:              {stepWorker, "p/001-a"},
+		"-crew-lead":      {step: stepLead},
+		"-work-p-_goal-g": {step: stepGoalLead},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[int]string{}
+	got := map[int]owner{}
 	for _, c := range ts.charges {
-		got[c.usage.Output] = c.step
+		got[c.usage.Output] = c.owner
 	}
-	for output, want := range map[int]string{
-		1:  stepWorker,
-		10: "general-purpose",
-		11: stepExhale,
-		12: stepExhale,
-		13: "general-purpose",
-		14: stepSecurityReview,
-		15: stepPrePRReview,
-		16: stepAutomatedReview,
-		17: "Explore",
-		18: "unnamed agent",
-		19: "test-review",
-		20: stepBriefReview,
-		21: stepLeadAgents,
-		22: stepBriefReview,
-		23: stepOther,
-		24: stepExhale,
-		25: stepGoalLeadAgents,
+	for output, want := range map[int]owner{
+		1:  {stepWorker, "p/001-a"},
+		10: {"general-purpose", "p/001-a"},
+		11: {stepExhale, "p/001-a"},
+		12: {stepExhale, "p/001-a"},
+		13: {"general-purpose", "p/001-a"},
+		14: {stepSecurityReview, "p/001-a"},
+		15: {stepPrePRReview, "p/001-a"},
+		16: {stepAutomatedReview, "p/001-a"},
+		17: {"Explore", "p/001-a"},
+		18: {"unnamed agent", "p/001-a"},
+		19: {"test-review", "p/001-a"},
+		20: {stepBriefReview, "p/001-a"},
+		21: {step: stepLeadAgents},
+		22: {stepBriefReview, "p/002-b"},
+		23: {step: stepOther},
+		24: {stepExhale, "p/001-a"},
+		25: {step: stepGoalLeadAgents},
+		26: {step: stepBriefReview},
 	} {
 		if got[output] != want {
-			t.Errorf("the message with %d output tokens is charged to %q; want %q", output, got[output], want)
+			t.Errorf("the message with %d output tokens is charged to %+v; want %+v", output, got[output], want)
 		}
 	}
 }
@@ -250,7 +253,7 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ts, err := scanTranscripts(dir, map[string]string{"-crew-lead": stepLead})
+	ts, err := scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +270,7 @@ func TestCostsAreCompleteFromTheOldestSessionsLastWrite(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "-crew-lead", "running.jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	if ts, err = scanTranscripts(dir, map[string]string{"-crew-lead": stepLead}); err != nil {
+	if ts, err = scanTranscripts(dir, map[string]owner{"-crew-lead": {step: stepLead}}); err != nil {
 		t.Fatal(err)
 	}
 	if ts.completeFrom.Before(began) {
@@ -285,11 +288,273 @@ func TestCostsSayFromWhenTheTranscriptsAreComplete(t *testing.T) {
 		want bool
 	}{{"2026-11-09", true}, {"2026-11-11", false}} {
 		var out strings.Builder
-		costsIn(ts, costsDay(t, c.from+" 00:00"), costsDay(t, "2026-11-15 00:00")).print(&out)
+		costsIn(ts, nil, nil, costsDay(t, c.from+" 00:00"), costsDay(t, "2026-11-15 00:00")).print(&out)
 		const note = "This machine's transcripts are complete only from 2026-11-10 09:00: older sessions may have been deleted.\n"
 		if got := strings.Contains(out.String(), note); got != c.want {
 			t.Errorf("from %s: report says the transcripts are incomplete = %v; want %v:\n%s", c.from, got, c.want, out.String())
 		}
+	}
+}
+
+// finishedTask is a task that was created and merged at the local times given,
+// as "YYYY-MM-DD HH:MM".
+func finishedTask(t *testing.T, id, created, merged string) Task {
+	t.Helper()
+	return taskFile(t, id, "---\nstatus: merged\ncreated: "+costsDay(t, created).Format(time.RFC3339)+
+		"\n---\n## Log\n- "+merged+" — status → merged\n")
+}
+
+// dollarsLine is an assistant line from a session run by claude whose message
+// cost the dollars given at Opus's rates.
+func dollarsLine(id string, at time.Time, dollars float64, block string) string {
+	return assistantLine(id, "claude-opus-5-5", at, int(dollars*50_000), block)
+}
+
+// A step's median counts all a task spent on it, before the range too, over
+// the tasks that merged or were done in the range and ran the step. A brief
+// review counts toward its task, whichever lead ran it, and a step a task
+// didn't run leaves it out of that step's median only.
+func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
+	dir := t.TempDir()
+	text := `{"type":"text"}`
+	at := func(s string) time.Time { return costsDay(t, s) }
+	// a spent $20 before the range and $20 in it, ran /simplify for $3 and had a
+	// brief review from the lead for $1: $44 in all. b spent $60 and had a brief
+	// review from a goal lead for $2: $62. Both brief reviews were before the
+	// range, so their step has a median but nothing spent in it.
+	writeTranscript(t, dir, "-work-p-a/s.jsonl",
+		dollarsLine("a1", at("2026-11-12 09:00"), 20, text),
+		dollarsLine("a2", at("2026-11-17 09:00"), 20, toolUseBlock("t1", "Skill", `{"skill":"simplify"}`)),
+		dollarsLine("a3", at("2026-11-17 09:05"), 0, toolUseBlock("simplify-1", "Agent", `{}`)))
+	writeTranscript(t, dir, "-work-p-a/s/subagents/agent-simplify-1.meta.json", `{"agentType":"general-purpose","isBuiltIn":true,"toolUseId":"simplify-1"}`)
+	writeTranscript(t, dir, "-work-p-a/s/subagents/agent-simplify-1.jsonl", dollarsLine("a4", at("2026-11-17 09:06"), 3, text))
+	writeTranscript(t, dir, "-work-p-b/s.jsonl", dollarsLine("b1", at("2026-11-20 09:00"), 60, text))
+	brief := func(folder, task, id string, sent time.Time, dollars float64) {
+		path := folder + "/s/subagents/agent-" + id
+		writeTranscript(t, dir, path+".meta.json", `{"agentType":"brief-reviewer","isBuiltIn":false}`)
+		writeTranscript(t, dir, path+".jsonl",
+			fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"/home/u/crew/projects/p/tasks/%s.md"}}`+"\n", task),
+			dollarsLine(id, sent, dollars, text))
+	}
+	writeTranscript(t, dir, "-crew-lead/s.jsonl", dollarsLine("lead", at("2026-11-18 09:00"), 5, text))
+	brief("-crew-lead", "a", "brief-a", at("2026-11-10 09:00"), 1)
+	writeTranscript(t, dir, "-work-p-_goal-g/s.jsonl")
+	brief("-work-p-_goal-g", "b", "brief-b", at("2026-11-14 09:00"), 2)
+	// Tasks that finished outside the range, or haven't, count in the totals only.
+	writeTranscript(t, dir, "-work-p-before/s.jsonl", dollarsLine("before", at("2026-11-15 09:00"), 100, text))
+	writeTranscript(t, dir, "-work-p-after/s.jsonl", dollarsLine("after", at("2026-11-20 09:00"), 100, text))
+	writeTranscript(t, dir, "-work-p-open/s.jsonl", dollarsLine("open", at("2026-11-20 09:00"), 100, text))
+	tasks := map[string]Task{
+		"p/a":      finishedTask(t, "a", "2026-11-10 08:00", "2026-11-18 12:00"),
+		"p/b":      finishedTask(t, "b", "2026-11-14 09:00", "2026-11-22 23:59"),
+		"p/before": finishedTask(t, "before", "2026-11-10 09:00", "2026-11-15 23:59"),
+		"p/after":  finishedTask(t, "after", "2026-11-14 09:00", "2026-11-23 00:00"),
+		"p/open":   taskFile(t, "open", "---\nstatus: pr-open\ncreated: 2026-11-15T09:00:00Z\n---\n## Log\n"),
+	}
+	owners := map[string]owner{"-crew-lead": {step: stepLead}, "-work-p-_goal-g": {step: stepGoalLead}}
+	for id := range tasks {
+		owners["-work-"+strings.Replace(id, "/", "-", 1)] = owner{stepWorker, id}
+	}
+	ts, err := scanTranscripts(dir, owners)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts.completeFrom = at("2026-11-01 09:00") // the sessions were written just now
+
+	var out strings.Builder
+	costsIn(ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	want := `Spend from 2026-11-16 to 2026-11-22, at API rates, from this machine's transcripts:
+
+                                          median
+  step             total  share  tasks  per task
+  Brief review     $0.00     0%      2     $1.50
+  Worker sessions   $280    97%      2       $50
+  Exhale           $3.00     1%      1     $3.00
+
+  Lead sessions    $5.00   1.7%
+
+  All               $288   100%      2       $53
+
+A step's median is over the tasks that merged or were done in the range and ran that step. It counts all a task spent, before the range too.
+It counts only tasks this machine's transcripts hold whole: those begun since 2026-11-01 09:00, from when they're complete, and not under way while another machine ran the crew.
+
+Anthropic's API rates`
+	if got := out.String(); !strings.HasPrefix(got, want) {
+		t.Errorf("report:\n%s\nwant it to start:\n%s", got, want)
+	}
+}
+
+// A task whose spend this machine's transcripts may not hold whole is left out
+// of every median, and counted. Claude Code deletes a session once it has gone
+// unwritten for a while, so the transcripts are complete from when the oldest
+// session it would delete was last written, and a task begun before then may
+// have lost sessions. An agent's transcript goes with its session, and Claude
+// Code keeps an empty transcript, and a session started or last continued in
+// Claude Desktop, at any age, so none of those may date the transcripts
+// earlier: each case here would let the early task in if it did.
+func TestCostsLeaveOutTasksBegunBeforeTheTranscriptsAreComplete(t *testing.T) {
+	text := `{"type":"text"}`
+	desktopPrompt := `{"type":"user","entrypoint":"claude-desktop","message":{"role":"user","content":"Go on."}}` + "\n"
+	for _, c := range []struct {
+		name  string
+		older map[string][]string // transcripts last written 2026-11-05, by path
+	}{
+		{"its earlier sessions were deleted by age", nil},
+		{"an agent's transcript is older than its session", map[string][]string{
+			"-crew-lead/oldest/subagents/agent-a.jsonl": {dollarsLine("agent", costsDay(t, "2026-11-05 09:00"), 1, text)},
+		}},
+		{"a session started in Claude Desktop", map[string][]string{
+			"-crew-lead/desktop.jsonl": {desktopPrompt, dollarsLine("desktop", costsDay(t, "2026-11-05 09:00"), 1, text)},
+		}},
+		{"a session last continued in Claude Desktop", map[string][]string{
+			"-crew-lead/desktop.jsonl": {dollarsLine("desktop", costsDay(t, "2026-11-05 09:00"), 1, text), desktopPrompt},
+		}},
+		{"an empty transcript", map[string][]string{"-crew-lead/empty.jsonl": nil}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			written := map[string]string{
+				"-crew-lead/oldest.jsonl": "2026-11-10 09:00",
+				"-work-p-whole/s.jsonl":   "2026-11-18 09:00",
+				"-work-p-early/s.jsonl":   "2026-11-18 09:00",
+			}
+			writeTranscript(t, dir, "-crew-lead/oldest.jsonl", dollarsLine("lead", costsDay(t, "2026-11-10 09:00"), 1, text))
+			writeTranscript(t, dir, "-work-p-whole/s.jsonl", dollarsLine("whole", costsDay(t, "2026-11-18 09:00"), 10, text))
+			writeTranscript(t, dir, "-work-p-early/s.jsonl", dollarsLine("early", costsDay(t, "2026-11-18 09:00"), 30, text))
+			for path, lines := range c.older {
+				writeTranscript(t, dir, path, lines...)
+				written[path] = "2026-11-05 09:00"
+			}
+			for path, at := range written {
+				if err := os.Chtimes(filepath.Join(dir, path), time.Time{}, costsDay(t, at)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ts, err := scanTranscripts(dir, map[string]owner{
+				"-crew-lead":    {step: stepLead},
+				"-work-p-whole": {stepWorker, "p/whole"},
+				"-work-p-early": {stepWorker, "p/early"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tasks := map[string]Task{
+				"p/whole": finishedTask(t, "whole", "2026-11-10 09:00", "2026-11-18 12:00"),
+				"p/early": finishedTask(t, "early", "2026-11-09 12:00", "2026-11-18 12:00"),
+			}
+			var out strings.Builder
+			costsIn(ts, tasks, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00")).print(&out)
+			for _, want := range []string{
+				"  All                $40   100%      1       $10\n",
+				"those begun since 2026-11-10 09:00, from when they're complete, and not under way while another machine ran the crew. Left out: 1 begun before then.\n",
+			} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("report doesn't say %q:\n%s", want, out.String())
+				}
+			}
+		})
+	}
+}
+
+// Another machine's sessions stay on it, so a task under way while another
+// machine ran the crew is left out of every median, and the report names the
+// machine. One whose time doesn't touch another machine's stays in.
+func TestCostsLeaveOutTasksUnderWayWhileAnotherMachineRanTheCrew(t *testing.T) {
+	at := func(s string) time.Time { return costsDay(t, s) }
+	spent := func(task string, dollars float64) *charge {
+		return &charge{owner{stepWorker, task}, &message{"claude-opus-5-5", at("2026-11-18 09:00"), claudeUsage{Output: int(dollars * 50_000)}}}
+	}
+	tasks := map[string]Task{
+		"p/whole":      finishedTask(t, "whole", "2026-11-13 10:00", "2026-11-18 12:00"),
+		"p/moved":      finishedTask(t, "moved", "2026-11-10 10:00", "2026-11-18 12:00"),
+		"p/also-moved": finishedTask(t, "also-moved", "2026-11-10 08:00", "2026-11-19 12:00"),
+		"p/desk":       finishedTask(t, "desk", "2026-11-13 08:00", "2026-11-20 12:00"),
+	}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		spent("p/whole", 10), spent("p/moved", 30), spent("p/also-moved", 30), spent("p/desk", 30),
+	}}
+	elsewhere := []tenure{
+		{"laptop", at("2026-11-10 09:30"), at("2026-11-10 12:00")},
+		{"desk", at("2026-11-12 09:00"), at("2026-11-13 09:00")},
+		{holder: "laptop", from: at("2026-11-25 09:00")},
+	}
+	var out strings.Builder
+	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	for _, want := range []string{
+		"  All               $100   100%      1       $10\n",
+		"Left out: 3 under way while desk or laptop ran the crew.\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report doesn't say %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A task with a message at a model there's no rate for has a cost nobody
+// knows, and one with nothing spent in the transcripts ran somewhere else, so
+// each is left out of every median, and counted.
+func TestCostsLeaveOutTasksWhoseCostIsUnknown(t *testing.T) {
+	at := func(s string) time.Time { return costsDay(t, s) }
+	spent := func(task, model string) *charge {
+		return &charge{owner{stepWorker, task}, &message{model, at("2026-11-18 09:00"), claudeUsage{Output: 500_000}}}
+	}
+	tasks := map[string]Task{
+		"p/rated":   finishedTask(t, "rated", "2026-11-13 10:00", "2026-11-18 12:00"),
+		"p/unrated": finishedTask(t, "unrated", "2026-11-13 10:00", "2026-11-18 12:00"),
+		"p/unspent": finishedTask(t, "unspent", "2026-11-13 10:00", "2026-11-18 12:00"),
+	}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		spent("p/rated", "claude-opus-5-5"), spent("p/unrated", "claude-opus-5-5"), spent("p/unrated", "claude-mystery-1"),
+	}}
+	var out strings.Builder
+	costsIn(ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	for _, want := range []string{
+		"  All                $20   100%      1       $10\n",
+		"Left out: 1 with a message there's no rate for and 1 with nothing spent in this machine's transcripts.\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report doesn't say %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A Log line's time is the clock of the machine that wrote it, with no zone.
+// Here, in New York, a task merged on a laptop in Los Angeles at 06:30 its
+// time, after the laptop took over at 04:00 there: 06:30 read in New York
+// would be before that.
+func TestCostsLeaveOutATaskThatFinishedOnAnotherMachinesClock(t *testing.T) {
+	local := time.Local
+	time.Local = time.FixedZone("EST", -5*60*60)
+	t.Cleanup(func() { time.Local = local })
+	at := func(s string) time.Time { return costsDay(t, s) }
+	tasks := map[string]Task{"p/west": finishedTask(t, "west", "2026-11-13 10:00", "2026-11-18 06:30")}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		{owner{stepWorker, "p/west"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
+	}}
+	elsewhere := []tenure{{holder: "laptop", from: time.Date(2026, 11, 18, 4, 0, 0, 0, time.FixedZone("PST", -8*60*60))}}
+	var out strings.Builder
+	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	if want := "Left out: 1 under way while laptop ran the crew.\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("report doesn't say %q:\n%s", want, out.String())
+	}
+}
+
+// Here, in New York, a task merged at 10:00, and a laptop in New York took
+// over at 12:00: the task finished before then, on either clock.
+func TestCostsKeepATaskThatFinishedBeforeAnotherMachineTookOver(t *testing.T) {
+	local := time.Local
+	time.Local = time.FixedZone("EST", -5*60*60)
+	t.Cleanup(func() { time.Local = local })
+	at := func(s string) time.Time { return costsDay(t, s) }
+	tasks := map[string]Task{"p/a": finishedTask(t, "a", "2026-11-13 10:00", "2026-11-18 10:00")}
+	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+		{owner{stepWorker, "p/a"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
+	}}
+	elsewhere := []tenure{{holder: "laptop", from: at("2026-11-18 12:00")}}
+	var out strings.Builder
+	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	if strings.Contains(out.String(), "Left out") {
+		t.Errorf("report leaves out a task that finished before the laptop took over:\n%s", out.String())
 	}
 }
 

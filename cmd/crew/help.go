@@ -168,9 +168,11 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew costs [--from YYYY-MM-DD] [--to YYYY-MM-DD]
                                    What each step of crew's process cost from the
                                    first day to the last, both included (default
-                                   the last 7 days), at API rates: its total and
-                                   its share of all spend. Reads this machine's
-                                   Claude Code transcripts, for every project
+                                   the last 7 days), at API rates: its total, its
+                                   share of all spend, and its median per task
+                                   over the tasks that finished then. Reads this
+                                   machine's Claude Code transcripts, for every
+                                   project
   crew sync [--quiet] [--all|--project P]
                                    Pull PR URLs/states from GitHub; mark merged tasks;
                                    raise to high the risk of tasks whose branch

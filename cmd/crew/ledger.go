@@ -108,10 +108,12 @@ type logEntry struct {
 }
 
 // LogEntries is the file's Log, oldest first: the lines Log wrote, read back.
-// A line that isn't one, such as one that continues a message, is skipped.
+// A line that isn't one, such as one that continues a message, is skipped. It
+// reads the lines as written, not the Log's Section: a message may quote a
+// comment's "<!--", which would hide every line after it.
 func (d Doc) LogEntries() []logEntry {
 	var entries []logEntry
-	for _, l := range strings.Split(d.Section("## Log"), "\n") {
+	for _, l := range sectionLines(d.lines(), "## Log") {
 		item, ok := strings.CutPrefix(l, "- ")
 		if !ok {
 			continue
@@ -134,11 +136,10 @@ func (e logEntry) status() (Status, bool) {
 // Section is a section's text, without HTML comments and blank lines.
 func (d Doc) Section(heading string) string { return section(d.lines(), heading) }
 
-// section is the text of the section of lines under heading, without HTML
-// comments and blank lines.
-func section(lines []string, heading string) string {
+// sectionLines is the section of lines under heading, as written.
+func sectionLines(lines []string, heading string) []string {
 	var out []string
-	on, inComment := false, false
+	on := false
 	for _, l := range lines {
 		if !on {
 			on = l == heading
@@ -150,6 +151,17 @@ func section(lines []string, heading string) string {
 		if strings.HasPrefix(l, "## ") {
 			break
 		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// section is the text of the section of lines under heading, without HTML
+// comments and blank lines.
+func section(lines []string, heading string) string {
+	var out []string
+	inComment := false
+	for _, l := range sectionLines(lines, heading) {
 		var b strings.Builder
 		for l != "" {
 			if inComment {

@@ -240,6 +240,8 @@ check "the lead lists what's still to learn and opens a spike for each approach,
   "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Set the objective\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'write their answers side by side under the item, tick it, and finish the brief from them' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no brief review' $A/lead.md"
 check "the goal lead opens and readies spikes without parking, and hears when one reports" \
   "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the brief review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a brief review' $A/lead.md"
+check "leads start a brief review with the task file's path alone, which crew costs reads to charge the review to its task" \
+  "grep -q 'Spawn the .brief-reviewer. subagent with the task file.s path and nothing else' $A/lead.md && grep -q 'spawning .brief-reviewer. with the task file.s path and nothing else' $A/goal-lead.md && grep -qF '/projects/([^/\\s]+)/tasks/([^/\\s]+)\\.md' <<<\"\$SRC\""
 check "crew tells the goal lead a spike reported in the words its workflow names" \
   "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
 # --- fixes: a defect live in production, proved by a failing test and traced to its cause

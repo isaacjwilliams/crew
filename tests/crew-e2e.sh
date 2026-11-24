@@ -2744,9 +2744,11 @@ check "without the project's clone, stats says it didn't check for reverts, and 
 # crew costs: each transcript folder is charged to the step the ledger gives it,
 # by the folder's name: the lead's, a task's worktree, a goal's checkout, the
 # gardener's and review-eval's, and any other folder is no part of crew's. A million output
-# tokens of Opus cost $20.
+# tokens of Opus cost $20. 001 merged in the range, begun after the transcripts
+# are complete, so its median counts it.
 WRS=$(crew config WORK_ROOT)/stats
 mkdir -p "$SP/goals" && cp "$L/templates/goal.md" "$SP/goals/001-costs-goal.md"
+sed -i 's/^created: .*/created: 2026-11-06T08:00:00Z/' "$SP/tasks/001-stats-one.md"
 crew commit "costs fixtures" >/dev/null
 costs_session() {  # dir sent output: a session in dir that sent one message, last written then
   local f
@@ -2765,6 +2767,8 @@ head=$(git -C "$L" rev-parse @); dirty=$(git -C "$L" status --porcelain)
 out=$(crew costs --from 2026-11-05 --to 2026-11-06 2>&1); st=$?; rows=$(tr -s ' ' <<<"$out")
 check "costs charges a task's worktree, the lead's, a goal's, the gardener's and review-eval's sessions to their steps, and any other folder's to other sessions" \
   '((st == 0)) && [[ $rows == *" Worker sessions \$10 50%"* && $rows == *" Lead sessions \$1.00 5%"* && $rows == *" Goal-lead sessions \$2.00 10%"* && $rows == *" Gardener \$3.00 15%"* && $rows == *" Review eval \$1.00 5%"* && $rows == *" Other Claude Code sessions \$3.00 15%"* && $rows == *" All \$20 100%"* ]]'
+check "costs gives a step's median per task, over the tasks that merged in the range" \
+  '[[ $rows == *" Worker sessions \$10 50% 1 \$10"* && $rows == *" All \$20 100% 1 \$10"* && $out == *"those begun since 2026-11-05 "* ]]'
 check "costs changes nothing in the home" '[[ $(git -C "$L" rev-parse @) == "$head" && $(git -C "$L" status --porcelain) == "$dirty" ]]'
 check "costs refuses a date it can't read, and a last day before the first" \
   '[[ $(crew costs --from 11/05 2>&1) == *"--from takes a date, YYYY-MM-DD, not '"'"'11/05'"'"'"* && $(crew costs --from 2026-11-06 --to 2026-11-05 2>&1) == *"--to 2026-11-05 is before --from 2026-11-06"* ]]'

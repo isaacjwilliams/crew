@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -78,8 +79,9 @@ func (r rate) dollars(u claudeUsage) float64 {
 // crew costs [--from YYYY-MM-DD] [--to YYYY-MM-DD]
 //
 // Prints what each step cost from the first day to the last, both included and
-// in local time: the last 7 days by default. It only reads, so it needs no lock
-// and runs on any machine, from the transcripts that machine has.
+// in local time (the last 7 days by default), and its median per task over the
+// tasks that finished then. It only reads, so it needs no lock and runs on any
+// machine, from the transcripts that machine has.
 func cmdCosts(c *Crew, args []string) error {
 	y, m, d := time.Now().Date()
 	to := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
@@ -102,40 +104,52 @@ func cmdCosts(c *Crew, args []string) error {
 	if to.Before(from) {
 		return fail("--to %s is before --from %s", to.Format("2006-01-02"), from.Format("2006-01-02"))
 	}
-	steps, err := c.transcriptSteps()
+	owners, tasks, err := c.transcriptOwners()
 	if err != nil {
 		return err
 	}
-	ts, err := scanTranscripts(claudeTranscripts(), steps)
+	ts, err := scanTranscripts(claudeTranscripts(), owners)
+	if err != nil {
+		return err
+	}
+	elsewhere, err := c.tenuresElsewhere()
 	if err != nil {
 		return err
 	}
 	if ts.unread > 0 {
 		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", ts.unread)
 	}
-	costsIn(ts, from, to).print(os.Stdout)
+	costsIn(ts, tasks, elsewhere, from, to).print(os.Stdout)
 	return nil
 }
 
-// transcriptSteps is the step each folder Claude Code keeps crew's transcripts
-// in is charged to. A folder not listed is no part of crew's.
-func (c *Crew) transcriptSteps() (map[string]string, error) {
+// owner is who a transcript folder's sessions are charged to: a step, and for a
+// task's worktree the task, as "<project>/<task ID>".
+type owner struct{ step, task string }
+
+// transcriptOwners is the owner of each folder Claude Code keeps crew's
+// transcripts in, and every task in the ledger, by the name its owner gives it.
+// A folder not listed is no part of crew's.
+func (c *Crew) transcriptOwners() (map[string]owner, map[string]Task, error) {
 	projects, err := c.ledgerProjects("")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	steps := map[string]string{transcriptFolder(c.path("lead")): stepLead}
+	owners := map[string]owner{transcriptFolder(c.path("lead")): {step: stepLead}}
+	tasks := map[string]Task{}
 	for _, p := range projects {
-		steps[transcriptFolder(gardenerCheckout(p))] = stepGardener
-		steps[transcriptFolder(evalCheckout(p))] = stepReviewEval
+		owners[transcriptFolder(gardenerCheckout(p))] = owner{step: stepGardener}
+		owners[transcriptFolder(evalCheckout(p))] = owner{step: stepReviewEval}
 		for _, g := range c.goals(p.Name) {
-			steps[transcriptFolder(goalCheckout(p, g))] = stepGoalLead
+			owners[transcriptFolder(goalCheckout(p, g))] = owner{step: stepGoalLead}
 		}
 		for _, t := range c.tasks(p.Name) {
-			steps[transcriptFolder(p.taskWorktree(t))] = stepWorker
+			id := p.Name + "/" + t.ID()
+			tasks[id] = t
+			owners[transcriptFolder(p.taskWorktree(t))] = owner{stepWorker, id}
 		}
 	}
-	return steps, nil
+	return owners, tasks, nil
 }
 
 // transcriptFolder is the folder Claude Code keeps the transcripts of sessions
@@ -171,9 +185,9 @@ func abs(n int64) int64 {
 	return n
 }
 
-// A charge is one API message, and the step it's charged to.
+// A charge is one API message, and the step and task it's charged to.
 type charge struct {
-	step string
+	owner
 	*message
 }
 
@@ -191,8 +205,8 @@ type transcripts struct {
 }
 
 // scanTranscripts charges every message in the transcripts under dir, each
-// once, to the step of its folder in steps.
-func scanTranscripts(dir string, steps map[string]string) (transcripts, error) {
+// once, to the owner of its folder in owners.
+func scanTranscripts(dir string, owners map[string]owner) (transcripts, error) {
 	s := costScan{transcripts: transcripts{completeFrom: time.Now()}}
 	folders, err := os.ReadDir(dir)
 	if err != nil {
@@ -202,11 +216,11 @@ func scanTranscripts(dir string, steps map[string]string) (transcripts, error) {
 		if !f.IsDir() {
 			continue
 		}
-		step, ok := steps[f.Name()]
+		o, ok := owners[f.Name()]
 		if !ok {
-			step = stepOther
+			o = owner{step: stepOther}
 		}
-		if err := s.folder(filepath.Join(dir, f.Name()), step); err != nil {
+		if err := s.folder(filepath.Join(dir, f.Name()), o); err != nil {
 			return transcripts{}, err
 		}
 	}
@@ -220,18 +234,18 @@ type costScan struct {
 	messages messages
 }
 
-// folder charges the sessions in a transcript folder to its step: its main
+// folder charges the sessions in a transcript folder to its owner o: its main
 // sessions, then their subagents. In a worker's folder, each subagent is
 // charged to its own step (subagentStep), which needs the main sessions read
 // first: they show which Agent calls a skill made.
-func (s *costScan) folder(dir, step string) error {
+func (s *costScan) folder(dir string, o owner) error {
 	skillAgents := map[string]string{} // the step of each Agent call a skill made, by the call's ID
 	mains, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, path := range mains {
 		var run skillRun
 		err := s.read(path, func(l transcriptLine) {
-			s.charge(step, l)
-			if step == stepWorker {
+			s.charge(o, l)
+			if o.step == stepWorker {
 				for _, u := range l.toolUses() {
 					run.follow(u, skillAgents)
 				}
@@ -246,18 +260,21 @@ func (s *costScan) folder(dir, step string) error {
 	}
 	agents, _ := filepath.Glob(filepath.Join(dir, "*", "subagents", "agent-*.jsonl"))
 	for _, path := range agents {
-		agentStep := subagentStep(path, step, skillAgents)
-		if err := s.read(path, func(l transcriptLine) { s.charge(agentStep, l) }); err != nil {
+		ao, err := subagentOwner(path, o, skillAgents)
+		if err != nil {
+			return err
+		}
+		if err := s.read(path, func(l transcriptLine) { s.charge(ao, l) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// charge charges the message on line l to step, unless it was charged already.
-func (s *costScan) charge(step string, l transcriptLine) {
+// charge charges the message on line l to o, unless it was charged already.
+func (s *costScan) charge(o owner, l transcriptLine) {
 	if m, isNew := s.messages.add(l); isNew {
-		s.charges = append(s.charges, &charge{step, m})
+		s.charges = append(s.charges, &charge{o, m})
 	}
 }
 
@@ -352,6 +369,41 @@ func (r *skillRun) follow(u toolUse, agents map[string]string) {
 	}
 }
 
+// subagentOwner is who the subagent whose transcript is at path is charged to,
+// when it ran in a folder owned by o: its step (subagentStep), and o's task. A
+// brief review is charged to the task whose file its prompt names instead,
+// wherever it ran: a lead or a goal lead gives it the file's path and nothing
+// else.
+func subagentOwner(path string, o owner, skillAgents map[string]string) (owner, error) {
+	step := subagentStep(path, o.step, skillAgents)
+	if step != stepBriefReview {
+		return owner{step, o.task}, nil
+	}
+	prompt, err := firstPrompt(path)
+	if err != nil {
+		return owner{}, err
+	}
+	if m := briefTask.FindStringSubmatch(prompt); m != nil {
+		return owner{step, m[1] + "/" + m[2]}, nil
+	}
+	return owner{step: step}, nil
+}
+
+// briefTask is the task file a brief reviewer's prompt names, under whichever
+// home it ran in: ".../projects/<project>/tasks/<task ID>.md".
+var briefTask = regexp.MustCompile(`/projects/([^/\s]+)/tasks/([^/\s]+)\.md`)
+
+// firstPrompt is the text of the first prompt in the transcript at path. Claude
+// Code writes tool results and its own notices as user lines too, but only a
+// prompt as plain text.
+func firstPrompt(path string) (string, error) {
+	var prompt string
+	_, err := scanLines(path, `"type":"user"`, func(l transcriptLine) bool {
+		return l.Type != "user" || json.Unmarshal(l.Message.Content, &prompt) != nil
+	})
+	return prompt, err
+}
+
 // subagentStep is the step the subagent whose transcript is at path is charged
 // to, when it ran in a folder charged to folderStep. A brief review is its own
 // step, wherever it ran. In a worker's folder, a built-in agent started in a
@@ -395,7 +447,8 @@ func subagentOf(path string) subagentMeta {
 	return meta
 }
 
-// costReport is what the steps cost over a range of days.
+// costReport is what the steps cost over a range of days, and what they cost
+// each task that finished in it.
 type costReport struct {
 	from, to     time.Time // the first and last day
 	completeFrom time.Time // from when this machine's transcripts hold every message
@@ -403,54 +456,184 @@ type costReport struct {
 	total        float64
 	unpriced     map[string]int // the tokens sent in the range of each model there's no rate for
 	rated        []string       // the models priced, for the rates the report gives
+	// What each task the medians count cost in each step it ran, and in all.
+	perTask    map[string][]float64
+	taskTotals []float64
+	leftOut    leftOut
+}
+
+// leftOut is the tasks that finished in the range but that the medians leave
+// out, by why.
+type leftOut struct {
+	begunEarly int      // begun before the transcripts are complete
+	underWay   int      // under way while another machine ran the crew
+	machines   []string // those other machines
+	unrated    int      // with a message there's no rate for
+	unspent    int      // with nothing spent in the transcripts: its sessions are somewhere else
 }
 
 // costsIn is the report on the transcripts from the first day to the last,
-// both included: it counts what was sent in the range.
-func costsIn(ts transcripts, from, to time.Time) costReport {
+// both included. Its totals count what was sent in the range. Its medians count
+// all that each of the wholeTasks spent, whenever it was sent.
+func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) costReport {
 	end := to.AddDate(0, 0, 1)
 	r := costReport{from: from, to: to, completeFrom: ts.completeFrom,
-		steps: map[string]float64{}, unpriced: map[string]int{}}
+		steps: map[string]float64{}, unpriced: map[string]int{}, perTask: map[string][]float64{}}
 	for _, c := range ts.charges {
 		if c.at.Before(from) || !c.at.Before(end) {
 			continue
 		}
-		rt, priced := apiRates[c.model]
-		if !priced {
+		if cost, ok := r.price(c); ok {
+			r.steps[c.step] += cost
+			r.total += cost
+		} else {
 			r.unpriced[c.model] += c.usage.total()
-			continue
 		}
-		if !slices.Contains(r.rated, c.model) {
-			r.rated = append(r.rated, c.model)
-		}
-		cost := rt.dollars(c.usage)
-		r.steps[c.step] += cost
-		r.total += cost
 	}
+	whole, leftOut := wholeTasks(tasks, elsewhere, ts.completeFrom, from, end)
+	for _, c := range ts.charges {
+		if spend := whole[c.task]; spend != nil {
+			if cost, ok := r.price(c); ok {
+				spend.steps[c.step] += cost
+			} else {
+				spend.unrated = true
+			}
+		}
+	}
+	for _, spend := range whole {
+		switch {
+		case spend.unrated:
+			leftOut.unrated++
+		case len(spend.steps) == 0:
+			leftOut.unspent++
+		default:
+			total := 0.0
+			for step, cost := range spend.steps {
+				r.perTask[step] = append(r.perTask[step], cost)
+				total += cost
+			}
+			r.taskTotals = append(r.taskTotals, total)
+		}
+	}
+	r.leftOut = leftOut
 	slices.Sort(r.rated)
 	return r
 }
 
-// print writes the report: a row for each step, with its total and its share
-// of all spend, then how far back the data goes, what wasn't priced and the
-// rates used.
+// price is what a message cost, at its model's rate, which the report then
+// lists. ok is false when there's no rate for the model.
+func (r *costReport) price(c *charge) (cost float64, ok bool) {
+	rt, ok := apiRates[c.model]
+	if !ok {
+		return 0, false
+	}
+	if !slices.Contains(r.rated, c.model) {
+		r.rated = append(r.rated, c.model)
+	}
+	return rt.dollars(c.usage), true
+}
+
+// taskSpend is what a task cost, by step, and whether a message of its has no
+// rate, which leaves its cost unknown.
+type taskSpend struct {
+	steps   map[string]float64
+	unrated bool
+}
+
+// wholeTasks are the tasks that merged or were done from one time to another
+// whose spend this machine's transcripts hold whole, by task ID
+// ("<project>/<task>"), each with nothing spent yet, and how many it left out.
+// A task begun before the transcripts are complete may have lost sessions to
+// Claude Code's age cleanup, and one under way while another machine ran the
+// crew has sessions there.
+func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, to time.Time) (map[string]*taskSpend, leftOut) {
+	whole, left := map[string]*taskSpend{}, leftOut{}
+	for id, t := range tasks {
+		finished := finishedAt(t)
+		if finished.Before(from) || !finished.Before(to) {
+			continue
+		}
+		// A task with no created date is zero, so it counts as begun early.
+		created, _ := time.Parse(time.RFC3339, t.Get("created"))
+		// The machines that ran the crew while the task was under way.
+		var during []string
+		for _, e := range elsewhere {
+			if e.during(created, latestFinish(finished, e)) {
+				during = append(during, e.holder)
+			}
+		}
+		switch {
+		case created.Before(completeFrom):
+			left.begunEarly++
+		case len(during) > 0:
+			left.underWay++
+			left.machines = append(left.machines, during...)
+		default:
+			whole[id] = &taskSpend{steps: map[string]float64{}}
+		}
+	}
+	return whole, left
+}
+
+// latestFinish is the latest a task's finish can be, as another machine's
+// tenure sees it. The finish's Log line gives the clock of the machine that
+// held the lease, with no zone, and LogEntries reads it on this machine's
+// clock. If the other machine wrote it, it's the same clock time in that
+// machine's zone, which its tenure's start carries.
+func latestFinish(logged time.Time, other tenure) time.Time {
+	y, mo, d := logged.Date()
+	there := time.Date(y, mo, d, logged.Hour(), logged.Minute(), 0, 0, other.from.Location())
+	if there.After(logged) {
+		return there
+	}
+	return logged
+}
+
+// finishedAt is when the task last merged or was done, or zero if it isn't
+// merged or done. Its Log runs oldest first, so the last change wins.
+func finishedAt(t Task) time.Time {
+	var at time.Time
+	if !t.Status().Delivered() {
+		return at
+	}
+	for _, e := range withStatusLines(t.LogEntries()) {
+		if s, ok := e.status(); ok && s.Delivered() {
+			at = e.at
+		}
+	}
+	return at
+}
+
+// print writes the report: a row for each step, with its total, its share of
+// all spend and its median per task, then which tasks the medians count, how
+// far back the data goes, what wasn't priced and the rates used.
 func (r costReport) print(w io.Writer) {
 	fmt.Fprintf(w, "Spend from %s to %s, at API rates, from this machine's transcripts:\n\n",
 		r.from.Format("2006-01-02"), r.to.Format("2006-01-02"))
+	// A step has a row when something was spent on it in the range, or it has
+	// a median.
 	var agents []string
-	for name := range r.steps {
-		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) {
+	for _, name := range slices.Concat(slices.Collect(maps.Keys(r.steps)), slices.Collect(maps.Keys(r.perTask))) {
+		if !slices.Contains(taskSteps, name) && !slices.Contains(sharedSteps, name) && !slices.Contains(agents, name) {
 			agents = append(agents, name)
 		}
 	}
 	slices.Sort(agents)
-	row := func(name string, total float64) []string { return []string{name, formatDollars(total), r.share(total)} }
+	// A row's median, and how many tasks it's over, show only when there are any.
+	row := func(name string, total float64, perTask []float64) []string {
+		cells := []string{name, formatDollars(total), r.share(total)}
+		if len(perTask) > 0 {
+			cells = append(cells, strconv.Itoa(len(perTask)), formatDollars(median(perTask)))
+		}
+		return cells
+	}
 	var rows [][]string
 	for _, group := range [][]string{slices.Concat(taskSteps, agents), sharedSteps} {
 		var groupRows [][]string
 		for _, name := range group {
-			if total, ok := r.steps[name]; ok {
-				groupRows = append(groupRows, row(name, total))
+			total, spent := r.steps[name]
+			if perTask := r.perTask[name]; spent || len(perTask) > 0 {
+				groupRows = append(groupRows, row(name, total, perTask))
 			}
 		}
 		if len(rows) > 0 && len(groupRows) > 0 {
@@ -458,9 +641,16 @@ func (r costReport) print(w io.Writer) {
 		}
 		rows = append(rows, groupRows...)
 	}
-	rows = append(rows, nil, row("All", r.total))
-	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}}, rows)
+	rows = append(rows, nil, row("All", r.total, r.taskTotals))
+	printTable(w, [][2]string{{"", "step"}, {"", "total"}, {"", "share"}, {"", "tasks"}, {"median", "per task"}}, rows)
 
+	fmt.Fprintln(w, "\nA step's median is over the tasks that merged or were done in the range and ran that step. It counts all a task spent, before the range too.")
+	fmt.Fprintf(w, "It counts only tasks this machine's transcripts hold whole: those begun since %s, from when they're complete, and not under way while another machine ran the crew.",
+		r.completeFrom.Local().Format(logTime))
+	if left := r.leftOut.reasons(); len(left) > 0 {
+		fmt.Fprintf(w, " Left out: %s.", andList(left))
+	}
+	fmt.Fprintln(w)
 	if r.from.Before(r.completeFrom) {
 		fmt.Fprintf(w, "\nThis machine's transcripts are complete only from %s: older sessions may have been deleted.\n", r.completeFrom.Local().Format(logTime))
 	}
@@ -473,6 +663,24 @@ func (r costReport) print(w io.Writer) {
 		fmt.Fprintf(w, "  %s: %g, %g, %g\n", model, rt.input, rt.output, rt.cacheRead)
 	}
 	fmt.Fprintln(w, "A cache write costs 1.25 times input when it's kept for five minutes, and twice input for an hour.")
+}
+
+// reasons says how many tasks were left out for each reason there is.
+func (l leftOut) reasons() []string {
+	var reasons []string
+	if l.begunEarly > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d begun before then", l.begunEarly))
+	}
+	if l.underWay > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d under way while %s ran the crew", l.underWay, orList(slices.Compact(slices.Sorted(slices.Values(l.machines))))))
+	}
+	if l.unrated > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d with a message there's no rate for", l.unrated))
+	}
+	if l.unspent > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d with nothing spent in this machine's transcripts", l.unspent))
+	}
+	return reasons
 }
 
 // share is the part of all spend that dollars is, as a person needs it: "61%",
