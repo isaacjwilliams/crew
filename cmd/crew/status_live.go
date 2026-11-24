@@ -45,10 +45,10 @@ type statusFeed struct {
 	// build's error says the shared settings couldn't be read again, so the
 	// report went by the ones crew started with.
 	build func(statusReads) (statusReport, error)
-	// openPR's and sendNote's errors are a line each, for the view to show,
-	// and so is the warning sendNote gives when crew sent the note but warned.
+	// The view shows openPR's and sendNote's errors as they are, and the
+	// warnings sendNote gives, one to a line, when crew sent the note but warned.
 	openPR   func(url string) error
-	sendNote func(t Task, note string) (warning string, err error)
+	sendNote func(t Task, note string) (warnings string, err error)
 }
 
 // feedOf is crew status's feed for the scope it takes: one project, or "" for
@@ -81,21 +81,22 @@ func feedOf(c *Crew, scope string, doneToo bool) statusFeed {
 	}
 }
 
-// followupOutcome reads what crew followup wrote to stderr: why it refused,
-// when it failed, or else every warning crew gave, in one line. claude's own
-// notes on starting a session aren't crew's warnings, so they're left out.
-func followupOutcome(failed bool, stderr string) (warning string, err error) {
+// followupOutcome reads what crew followup wrote to stderr. When it failed,
+// that's all of it, as a shell shows it, since a refusal can point to claude's
+// output above it. When it sent the note, it's every warning crew gave, a line
+// each: claude's own notes on starting a session aren't crew's warnings.
+func followupOutcome(failed bool, stderr string) (warnings string, err error) {
+	stderr = strings.TrimRight(stderr, "\n")
 	if failed {
-		_, why := splitRefusal(stderr)
-		return "", errors.New(cmp.Or(why, "crew followup failed"))
+		return "", errors.New(cmp.Or(stderr, "crew followup failed"))
 	}
-	var warnings []string
-	for _, line := range strings.Split(stderr, "\n") {
+	var ws []string
+	for line := range strings.SplitSeq(stderr, "\n") {
 		if w, ok := strings.CutPrefix(line, "crew: "); ok {
-			warnings = append(warnings, w)
+			ws = append(ws, w)
 		}
 	}
-	return strings.Join(warnings, "; "), nil
+	return strings.Join(ws, "\n"), nil
 }
 
 // browsePR opens a PR in the browser, with gh's output kept off the screen. A
@@ -193,7 +194,7 @@ type liveStatus struct {
 	// task's path: one on its way, or one crew refused, for n on the task to
 	// bring back.
 	held map[string]heldNote
-	said string // a line on what an action did, or why it couldn't
+	said string // what an action did, or why it couldn't
 }
 
 // noteDraft is a note the user is typing to a task's worker.
@@ -246,9 +247,9 @@ type (
 		err  error
 	}
 	noteSent struct {
-		to            Task
-		text, warning string
-		err           error
+		to             Task
+		text, warnings string
+		err            error
 	}
 	// noteInput is what a note's own command sent back (the clipboard, say),
 	// for the draft that started it.
@@ -349,9 +350,9 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 		switch {
 		case msg.err != nil:
 			m.held[msg.to.Path] = heldNote{text: msg.text}
-			m.said = "note not sent, n on " + msg.to.ID() + " brings it back: " + msg.err.Error()
-		case msg.warning != "":
-			m.said = "sent your note to " + msg.to.ID() + "'s worker, but: " + msg.warning
+			m.said = "crew followup failed; n on " + msg.to.ID() + " brings your note back:\n" + msg.err.Error()
+		case msg.warnings != "":
+			m.said = "sent your note to " + msg.to.ID() + "'s worker, but:\n" + msg.warnings
 		default:
 			m.said = "sent your note to " + msg.to.ID() + "'s worker"
 		}
@@ -542,8 +543,8 @@ func (m *liveStatus) sendNote() tea.Cmd {
 	m.held[to.Path] = heldNote{text: text, sending: true}
 	m.said = "sending your note to " + to.ID() + "'s worker…"
 	return func() tea.Msg {
-		warning, err := send(to, text)
-		return noteSent{to, text, warning, err}
+		warnings, err := send(to, text)
+		return noteSent{to, text, warnings, err}
 	}
 }
 
@@ -622,21 +623,27 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 }
 
 // bodyHeight is how many lines of the report fit on screen, above the bar and
-// the line above it, when there's one.
+// the lines above it.
 func (m *liveStatus) bodyHeight() int {
-	if m.footLine() != "" {
-		return max(1, m.height-2)
-	}
-	return max(1, m.height-1)
+	return max(1, m.height-1-len(m.footLines()))
 }
 
-// footLine is the line above the bar: the note the user is typing or, when
-// they aren't, what an action did; "" when there's neither.
-func (m *liveStatus) footLine() string {
+// footLines are the lines above the bar: the note the user is typing or, when
+// they aren't, what an action did, wrapped to the screen. They take at most
+// half of it, so a long one keeps its first line, which says what happened,
+// and its last ones, where a refusal ends.
+func (m *liveStatus) footLines() []string {
 	if m.note != nil {
-		return m.note.input.View()
+		return []string{m.note.input.View()}
 	}
-	return m.said
+	if m.said == "" {
+		return nil
+	}
+	lines := strings.Split(lipgloss.Wrap(m.said, m.width, ""), "\n")
+	if most := max(1, m.height/2); len(lines) > most {
+		lines = append(lines[:1], lines[len(lines)-most+1:]...)
+	}
+	return lines
 }
 
 // scroll moves the screen as little as keeps the cursor on it.
@@ -651,7 +658,8 @@ var cursorStyle = lipgloss.NewStyle().Reverse(true)
 
 func (m *liveStatus) View() tea.View {
 	var b strings.Builder
-	for i := m.top; i < m.top+m.bodyHeight(); i++ {
+	foot, body := m.footLines(), m.bodyHeight()
+	for i := m.top; i < m.top+body; i++ {
 		line := ""
 		if i < len(m.shown) {
 			line = fit(m.shown[i].text(), m.width)
@@ -661,8 +669,8 @@ func (m *liveStatus) View() tea.View {
 		}
 		b.WriteString(line + "\n")
 	}
-	if foot := m.footLine(); foot != "" {
-		b.WriteString(fit(foot, m.width) + "\n")
+	for _, line := range foot {
+		b.WriteString(fit(line, m.width) + "\n")
 	}
 	b.WriteString(fit(m.bar(), m.width))
 	v := tea.NewView(b.String())

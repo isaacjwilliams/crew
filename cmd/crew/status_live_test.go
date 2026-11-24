@@ -446,10 +446,10 @@ func actionsReport(c *Crew) statusReport {
 // actionsRun is what the view's actions were given to run, in place of gh and
 // crew followup.
 type actionsRun struct {
-	opened  []string // the PRs opened, by URL
-	notes   []string // the notes sent: "<task ID>: <note>"
-	err     error    // what each action returns
-	warning string   // what crew warned of when it sent a note
+	opened   []string // the PRs opened, by URL
+	notes    []string // the notes sent: "<task ID>: <note>"
+	err      error    // what each action returns
+	warnings string   // what crew warned of when it sent a note
 }
 
 // actingOn is the live view showing r, with its actions recorded in run rather
@@ -461,7 +461,7 @@ func actingOn(r statusReport) (*liveStatus, *actionsRun) {
 	m.feed.openPR = func(url string) error { run.opened = append(run.opened, url); return run.err }
 	m.feed.sendNote = func(t Task, note string) (string, error) {
 		run.notes = append(run.notes, t.ID()+": "+note)
-		return run.warning, run.err
+		return run.warnings, run.err
 	}
 	return m, run
 }
@@ -482,11 +482,15 @@ func offered(m *liveStatus) string {
 	return strings.TrimSpace(keys)
 }
 
-// footLineOnScreen is the line above the bar, as the screen shows it, without
-// its style or the spaces after it.
-func footLineOnScreen(m *liveStatus) string {
+// footOnScreen is the lines above the bar, as the screen shows them, without
+// their style or the spaces after them.
+func footOnScreen(m *liveStatus) string {
 	lines := screen(m)
-	return strings.TrimRight(ansiCodes.ReplaceAllString(lines[len(lines)-2], ""), " ")
+	foot := lines[len(lines)-1-len(m.footLines()) : len(lines)-1]
+	for i, line := range foot {
+		foot[i] = strings.TrimRight(ansiCodes.ReplaceAllString(line, ""), " ")
+	}
+	return strings.Join(foot, "\n")
 }
 
 func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
@@ -524,8 +528,8 @@ func TestLiveStatusBarOffersTheActionsTheLineTakes(t *testing.T) {
 			if cmd != nil || m.note != nil || len(run.opened)+len(run.notes) > 0 || !slices.Equal(before[:len(after)-2], after[:len(after)-2]) {
 				t.Errorf("%s on %q, which doesn't take it, changed something", a.key, l.head)
 			}
-			if footLineOnScreen(m) != m.said || m.said == "" {
-				t.Errorf("%s on %q doesn't say why in a line: %q", a.key, l.head, footLineOnScreen(m))
+			if footOnScreen(m) != m.said || m.said == "" {
+				t.Errorf("%s on %q doesn't say why in a line: %q", a.key, l.head, footOnScreen(m))
 			}
 		}
 	}
@@ -573,13 +577,13 @@ func TestLiveStatusOpensTheTasksPR(t *testing.T) {
 	if !slices.Equal(run.opened, []string{"https://github.com/o/r/pull/9"}) {
 		t.Errorf("opened %v, want 013-risky's PR", run.opened)
 	}
-	if got := footLineOnScreen(m); got != "opened 013-risky's PR in the browser" {
+	if got := footOnScreen(m); got != "opened 013-risky's PR in the browser" {
 		t.Errorf("after opening the PR, the view says %q", got)
 	}
 
 	run.err = errors.New("no browser found")
 	finish(t, m, press(m, "o"))
-	if got := footLineOnScreen(m); got != "couldn't open 013-risky's PR: no browser found" {
+	if got := footOnScreen(m); got != "couldn't open 013-risky's PR: no browser found" {
 		t.Errorf("when opening the PR fails, the view says %q", got)
 	}
 	if !strings.Contains(screen(m)[len(screen(m))-1], "o open PR") {
@@ -596,8 +600,8 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	m, run := actingOn(actionsReport(actionsLedger(t)))
 	goTo(t, m, "016-both")
 	press(m, "n")
-	if m.note == nil || !strings.HasPrefix(footLineOnScreen(m), "note to 016-both:") {
-		t.Fatalf("n doesn't ask for a note: the line above the bar is %q", footLineOnScreen(m))
+	if m.note == nil || !strings.HasPrefix(footOnScreen(m), "note to 016-both:") {
+		t.Fatalf("n doesn't ask for a note: the line above the bar is %q", footOnScreen(m))
 	}
 	if got := offered(m); !strings.HasSuffix(m.bar(), "enter send  esc cancel") || got != "" {
 		t.Errorf("while a note is typed, the bar is %q", m.bar())
@@ -615,15 +619,15 @@ func TestLiveStatusSendsANoteAsTyped(t *testing.T) {
 	if want := "016-both: " + note + " (pasted)"; !slices.Equal(run.notes, []string{want}) {
 		t.Errorf("sent %q, want %q", run.notes, want)
 	}
-	if m.note != nil || footLineOnScreen(m) != "sent your note to 016-both's worker" {
-		t.Errorf("after sending, the view says %q", footLineOnScreen(m))
+	if m.note != nil || footOnScreen(m) != "sent your note to 016-both's worker" {
+		t.Errorf("after sending, the view says %q", footOnScreen(m))
 	}
 
-	run.notes, run.warning = nil, "job w9 hasn't reported its session after 30s, so crew can't confirm it started"
+	run.notes, run.warnings = nil, "couldn't resume session 1b2a; starting a fresh session instead\nledger commit failed (continuing)"
 	press(m, "n")
 	typeText(m, "and one more thing")
 	finish(t, m, press(m, "enter"))
-	if got, want := footLineOnScreen(m), "sent your note to 016-both's worker, but: "+run.warning; got != want {
+	if got, want := footOnScreen(m), "sent your note to 016-both's worker, but:\n"+run.warnings; got != want {
 		t.Errorf("when crew warns as it sends a note, the view says %q, want %q", got, want)
 	}
 
@@ -650,7 +654,7 @@ func TestLiveStatusKeepsANoteCrewDidntSend(t *testing.T) {
 	press(m, "n")
 	typeText(m, "the tests first")
 	finish(t, m, press(m, "enter"))
-	if got, want := footLineOnScreen(m), "note not sent, n on 016-both brings it back: "+run.err.Error(); got != want {
+	if got, want := footOnScreen(m), "crew followup failed; n on 016-both brings your note back:\n"+run.err.Error(); got != want {
 		t.Errorf("when crew refuses a note, the view says %q, want %q", got, want)
 	}
 
@@ -689,7 +693,7 @@ func TestLiveStatusTakesNoNoteForATaskWhileOneIsOnItsWay(t *testing.T) {
 	if m.note != nil {
 		t.Fatal("n started a second note to 016-both while one was on its way")
 	}
-	if got, want := footLineOnScreen(m), "your note to 016-both's worker is still on its way"; got != want {
+	if got, want := footOnScreen(m), "your note to 016-both's worker is still on its way"; got != want {
 		t.Errorf("n says %q, want %q", got, want)
 	}
 
@@ -770,25 +774,61 @@ func TestFollowupOutcomeTellsCrewsWarningsFromClaudesNotes(t *testing.T) {
 	note := "Note: session 7f3c started in the background\n"
 	slow := "crew: job w9 hasn't reported its session after 30s, so crew can't confirm it started\n"
 	resumed := "crew: couldn't resume session 1b2a; starting a fresh session instead\n"
+	claudeFailed := "Error: not logged in\n"
 	for _, tc := range []struct {
-		failed               bool
-		stderr, warning, err string
+		failed                bool
+		stderr, warnings, err string
 	}{
 		{false, "", "", ""},
 		{false, note, "", ""},
 		{false, note + slow, "job w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
-		{false, resumed + note + slow, "couldn't resume session 1b2a; starting a fresh session instead; job w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
-		{true, resumed + "crew: could not start a session (see output above)\n", "", "could not start a session (see output above)"},
+		{false, resumed + note + slow, "couldn't resume session 1b2a; starting a fresh session instead\njob w9 hasn't reported its session after 30s, so crew can't confirm it started", ""},
+		// A refusal shows whole, with the output of claude's it points to.
+		{true, resumed + claudeFailed + "crew: could not start a session (see output above)\n", "",
+			"crew: couldn't resume session 1b2a; starting a fresh session instead\nError: not logged in\ncrew: could not start a session (see output above)"},
+		{true, "crew: claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\nbackgrounded job ???\n", "",
+			"crew: claude started a session but crew can't read its job ID from this output; find it in 'claude agents' and record it with 'crew set':\nbackgrounded job ???"},
 		{true, "", "", "crew followup failed"},
 	} {
-		warning, err := followupOutcome(tc.failed, tc.stderr)
+		warnings, err := followupOutcome(tc.failed, tc.stderr)
 		got := ""
 		if err != nil {
 			got = err.Error()
 		}
-		if warning != tc.warning || got != tc.err {
-			t.Errorf("followupOutcome(%v, %q) = %q, %v; want %q, %q", tc.failed, tc.stderr, warning, err, tc.warning, tc.err)
+		if warnings != tc.warnings || got != tc.err {
+			t.Errorf("followupOutcome(%v, %q) = %q, %v; want %q, %q", tc.failed, tc.stderr, warnings, err, tc.warnings, tc.err)
 		}
+	}
+}
+
+func TestLiveStatusShowsAllThatCrewSaidOfANoteAndKeepsTheCursorOnScreen(t *testing.T) {
+	m, run := actingOn(actionsReport(actionsLedger(t)))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	goTo(t, m, "016-both")
+	resumed := "couldn't resume session 1b2a7c4e-90f1-4d2b-8e3a-5c6d7e8f9a0b; starting a fresh session instead"
+	run.warnings = resumed + "\nledger commit failed (continuing)"
+	press(m, "n")
+	typeText(m, "the tests first")
+	finish(t, m, press(m, "enter"))
+	// The first warning is wider than the screen, so it takes two lines.
+	if got, want := strings.Join(strings.Fields(footOnScreen(m)), " "), "sent your note to 016-both's worker, but: "+resumed+" ledger commit failed (continuing)"; got != want {
+		t.Errorf("at 80 columns, the view says %q, want %q", got, want)
+	}
+	if !strings.Contains(words(screen(m)[m.cursor-m.top]), "016-both") {
+		t.Errorf("the cursor's line isn't on screen above what crew said: %q", screen(m))
+	}
+
+	// A refusal longer than half the screen keeps its first line and its last.
+	run.warnings, run.err = "", errors.New(strings.Repeat("claude's output\n", 20)+"crew: could not start a session (see output above)")
+	press(m, "n")
+	typeText(m, "and again")
+	finish(t, m, press(m, "enter"))
+	foot := strings.Split(footOnScreen(m), "\n")
+	if len(foot) != 6 || foot[0] != "crew followup failed; n on 016-both brings your note back:" || foot[5] != "crew: could not start a session (see output above)" {
+		t.Errorf("on a screen 12 lines high, a long refusal shows as %q", foot)
+	}
+	if !strings.Contains(words(screen(m)[m.cursor-m.top]), "016-both") {
+		t.Errorf("the cursor's line isn't on screen above a long refusal: %q", screen(m))
 	}
 }
 
