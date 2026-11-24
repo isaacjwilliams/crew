@@ -237,6 +237,12 @@ type (
 		text, warning string
 		err           error
 	}
+	// noteInput is what a note's own command sent back (the clipboard, say),
+	// for the draft that started it.
+	noteInput struct {
+		draft *noteDraft
+		msg   tea.Msg
+	}
 )
 
 func newLiveStatus(feed statusFeed) *liveStatus {
@@ -344,9 +350,14 @@ func (m *liveStatus) update(msg tea.Msg) tea.Cmd {
 			return m.typeNote(msg)
 		}
 		return m.press(msg.String())
-	default:
+	case tea.PasteMsg:
 		if m.note != nil {
 			return m.typeNote(msg)
+		}
+	case noteInput:
+		// A draft that's gone since doesn't pass what it asked for to the next.
+		if msg.draft == m.note {
+			return m.typeNote(msg.msg)
 		}
 	}
 	return nil
@@ -470,7 +481,7 @@ func (m *liveStatus) startNote(t Task) tea.Cmd {
 	delete(m.held, t.Path)
 	m.note = &noteDraft{to: t, input: input}
 	m.note.input.SetWidth(m.noteWidth())
-	return m.note.input.Focus()
+	return m.note.own(m.note.input.Focus())
 }
 
 // noteWidth is how much of the note shows after its prompt: the rest of the
@@ -497,7 +508,15 @@ func (m *liveStatus) typeNote(msg tea.Msg) tea.Cmd {
 	}
 	var cmd tea.Cmd
 	m.note.input, cmd = m.note.input.Update(msg)
-	return cmd
+	return m.note.own(cmd)
+}
+
+// own has what cmd sends back come to this draft only.
+func (d *noteDraft) own(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg { return noteInput{d, cmd()} }
 }
 
 // sendNote sends the note the user typed, unless it's empty.

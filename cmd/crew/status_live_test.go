@@ -715,6 +715,23 @@ func TestLiveStatusGivesTheNoteWhatItsCommandsSendBack(t *testing.T) {
 	}
 }
 
+// TestLiveStatusGivesANoteOnlyWhatItsOwnCommandsSendBack drops the note that
+// pressed ctrl+v and starts another before the clipboard answers.
+func TestLiveStatusGivesANoteOnlyWhatItsOwnCommandsSendBack(t *testing.T) {
+	m, _ := actingOn(actionsReport(actionsLedger(t)))
+	goTo(t, m, "016-both")
+	press(m, "n")
+	t.Setenv("PATH", t.TempDir())
+	_, paste := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	press(m, "esc")
+	goTo(t, m, "└ 017-stacked")
+	press(m, "n")
+	finish(t, m, paste)
+	if m.note.input.Err != nil {
+		t.Error("the clipboard's answer to a note that's gone reached the next one")
+	}
+}
+
 func TestLiveStatusSendsANoteToTheTaskItWasStartedOn(t *testing.T) {
 	c := actionsLedger(t)
 	m, run := actingOn(actionsReport(c))
