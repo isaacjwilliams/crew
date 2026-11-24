@@ -683,7 +683,7 @@ func (c *Crew) relaunch(start launcher, d Doc, wt, prompt, freshPrompt string, f
 		if !errors.As(err, new(notStarted)) {
 			return l, err
 		}
-		c.warn("couldn't resume session %s, so crew started a fresh one instead; %v", session, err)
+		c.warn("couldn't resume session %s, so crew tried a fresh one instead; %v", session, err)
 	}
 	l, err := c.launchSession(start, d, wt, freshPrompt+"\n"+prompt, false)
 	if errors.As(err, new(notStarted)) {

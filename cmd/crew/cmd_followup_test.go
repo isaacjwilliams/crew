@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -238,7 +239,7 @@ func TestFollowupSendsANoteWithWarnings(t *testing.T) {
 	if sent.mode != "fresh" || sent.job != task.WorkerJob() {
 		t.Errorf("followup sent %+v, want a fresh worker, %s", sent, task.WorkerJob())
 	}
-	want := "couldn't resume session w1-session, so crew started a fresh one instead; claude said:\nError: session not found"
+	want := "couldn't resume session w1-session, so crew tried a fresh one instead; claude said:\nError: session not found"
 	if len(warnings) != 1 || warnings[0] != want {
 		t.Errorf("followup warned %q, want %q", warnings, want)
 	}
@@ -332,6 +333,24 @@ func TestFollowupWhenClaudeStartsNoSession(t *testing.T) {
 	}
 	if task.WorkerJob() != "w1" {
 		t.Errorf("worker_job is %q, want w1 still", task.WorkerJob())
+	}
+}
+
+// When claude refuses the resume and then the fresh start, the warning about
+// the resume mustn't say a session started.
+func TestFollowupWhenClaudeResumesNothingAndStartsNoSession(t *testing.T) {
+	f := newFollowupCrew(t, "git")
+	task := f.task(t)
+	f.resumable(t, task)
+	f.claudeSays(t, "Error: out of credits", 1)
+	_, warnings, err := f.followupInProcess(t, task, followupWith{note: "carry on"})
+	refused(t, err)
+	if want := "could not start a session; claude said:\nError: out of credits"; err.Error() != want {
+		t.Errorf("followup said %q, want %q", err, want)
+	}
+	want := []string{"couldn't resume session w1-session, so crew tried a fresh one instead; claude said:\nError: out of credits"}
+	if !slices.Equal(warnings, want) {
+		t.Errorf("followup warned %q, want %q", warnings, want)
 	}
 }
 
