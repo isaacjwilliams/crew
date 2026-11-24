@@ -166,6 +166,7 @@ func raiseRisk(t Task, p *Project) (string, error) {
 	if t.AutomatedReviewOff() && atoiOr0(p.Settings["AUTO_REVIEWS"]) > 0 {
 		line += "; automated review back on"
 	}
+	// An empty pr means the worker hasn't reached its pre-PR passes yet.
 	if t.PrePRReviewOff() && t.PR() == "" {
 		line += "; pre-PR passes back on"
 	}
