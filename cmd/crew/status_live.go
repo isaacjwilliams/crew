@@ -458,8 +458,12 @@ func (m *liveStatus) page(by int) {
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
 	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-body))
+	// A cursor's line that fits stays all on screen: the screen starts between
+	// end-body and start. One taller than the screen fills it: the screen
+	// starts between start and end-body.
 	start, end := m.cursorSpan()
-	m.top = min(max(m.top, min(start, end-body)), max(start, end-body))
+	low, high := min(start, end-body), max(start, end-body)
+	m.top = min(max(m.top, low), high)
 }
 
 var cursorStyle = lipgloss.NewStyle().Reverse(true)

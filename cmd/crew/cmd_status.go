@@ -63,7 +63,7 @@ func (c *Crew) catchUpLedger() {
 // others. Task and goal lines are a table, each column as wide as its widest
 // value, with its headings at the top of each project.
 func printReport(w io.Writer, r statusReport) {
-	lines := unfolded(reportLines(r))
+	lines := asPrinted(reportLines(r))
 	// Two spaces a level. The live view's indent is two wider, for its fold
 	// marker (indentWidth).
 	t := measure(lines, func(depth int) int { return 2 * depth })
@@ -112,15 +112,15 @@ func (l statusLine) hasRows() bool {
 	return slices.ContainsFunc(l.kids, func(k statusLine) bool { return k.hasFields() || k.hasRows() })
 }
 
-// unfolded is lines as the plain text shows them: each folded line without its
-// kids, so it neither prints nor measures them.
-func unfolded(lines []statusLine) []statusLine {
+// asPrinted is lines as the plain text prints them: each folded line without
+// its kids, so it neither prints nor measures them.
+func asPrinted(lines []statusLine) []statusLine {
 	var out []statusLine
 	for _, l := range lines {
 		if l.folded {
 			l.kids = nil
 		}
-		l.kids = unfolded(l.kids)
+		l.kids = asPrinted(l.kids)
 		out = append(out, l)
 	}
 	return out
