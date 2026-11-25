@@ -1011,14 +1011,16 @@ func (f Finding) Outcome() Outcome {
 
 // StillOpen: the finding repeats one an earlier review left for the user,
 // which the user hadn't decided when this review ran ("left for the user:
-// still open from review <N>").
+// still open from review <N>"). It stays true once the user decides it: that's
+// Decided.
 func (f Finding) StillOpen() bool {
 	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
 }
 
 // Decided: the user has decided a finding left for them. The worker adds the
-// decision to the end of the outcome, so the outcome still starts with what
-// the worker did ("left for the user: …; decided by the user: no change").
+// decision after what it first wrote, so the outcome still starts with that
+// ("left for the user: …; decided by the user: no change"). It may add what it
+// did next, "…, fixed in <sha>", so the decision isn't always last.
 func (f Finding) Decided() bool {
 	return strings.Contains(f.outcome, "; decided by the user")
 }
