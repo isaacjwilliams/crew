@@ -181,14 +181,19 @@ type followupSent struct {
 }
 
 // followupRefusal is why followup would send t's worker nothing now, whatever
-// it was given to send, or nil when it would send: the task has no worker, its
-// worker is busy (as is what claude agents lists), it's finished, its project
-// is paused, or this machine doesn't run the crew. followup asks it before it
-// sends and again under the ledger lock, and noteRefusal for a caller that asks
-// first.
+// it was given to send, or nil when it would send: the task has no worker,
+// it's finished, its project is paused, its worker is busy (as is what claude
+// agents lists), or this machine doesn't run the crew, in that order. followup
+// asks it before it sends and again under the ledger lock, and noteRefusal for
+// a caller that asks first.
 func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
 	if !t.Dispatched() {
 		return fail("%s has no worker yet; dispatch it first", t.ID())
+	}
+	// Before the pause and busy checks: crew never resumes a finished task's
+	// worker, so "resume the project" or "wait for it" would be bad advice.
+	if st := t.Status(); st.Finished() {
+		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
 	if err := refuseIfPaused(p); err != nil {
 		return err
@@ -199,9 +204,6 @@ func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
 			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
-	}
-	if st := t.Status(); st.Finished() {
-		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
 	return c.requireHost()
 }
