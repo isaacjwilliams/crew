@@ -95,6 +95,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    --again resends a restack the worker already has
   crew nudge TASK                  Resume, once, a worker whose turn ended mid-task;
                                    ask the lead if it stalls again (run by crew tick)
+  crew settle TASK                 Check off the questions crew nudge asked the lead
+                                   once the task's worker has moved on (run by crew tick)
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick

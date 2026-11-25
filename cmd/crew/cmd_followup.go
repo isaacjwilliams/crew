@@ -237,13 +237,19 @@ func unsentRounds(t Task) string {
 // to working.
 func backToWorker(t Task) Status {
 	if t.Status() == NeedsInput {
-		for _, e := range slices.Backward(t.LogEntries()) {
-			if s, ok := e.status(); ok && s != NeedsInput {
-				if s.WorkersTurn() {
-					return s
-				}
-				break
-			}
+		if s := statusBeforeNeedsInput(t); s.WorkersTurn() {
+			return s
+		}
+	}
+	return Working
+}
+
+// statusBeforeNeedsInput is the last status in the task's Log that isn't
+// needs-input, or working when it has none.
+func statusBeforeNeedsInput(t Task) Status {
+	for _, e := range slices.Backward(t.LogEntries()) {
+		if s, ok := e.status(); ok && s != NeedsInput {
+			return s
 		}
 	}
 	return Working
@@ -528,7 +534,8 @@ func stalled(t Task, a *Agent) bool {
 // stalls again with no new commit and no change of status since
 // (NudgedWithoutProgress), or its worktree isn't on this machine, it adds an
 // Open question for the lead instead, and crew tick's "waiting on you" rule makes
-// the task needs-input. Exits 3 when the task isn't stalled.
+// the task needs-input until crew settle settles the question. Exits 3 when the
+// task isn't stalled.
 func cmdNudge(c *Crew, args []string) error {
 	for _, tool := range []string{"git", "claude"} {
 		if err := need(tool); err != nil {
@@ -572,8 +579,8 @@ func cmdNudge(c *Crew, args []string) error {
 	// Making the worktree again can take minutes of a repo's hooks, and isn't
 	// a tick's to do: it's left to the lead.
 	if wt := t.Worktree(); !isDir(wt) {
-		return ask(fmt.Sprintf("Its worker's turn ended mid-task, but its worktree, %s, isn't on this machine, so crew didn't nudge it. To have a fresh worker carry on here, run `crew followup %s --fresh --note \"Carry on from where your Log says you stopped.\"`: it makes the worktree again.", wt, c.taskArg(t)),
-			"nudge: worktree missing; for the lead")
+		return ask(fmt.Sprintf(nudgeQuestionStart+", but its worktree, %s, isn't on this machine, so crew didn't nudge it. To have a fresh worker carry on here, run `crew followup %s --fresh --note \"Carry on from where your Log says you stopped.\"`: it makes the worktree again.", wt, c.taskArg(t)),
+			nudgeWorktreeMissing+nudgeForLead)
 	}
 	sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}")
 	if err != nil {
@@ -581,8 +588,8 @@ func cmdNudge(c *Crew, args []string) error {
 	}
 	head := shortSHA(sha)
 	if t.NudgedWithoutProgress(head) {
-		return ask(fmt.Sprintf("Its worker's turn ended mid-task again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
-			"nudge: stalled again at "+head+"; for the lead")
+		return ask(fmt.Sprintf(nudgeQuestionStart+" again after a nudge, with no new commit (the branch is still at %s) and no change of status. Its last turn is in its transcript, %s. Answer it with `crew followup %s --note \"…\"`, or look into it yourself.", head, transcript(worker.SessionID), c.taskArg(t)),
+			nudgeStalledAgain+head+nudgeForLead)
 	}
 	if _, err := c.followup(t, followupWith{stalled: true}); err != nil {
 		return err
@@ -590,5 +597,57 @@ func cmdNudge(c *Crew, args []string) error {
 	// Last, so NudgedWithoutProgress finds it only once the worker was resumed.
 	t.Log(nudgedAt + head)
 	c.commit("nudge " + p.Name + "/" + t.ID())
+	return nil
+}
+
+// crew settle TASK: when the worker of a task with an open nudge question has
+// moved on since crew nudge asked it (see Task.WorkerMovedOn), checks the
+// question off, saying what settled it. A task that waits on no other question
+// goes back to the status it had before needs-input. Exits 3 when there's
+// nothing to settle.
+func cmdSettle(c *Crew, args []string) error {
+	if err := need("git"); err != nil {
+		return err
+	}
+	if len(args) != 1 {
+		return usage("crew settle TASK")
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	p, err := c.loadProject(t.Project())
+	if err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if t.NudgeQuestions() == 0 {
+		return nothingToDo("%s has no open nudge question", t.ID())
+	}
+	// A branch that isn't in the repo has no new commit; the worker may still
+	// have moved on by its status.
+	head := ""
+	if sha, err := git(p.Repo(), "rev-parse", "--verify", "--quiet", "refs/heads/"+t.Branch()+"^{commit}"); err == nil {
+		head = shortSHA(sha)
+	}
+	by := t.WorkerMovedOn(head)
+	if by == "" {
+		return nothingToDo("%s's worker hasn't moved on since its nudge question", t.ID())
+	}
+	if err := t.SettleNudgeQuestions(by); err != nil {
+		return err
+	}
+	// The question was all the task waited on, so it goes back to the status it
+	// had before: its worker's turn, or pr-open when tick marked a handed-over
+	// task needs-input.
+	if t.Status() == NeedsInput && t.OpenQuestions() == 0 {
+		t.SetStatus(statusBeforeNeedsInput(t))
+	}
+	t.Log(nudgeSettled + by)
+	t.Touch()
+	c.commit("settle " + p.Name + "/" + t.ID())
+	fmt.Printf("%s: nudge question settled: %s\n", t.ID(), by)
 	return nil
 }
