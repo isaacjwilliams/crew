@@ -134,9 +134,11 @@ type liveStatus struct {
 	cursor int         // the line it's on, in shown
 	top    int         // the first line of shown on the screen
 	// table is the report's columns fitted to the screen, and inColumns whether
-	// they fit; when they don't, each task and goal is a card.
+	// they fit; when they don't, each task and goal is a card. headings are
+	// the table's, pinned at the top of the screen: none for cards.
 	table         table
 	inColumns     bool
+	headings      []string
 	width, height int
 }
 
@@ -355,6 +357,10 @@ func (m *liveStatus) layOut() {
 	}
 	add(m.lines, 0)
 	m.table, m.inColumns = measure(m.lines, indentWidth).fit(m.width)
+	m.headings = nil
+	if m.inColumns && slices.ContainsFunc(m.lines, statusLine.hasRows) {
+		m.headings = m.table.row(strings.Repeat(" ", indentWidth(1)), headings())
+	}
 	for i, l := range m.shown {
 		m.shown[i].drawn = m.draw(l)
 	}
@@ -364,21 +370,12 @@ func (m *liveStatus) layOut() {
 // or as a card, and any other line wrapped to the screen.
 func (m *liveStatus) draw(l shownLine) []string {
 	switch {
-	case l.fields == nil:
+	case !l.hasFields():
 		return hang(l.indent(), l.head, m.width)
 	case m.inColumns:
 		return m.table.row(l.indent(), l.statusLine)
 	}
 	return card(l.indent(), l.statusLine, m.width)
-}
-
-// pinnedHeadings is the table's headings, pinned at the top of the screen:
-// none when the rows are cards, or when there are no rows.
-func (m *liveStatus) pinnedHeadings() []string {
-	if !m.inColumns || !slices.ContainsFunc(m.lines, func(l statusLine) bool { return slices.ContainsFunc(l.kids, statusLine.hasFields) }) {
-		return nil
-	}
-	return m.table.row(strings.Repeat(" ", indentWidth(1)), headings())
 }
 
 // isOpen is whether the lines under l are on show: as the user left it, or
@@ -393,7 +390,7 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 
 // bodyHeight is how many screen lines the report's lines get, between the
 // headings and the bar.
-func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.pinnedHeadings())) }
+func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)) }
 
 // drawnHeight is how many screen lines the shown lines from i to j take.
 func (m *liveStatus) drawnHeight(i, j int) int {
@@ -422,24 +419,24 @@ var cursorStyle = lipgloss.NewStyle().Reverse(true)
 // View is the headings, the lines on show from the top, and the bar. The
 // cursor's line is highlighted across the screen, all of it when it wraps.
 func (m *liveStatus) View() tea.View {
-	screen := m.pinnedHeadings()
-	height := len(screen) + m.bodyHeight()
+	height := len(m.headings) + m.bodyHeight()
+	var screen []string
+	for _, line := range m.headings {
+		screen = append(screen, fit(line, m.width))
+	}
 	for i := m.top; i < len(m.shown) && len(screen) < height; i++ {
 		for _, line := range m.shown[i].drawn {
+			line = fit(line, m.width)
 			if i == m.cursor {
-				// Cut first: a style with a width wraps a longer line.
-				line = cursorStyle.Width(m.width).Render(fit(line, m.width))
+				line = cursorStyle.Width(m.width).Render(line)
 			}
 			screen = append(screen, line)
 		}
 	}
-	screen = append(screen, make([]string, max(0, height-len(screen)))...)[:height]
-	var b strings.Builder
-	for _, line := range screen {
-		b.WriteString(fit(line, m.width) + "\n")
+	for len(screen) < height {
+		screen = append(screen, "")
 	}
-	b.WriteString(fit(m.bar(), m.width))
-	v := tea.NewView(b.String())
+	v := tea.NewView(strings.Join(append(screen[:height], fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
 	return v
 }

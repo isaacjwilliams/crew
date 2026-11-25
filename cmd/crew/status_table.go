@@ -73,7 +73,7 @@ func measure(lines []statusLine, indent func(depth int) int) table {
 	var t table
 	var add func(l statusLine, depth int)
 	add = func(l statusLine, depth int) {
-		if l.fields != nil {
+		if l.hasFields() {
 			t.id = max(t.id, indent(depth)+lipgloss.Width(l.head))
 			for i, f := range l.fields {
 				t.fields[i] = max(t.fields[i], lipgloss.Width(f))

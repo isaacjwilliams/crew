@@ -175,7 +175,7 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	// fields, under the line it's under in the tree. At this width, each takes
 	// one line, under the headings.
 	parents, _ := treeOf(reportLines(r))
-	headings := len(m.pinnedHeadings())
+	headings := len(m.headings)
 	for i, l := range m.shown {
 		if want := words(l.head + " " + says(l.statusLine)); view[headings+i] != want {
 			t.Errorf("the view shows %q where the tree has %q", view[headings+i], want)
@@ -424,7 +424,7 @@ func TestLiveStatusFitsTheScreen(t *testing.T) {
 // onScreen: every line the cursor's line is drawn on is on the screen, between
 // the headings and the bar.
 func onScreen(m *liveStatus) bool {
-	body := screen(m)[len(m.pinnedHeadings()) : len(screen(m))-1]
+	body := screen(m)[len(m.headings) : len(screen(m))-1]
 	var cursor []string
 	for _, l := range body {
 		if strings.Contains(l, "\x1b[7m") { // the cursor's style: reversed
@@ -487,13 +487,13 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 			t.Fatalf("at width %d, the rows are cards", width)
 		}
 		want := append([]string{idHeading}, headings().fields...)
-		if got := cellsOf(m.table, m.pinnedHeadings()); !slices.Equal(got, want) {
+		if got := cellsOf(m.table, m.headings); !slices.Equal(got, want) {
 			t.Errorf("at width %d, the headings read %q, want %q", width, got, want)
 		}
 		// Every value starts in its column and stays inside it, on every line
 		// of its row: read back column by column, each row has its values.
 		for _, l := range m.shown {
-			if l.fields == nil {
+			if !l.hasFields() {
 				continue
 			}
 			got := cellsOf(m.table, l.drawn)
@@ -577,7 +577,7 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 	want := words(strings.Join(append([]string{idHeading}, headings().fields...), " "))
 	scrolled := false
 	for range m.shown {
-		if m.shown[m.cursor].fields != nil {
+		if m.shown[m.cursor].hasFields() {
 			if got := words(screen(m)[0]); got != want {
 				t.Errorf("with the cursor on %s, the screen starts %q, want the headings", m.shown[m.cursor].head, got)
 			}

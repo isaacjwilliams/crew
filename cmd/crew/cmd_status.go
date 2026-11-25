@@ -74,7 +74,7 @@ func printReport(w io.Writer, r statusReport) {
 }
 
 func printLine(w io.Writer, t table, l statusLine, indent string) {
-	if l.fields == nil {
+	if !l.hasFields() {
 		fmt.Fprintln(w, indent+l.head)
 	} else {
 		// One line: no column is narrower than its values.
@@ -83,7 +83,7 @@ func printLine(w io.Writer, t table, l statusLine, indent string) {
 	if l.folded {
 		return
 	}
-	if indent == "" && slices.ContainsFunc(l.kids, statusLine.hasFields) {
+	if indent == "" && l.hasRows() {
 		printLine(w, t, headings(), "  ") // a project's rows go under the headings
 	}
 	for _, k := range l.kids {
@@ -104,6 +104,10 @@ type statusLine struct {
 }
 
 func (l statusLine) hasFields() bool { return l.fields != nil }
+
+// hasRows is whether a top-level line, a project, has task or goal lines under
+// it, which go under the table's headings.
+func (l statusLine) hasRows() bool { return slices.ContainsFunc(l.kids, statusLine.hasFields) }
 
 func leafLine(key, head string) statusLine { return statusLine{key: key, head: head} }
 
