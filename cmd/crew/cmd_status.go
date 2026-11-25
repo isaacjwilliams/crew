@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
-	"unicode/utf8"
 )
 
 // crew status [--done] [--plain] [--all|--project P]: the tasks of one project
@@ -60,50 +60,50 @@ func (c *Crew) catchUpLedger() {
 // printReport prints a status report as plain text: its lines, each under the
 // line it belongs to, with folded lines' kids left out. A blank line comes before
 // each top-level line with lines under it: a project, or what waits in the
-// others.
+// others. Task and goal lines are a table, each column as wide as its widest
+// value, with its headings at the top of each project.
 func printReport(w io.Writer, r statusReport) {
-	for _, l := range reportLines(r) {
+	lines := reportLines(r)
+	t := measure(lines, func(depth int) int { return 2 * depth })
+	for _, l := range lines {
 		if len(l.kids) > 0 {
 			fmt.Fprintln(w)
 		}
-		printLine(w, l, "")
+		printLine(w, t, l, "")
 	}
 }
 
-func printLine(w io.Writer, l statusLine, indent string) {
-	fmt.Fprintln(w, l.text(indent, idColumn))
-	if !l.folded {
-		for _, k := range l.kids {
-			printLine(w, k, indent+"  ")
-		}
+func printLine(w io.Writer, t table, l statusLine, indent string) {
+	if l.fields == nil {
+		fmt.Fprintln(w, indent+l.head)
+	} else {
+		// One line: no column is narrower than its values.
+		fmt.Fprintln(w, t.row(indent, l)[0])
+	}
+	if l.folded {
+		return
+	}
+	if indent == "" && slices.ContainsFunc(l.kids, statusLine.hasFields) {
+		printLine(w, t, headings(), "  ") // a project's rows go under the headings
+	}
+	for _, k := range l.kids {
+		printLine(w, t, k, indent+"  ")
 	}
 }
-
-// idColumn is how wide the text before a task's or goal's columns is, its ID
-// cut to fit: room for a group's indent, a number column and a 32-character ID.
-const idColumn = 2 + 4 + 3 + 32
 
 // statusLine is one line of crew status (a project, a goal, a group of a goal's
 // tasks, a task, or a count), with the lines that belong under it, its kids.
 type statusLine struct {
-	key    string // names the line from one report to the next, so a view can keep its place
-	head   string // what the line says; for a task or a goal, its ID
-	tail   string // a task's or goal's columns, lined up after its ID
+	key  string // names the line from one report to the next, so a view can keep its place
+	head string // what the line says; for a task or a goal, its ID
+	// fields are a task's or a goal's values, one for each of columns, in
+	// order; nil for any other line.
+	fields []string
 	kids   []statusLine
 	folded bool // the text shows only this line, which counts its kids
 }
 
-// text is the line after the indent, with its columns, if any, starting after
-// column.
-func (l statusLine) text(indent string, column int) string {
-	head := indent + l.head
-	if l.tail == "" {
-		return head
-	}
-	// Padded by rune: a └ is one character wide but three bytes long.
-	head = cut(head, column)
-	return head + strings.Repeat(" ", column-utf8.RuneCountInString(head)) + " " + l.tail
-}
+func (l statusLine) hasFields() bool { return l.fields != nil }
 
 func leafLine(key, head string) statusLine { return statusLine{key: key, head: head} }
 
@@ -260,27 +260,24 @@ func toReviewLine(open []Task) string {
 
 // goalLines is a goal's line, with its groups of tasks under it.
 func goalLines(g goalReport) statusLine {
-	l := statusLine{key: "goal " + g.Goal.Path, head: "goal " + g.Goal.ID(), tail: goalColumns(g)}
+	l := statusLine{key: "goal " + g.Goal.Path, head: "goal " + g.Goal.ID(), fields: goalFields(g)}
 	for _, group := range g.Groups {
 		l.kids = append(l.kids, groupLines(l.key, group))
 	}
 	return l
 }
 
-// goalColumns is what a goal's line says after its ID: its status, its lead,
-// how many of its tasks have merged and how many are in flight.
-func goalColumns(g goalReport) string {
-	lead := g.Lead.stateText()
-	if lead != "" {
-		lead = "lead: " + lead
-	}
-	full := ""
+// goalFields are what a goal's line says after its ID: its status, its lead's
+// state under worker, and in its notes how many of its tasks have merged and
+// how many are in flight.
+func goalFields(g goalReport) []string {
+	notes := fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr))
 	if g.CapErr != nil {
-		full = "  " + g.CapErr.Error()
+		notes += "  " + g.CapErr.Error()
 	} else if g.InFlight.full() {
-		full = ": full"
+		notes += ": full"
 	}
-	return fmt.Sprintf("%-20s %-26s %d of %d task(s) merged, %s in flight%s", g.Goal.Get("status"), lead, g.Merged, g.Total, slotsText(g.InFlight, g.CapErr), full)
+	return []string{statusField: g.Goal.Get("status"), workerField: g.Lead.stateText(), notesField: notes}
 }
 
 // slotsText is "used/limit", with ? for a limit set to something that isn't a
@@ -375,21 +372,18 @@ func noNumber(taskRow) string { return "" }
 // rowLines is a task's line, with the tasks stacked on it under it. before is
 // what goes before its ID: its group's number column, or └ for a stacked task.
 func rowLines(r taskRow, before string) statusLine {
-	l := statusLine{key: "task " + r.Task.Path, head: before + r.Task.ID(), tail: rowColumns(r)}
+	l := statusLine{key: "task " + r.Task.Path, head: before + r.Task.ID(), fields: rowFields(r)}
 	for _, k := range r.Kids {
 		l.kids = append(l.kids, rowLines(k, "└ "))
 	}
 	return l
 }
 
-// rowColumns is what a task's row says after its ID: its status, its worker,
-// its PR, its merge check and its notes.
-func rowColumns(r taskRow) string {
-	worker := r.Worker.stateText()
-	if worker != "" {
-		worker = "worker: " + worker
-	}
-	pr := "-"
+// rowFields are what a task's row says after its ID: its status, its worker's
+// state, its PR, the model and effort it runs with, and in its notes its merge
+// check and the rest.
+func rowFields(r taskRow) []string {
+	pr := ""
 	if r.Task.PR() != "" {
 		pr = "#" + r.Task.PRNumber()
 	}
@@ -397,5 +391,12 @@ func rowColumns(r taskRow) string {
 	if r.Merge != nil {
 		notes = append([]string{r.Merge.String()}, notes...)
 	}
-	return fmt.Sprintf("%-20s %-26s %-6s %s", r.Task.Status(), worker, pr, strings.Join(notes, "  "))
+	return []string{
+		statusField: string(r.Task.Status()),
+		workerField: r.Worker.stateText(),
+		prField:     pr,
+		modelField:  r.Task.Model(),
+		effortField: r.Task.Effort(),
+		notesField:  strings.Join(notes, "  "),
+	}
 }

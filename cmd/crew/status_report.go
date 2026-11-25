@@ -549,9 +549,9 @@ func (s *statusView) goalDispatches(t Task) bool {
 	return ok && (g.Status() == GoalRunning || g.Status() == GoalDraft)
 }
 
-// notes are what a task's row says after its PR and its merge check: its PR's
-// state, and what it waits for or on. A pr-open task's merge check already says
-// what stands in its PR's way, so its notes give only the look it needs.
+// notes are what a task's row says after its merge check: its PR's state, and
+// what it waits for or on. A pr-open task's merge check already says what
+// stands in its PR's way, so its notes give only the look it needs.
 func (s *statusView) notes(t Task) []string {
 	st := t.Status()
 	var notes []string
@@ -570,13 +570,6 @@ func (s *statusView) notes(t Task) []string {
 	}
 	if t.Get("interrupted") != "" {
 		notes = append(notes, "interrupted by a pause")
-	}
-	// The lead's choices at intake, so the user sees what each worker runs with.
-	if m := t.Model(); m != "" {
-		notes = append(notes, "model "+m)
-	}
-	if e := t.Effort(); e != "" {
-		notes = append(notes, "effort "+e)
 	}
 	if t.AutomatedReviewOff() {
 		notes = append(notes, "automated review off")

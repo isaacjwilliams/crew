@@ -38,23 +38,24 @@ func TestPrintReport(t *testing.T) {
 workers running: 1/3
 
 p
-  goal 001-launch                         running              lead: idle                 0 of 9 task(s) merged, 1/2 in flight
+  task               status   worker   PR   model   effort  notes
+  goal 001-launch    running  idle                          0 of 9 task(s) merged, 1/2 in flight
     in flight
-      001-in-flight                       working              worker: working            -      
+      001-in-flight  working  working
     next, in dispatch order
-      1  002-next                         ready                                           -      dispatch by hand
-      2  003-next                         ready                                           -      dispatch by hand
-      3  004-next                         ready                                           -      dispatch by hand
-      4  005-next                         ready                                           -      dispatch by hand
-      5  006-next                         ready                                           -      dispatch by hand
+      1  002-next    ready                                  dispatch by hand
+      2  003-next    ready                                  dispatch by hand
+      3  004-next    ready                                  dispatch by hand
+      4  005-next    ready                                  dispatch by hand
+      5  006-next    ready                                  dispatch by hand
       … (2 more)
     parked
-         009-parked                       draft                                           -      1 open question(s)
-  010-parent                              working                                         -      model sonnet  effort high
-    └ 011-child                           draft                                           -      1 open question(s)
-  013-risky                               pr-open                                         #9     not yet: no security review yet (couldn't read GitHub; as of the last sync)  high
-  014-later                               pr-open                                         #12    not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
-  015-earlier                             pr-open                                         #5     not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
+         009-parked  draft                                  1 open question(s)
+  010-parent         working                sonnet  high
+    └ 011-child      draft                                  1 open question(s)
+  013-risky          pr-open           #9                   not yet: no security review yet (couldn't read GitHub; as of the last sync)  high
+  014-later          pr-open           #12                  not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
+  015-earlier        pr-open           #5                   not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
   1 draft(s)  (crew list --project p --status draft)
   open proposals: 1  (crew proposals --project p)
   memory suggestions: 1  (projects/p/memory-suggestions.md)

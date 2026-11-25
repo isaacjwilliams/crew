@@ -14,6 +14,10 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// says is a line's fields, as the plain text has them, for a test that looks
+// for a value in any of them.
+func says(l statusLine) string { return strings.Join(l.fields, "  ") }
+
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
 	m := newLiveStatus(statusFeed{})
@@ -153,14 +157,14 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	r := readReport(fullStatusLedger(t), "p")
 	r.ReadOnlyOn = "laptop"
 	m := liveOn(r)
-	m.width, m.height = 400, 200
+	m.Update(tea.WindowSizeMsg{Width: 400, Height: 200})
 	openAll(m)
 	var view []string
 	for _, l := range screen(m) {
 		view = append(view, words(l))
 	}
-	// Every line the text prints, with its columns: the header, each project's
-	// and goal's line, every task with its status, worker, PR, merge check and
+	// Every line the text prints, with its fields: the headings, each project's
+	// and goal's line, every task with its status, worker, PR, model, effort and
 	// notes, the counts and what waits in the other projects.
 	for _, l := range strings.Split(plainText(r), "\n") {
 		if l != "" && !slices.Contains(view, words(l)) {
@@ -168,11 +172,13 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 		}
 	}
 	// Every line of the tree, the ones the text only counts too, with its
-	// columns, under the line it's under in the tree.
+	// fields, under the line it's under in the tree. At this width, each takes
+	// one line, under the headings.
 	parents, _ := treeOf(reportLines(r))
+	headings := len(m.pinnedHeadings())
 	for i, l := range m.shown {
-		if !strings.HasSuffix(view[i], words(l.tail)) {
-			t.Errorf("%q isn't in the view with its columns %q", l.head, l.tail)
+		if want := words(l.head + " " + says(l.statusLine)); view[headings+i] != want {
+			t.Errorf("the view shows %q where the tree has %q", view[headings+i], want)
 		}
 		parent := ""
 		if j := m.above(i); j >= 0 {
@@ -271,6 +277,7 @@ func TestLiveStatusStaysUsableWhileItsFeedHangs(t *testing.T) {
 	clock := tenOClock
 	m := newLiveStatus(feed)
 	m.now = func() time.Time { return clock }
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	msgs := make(chan tea.Msg, 8)
 
 	inBackground(m.Init(), msgs)
@@ -350,7 +357,7 @@ func TestLiveStatusKeepsBuildingWhileItsReadsHang(t *testing.T) {
 			m.Update(next(t, msgs))
 		}
 	}
-	if i := lineOf(m, "010-parent"); i < 0 || !strings.Contains(m.shown[i].tail, "needs-input") {
+	if i := lineOf(m, "010-parent"); i < 0 || m.shown[i].fields[statusField] != "needs-input" {
 		t.Error("5 seconds after a task changed, while the reads and the pull hang, the view doesn't show it")
 	}
 }
@@ -396,17 +403,214 @@ func TestLiveStatusFitsTheScreen(t *testing.T) {
 	openAll(m)
 	for _, width := range []int{60, 100, 160} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 12})
-		for _, l := range screen(m) {
-			if w := lipgloss.Width(l); w > width {
-				t.Errorf("at width %d, a line is %d wide: %q", width, w, l)
+		for _, keys := range [][]string{{"end"}, {"pgup"}, {"home"}, {"pgdown"}, {"G", "k", "k"}} {
+			press(m, keys...)
+			lines := screen(m)
+			if len(lines) != 12 {
+				t.Errorf("at width %d, after %v, the view is %d lines high, want 12", width, keys, len(lines))
+			}
+			for _, l := range lines {
+				if w := lipgloss.Width(l); w > width {
+					t.Errorf("at width %d, a line is %d wide: %q", width, w, l)
+				}
+			}
+			if !onScreen(m) {
+				t.Errorf("at width %d, after %v, the cursor's line %q isn't all on screen:\n%s", width, keys, m.shown[m.cursor].head, strings.Join(lines, "\n"))
 			}
 		}
 	}
-	for _, keys := range [][]string{{"end"}, {"pgup"}, {"home"}, {"pgdown"}, {"G", "k", "k"}} {
-		press(m, keys...)
-		on := screen(m)[m.cursor-m.top]
-		if m.cursor < m.top || m.cursor >= m.top+m.bodyHeight() || !strings.Contains(on, m.shown[m.cursor].head) {
-			t.Errorf("after %v, the cursor's line %q isn't on screen (lines %d to %d)", keys, m.shown[m.cursor].head, m.top, m.top+m.bodyHeight()-1)
+}
+
+// onScreen: every line the cursor's line is drawn on is on the screen, between
+// the headings and the bar.
+func onScreen(m *liveStatus) bool {
+	body := screen(m)[len(m.pinnedHeadings()) : len(screen(m))-1]
+	var cursor []string
+	for _, l := range body {
+		if strings.Contains(l, "\x1b[7m") { // the cursor's style: reversed
+			cursor = append(cursor, strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " "))
+		}
+	}
+	return slices.Equal(cursor, m.shown[m.cursor].drawn)
+}
+
+// variedReport is fullStatusLedger's report with values of every length a
+// column meets: a status longer than its column, a worker idle with a
+// background task running, and a goal whose lead is idle and whose slots are
+// full. Its rows also have a long merge check, a stack and a goal's group.
+func variedReport(t *testing.T) statusReport {
+	c := fullStatusLedger(t)
+	reportTask(t, c, "p", "016-feedback", false, "status: addressing-feedback", "pr: https://github.com/o/r/pull/1234", "model: opus", "effort: medium")
+	r := readReport(c, "p")
+	p := &r.Projects[slices.IndexFunc(r.Projects, func(p projectReport) bool { return p.Name == "p" })]
+	g := &p.Goals[0]
+	g.InFlight = slots{2, 2}
+	inFlight := &g.Groups[0].Rows[0]
+	if inFlight.Task.ID() != "001-in-flight" {
+		t.Fatalf("the goal's first row is %s, want 001-in-flight", inFlight.Task.ID())
+	}
+	inFlight.Worker = Agent{ID: "w1", State: "working", PID: true, TurnEnded: true}
+	return r
+}
+
+// squeezed is s without its spaces, to compare a value with the same value
+// wrapped onto more than one line.
+func squeezed(s string) string { return strings.ReplaceAll(s, " ", "") }
+
+// cellsOf reads a row of the table back from the lines it's drawn on: the
+// text in each column, with its lines joined, the ID's first.
+func cellsOf(tb table, drawn []string) []string {
+	widths := append([]int{tb.id}, tb.fields[:]...)
+	cells := make([]string, len(widths))
+	for _, line := range drawn {
+		runes := []rune(line)
+		start := 0
+		for i, w := range widths {
+			if end := min(len(runes), start+w); start < end {
+				cells[i] += string(runes[start:end]) + " "
+			}
+			start += w + len(columnGap)
+		}
+	}
+	for i := range cells {
+		cells[i] = strings.Join(strings.Fields(cells[i]), " ")
+	}
+	return cells
+}
+
+func TestLiveStatusLinesUpItsColumns(t *testing.T) {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	for _, width := range []int{120, 160} {
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 60})
+		if !m.inColumns {
+			t.Fatalf("at width %d, the rows are cards", width)
+		}
+		want := append([]string{idHeading}, headings().fields...)
+		if got := cellsOf(m.table, m.pinnedHeadings()); !slices.Equal(got, want) {
+			t.Errorf("at width %d, the headings read %q, want %q", width, got, want)
+		}
+		// Every value starts in its column and stays inside it, on every line
+		// of its row: read back column by column, each row has its values.
+		for _, l := range m.shown {
+			if l.fields == nil {
+				continue
+			}
+			got := cellsOf(m.table, l.drawn)
+			if !strings.HasSuffix(got[0], words(l.head)) {
+				t.Errorf("at width %d, the ID column reads %q, want %q", width, got[0], l.head)
+			}
+			for i, f := range l.fields {
+				if squeezed(got[i+1]) != squeezed(f) {
+					t.Errorf("at width %d, %s's %s column reads %q, want %q:\n%s", width, l.head, columns[i].heading, got[i+1], f, strings.Join(l.drawn, "\n"))
+				}
+			}
+		}
+		for id, field := range map[string]string{"016-feedback": "addressing-feedback", "001-in-flight": "idle, background task running"} {
+			if l := m.shown[lineOf(m, id)]; len(l.drawn) < 2 {
+				t.Errorf("at width %d, %s shows %q on one line: %q", width, id, field, l.drawn)
+			}
+		}
+	}
+}
+
+func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	for _, width := range []int{60, 100, 160} {
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 200})
+		for _, line := range screen(m) {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at width %d, a line is %d wide: %q", width, w, line)
+			}
+		}
+		// Every line shows its whole head and every field, on lines that fit
+		// without cutting: in its column, or as "heading: value" on a card.
+		for _, l := range m.shown {
+			for _, line := range l.drawn {
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("at width %d, %s is drawn %d wide: %q", width, l.head, w, line)
+				}
+			}
+			drawn := squeezed(strings.Join(l.drawn, ""))
+			if !strings.Contains(drawn, squeezed(l.head)) {
+				t.Errorf("at width %d, %q isn't all shown: %q", width, l.head, l.drawn)
+			}
+			for i, f := range l.fields {
+				switch {
+				case m.inColumns:
+					if got := cellsOf(m.table, l.drawn)[i+1]; squeezed(got) != squeezed(f) {
+						t.Errorf("at width %d, %s shows %q, want %q", width, l.head, got, f)
+					}
+				case f != "" && !strings.Contains(drawn, squeezed(columns[i].heading+": "+f)):
+					t.Errorf("at width %d, %s doesn't show %s %q: %q", width, l.head, columns[i].heading, f, l.drawn)
+				}
+			}
+		}
+	}
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 200})
+	if m.inColumns {
+		t.Error("at width 60, the rows are in columns")
+	}
+	if got := m.shown[lineOf(m, "001-in-flight")].drawn; !slices.Equal(got, []string{
+		"        001-in-flight",
+		"          status: working",
+		"          worker: idle, background task running",
+	}) {
+		t.Errorf("at width 60, 001-in-flight's card is %q", got)
+	}
+
+	// On a screen narrower than an ID with its indent, the indent gives way,
+	// and only an ID wider than the screen is cut.
+	m.Update(tea.WindowSizeMsg{Width: 12, Height: 200})
+	for id, want := range map[string]string{"010-parent": "▾ 010-parent", "goal 001-launch": "▾ goal 001-…"} {
+		if got := m.shown[lineOf(m, id)].drawn[0]; got != want {
+			t.Errorf("at width 12, %s's card starts %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
+	want := words(strings.Join(append([]string{idHeading}, headings().fields...), " "))
+	scrolled := false
+	for range m.shown {
+		if m.shown[m.cursor].fields != nil {
+			if got := words(screen(m)[0]); got != want {
+				t.Errorf("with the cursor on %s, the screen starts %q, want the headings", m.shown[m.cursor].head, got)
+			}
+		}
+		scrolled = scrolled || m.top > 0
+		press(m, "j")
+	}
+	if !scrolled {
+		t.Error("the report fits on the screen, so nothing scrolled")
+	}
+}
+
+func TestLiveStatusMovesAWrappedRowAsOne(t *testing.T) {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 7})
+	if got := len(m.shown[lineOf(m, "016-feedback")].drawn); got < 2 {
+		t.Fatalf("016-feedback takes %d line(s), want a row that wraps", got)
+	}
+	for _, key := range []string{"j", "k"} {
+		step := map[string]int{"j": 1, "k": -1}[key]
+		for {
+			from := m.cursor
+			press(m, key)
+			if m.cursor == from {
+				break
+			}
+			if m.cursor != from+step {
+				t.Fatalf("%s from %q went %d lines", key, m.shown[from].head, m.cursor-from)
+			}
+			if !onScreen(m) {
+				t.Errorf("after %s onto %q, its row isn't all on screen:\n%s", key, m.shown[m.cursor].head, strings.Join(screen(m), "\n"))
+			}
 		}
 	}
 }
@@ -461,7 +665,7 @@ exec `+realGit+` "$@"
 		}
 		calls = len(lines)
 		i := lineOf(m, "013-risky")
-		lastSync = append(lastSync, i >= 0 && strings.Contains(m.shown[i].tail, "as of the last sync"))
+		lastSync = append(lastSync, i >= 0 && strings.Contains(says(m.shown[i].statusLine), "as of the last sync"))
 
 		if since == 2*time.Minute {
 			break
@@ -703,14 +907,17 @@ func (r *liveRun) second() {
 // open is how long the view has been open.
 func (r *liveRun) open() time.Duration { return r.clock.Sub(tenOClock) }
 
-// tail is what the view shows after a task's ID: its status, worker, PR and
-// merge check or notes.
-func (r *liveRun) tail(id string) string {
+// fields are what the view shows of a task after its ID: its status, worker,
+// PR, model, effort and notes; none when it isn't on show.
+func (r *liveRun) fields(id string) []string {
 	if i := lineOf(r.m, id); i >= 0 {
-		return r.m.shown[i].tail
+		return r.m.shown[i].fields
 	}
-	return ""
+	return make([]string, len(columns))
 }
+
+// says is what the view shows of a task after its ID, its fields joined.
+func (r *liveRun) says(id string) string { return strings.Join(r.fields(id), "  ") }
 
 // A change to a task file shows with the next build, within 3 seconds, and
 // the view lists no workers and reads no branches to show it.
@@ -725,9 +932,9 @@ func TestLiveStatusShowsALedgerChangeWithoutReadingAgain(t *testing.T) {
 	reportTask(t, l.Crew, "p", "024-ready", true, "status: pr-open", "risk: low", "base: main", "branch: agent/ready",
 		"pr: https://github.com/o/r/pull/24", "pr_state: open", "pr_base: main", "worker_job: w24")
 	changed := run.open()
-	for !strings.HasPrefix(run.tail("020-lower"), "needs-input") || !strings.Contains(run.tail("024-ready"), "1 open question(s)") {
+	for run.fields("020-lower")[statusField] != "needs-input" || !strings.Contains(run.says("024-ready"), "1 open question(s)") {
 		if run.open()-changed == 3*time.Second {
-			t.Fatalf("3s after the ledger changed, the view shows 020-lower %q and 024-ready %q", run.tail("020-lower"), run.tail("024-ready"))
+			t.Fatalf("3s after the ledger changed, the view shows 020-lower %q and 024-ready %q", run.says("020-lower"), run.says("024-ready"))
 		}
 		run.second()
 	}
@@ -751,10 +958,10 @@ func TestLiveStatusShowsWorkersAndRestacksWithin15Seconds(t *testing.T) {
 	for range 15 {
 		run.second()
 	}
-	if got := run.tail("024-ready"); !strings.Contains(got, "worker: working") || !strings.Contains(got, "not yet: worker busy") {
+	if got := run.fields("024-ready"); got[workerField] != "working" || !strings.HasPrefix(got[notesField], "not yet: worker busy") {
 		t.Errorf("15s after its worker started, 024-ready shows %q", got)
 	}
-	if got := run.tail("021-upper"); !strings.Contains(got, "needs restack: 020-lower moved") {
+	if got := run.says("021-upper"); !strings.Contains(got, "needs restack: 020-lower moved") {
 		t.Errorf("15s after 020-lower moved on, 021-upper shows %q", got)
 	}
 
@@ -762,10 +969,10 @@ func TestLiveStatusShowsWorkersAndRestacksWithin15Seconds(t *testing.T) {
 	l.listWorkers(t, `{"id":"w1","state":"working","pid":1},{"id":"w20","state":"working","pid":2},{"id":"w24","state":"idle","pid":3}`)
 	gitRepo{t, l.repo}.git("update-ref", "refs/remotes/origin/agent/lower", lowerWas)
 	settle(run.m, press(run.m, "r"))
-	if got := run.tail("024-ready"); !strings.Contains(got, "worker: idle") || !strings.Contains(got, "merge now") {
+	if got := run.fields("024-ready"); got[workerField] != "idle" || !strings.HasPrefix(got[notesField], "merge now") {
 		t.Errorf("after r, with its worker idle, 024-ready shows %q", got)
 	}
-	if got := run.tail("021-upper"); strings.Contains(got, "needs restack") {
+	if got := run.says("021-upper"); strings.Contains(got, "needs restack") {
 		t.Errorf("after r, with 020-lower back where it was, 021-upper shows %q", got)
 	}
 }
@@ -794,31 +1001,31 @@ func TestLiveStatusClaimsNothingBeforeTheFirstReads(t *testing.T) {
 
 	openAll(m)
 	for _, line := range m.shown {
-		if strings.Contains(line.tail, "merge now") {
-			t.Errorf("before the first listing, %s says %q", line.head, line.tail)
+		if strings.Contains(says(line.statusLine), "merge now") {
+			t.Errorf("before the first listing, %s says %q", line.head, says(line.statusLine))
 		}
 	}
 	if got := m.shown[0].head; got != "workers running: not listed yet" {
 		t.Errorf("before the first listing, the workers line is %q", got)
 	}
 	for _, id := range []string{"001-in-flight", "020-lower", "024-ready"} {
-		if got := lineOf(m, id); got < 0 || !strings.Contains(m.shown[got].tail, "worker: not listed yet") {
+		if got := lineOf(m, id); got < 0 || m.shown[got].fields[workerField] != "not listed yet" {
 			t.Errorf("before the first listing, %s's worker isn't said to be not listed yet", id)
 		}
 	}
 	for _, id := range []string{"021-upper", "023-moved"} {
-		if got := lineOf(m, id); got < 0 || !strings.Contains(m.shown[got].tail, "branches not read yet") {
+		if got := lineOf(m, id); got < 0 || !strings.Contains(says(m.shown[got].statusLine), "branches not read yet") {
 			t.Errorf("before the first branch read, %s doesn't say its branches aren't read yet", id)
 		}
 	}
 	// git is never asked about 020-lower: it isn't stacked, and has no PR.
-	if got := lineOf(m, "020-lower"); got < 0 || strings.Contains(m.shown[got].tail, "branches not read yet") {
-		t.Errorf("before the first branch read, 020-lower is shown as %q", m.shown[got].tail)
+	if got := lineOf(m, "020-lower"); got < 0 || strings.Contains(says(m.shown[got].statusLine), "branches not read yet") {
+		t.Errorf("before the first branch read, 020-lower is shown as %q", says(m.shown[got].statusLine))
 	}
 
 	close(hold) // the reads come back, and with them what they say
-	tail := func(id string) string { return m.shown[lineOf(m, id)].tail }
-	for !strings.Contains(tail("024-ready"), "merge now") || !strings.Contains(tail("023-moved"), "PR targets agent/old, not main") {
+	shows := func(id string) string { return says(m.shown[lineOf(m, id)].statusLine) }
+	for !strings.Contains(shows("024-ready"), "merge now") || !strings.Contains(shows("023-moved"), "PR targets agent/old, not main") {
 		handle()
 	}
 }
@@ -842,7 +1049,7 @@ func TestLiveStatusSaysWhenTheWorkersCouldntBeListed(t *testing.T) {
 		}
 		// The listings at 30s fails; the one at 45s succeeds.
 		failed := run.open() >= 30*time.Second && run.open() < 45*time.Second
-		got := run.tail("024-ready")
+		got := run.says("024-ready")
 		if failed && (!strings.Contains(got, "workers couldn't be listed") || strings.Contains(got, "merge now")) {
 			t.Errorf("at %v, after a listing failed, 024-ready shows %q", run.open(), got)
 		}
