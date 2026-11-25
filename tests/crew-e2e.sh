@@ -1428,6 +1428,32 @@ check "a second stall with no new commit or change of status since the nudge res
 check "the question names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
 out=$(crew tick 2>/dev/null)
 check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13 | wc -l) == 1 ]]'
+check "and with nothing after the question but tick's own needs-input, the task stays needs-input, the question open and counted" \
+  '[[ $(crew get 13 status) == needs-input && $(asked13 | wc -l) == 1 && $(crew tick 2>&1) == "" && $(crew get 13 status) == needs-input ]]'
+# A nudge question settles once its worker moves on. Asking again takes a nudge and a second
+# stall; a new commit first lets the nudge go out. Each nudge or followup is one more resume,
+# so what follows is counted from n again.
+ASKS=0
+settled13() { section "$F13" "## Open questions" | grep -c "^- \[x\] Its worker's turn ended mid-task.* Settled: $1"; }
+SETTLED="013-tick-routing: its worker moved on; nudge question settled"
+ask13() { work "$WT13" "ask$((++ASKS)).txt"; stall13 "done" null; crew tick >/dev/null 2>&1; stall13 "done" null; crew tick >/dev/null 2>&1
+  [[ $(crew get 13 status) == needs-input && $(asked13 | wc -l) == 1 ]]; }
+sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
+sed -i '/^## Open questions$/a - [ ] CI still red on abc1234, for you' "$F13"
+work "$WT13" settle1.txt; out=$(crew tick 2>/dev/null)
+check "a new commit alone settles the nudge question, saying which; a worker's own question and a CI question beside it stay open, and the task keeps waiting" \
+  '[[ $out == "$SETTLED" && $(settled13 "new commit $(head13)\.") == 1 && $(asked13 | wc -l) == 2 && $(crew get 13 status) == needs-input ]]'
+answer13; crew set 13 status working
+ask13; work "$WT13" settle2.txt; out=$(crew tick 2>/dev/null)
+check "a new commit while needs-input puts the task back in its worker's turn, with no open question; its idle worker is nudged by the same tick" \
+  '[[ $out == "$SETTLED$NL$NUDGED" && $(settled13 "new commit") == 2 && -z $(asked13) && $(crew get 13 status) == working ]]'
+ask13; crew followup 13 --note "Carry on with A." >/dev/null 2>&1; out=$(crew tick 2>/dev/null)
+check "the lead's followup settles the question, and a later idle tick doesn't mark the task needs-input again" \
+  '[[ $(settled13 "a followup to its worker") == 1 && -z $(asked13) && $(crew get 13 status) == working && $out != *"waiting on you"* ]]'
+ask13; work "$WT13" settle3.txt; crew set 13 status working; record_evidence 13; hand_over 13; out=$(crew tick 2>/dev/null)
+check "after a new commit and a hand-over, the question is settled by the status and the task stays pr-open with no open question" \
+  '[[ $(settled13 "status pr-open") == 1 && -z $(asked13) && $(crew get 13 status) == pr-open && $out == "$SETTLED" ]]'
+crew set 13 status working; n=$(( $(resumes) - 1 ))
 answer13; crew set 13 status working; stall13 "done" null
 out=$(crew tick 2>/dev/null)
 check "a change of status since the nudge lets the next stall be nudged again" '[[ $out == "$NUDGED" && $(resumes) == $((n + 2)) ]] && nudged13'
