@@ -616,13 +616,21 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 }
 
 // unseen is the lines of the report never on screen while keys are pressed,
-// over and over until the screen stops changing.
+// over and over until the screen stops changing. A line counts as seen only
+// at its own place in the report, so a line with the same text as another,
+// such as a card's "status: ready", doesn't stand in for it.
 func unseen(m *liveStatus, keys ...string) []string {
-	seen := map[string]bool{}
+	var report []string // every shown line's drawn lines, top to bottom
+	for _, l := range m.shown {
+		report = append(report, l.drawn...)
+	}
+	seen := make([]bool, len(report))
 	for last := ""; ; {
 		lines := screen(m)
-		for _, l := range lines[len(m.headings) : len(lines)-1] {
-			seen[strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " ")] = true
+		for i, l := range lines[len(m.headings) : len(lines)-1] {
+			if n := m.top + i; n < len(report) && strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " ") == report[n] {
+				seen[n] = true
+			}
 		}
 		if now := strings.Join(lines, "\n"); now == last {
 			break
@@ -632,11 +640,9 @@ func unseen(m *liveStatus, keys ...string) []string {
 		press(m, keys...)
 	}
 	var missed []string
-	for _, l := range m.shown {
-		for _, line := range l.drawn {
-			if !seen[line] {
-				missed = append(missed, line)
-			}
+	for n, line := range report {
+		if !seen[n] {
+			missed = append(missed, line)
 		}
 	}
 	return missed
