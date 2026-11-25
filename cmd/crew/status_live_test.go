@@ -580,6 +580,21 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 	}
 }
 
+func TestLiveStatusPinsTheHeadingsOverRowsUnderAFold(t *testing.T) {
+	c := statusLedger(t)
+	writeFile(t, c, "", "projects", "s", "project.env")
+	reportTask(t, c, "s", "001-idea", false, "status: draft")
+	m := liveOn(readReport(c, "s"))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	if lineOf(m, "001-idea") < 0 || !m.inColumns {
+		t.Fatalf("001-idea isn't shown in columns:\n%s", strings.Join(screen(m), "\n"))
+	}
+	if len(m.headings) == 0 {
+		t.Errorf("no headings over the drafts' rows:\n%s", strings.Join(screen(m), "\n"))
+	}
+}
+
 func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 	m := liveOn(variedReport(t))
 	openAll(m)

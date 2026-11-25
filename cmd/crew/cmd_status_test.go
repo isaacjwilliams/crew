@@ -70,6 +70,23 @@ waiting on you in other projects  (crew status --all)
 	}
 }
 
+func TestPrintReportLeavesFoldedRowsOutOfItsColumns(t *testing.T) {
+	c := fullStatusLedger(t)
+	reportTask(t, c, "p", "016-an-idea-with-a-longer-name-than-any-row-printed", false, "status: draft", "base: main")
+	writeFile(t, c, "", "projects", "s", "project.env")
+	reportTask(t, c, "s", "001-idea", false, "status: draft")
+	var b strings.Builder
+	printReport(&b, readReport(c, "p"))
+	if want := "\n  task               status   worker"; !strings.Contains(b.String(), want) {
+		t.Errorf("a folded draft widens the columns: want %q in\n%s", want, b.String())
+	}
+	b.Reset()
+	printReport(&b, readReport(c, "s"))
+	if strings.Contains(b.String(), "  task  ") {
+		t.Errorf("headings over a project whose rows are all folded:\n%s", b.String())
+	}
+}
+
 func TestPrintReportWithoutProjects(t *testing.T) {
 	got := plainText(statusReport{ReadOnlyOn: "no machine"})
 	if want := "read-only: crew runs on no machine\nNo projects registered. Run 'crew project add' in a repo.\n"; got != want {

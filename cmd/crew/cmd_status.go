@@ -63,7 +63,7 @@ func (c *Crew) catchUpLedger() {
 // others. Task and goal lines are a table, each column as wide as its widest
 // value, with its headings at the top of each project.
 func printReport(w io.Writer, r statusReport) {
-	lines := reportLines(r)
+	lines := unfolded(reportLines(r))
 	// Two spaces a level. The live view's indent is two wider, for its fold
 	// marker (indentWidth).
 	t := measure(lines, func(depth int) int { return 2 * depth })
@@ -82,9 +82,6 @@ func printLine(w io.Writer, t table, l statusLine, indent string) {
 		// measure made each column as wide as its widest value, so nothing
 		// wraps and the row is one line.
 		fmt.Fprintln(w, t.row(indent, l)[0])
-	}
-	if l.folded {
-		return
 	}
 	// A project's line has no indent, and its rows go under the headings.
 	if indent == "" && l.hasRows() {
@@ -109,9 +106,25 @@ type statusLine struct {
 
 func (l statusLine) hasFields() bool { return l.fields != nil }
 
-// hasRows is whether a top-level line, a project, has task or goal lines under
-// it, which go under the table's headings.
-func (l statusLine) hasRows() bool { return slices.ContainsFunc(l.kids, statusLine.hasFields) }
+// hasRows is whether a line has task or goal lines anywhere under it, which go
+// under the table's headings.
+func (l statusLine) hasRows() bool {
+	return slices.ContainsFunc(l.kids, func(k statusLine) bool { return k.hasFields() || k.hasRows() })
+}
+
+// unfolded is lines as the plain text shows them: each folded line without its
+// kids, so it neither prints nor measures them.
+func unfolded(lines []statusLine) []statusLine {
+	var out []statusLine
+	for _, l := range lines {
+		if l.folded {
+			l.kids = nil
+		}
+		l.kids = unfolded(l.kids)
+		out = append(out, l)
+	}
+	return out
+}
 
 func leafLine(key, head string) statusLine { return statusLine{key: key, head: head} }
 

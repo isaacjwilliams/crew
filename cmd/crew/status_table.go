@@ -66,9 +66,10 @@ type table struct {
 }
 
 // measure is the table each line holding fields fits in unwrapped, with the
-// headings: every such line in lines and under them, folded or not, so opening
-// a fold never moves the columns. indent is how wide a line's indent is at a
-// depth. A project is at depth 0, and its rows and their headings at depth 1.
+// headings: every such line in lines and under them, folded lines' kids too.
+// The live view measures them all, so opening a fold never moves the columns.
+// indent is how wide a line's indent is at a depth. A project is at depth 0,
+// and its rows and their headings at depth 1.
 func measure(lines []statusLine, indent func(depth int) int) table {
 	var t table
 	var add func(l statusLine, depth int)
