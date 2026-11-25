@@ -1471,11 +1471,11 @@ const (
 	nudgeSettled         = "nudge question settled: " // then what settled it
 )
 
-// isNudgeQuestion: the checklist line l is a question crew nudge asked the
-// lead, open or settled.
-func isNudgeQuestion(l string) bool {
+// isOpenNudgeQuestion: the line l is an unchecked question crew nudge asked the
+// lead.
+func isOpenNudgeQuestion(l string) bool {
 	item, ok := checklistItem(l)
-	return ok && strings.HasPrefix(item, nudgeQuestionStart)
+	return ok && strings.HasPrefix(l, "- [ ]") && strings.HasPrefix(item, nudgeQuestionStart)
 }
 
 // NudgeQuestions counts the questions crew nudge asked the lead that are still
@@ -1483,7 +1483,7 @@ func isNudgeQuestion(l string) bool {
 func (t Task) NudgeQuestions() int {
 	n := 0
 	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
-		if isNudgeQuestion(l) && strings.HasPrefix(l, "- [ ]") {
+		if isOpenNudgeQuestion(l) {
 			n++
 		}
 	}
@@ -1529,7 +1529,7 @@ func (t Task) SettleNudgeQuestions(by string) error {
 		if strings.HasPrefix(l, "## ") {
 			in = l == "## Open questions"
 		}
-		if in && isNudgeQuestion(l) && strings.HasPrefix(l, "- [ ]") {
+		if in && isOpenNudgeQuestion(l) {
 			ls[i] = "- [x]" + strings.TrimPrefix(l, "- [ ]") + " Settled: " + by + "."
 		}
 	}
