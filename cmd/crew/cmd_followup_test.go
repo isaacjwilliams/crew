@@ -28,6 +28,29 @@ const (
 	followupBranch = "agent/task"
 )
 
+// keepMiseDirs points mise at its real directories before a test swaps HOME.
+// The stubs run jq, which may be a mise shim, and under a fake HOME mise
+// rejects the real config as untrusted and the stubs fail. tests/lib.sh's
+// isolate_home does the same.
+func keepMiseDirs(t *testing.T) {
+	t.Helper()
+	for _, d := range []struct{ env, xdg, under string }{
+		{"MISE_CONFIG_DIR", "XDG_CONFIG_HOME", ".config"},
+		{"MISE_DATA_DIR", "XDG_DATA_HOME", ".local/share"},
+		{"MISE_STATE_DIR", "XDG_STATE_HOME", ".local/state"},
+		{"MISE_CACHE_DIR", "XDG_CACHE_HOME", ".cache"},
+	} {
+		if os.Getenv(d.env) != "" {
+			continue
+		}
+		base := os.Getenv(d.xdg)
+		if base == "" {
+			base = filepath.Join(os.Getenv("HOME"), d.under)
+		}
+		t.Setenv(d.env, filepath.Join(base, "mise"))
+	}
+}
+
 func newFollowupCrew(t *testing.T, tool string) followupCrew {
 	t.Helper()
 	stubs, err := filepath.Abs("../../tests/stubs")
@@ -35,6 +58,7 @@ func newFollowupCrew(t *testing.T, tool string) followupCrew {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
+	keepMiseDirs(t)
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
