@@ -190,8 +190,8 @@ func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
 	if !t.Dispatched() {
 		return fail("%s has no worker yet; dispatch it first", t.ID())
 	}
-	// Before the busy check: crew never resumes a finished task's worker, so
-	// "wait for it" would be bad advice.
+	// Before the pause and busy checks: crew never resumes a finished task's
+	// worker, so "resume the project" or "wait for it" would be bad advice.
 	if st := t.Status(); st.Finished() {
 		return fail("%s is %s; not resuming its worker", t.ID(), st)
 	}
