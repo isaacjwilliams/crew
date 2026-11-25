@@ -1450,8 +1450,8 @@ check "a new commit while needs-input puts the task back in its worker's turn, w
 ask13; crew followup 13 --note "Carry on with A." >/dev/null 2>&1; out=$(crew tick 2>/dev/null)
 check "the lead's followup settles the question, and a later idle tick doesn't mark the task needs-input again" \
   '[[ $(settled13 "a followup to its worker") == 1 && -z $(asked13) && $(crew get 13 status) == working && $out != *"waiting on you"* ]]'
-ask13; work "$WT13" settle3.txt; crew set 13 status working; record_evidence 13; hand_over 13; out=$(crew tick 2>/dev/null)
-check "after a new commit and a hand-over, the question is settled by the status and the task stays pr-open with no open question" \
+ask13; work "$WT13" settle3.txt; record_evidence 13; hand_over 13; crew set 13 status needs-input; out=$(crew tick 2>/dev/null)
+check "after a new commit and a hand-over that tick had overwritten with needs-input, the question is settled by the status and the task is pr-open again with no open question" \
   '[[ $(settled13 "status pr-open") == 1 && -z $(asked13) && $(crew get 13 status) == pr-open && $out == "$SETTLED" ]]'
 crew set 13 status working; n=$(( $(resumes) - 1 ))
 answer13; crew set 13 status working; stall13 "done" null

@@ -601,8 +601,8 @@ func cmdNudge(c *Crew, args []string) error {
 // crew settle TASK: when the worker of a task with an open nudge question has
 // moved on since crew nudge asked it (see Task.WorkerMovedOn), checks the
 // question off, saying what settled it. A task that waits on no other question
-// goes back to the worker's turn it was in. Exits 3 when there's nothing to
-// settle.
+// goes back to the status it had before needs-input. Exits 3 when there's
+// nothing to settle.
 func cmdSettle(c *Crew, args []string) error {
 	if err := need("git"); err != nil {
 		return err
