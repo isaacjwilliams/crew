@@ -1010,8 +1010,8 @@ func (f Finding) Outcome() Outcome {
 }
 
 // StillOpen: the finding repeats one an earlier review left for the user,
-// which the user hasn't decided yet ("left for the user: still open from
-// review <N>").
+// which the user hadn't decided when this review ran ("left for the user:
+// still open from review <N>").
 func (f Finding) StillOpen() bool {
 	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
 }
