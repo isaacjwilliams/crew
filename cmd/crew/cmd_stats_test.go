@@ -99,6 +99,21 @@ func TestStatsOfReview(t *testing.T) {
 		t.Errorf("rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
 	}
 
+	// The user later decided what review 3 left for them, the repeat included:
+	// stats still counts what automated review couldn't settle on its own.
+	decided := reviews + round
+	for _, o := range []string{"left for the user\n", "left for the user: pre-existing, proposal 013-h.md\n", "left for the user: still open from review 3\n"} {
+		decided = strings.ReplaceAll(decided, "- Outcome: "+o, "- Outcome: "+strings.TrimSuffix(o, "\n")+"; decided by the user: no change\n")
+	}
+	if n := strings.Count(decided, "; decided by the user"); n != 4 {
+		t.Fatalf("decided %d findings, want 4", n)
+	}
+	s = statsOf(Task{docWith(t, decided)}, history{})
+	got = []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
+	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
+		t.Errorf("with the findings decided: rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
+	}
+
 	// Only the first review, which needed fixes: it never came back clean.
 	first, _, _ := strings.Cut(reviewedTask, "### Automated review 2")
 	if s := statsOf(Task{docWith(t, first+"## Log\n")}, history{}); s.reviews != 1 || s.cleanAfter != 0 {

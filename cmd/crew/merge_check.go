@@ -17,9 +17,10 @@ type mergeCheck struct {
 	// InTheWay is what stands between the PR and a merge, what's likely to clear
 	// soonest first. It's empty when the PR can merge now.
 	InTheWay []string
-	// LeftForUser counts the findings the newest automated review left for the
-	// user. They never stand in the way: nothing records that the user read them.
-	LeftForUser int
+	// AwaitingUser counts the findings the newest automated review left for the
+	// user that they haven't decided yet. They never stand in the way: the user
+	// can merge without deciding them.
+	AwaitingUser int
 	// LastSync: GitHub couldn't be read, so the check went by what crew sync
 	// last recorded.
 	LastSync bool
@@ -34,8 +35,8 @@ func (m mergeCheck) String() string {
 		s = m.Closed + " on GitHub"
 	case len(m.InTheWay) > 0:
 		s = "not yet: " + strings.Join(m.InTheWay, "; ")
-	case m.LeftForUser > 0:
-		s += fmt.Sprintf(", %d finding(s) left for you", m.LeftForUser)
+	case m.AwaitingUser > 0:
+		s += fmt.Sprintf(", %d finding(s) left for you", m.AwaitingUser)
 	}
 	if m.LastSync {
 		s += " (couldn't read GitHub; as of the last sync)"
@@ -122,7 +123,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		m.InTheWay = []string{"blocked by a branch rule on GitHub"}
 	}
 	if reviews := t.AutomatedReviews(); len(reviews) > 0 {
-		m.LeftForUser = reviews[len(reviews)-1].LeftForUser()
+		m.AwaitingUser = reviews[len(reviews)-1].AwaitingUser()
 	}
 	return m
 }

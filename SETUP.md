@@ -408,7 +408,7 @@ One row for each merged task:
 - **PR waited on you**: from each time the task went to `pr-open` until its status next changed, when you sent a round or the PR merged.
 - **questions waited on you**: from each time it went to `needs-input` until it left it. In a goal's task, from when the goal lead left a worker's question for you, or a collaborator's comment or red CI came to you directly.
 - **automated reviews** and **clean after**: how many reviews ran, and the one that first came back clean (nothing fixed at must fix or should fix, and the Claude reviewer reported), or `never`.
-- **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column.
+- **findings fixed**, **set aside** and **left for you**: what the worker did with the reviews' findings. Set aside means it judged one not a defect: a split it settled that way, or one it disputed, which is left for you as well. A finding that later reviews repeat while it waits for your decision counts once, in each column, and a finding left for you still counts there once you've decided it.
 - **later fixes** and **reverts**: the fix tasks that merged naming this task in `fixes`, and the reverts of its PR, whenever they came.
 
 Then the totals, and the median waits.
@@ -517,7 +517,7 @@ When a task's branch changes a file that matches one, crew raises its tier to `h
   038-season-admin   pr-open  done    #38  sonnet          not yet: CI running; draft  medium: read the diff
 ```
 
-`merge now` means GitHub has the PR open, ready, clean against its base, its checks passing, no changes requested and nothing its branch rules still want, and crew has nothing more to do on it: its worker is idle, its automated review is recorded, it needs no restack and has no open question. Otherwise `not yet:` names what stands in the way, what's likely to clear soonest first. Status reads each PR from GitHub as it runs; when it can't, it goes by the last `crew sync` and says `(couldn't read GitHub; as of the last sync)`. On a machine that doesn't run the crew, it can't see the workers, so it never says `merge now` there. A PR merged or closed on GitHub that sync hasn't caught up with says `merged on GitHub` or `closed on GitHub`.
+`merge now` means GitHub has the PR open, ready, clean against its base, its checks passing, no changes requested and nothing its branch rules still want, and crew has nothing more to do on it: its worker is idle, its automated review is recorded, it needs no restack and has no open question. Otherwise `not yet:` names what stands in the way, what's likely to clear soonest first. `merge now, 2 finding(s) left for you` counts what the worker's newest automated review left for you to decide and you haven't yet; they don't stop a merge. Once you decide one, through the lead or in a PR comment, the worker records it and the count drops. Status reads each PR from GitHub as it runs; when it can't, it goes by the last `crew sync` and says `(couldn't read GitHub; as of the last sync)`. On a machine that doesn't run the crew, it can't see the workers, so it never says `merge now` there. A PR merged or closed on GitHub that sync hasn't caught up with says `merged on GitHub` or `closed on GitHub`.
 
 Each project ends with the PRs waiting on you, cheapest look first, then by number:
 

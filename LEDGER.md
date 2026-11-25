@@ -228,6 +228,7 @@ After opening its PR, a worker reviews it with its `pr-review` skill, up to `AUT
   - `left for the user: still open from review N`: a repeat of a finding an earlier review left for the user, which the user hasn't decided since;
   - `left for the user: <the cost>`: a must fix that only a deploy step or the docs could close. The cost says what fails, for whom, and for how long;
   - `left for the user: <the fix's cost>`: a fix-later finding in the PR's lines whose fix is too big for the PR. The cost says the fix's size and what it touches;
+  - `left for the user…; decided by the user: <the decision>`: any of these once the user has decided it. The worker adds the decision to the end of the finding's outcome, and of each later repeat's (`left for the user: still open from review 2; decided by the user: no change`). `crew stats` still counts it as left for the user; `crew status`'s `finding(s) left for you` doesn't;
 - each reviewer's conclusion and what they couldn't check;
 - `Summary posted`, under the newest review, once the worker has posted the pass's summary comment with `crew review-summary`. That comment is filled in from `templates/review-comment.md` and this record alone. It carries `<!-- crew -->`, so `crew feedback` skips it, and `<!-- crew review-summary: review N -->`, N the newest review, so a second `crew review-summary` for the same review edits it instead of posting another.
 
