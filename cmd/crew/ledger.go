@@ -959,11 +959,12 @@ func (r AutomatedReview) Clean() bool {
 	return r.ClaudeReported
 }
 
-// LeftForUser counts the review's findings whose outcome left them for the user.
-func (r AutomatedReview) LeftForUser() int {
+// AwaitingUser counts the review's findings left for the user that the user
+// hasn't decided yet.
+func (r AutomatedReview) AwaitingUser() int {
 	n := 0
 	for _, f := range r.Findings {
-		if f.Outcome() == OutcomeLeftForUser {
+		if f.Outcome() == OutcomeLeftForUser && !f.Decided() {
 			n++
 		}
 	}
@@ -1013,6 +1014,13 @@ func (f Finding) Outcome() Outcome {
 // review <N>").
 func (f Finding) StillOpen() bool {
 	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
+}
+
+// Decided: the user has decided a finding left for them. The worker adds the
+// decision to the end of the outcome, so the outcome still starts with what
+// the worker did ("left for the user: …; decided by the user: no change").
+func (f Finding) Decided() bool {
+	return strings.Contains(f.outcome, "; decided by the user")
 }
 
 // SetAside: the worker judged the finding not a defect, either settling a
