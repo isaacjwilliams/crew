@@ -68,6 +68,13 @@ func TestMergeCheck(t *testing.T) {
 	}
 	// A fix that found old instances is fixed, and not left for the user.
 	fixed := []string{"fixed in abc1234", "fixed in abc1234; left for the user: also at the fork point, a.go:3"}
+	// #111's three findings, once the worker recorded the user's decisions on
+	// them as implementer.md says.
+	decided111 := []string{
+		"left for the user: its fix would cross acceptance criterion 6, which names `retros/`, `runs/` and `verify/`; decided by the user: take the second fix, fixed in 58050d9",
+		"left for the user; decided by the user: no change, the check can fail",
+		"left for the user; decided by the user: no change, the type word stays `memory`",
+	}
 	decisions := "## Decisions\n- 2026-11-20 — Keep the old flag. (user)\n- 2026-11-20 — Automated review 2, finding 1: no change. (user)\n\n"
 	for _, tc := range []struct {
 		name     string
@@ -120,6 +127,7 @@ func TestMergeCheck(t *testing.T) {
 		{name: "findings left for the user", body: review2(slices.Concat(leftForUser, fixed)...) + "## Log\n", want: "merge now, 7 finding(s) left for you"},
 		{name: "findings left for the user, some decided", body: review2(slices.Concat(leftForUser, decided, fixed)...) + "## Log\n", want: "merge now, 7 finding(s) left for you"},
 		{name: "every finding left for the user decided", body: review2(slices.Concat(decided, fixed)...) + "## Log\n", want: "merge now"},
+		{name: "#111's findings, all decided", body: review2(decided111...) + "## Log\n", want: "merge now"},
 		{name: "a finding decided under Decisions, whose outcome doesn't say so yet", body: decisions + review2(leftForUser[:2]...) + "## Log\n", want: "merge now, 2 finding(s) left for you"},
 		{name: "the user's decisions about other things and another finding", body: decisions + review2(decided[0], leftForUser[1]) + "## Log\n", want: "merge now, 1 finding(s) left for you"},
 		{name: "findings left for the user, and in the way", body: review2(leftForUser...) + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
