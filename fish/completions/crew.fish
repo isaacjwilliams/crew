@@ -18,7 +18,7 @@ end
 # The names of the free-form files crew show file finds.
 function __crew_free_files
     set -l h (crew config CREW_HOME 2>/dev/null); or return
-    set -l files $h/reports/* $h/logs/* $h/news/*.log $h/projects/*/{review-eval,retros,runs,verify}/*
+    set -l files $h/reports/* $h/logs/* $h/news/*.log $h/projects/*/review-eval/*
     path filter -f $files | path basename
 end
 complete -c crew -f

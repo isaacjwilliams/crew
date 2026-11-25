@@ -2528,22 +2528,22 @@ check "show refuses a type word without its argument, and --project where it doe
   '! crew show task 2>/dev/null && ! crew show file 2>/dev/null && ! crew show memory x 2>/dev/null && ! crew show proposal "$SP" --project "$PJ" 2>/dev/null'
 # crew show file: the free-form files crew and its agents write, by a part of their name.
 NEWS=$L/news/$(date +%F).log; PR2=$L/projects/$P2
-mkdir -p "$L/reports" "$L/logs" "$PD/review-eval" "$PD/retros" "$PD/runs/batch" "$PD/verify" "$PR2/retros"
-for f in "$L/reports/standup.md" "$L/logs/hook-output.log" "$PD/review-eval/2025-01-02-030405.md" "$PD/retros/sprint-a.md" \
-  "$PD/runs/run-plan.md" "$PD/runs/batch/inner.md" "$PD/verify/sprint-b.md" "$PD/retros/q3.md" "$PR2/retros/q3.md" "$PD/retros/plan.md" "$PD/verify/plan-b.md"; do
+RE=$PD/review-eval/2025-03-04-050607.md; RE2=$PR2/review-eval/2025-03-04-050607.md
+mkdir -p "$L/reports/batch" "$L/logs" "$PD/review-eval" "$PR2/review-eval"
+for f in "$L/reports/standup.md" "$L/reports/plan.md" "$L/reports/sprint-a.md" "$L/reports/batch/inner.md" "$L/logs/hook-output.log" \
+  "$L/logs/plan-b.log" "$L/logs/sprint-b.log" "$PD/review-eval/2025-01-02-030405.md" "$RE" "$RE2"; do
   echo "${f#"$L"/}" >"$f"
 done
-check "show file finds a file in the home's reports/ and logs/, and in a project's review-eval/, retros/, runs/ and verify/" \
-  'shows "$L/reports/standup.md" file standup && shows "$L/logs/hook-output.log" file hook-out && shows "$PD/review-eval/2025-01-02-030405.md" file 2025-01-02 &&
-   shows "$PD/retros/sprint-a.md" file sprint-a && shows "$PD/runs/run-plan.md" file run-plan && shows "$PD/verify/sprint-b.md" file sprint-b'
+check "show file finds a file in the home's reports/ and logs/, and in a project's review-eval/" \
+  'shows "$L/reports/standup.md" file standup && shows "$L/logs/hook-output.log" file hook-out && shows "$PD/review-eval/2025-01-02-030405.md" file 2025-01-02'
 check "show file finds the day's news log, not the proposal of the same date" '[[ -f $NEWS ]] && shows "$NEWS" file "$(date +%F)" && shows "$NEWS" file "$(date +%F).log"'
 check "show file leaves out files in subdirectories" '! crew show file inner 2>/dev/null'
-check "a file's full name, with or without its extension, wins over a part of another's" 'shows "$PD/retros/plan.md" file plan && shows "$PD/retros/plan.md" file plan.md'
+check "a file's full name, with or without its extension, wins over a part of another's" 'shows "$L/reports/plan.md" file plan && shows "$L/reports/plan.md" file plan.md && shows "$L/logs/plan-b.log" file plan-b'
 out=$(crew show file sprint 2>&1 >/dev/null); st=$?
 check "a part of more than one file's name lists them, and shows none" \
-  '((st == 1)) && [[ $out == *"ambiguous:"*"projects/$PJ/retros/sprint-a.md"*"projects/$PJ/verify/sprint-b.md"* && -z $(crew show file sprint 2>/dev/null) ]]'
+  '((st == 1)) && [[ $out == *"ambiguous:"*"reports/sprint-a.md"* && $out == *"logs/sprint-b.log"* && -z $(crew show file sprint 2>/dev/null) ]]'
 check "show file looks in the default project first, then every project, or in --project's" \
-  'shows "$PD/retros/q3.md" file q3 && ! (cd "$HOME" && crew show file q3 2>/dev/null) && (cd "$HOME" && shows "$PR2/retros/q3.md" file q3 --project "$P2") && shows "$L/reports/standup.md" file standup --project "$P2"'
+  'shows "$RE" file 2025-03-04 && ! (cd "$HOME" && crew show file 2025-03-04 2>/dev/null) && (cd "$HOME" && shows "$RE2" file 2025-03-04 --project "$P2") && shows "$L/reports/standup.md" file standup --project "$P2"'
 # Fish completes the type words, then only what each kind takes.
 if command -v fish >/dev/null; then
   completes() { fish --no-config -c "source $L/fish/completions/crew.fish; complete -C '$1'" | cut -f1 | sort -u; }  # the words fish offers for a command line
@@ -2556,12 +2556,13 @@ if command -v fish >/dev/null; then
   check "fish completes nothing but --project after memory and memory-suggestions" \
     '[[ -z $(completes "crew show memory ") && $(completes "crew show memory -") == --project && -z $(completes "crew path memory-suggestions ") && $(completes "crew path memory-suggestions -") == --project ]]'
   check "fish completes nothing but file names and --project after file" \
-    '[[ $(completes "crew show file ") == "$(cd "$L" && find reports logs news/*.log projects/*/{review-eval,retros,runs,verify} -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | sort -u)" && $(completes "crew show file -") == --project ]]'
+    '[[ $(completes "crew show file ") == "$(cd "$L" && find reports logs news/*.log projects/*/review-eval -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | sort -u)" && $(completes "crew show file -") == --project ]]'
   check "fish still completes crew goal and crew memory as it did" \
     '[[ $(completes "crew goal ") == "$(printf "%s\n" new start note cap followup done abandon path | sort)" && $(completes "crew goal path ") == "$goal_ids" &&
        $(completes "crew goal new -") == *--max-in-flight*--project* && $(completes "crew memory -") == "$(printf "%s\n" --hook --project | sort)" ]]'
 else echo "  (skipped fish completions: fish not installed)"; fi
-rm -r "$L/reports/standup.md" "$L/logs/hook-output.log" "$PD/review-eval" "$PD/retros" "$PD/runs" "$PD/verify" "$PR2/retros"
+rm -r "$L/reports/standup.md" "$L/reports/plan.md" "$L/reports/sprint-a.md" "$L/reports/batch" "$L/logs/hook-output.log" "$L/logs/plan-b.log" "$L/logs/sprint-b.log" \
+  "$PD/review-eval" "$PR2/review-eval"
 
 # MCP servers for one project: its mcp.json, expanded into its git-ignored
 # mcp.local.json, which its workers and goal leads start with.

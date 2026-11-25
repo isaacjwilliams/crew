@@ -275,9 +275,8 @@ Reading the ledger  (with no type word, the argument is a task, as for any TASK)
                                    Print the project's memory-suggestions.md
   crew show file NAME [--project P]
                                    Print a file in the home's reports/ or logs/, a
-                                   news/<date>.log, or a file in a project's
-                                   review-eval/, retros/, runs/ or verify/, by its
-                                   name or a unique part of it
+                                   news/<date>.log, or a project's review-eval
+                                   report, by its name or a unique part of it
   crew path ...                    Print the path of the file crew show would print
 
 MCP servers  (a project's own, from projects/<p>/mcp.json)

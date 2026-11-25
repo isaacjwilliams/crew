@@ -1048,14 +1048,14 @@ func TestResolveIn(t *testing.T) {
 }
 
 func TestResolveName(t *testing.T) {
-	files := []string{"/h/news/2026-11-24.log", "/h/reports/2026-11-24-standup.md", "/h/retros/plan.md", "/h/verify/plan-b.md", "/h/logs/push.log"}
+	files := []string{"/h/news/2026-11-24.log", "/h/reports/2026-11-24-standup.md", "/h/reports/plan.md", "/h/logs/plan-b.log", "/h/logs/push.log"}
 	for arg, want := range map[string]string{
 		"2026-11-24":     "/h/news/2026-11-24.log",
 		"2026-11-24.log": "/h/news/2026-11-24.log",
 		"standup":        "/h/reports/2026-11-24-standup.md",
-		"plan":           "/h/retros/plan.md",
-		"plan.md":        "/h/retros/plan.md",
-		"plan-b":         "/h/verify/plan-b.md",
+		"plan":           "/h/reports/plan.md",
+		"plan.md":        "/h/reports/plan.md",
+		"plan-b":         "/h/logs/plan-b.log",
 		"push":           "/h/logs/push.log",
 	} {
 		if f, _ := resolveName(arg, files); f != want {

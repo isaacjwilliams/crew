@@ -136,16 +136,12 @@ func (c *Crew) resolve(kind, arg string) (string, error) {
 
 // freeFiles are the free-form files a user reads, for a project or every project
 // when it's empty: those directly inside the home's reports/ and logs/, each
-// news/<date>.log, and those directly inside the project's review-eval/,
-// retros/, runs/ and verify/.
+// news/<date>.log, and those directly inside the project's review-eval/.
 func (c *Crew) freeFiles(project string) []string {
 	if project == "" {
 		project = "*"
 	}
-	globs := []string{c.path("reports", "*"), c.path("logs", "*"), c.path("news", "*.log")}
-	for _, dir := range []string{"review-eval", "retros", "runs", "verify"} {
-		globs = append(globs, c.path("projects", project, dir, "*"))
-	}
+	globs := []string{c.path("reports", "*"), c.path("logs", "*"), c.path("news", "*.log"), c.path("projects", project, "review-eval", "*")}
 	var files []string
 	for _, g := range globs {
 		matches, _ := filepath.Glob(g)
