@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -42,10 +43,32 @@ func mergeTask(t *testing.T, dir, name string, fields map[string]string, body st
 
 func TestMergeCheck(t *testing.T) {
 	repo := stackRepo(t, "agent/task", "agent/parent")
-	leftForUser := "### Automated review 2 — 2026-11-20 11:00\n- Reviewers: Claude reviewer\n" +
-		"#### [should fix] a\n- Agreed severity: should fix\n- Outcome: left for the user: its fix would cross a bound\n" +
-		"#### [fix later] b\n- Agreed severity: fix later\n- Outcome: left for the user: a day's work\n" +
-		"#### [nitpick] c\n- Agreed severity: nitpick\n- Outcome: fixed in abc1234\n\n"
+	// Review 2 of a task whose findings have the outcomes given, after reviewed.
+	review2 := func(outcomes ...string) string {
+		s := "## Automated reviews\n" + reviewed + "### Automated review 2 — 2026-11-20 11:00\n- Reviewers: Claude reviewer\n"
+		for i, o := range outcomes {
+			s += fmt.Sprintf("#### %d. [should fix] f%d\n- Agreed severity: should fix\n- Outcome: %s\n", i+1, i+1, o)
+		}
+		return s + "\n"
+	}
+	// Every outcome LEDGER.md lists that leaves a finding for the user, and each
+	// of them as the user decided it.
+	leftForUser := []string{
+		"left for the user",
+		"left for the user: its fix would cross acceptance criterion 2",
+		"left for the user: pre-existing, a day's work; proposal 013-h.md",
+		"left for the user: verdict changed since review 1",
+		"left for the user: still open from review 1",
+		"left for the user: every deploy fails until the migration runs",
+		"left for the user: a day's work, all in the parser",
+	}
+	var decided []string
+	for _, o := range leftForUser {
+		decided = append(decided, o+"; decided by the user: no change")
+	}
+	// A fix that found old instances is fixed, and not left for the user.
+	fixed := []string{"fixed in abc1234", "fixed in abc1234; left for the user: also at the fork point, a.go:3"}
+	decisions := "## Decisions\n- 2026-11-20 — Keep the old flag. (user)\n- 2026-11-20 — Automated review 2, finding 1: no change. (user)\n\n"
 	for _, tc := range []struct {
 		name     string
 		fields   map[string]string // over clearTask's; an empty value removes the key
@@ -94,8 +117,12 @@ func TestMergeCheck(t *testing.T) {
 		{name: "branches not read yet", unbranch: true, fields: map[string]string{"base": "agent/parent"}, parent: "pr-open", pr: func(p *gitHubPR) { p.Base = "agent/parent" }, want: "not yet: branches not read yet; stacked on 020"},
 		{name: "branches not read yet, with nothing for git to say", unbranch: true, want: "merge now"},
 		{name: "several, soonest to clear first", worker: Agent{State: "working"}, pr: func(p *gitHubPR) { p.Draft, p.CI = true, ciFailing }, want: "not yet: worker busy; CI failing; draft"},
-		{name: "findings left for the user", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", want: "merge now, 2 finding(s) left for you"},
-		{name: "findings left for the user, and in the way", body: "## Automated reviews\n" + reviewed + leftForUser + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
+		{name: "findings left for the user", body: review2(slices.Concat(leftForUser, fixed)...) + "## Log\n", want: "merge now, 7 finding(s) left for you"},
+		{name: "findings left for the user, some decided", body: review2(slices.Concat(leftForUser, decided, fixed)...) + "## Log\n", want: "merge now, 14 finding(s) left for you"},
+		{name: "every finding left for the user decided", body: review2(slices.Concat(decided, fixed)...) + "## Log\n", want: "merge now, 7 finding(s) left for you"},
+		{name: "a finding decided under Decisions, whose outcome doesn't say so yet", body: decisions + review2(leftForUser[:2]...) + "## Log\n", want: "merge now, 2 finding(s) left for you"},
+		{name: "the user's decisions about other things and another finding", body: decisions + review2(decided[0], leftForUser[1]) + "## Log\n", want: "merge now, 2 finding(s) left for you"},
+		{name: "findings left for the user, and in the way", body: review2(leftForUser...) + "## Log\n", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
 		{name: "merged on GitHub", pr: func(p *gitHubPR) { p.State, p.Draft = "MERGED", true }, want: "merged on GitHub"},
 		{name: "closed on GitHub", pr: func(p *gitHubPR) { p.State = "CLOSED" }, want: "closed on GitHub"},
 		{name: "GitHub unread, clear when last synced", unread: true, want: "merge now (couldn't read GitHub; as of the last sync)"},
