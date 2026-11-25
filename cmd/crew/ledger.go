@@ -1461,6 +1461,81 @@ func (t Task) NudgedWithoutProgress(head string) bool {
 	return false
 }
 
+// What crew nudge's questions for the lead start with, and the Log lines that
+// record it asked one.
+const (
+	nudgeQuestionStart   = "Its worker's turn ended mid-task"
+	nudgeStalledAgain    = "nudge: stalled again at " // then the branch's head, then nudgeForLead
+	nudgeWorktreeMissing = "nudge: worktree missing"
+	nudgeForLead         = "; for the lead"
+	nudgeSettled         = "nudge question settled: " // then what settled it
+)
+
+// isNudgeQuestion: the checklist line l is a question crew nudge asked the
+// lead, open or settled.
+func isNudgeQuestion(l string) bool {
+	item, ok := checklistItem(l)
+	return ok && strings.HasPrefix(item, nudgeQuestionStart)
+}
+
+// NudgeQuestions counts the questions crew nudge asked the lead that are still
+// open.
+func (t Task) NudgeQuestions() int {
+	n := 0
+	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
+		if isNudgeQuestion(l) && strings.HasPrefix(l, "- [ ]") {
+			n++
+		}
+	}
+	return n
+}
+
+// WorkerMovedOn is what shows the worker went on after the last question crew
+// nudge asked the lead, or "" when nothing does. Any of these is enough: the
+// branch's head (head, empty when unknown) isn't the commit it asked at; the
+// task's status changed to anything but needs-input, which crew tick sets for
+// the question itself; or the worker was sent a followup, the lead's answer
+// among them.
+func (t Task) WorkerMovedOn(head string) string {
+	for _, e := range slices.Backward(t.LogEntries()) {
+		if at, ok := strings.CutPrefix(e.msg, nudgeStalledAgain); ok {
+			if at, _, _ := strings.Cut(at, ";"); head != "" && at != head {
+				return "new commit " + head
+			}
+			return ""
+		}
+		if strings.HasPrefix(e.msg, nudgeWorktreeMissing) {
+			return ""
+		}
+		if s, ok := e.status(); ok && s != NeedsInput {
+			return "status " + string(s)
+		}
+		if strings.HasPrefix(e.msg, "followup (") {
+			return "a followup to its worker"
+		}
+	}
+	return ""
+}
+
+// SettleNudgeQuestions checks off the open questions crew nudge asked the
+// lead, and says what settled them.
+func (t Task) SettleNudgeQuestions(by string) error {
+	ls, err := t.read()
+	if err != nil {
+		return err
+	}
+	in := false
+	for i, l := range ls {
+		if strings.HasPrefix(l, "## ") {
+			in = l == "## Open questions"
+		}
+		if in && isNudgeQuestion(l) && strings.HasPrefix(l, "- [ ]") {
+			ls[i] = "- [x]" + strings.TrimPrefix(l, "- [ ]") + " Settled: " + by + "."
+		}
+	}
+	return t.writeLines(ls)
+}
+
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
 // round but those that only hold crew's own reports (crewReports), of red CI
 // or a conflict with the base. MAX_REVIEW_ROUNDS limits these.

@@ -1322,3 +1322,65 @@ func TestSessionMemoryTooLongToLoad(t *testing.T) {
 		t.Errorf("a memory one character over the cap printed:\n%.300s\nwant:\n%s", got, want)
 	}
 }
+
+// A task whose worker stalled again, so crew nudge asked the lead, with each
+// kind of question someone else may ask beside it. head is what the Log says
+// after the question, one line each.
+func nudgeQuestionTask(t *testing.T, after ...string) Task {
+	text := "---\nid: 1\nstatus: needs-input\n---\n## Open questions\n" +
+		"- [ ] Which way? A or B.\n" +
+		"- [ ] " + nudgeQuestionStart + " again after a nudge, with no new commit.\n" +
+		"- [ ] CI still red on abc1234\n" +
+		"- [ ] Comment from a collaborator\n\n## Log\n" +
+		"- 2026-11-24 16:00 — status → working\n" +
+		"- 2026-11-24 16:30 — nudge: stalled again at aaa1111; for the lead\n" +
+		"- 2026-11-24 16:30 — status → needs-input\n"
+	for _, l := range after {
+		text += "- 2026-11-24 17:00 — " + l + "\n"
+	}
+	return Task{docWith(t, text)}
+}
+
+func TestWorkerMovedOn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		after []string
+		head  string
+		want  string
+	}{
+		"tick's own needs-input is not moving on": {nil, "aaa1111", ""},
+		"a repeated tick is not moving on":        {[]string{"status → needs-input"}, "aaa1111", ""},
+		"a new commit alone":                      {nil, "bbb2222", "new commit bbb2222"},
+		"no known head, no new commit":            {nil, "", ""},
+		"a status change":                         {[]string{"status → pr-open"}, "aaa1111", "status pr-open"},
+		"a followup":                              {[]string{"followup (resume): worker w1 — note: go on"}, "aaa1111", "a followup to its worker"},
+	} {
+		if got := nudgeQuestionTask(t, tc.after...).WorkerMovedOn(tc.head); got != tc.want {
+			t.Errorf("%s: WorkerMovedOn(%q) = %q, want %q", name, tc.head, got, tc.want)
+		}
+	}
+	// Only what came after the last question counts.
+	task := nudgeQuestionTask(t, "status → working", "nudge: worktree missing; for the lead")
+	if got := task.WorkerMovedOn("bbb2222"); got != "" {
+		t.Errorf("WorkerMovedOn after a later question = %q, want none", got)
+	}
+}
+
+func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
+	task := nudgeQuestionTask(t)
+	if n := task.NudgeQuestions(); n != 1 {
+		t.Fatalf("NudgeQuestions = %d, want 1", n)
+	}
+	if err := task.SettleNudgeQuestions("new commit bbb2222"); err != nil {
+		t.Fatal(err)
+	}
+	if n := task.NudgeQuestions(); n != 0 {
+		t.Errorf("NudgeQuestions = %d after settling, want 0", n)
+	}
+	if n := task.OpenQuestions(); n != 3 {
+		t.Errorf("OpenQuestions = %d after settling, want the 3 that aren't nudge questions", n)
+	}
+	want := "- [x] " + nudgeQuestionStart + " again after a nudge, with no new commit. Settled: new commit bbb2222."
+	if !strings.Contains(contents(t, task.Doc), want) {
+		t.Errorf("the settled question isn't marked as settled:\n%s", contents(t, task.Doc))
+	}
+}

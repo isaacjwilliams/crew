@@ -157,6 +157,12 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	if !st.InFlight() {
 		return
 	}
+	// First, so a question the worker has moved on from isn't acted on below.
+	if t.NudgeQuestions() > 0 {
+		if c.step(nil, "settle", t.Path) == 0 {
+			news.did(p.Name, "%s: its worker moved on; nudge question settled", id)
+		}
+	}
 	if t.PR() != "" && prMayHaveNewComments(t) {
 		// crew feedback reports what it recorded only in the task file, so compare
 		// before and after.
