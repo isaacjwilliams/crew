@@ -401,8 +401,10 @@ func (m *liveStatus) drawnHeight(i, j int) int {
 	return n
 }
 
-// scroll moves the screen as little as keeps the cursor's whole line on it,
-// and leaves no room at the bottom while lines above are off the screen.
+// scroll moves the screen as little as keeps the cursor's whole line on it.
+// Then, while the lines from one above the top to the end would still fit,
+// it moves the top up one, so no room is left empty at the bottom while lines
+// above are off the screen.
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
 	m.top = max(0, min(m.top, m.cursor))
@@ -455,7 +457,8 @@ func (l shownLine) indent() string {
 	return strings.Repeat("  ", l.depth) + marker + " "
 }
 
-// indentWidth is how wide a line's indent is at a depth.
+// indentWidth is how wide a line's indent is at a depth: two spaces a level,
+// then the fold marker and a space (shownLine.indent).
 func indentWidth(depth int) int { return 2*depth + 2 }
 
 // bar is the line at the bottom: how fresh the report is, and the keys.

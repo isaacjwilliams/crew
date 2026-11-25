@@ -7,7 +7,6 @@ package main
 // doesn't fit.
 
 import (
-	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -40,7 +39,8 @@ var columns = [...]struct {
 
 // The ID column is idHeading under the headings, and the live view lets it grow
 // to idCap, its indent included. Notes must get at least minNotes, unless its
-// values need less. With the caps above, every report fits in columns in 120.
+// values need less. With the caps above, every report fits in columns in 120
+// (TestTheCappedColumnsFitIn120).
 const (
 	idHeading = "task"
 	idCap     = 40
@@ -68,7 +68,7 @@ type table struct {
 // measure is the table each line holding fields fits in unwrapped, with the
 // headings: every such line in lines and under them, folded or not, so opening
 // a fold never moves the columns. indent is how wide a line's indent is at a
-// depth, the headings' being a project's rows'.
+// depth. A project is at depth 0, and its rows and their headings at depth 1.
 func measure(lines []statusLine, indent func(depth int) int) table {
 	var t table
 	var add func(l statusLine, depth int)
@@ -103,7 +103,8 @@ func (t table) fit(width int) (table, bool) {
 		used += len(columnGap) + f.fields[i]
 	}
 	f.fields[notesField] = width - used - len(columnGap)
-	return f, f.fields[notesField] >= min(t.fields[notesField], minNotes)
+	needs := min(t.fields[notesField], minNotes)
+	return f, f.fields[notesField] >= needs
 }
 
 // row lays out a line with fields as a row of the table: its head after indent
@@ -115,21 +116,16 @@ func (t table) row(indent string, l statusLine) []string {
 		cells = append(cells, strings.Split(lipgloss.Wrap(f, t.fields[i], ""), "\n"))
 	}
 	widths := append([]int{t.id}, t.fields[:]...)
-	height := len(slices.MaxFunc(cells, func(a, b []string) int { return len(a) - len(b) }))
-	lines := make([]string, height)
-	for i := range lines {
-		var b strings.Builder
-		for j, cell := range cells {
-			text := ""
-			if i < len(cell) {
-				text = cell[i]
-			}
-			if j > 0 {
-				b.WriteString(columnGap)
-			}
-			b.WriteString(text + strings.Repeat(" ", max(0, widths[j]-lipgloss.Width(text))))
+	var blocks []string
+	for i, cell := range cells {
+		if i > 0 {
+			blocks = append(blocks, columnGap)
 		}
-		lines[i] = strings.TrimRight(b.String(), " ")
+		blocks = append(blocks, lipgloss.NewStyle().Width(widths[i]).Render(strings.Join(cell, "\n")))
+	}
+	lines := strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, blocks...), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
 	}
 	return lines
 }
@@ -139,9 +135,11 @@ func (t table) row(indent string, l statusLine) []string {
 // under the head as "heading: value". When the head doesn't fit, the indent's
 // spaces give way first, and only a head wider than the screen is cut.
 func card(indent string, l statusLine, width int) []string {
-	over := lipgloss.Width(indent+l.head) - width
+	// Drop as many of the indent's leading spaces as the head is too wide by.
+	over := max(0, lipgloss.Width(indent+l.head)-width)
 	spaces := len(indent) - len(strings.TrimLeft(indent, " "))
-	lines := []string{cutWithEllipsis(indent[min(spaces, max(0, over)):]+l.head, width)}
+	head := indent[min(spaces, over):] + l.head
+	lines := []string{cutWithEllipsis(head, width)}
 	under := strings.Repeat(" ", lipgloss.Width(indent)+2)
 	for i, f := range l.fields {
 		if f != "" {
@@ -152,7 +150,9 @@ func card(indent string, l statusLine, width int) []string {
 }
 
 // hang wraps text to fit width after indent. The lines it wraps onto start two
-// columns further in, so they read as part of the line above.
+// columns further in, so they read as part of the line above. To keep those
+// two columns on the first line, it wraps the text once to find where the first
+// line ends, then wraps the rest two columns narrower.
 func hang(indent, text string, width int) []string {
 	room := max(1, width-lipgloss.Width(indent))
 	first, _, wrapped := strings.Cut(lipgloss.Wrap(text, room, ""), "\n")
@@ -161,7 +161,7 @@ func hang(indent, text string, width int) []string {
 		return lines
 	}
 	under := strings.Repeat(" ", lipgloss.Width(indent)+2)
-	// Wrapping only breaks lines, so the first is the start of text.
+	// Wrapping only puts line breaks in, so the first line starts the text.
 	rest := strings.TrimLeft(strings.TrimPrefix(text, first), " ")
 	for _, l := range strings.Split(lipgloss.Wrap(rest, max(1, room-2), ""), "\n") {
 		lines = append(lines, under+l)

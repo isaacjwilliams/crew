@@ -478,6 +478,16 @@ func cellsOf(tb table, drawn []string) []string {
 	return cells
 }
 
+func TestTheCappedColumnsFitIn120(t *testing.T) {
+	wide := table{id: 200}
+	for i := range wide.fields {
+		wide.fields[i] = 200
+	}
+	if _, inColumns := wide.fit(120); !inColumns {
+		t.Fatal("a report whose every column is past its cap should still fit in columns at 120")
+	}
+}
+
 func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 	m := liveOn(variedReport(t))
 	openAll(m)

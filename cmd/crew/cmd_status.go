@@ -64,6 +64,8 @@ func (c *Crew) catchUpLedger() {
 // value, with its headings at the top of each project.
 func printReport(w io.Writer, r statusReport) {
 	lines := reportLines(r)
+	// Two spaces a level. The live view's indent is two wider, for its fold
+	// marker (indentWidth).
 	t := measure(lines, func(depth int) int { return 2 * depth })
 	for _, l := range lines {
 		if len(l.kids) > 0 {
@@ -77,14 +79,16 @@ func printLine(w io.Writer, t table, l statusLine, indent string) {
 	if !l.hasFields() {
 		fmt.Fprintln(w, indent+l.head)
 	} else {
-		// One line: no column is narrower than its values.
+		// measure made each column as wide as its widest value, so nothing
+		// wraps and the row is one line.
 		fmt.Fprintln(w, t.row(indent, l)[0])
 	}
 	if l.folded {
 		return
 	}
+	// A project's line has no indent, and its rows go under the headings.
 	if indent == "" && l.hasRows() {
-		printLine(w, t, headings(), "  ") // a project's rows go under the headings
+		printLine(w, t, headings(), "  ")
 	}
 	for _, k := range l.kids {
 		printLine(w, t, k, indent+"  ")
