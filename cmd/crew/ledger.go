@@ -1498,12 +1498,17 @@ func (t Task) NudgeQuestions() int {
 // among them.
 func (t Task) WorkerMovedOn(head string) string {
 	for _, e := range slices.Backward(t.LogEntries()) {
+		// The walk stops at the newest nudge question: what happened before it
+		// isn't the worker moving on from it.
 		if at, ok := strings.CutPrefix(e.msg, nudgeStalledAgain); ok {
-			if at, _, _ := strings.Cut(at, ";"); head != "" && at != head {
+			at, _ = strings.CutSuffix(at, nudgeForLead)
+			if head != "" && at != head {
 				return "new commit " + head
 			}
 			return ""
 		}
+		// A missing worktree's question names no commit, so only a status
+		// change or a followup settles it.
 		if strings.HasPrefix(e.msg, nudgeWorktreeMissing) {
 			return ""
 		}

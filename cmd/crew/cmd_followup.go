@@ -631,6 +631,7 @@ func cmdSettle(c *Crew, args []string) error {
 	if err := t.SettleNudgeQuestions(by); err != nil {
 		return err
 	}
+	// The question was all the task waited on, so its worker has the turn again.
 	if t.Status() == NeedsInput && t.OpenQuestions() == 0 {
 		t.SetStatus(backToWorker(t))
 	}

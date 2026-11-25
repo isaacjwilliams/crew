@@ -157,7 +157,8 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	if !st.InFlight() {
 		return
 	}
-	// First, so a question the worker has moved on from isn't acted on below.
+	// First, so the nudge and waiting-on-you rules below see a task whose worker
+	// moved on as the worker's, not as waiting on a settled question.
 	if t.NudgeQuestions() > 0 {
 		if c.step(nil, "settle", t.Path) == 0 {
 			news.did(p.Name, "%s: its worker moved on; nudge question settled", id)
