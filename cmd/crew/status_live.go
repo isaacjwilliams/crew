@@ -132,7 +132,7 @@ type liveStatus struct {
 	open   map[string]bool
 	shown  []shownLine // every line not under a closed one, in order
 	cursor int         // the line it's on, in shown
-	top    int         // the first line of shown on the screen
+	top    int         // how many screen lines of shown are above the screen
 	// table is the report's columns fitted to the screen, and inColumns whether
 	// they fit; when they don't, each task and goal is a card. headings are
 	// the table's, pinned at the top of the screen: none for cards.
@@ -262,13 +262,13 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	case "q", "ctrl+c":
 		return tea.Quit
 	case "up", "k":
-		m.moveTo(m.cursor - 1)
+		m.step(-1)
 	case "down", "j":
-		m.moveTo(m.cursor + 1)
+		m.step(1)
 	case "pgup":
-		m.moveTo(m.cursor - m.bodyHeight())
+		m.page(-1)
 	case "pgdown":
-		m.moveTo(m.cursor + m.bodyHeight())
+		m.page(1)
 	case "home", "g":
 		m.moveTo(0)
 	case "end", "G":
@@ -401,19 +401,65 @@ func (m *liveStatus) drawnHeight(i, j int) int {
 	return n
 }
 
-// scroll moves the screen as little as keeps the cursor's whole line on it.
-// Then, while the lines from one above the top to the end would still fit,
-// it moves the top up one, so no room is left empty at the bottom while lines
-// above are off the screen.
+// cursorSpan is the screen lines the cursor's line takes, from start up to
+// end, counted from the first shown line.
+func (m *liveStatus) cursorSpan() (start, end int) {
+	if m.cursor >= len(m.shown) {
+		return 0, 0
+	}
+	start = m.drawnHeight(0, m.cursor)
+	return start, start + len(m.shown[m.cursor].drawn)
+}
+
+// lineAt is the shown line that takes screen line n, counted from the first
+// shown line.
+func (m *liveStatus) lineAt(n int) int {
+	for i, l := range m.shown {
+		if n < len(l.drawn) {
+			return i
+		}
+		n -= len(l.drawn)
+	}
+	return len(m.shown) - 1
+}
+
+// step moves the cursor one line up or down. On a line taller than the
+// screen, it scrolls through that line first.
+func (m *liveStatus) step(by int) {
+	start, end := m.cursorSpan()
+	switch {
+	case by > 0 && end > m.top+m.bodyHeight():
+		m.top++
+	case by < 0 && start < m.top:
+		m.top--
+	default:
+		m.moveTo(m.cursor + by)
+		return
+	}
+	m.scroll()
+}
+
+// page moves the screen a screenful up or down, and the cursor to the line on
+// the screen line just past the old screen's edge, so every line shows on one
+// screen or the next.
+func (m *liveStatus) page(by int) {
+	body := m.bodyHeight()
+	edge := m.top + body
+	if by < 0 {
+		edge = m.top - 1
+	}
+	m.top += by * body
+	m.moveTo(m.lineAt(edge))
+}
+
+// scroll moves the screen as little as keeps the cursor's line on it: all of
+// it when it fits, and otherwise as much as fits, the screen not leaving it.
+// The screen never leaves room empty at the bottom while lines are above it.
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
-	m.top = max(0, min(m.top, m.cursor))
-	for m.top < m.cursor && m.drawnHeight(m.top, m.cursor+1) > body {
-		m.top++
-	}
-	for m.top > 0 && m.drawnHeight(m.top-1, len(m.shown)) <= body {
-		m.top--
-	}
+	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-body))
+	start, end := m.cursorSpan()
+	m.top = min(max(m.top, min(start, end-body)), max(start, end-body))
 }
 
 var cursorStyle = lipgloss.NewStyle().Reverse(true)
@@ -421,24 +467,28 @@ var cursorStyle = lipgloss.NewStyle().Reverse(true)
 // View is the headings, the lines on show from the top, and the bar. The
 // cursor's line is highlighted across the screen, all of it when it wraps.
 func (m *liveStatus) View() tea.View {
-	height := len(m.headings) + m.bodyHeight()
+	body := m.bodyHeight()
 	var screen []string
 	for _, line := range m.headings {
 		screen = append(screen, fit(line, m.width))
 	}
-	for i := m.top; i < len(m.shown) && len(screen) < height; i++ {
-		for _, line := range m.shown[i].drawn {
-			line = fit(line, m.width)
-			if i == m.cursor {
-				line = cursorStyle.Width(m.width).Render(line)
+	n := 0 // how many screen lines of shown come before this one
+	for i, l := range m.shown {
+		for _, line := range l.drawn {
+			if n >= m.top && n < m.top+body {
+				line = fit(line, m.width)
+				if i == m.cursor {
+					line = cursorStyle.Width(m.width).Render(line)
+				}
+				screen = append(screen, line)
 			}
-			screen = append(screen, line)
+			n++
 		}
 	}
-	for len(screen) < height {
+	for len(screen) < len(m.headings)+body {
 		screen = append(screen, "")
 	}
-	v := tea.NewView(strings.Join(append(screen[:height], fit(m.bar(), m.width)), "\n"))
+	v := tea.NewView(strings.Join(append(screen, fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
 	return v
 }

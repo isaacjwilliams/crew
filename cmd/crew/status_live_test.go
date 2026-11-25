@@ -600,6 +600,67 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 	}
 }
 
+// unseen is the lines of the report never on screen while keys are pressed,
+// over and over until the screen stops changing.
+func unseen(m *liveStatus, keys ...string) []string {
+	seen := map[string]bool{}
+	for last := ""; ; {
+		lines := screen(m)
+		for _, l := range lines[len(m.headings) : len(lines)-1] {
+			seen[strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " ")] = true
+		}
+		if now := strings.Join(lines, "\n"); now == last {
+			break
+		} else {
+			last = now
+		}
+		press(m, keys...)
+	}
+	var missed []string
+	for _, l := range m.shown {
+		for _, line := range l.drawn {
+			if !seen[line] {
+				missed = append(missed, line)
+			}
+		}
+	}
+	return missed
+}
+
+func TestLiveStatusScrollsThroughARowTallerThanTheScreen(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 3}, {Width: 60, Height: 4}} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(size)
+		if missed := unseen(m, "j"); len(missed) > 0 {
+			t.Errorf("at %dx%d, j never shows %q", size.Width, size.Height, missed)
+		}
+		if missed := unseen(m, "k"); len(missed) > 0 {
+			t.Errorf("at %dx%d, k never shows %q", size.Width, size.Height, missed)
+		}
+	}
+}
+
+func TestLiveStatusPagesThroughEveryLine(t *testing.T) {
+	for _, width := range []int{60, 120} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 12})
+		if missed := unseen(m, "pgdown"); len(missed) > 0 {
+			t.Errorf("at width %d, pgdown never shows %q", width, missed)
+		}
+		if m.cursor != len(m.shown)-1 {
+			t.Errorf("at width %d, pgdown stops on %q, not the last line", width, m.shown[m.cursor].head)
+		}
+		if missed := unseen(m, "pgup"); len(missed) > 0 {
+			t.Errorf("at width %d, pgup never shows %q", width, missed)
+		}
+		if m.cursor != 0 {
+			t.Errorf("at width %d, pgup stops on %q, not the first line", width, m.shown[m.cursor].head)
+		}
+	}
+}
+
 func TestLiveStatusMovesAWrappedRowAsOne(t *testing.T) {
 	m := liveOn(variedReport(t))
 	openAll(m)
