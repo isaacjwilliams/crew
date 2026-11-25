@@ -2498,6 +2498,73 @@ rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 
+# crew show prints a ledger file as it is on disk, and crew path prints its path.
+shows() {  # file arg...: crew show arg... prints file, and crew path arg... its path
+  local f=$1; shift
+  [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
+}
+shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
+TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
+check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
+  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
+MM=$L/projects/$PJ/memory.md
+check "show memory and memory-suggestions print the project's files as they are on disk, in the default project or --project's" \
+  'shows "$MM" memory && shows "$MS" memory-suggestions && (cd "$HOME" && shows "$MM" memory --project "$PJ" && shows "$MS" memory-suggestions --project "$PJ")'
+check "a type word wins over a task whose ID holds it, which its number, its ID or task still reach" \
+  'shows "$MM" memory && shows_task "$TM" "${TMI%%-*}" && shows_task "$TM" "$TMI" && shows "$TM" task memory'
+out=$(crew show memory --project "$P2" 2>&1); st=$?
+check "show and path say when a project has no memory file, and fail" \
+  '((st == 1)) && [[ $out == "crew: $P2 has no memory.md yet" ]] && ! crew path memory-suggestions --project "$P2" 2>/dev/null && ! crew show memory-suggestions --project "$P2" 2>/dev/null'
+check "show memory asks which project outside one" '! (cd "$HOME" && crew show memory 2>/dev/null)'
+check "show proposal finds a proposal by ID, unique substring or path, from any directory" \
+  '(cd "$HOME" && shows "$SP" proposal "$(basename "$SP" .md)" && shows "$SP" proposal jurisdiction-a-pricing && shows "$PP" proposal ship-to-canada && shows "$SP" proposal "$SP")'
+check "show goal finds a goal from anything goal path takes, though a task shares its number" \
+  'shows "$(crew goal path 1)" goal 1 && shows "$(crew goal path "$G")" goal "$G" && shows "$(crew goal path season-page)" goal season-page &&
+   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows "$F1" 1'
+out=$(crew show proposal "$(date +%F)" 2>&1 >/dev/null); st=$?
+check "an argument that matches more than one of its kind lists them, shows none and fails" \
+  '((st == 1)) && [[ $out == *"ambiguous:"*"$(basename "$SP") ($PJ)"* && -z $(crew show proposal "$(date +%F)" 2>/dev/null) ]]'
+check "show refuses a type word without its argument, and --project where it doesn't belong" \
+  '! crew show task 2>/dev/null && ! crew show file 2>/dev/null && ! crew show memory x 2>/dev/null && ! crew show proposal "$SP" --project "$PJ" 2>/dev/null'
+# crew show file: the free-form files crew and its agents write, by a part of their name.
+NEWS=$L/news/$(date +%F).log; PR2=$L/projects/$P2
+RE=$PD/review-eval/2025-03-04-050607.md; RE2=$PR2/review-eval/2025-03-04-050607.md
+mkdir -p "$L/reports/batch" "$L/logs" "$PD/review-eval" "$PR2/review-eval"
+for f in "$L/reports/standup.md" "$L/reports/plan.md" "$L/reports/sprint-a.md" "$L/reports/batch/inner.md" "$L/logs/hook-output.log" \
+  "$L/logs/plan-b.log" "$L/logs/sprint-b.log" "$PD/review-eval/2025-01-02-030405.md" "$RE" "$RE2"; do
+  echo "${f#"$L"/}" >"$f"
+done
+check "show file finds a file in the home's reports/ and logs/, and in a project's review-eval/" \
+  'shows "$L/reports/standup.md" file standup && shows "$L/logs/hook-output.log" file hook-out && shows "$PD/review-eval/2025-01-02-030405.md" file 2025-01-02'
+check "show file finds the day's news log, not the proposal of the same date" '[[ -f $NEWS ]] && shows "$NEWS" file "$(date +%F)" && shows "$NEWS" file "$(date +%F).log"'
+check "show file leaves out files in subdirectories" '! crew show file inner 2>/dev/null'
+check "a file's full name, with or without its extension, wins over a part of another's" 'shows "$L/reports/plan.md" file plan && shows "$L/reports/plan.md" file plan.md && shows "$L/logs/plan-b.log" file plan-b'
+out=$(crew show file sprint 2>&1 >/dev/null); st=$?
+check "a part of more than one file's name lists them, and shows none" \
+  '((st == 1)) && [[ $out == *"ambiguous:"*"reports/sprint-a.md"* && $out == *"logs/sprint-b.log"* && -z $(crew show file sprint 2>/dev/null) ]]'
+check "show file looks in the default project first, then every project, or in --project's" \
+  'shows "$RE" file 2025-03-04 && ! (cd "$HOME" && crew show file 2025-03-04 2>/dev/null) && (cd "$HOME" && shows "$RE2" file 2025-03-04 --project "$P2") && shows "$L/reports/standup.md" file standup --project "$P2"'
+# Fish completes the type words, then only what each kind takes.
+if command -v fish >/dev/null; then
+  completes() { fish --no-config -c "source $L/fish/completions/crew.fish; complete -C '$1'" | cut -f1 | sort -u; }  # the words fish offers for a command line
+  types=$(printf '%s\n' task proposal goal memory memory-suggestions file | sort)
+  task_ids=$(crew list | awk '{print $2}' | sort -u); goal_ids=$(basename -a -s .md "$L"/projects/*/goals/*.md | sort -u)
+  check "fish completes the type words and task IDs after show and path" \
+    '[[ $(completes "crew show ") == "$(sort -u <<<"$types$NL$task_ids")" && $(completes "crew path ") == "$(completes "crew show ")" ]]'
+  check "fish completes only each kind's IDs after task, proposal and goal" \
+    '[[ $(completes "crew show task ") == "$task_ids" && $(completes "crew path proposal ") == "$(crew proposals --any-status | grep -o "^[^ ]*" | sort -u)" && $(completes "crew show goal ") == "$goal_ids" ]]'
+  check "fish completes nothing but --project after memory and memory-suggestions" \
+    '[[ -z $(completes "crew show memory ") && $(completes "crew show memory -") == --project && -z $(completes "crew path memory-suggestions ") && $(completes "crew path memory-suggestions -") == --project ]]'
+  check "fish completes nothing but file names and --project after file" \
+    '[[ $(completes "crew show file ") == "$(cd "$L" && find reports logs news/*.log projects/*/review-eval -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | sort -u)" && $(completes "crew show file -") == --project ]]'
+  check "fish still completes crew goal and crew memory as it did" \
+    '[[ $(completes "crew goal ") == "$(printf "%s\n" new start note cap followup done abandon path | sort)" && $(completes "crew goal path ") == "$goal_ids" &&
+       $(completes "crew goal new -") == *--max-in-flight*--project* && $(completes "crew memory -") == "$(printf "%s\n" --hook --project | sort)" ]]'
+else echo "  (skipped fish completions: fish not installed)"; fi
+rm -r "$L/reports/standup.md" "$L/reports/plan.md" "$L/reports/sprint-a.md" "$L/reports/batch" "$L/logs/hook-output.log" "$L/logs/plan-b.log" "$L/logs/sprint-b.log" \
+  "$PD/review-eval" "$PR2/review-eval"
+
 # MCP servers for one project: its mcp.json, expanded into its git-ignored
 # mcp.local.json, which its workers and goal leads start with.
 M2=$L/projects/$P2/mcp.json; ML2=$L/projects/$P2/mcp.local.json
