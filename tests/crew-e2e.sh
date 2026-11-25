@@ -1596,7 +1596,10 @@ F16=$(crew new "Moved task" --branch moved-task); fill "$F16"; crew ready "$F16"
 WT16=$(crew get "$F16" worktree); work "$WT16" m.txt; T16=$(tip moved-task)
 git -C "$SB/webapp" worktree remove --force "$WT16"; git -C "$SB/webapp" branch -q -D agent/moved-task
 crew set "$F16" worktree "/elsewhere/agent-work/$(basename "$PD")/$(basename "$F16" .md)"
-setstate "done" null; crew followup "$F16" --note "carry on" >/dev/null 2>&1
+setstate "done" null; head=$(git -C "$L" rev-parse @); out=$(CREW_HOST=laptop crew followup "$F16" --note "carry on" 2>&1); st=$?
+check "on a machine that doesn't run the crew, a followup says which does, and adds no worktree" \
+  '((st == 1)) && [[ $out == *"crew runs on tower; this machine can only read"* && ! -d $WT16 && $(git -C "$L" rev-parse @) == "$head" ]] && ! git -C "$SB/webapp" rev-parse -q --verify refs/heads/agent/moved-task >/dev/null'
+crew followup "$F16" --note "carry on" >/dev/null 2>&1
 check "a followup brings back a worktree whose branch is on origin, at its pushed commit" '[[ $(git -C "$WT16" rev-parse HEAD) == "$T16" && $(git -C "$WT16" branch --show-current) == agent/moved-task ]]'
 check "and records this machine's path for it, saying how it came back" '[[ $(crew get "$F16" worktree) == "$WT16" ]] && grep -q "recreated worktree from origin/agent/moved-task" "$F16"'
 F17=$(crew new "Never pushed" --branch never-pushed); fill "$F17"; crew ready "$F17" >/dev/null; setstate "done" null; crew dispatch "$F17" >/dev/null
@@ -2405,15 +2408,16 @@ calls=$(wc -l <"$HOME/claude-calls.log"); out=$(cd "$HOME" && env -u CLAUDECODE 
 check "outside a repo, a task ID two projects share is ambiguous, naming each project, and attach runs no claude" \
   '[[ $out == *ambiguous*"($PJ)"*"($P2)"* && $(wc -l <"$HOME/claude-calls.log") == "$calls" ]]'
 check "CREW_PROJECT resolves a task ID two projects share in its project" '[[ $(CREW_PROJECT=$P2 crew get "$(basename "$F1" .md)" project) == "$P2" ]]'
-# A busy worker's hint names its task so that it resolves back to that task here.
-cp "$HOME/agents.json" "$HOME/agents.bak"
+# A busy worker's hint names its task so that it resolves back to that task here. F1 has merged,
+# and a merged task gets the finished refusal, so it's pr-open while the hint is checked.
+cp "$HOME/agents.json" "$HOME/agents.bak"; sed -i "s/^status: .*/status: pr-open/" "$F1"
 jq --arg id "$(crew get "$F1" worker_job)" 'map(select(.id != $id)) + [{id: $id, state: "working", pid: 4242, sessionId: ($id + "-busy")}]' \
   "$HOME/agents.bak" >"$HOME/agents.json"
 out=$(CREW_PROJECT=$P2 crew followup "$F1" --note hi 2>&1); want="crew attach '$F1',"
 check "a busy worker's hint names its task by path where another project's task with that ID would win" '[[ $out == *"$want"* ]]'
 out=$(CREW_PROJECT=$PJ crew followup "$F1" --note hi 2>&1); want="crew attach $(basename "$F1" .md),"
 check "a busy worker's hint names its task by ID where that ID finds it" '[[ $out == *"$want"* ]]'
-mv "$HOME/agents.bak" "$HOME/agents.json"
+mv "$HOME/agents.bak" "$HOME/agents.json"; sed -i "s/^status: .*/status: merged/" "$F1"
 rm "$TWIN"
 out=$(CREW_PROJECT=$P2 crew status)
 check "CREW_PROJECT scopes status to its project, over the current directory's" '[[ $out == *"$NL$P2$NL"* && $out != *"$NL$PJ$NL"* ]]'
