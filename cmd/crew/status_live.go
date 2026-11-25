@@ -2,6 +2,8 @@ package main
 
 // crew status's live view: the lines the plain text prints (reportLines), in a
 // terminal, built again every few seconds, with folds the user opens and closes.
+// Task and goal lines are a table with its headings pinned at the top, or cards
+// on a screen too narrow for it (status_table.go).
 
 import (
 	"slices"
@@ -127,18 +129,26 @@ type liveStatus struct {
 	settingsErr error
 	// open is whether the user left a line open, by its key. A line the user
 	// hasn't opened or closed is open unless the plain text folds it.
-	open          map[string]bool
-	shown         []shownLine // every line not under a closed one, in order
-	cursor        int         // the line it's on, in shown
-	top           int         // the first line of shown on the screen
+	open   map[string]bool
+	shown  []shownLine // every line not under a closed one, in order
+	cursor int         // the line it's on, in shown
+	top    int         // how many screen lines of shown are above the screen
+	// table is the report's columns fitted to the screen, and inColumns whether
+	// they fit; when they don't, each task and goal is a card. headings are
+	// the table's, pinned at the top of the screen: none for cards.
+	table         table
+	inColumns     bool
+	headings      []string
 	width, height int
 }
 
-// shownLine is a line on show, with how deep it is in the tree.
+// shownLine is a line on show, with how deep it is in the tree, and how the
+// screen draws it: on more than one line when it wraps, or as a card.
 type shownLine struct {
 	statusLine
 	depth int
 	open  bool
+	drawn []string
 }
 
 // The messages the view's jobs and its beat send it.
@@ -205,6 +215,7 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.layOut()
 		m.scroll()
 	case beat:
 		return m, m.startDue()
@@ -251,13 +262,13 @@ func (m *liveStatus) press(key string) tea.Cmd {
 	case "q", "ctrl+c":
 		return tea.Quit
 	case "up", "k":
-		m.moveTo(m.cursor - 1)
+		m.step(-1)
 	case "down", "j":
-		m.moveTo(m.cursor + 1)
+		m.step(1)
 	case "pgup":
-		m.moveTo(m.cursor - m.bodyHeight())
+		m.page(-1)
 	case "pgdown":
-		m.moveTo(m.cursor + m.bodyHeight())
+		m.page(1)
 	case "home", "g":
 		m.moveTo(0)
 	case "end", "G":
@@ -330,20 +341,41 @@ func (m *liveStatus) above(i int) int {
 	return -1
 }
 
-// layOut works out which lines are on show: every one not under a closed one.
+// layOut works out which lines are on show, every one not under a closed one,
+// and draws them for the screen.
 func (m *liveStatus) layOut() {
 	m.shown = m.shown[:0]
 	var add func(lines []statusLine, depth int)
 	add = func(lines []statusLine, depth int) {
 		for _, l := range lines {
 			open := m.isOpen(l)
-			m.shown = append(m.shown, shownLine{l, depth, open})
+			m.shown = append(m.shown, shownLine{statusLine: l, depth: depth, open: open})
 			if open {
 				add(l.kids, depth+1)
 			}
 		}
 	}
 	add(m.lines, 0)
+	m.table, m.inColumns = measure(m.lines, indentWidth).fit(m.width)
+	m.headings = nil
+	if m.inColumns && slices.ContainsFunc(m.lines, statusLine.hasRows) {
+		m.headings = m.table.row(strings.Repeat(" ", indentWidth(1)), headings())
+	}
+	for i, l := range m.shown {
+		m.shown[i].drawn = m.draw(l)
+	}
+}
+
+// draw is how the screen shows a line: a task or a goal as a row of the table
+// or as a card, and any other line wrapped to the screen.
+func (m *liveStatus) draw(l shownLine) []string {
+	switch {
+	case !l.hasFields():
+		return hang(l.indent(), l.head, m.width)
+	case m.inColumns:
+		return m.table.row(l.indent(), l.statusLine)
+	}
+	return card(l.indent(), l.statusLine, m.width)
 }
 
 // isOpen is whether the lines under l are on show: as the user left it, or
@@ -356,41 +388,119 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 	return open && len(l.kids) > 0
 }
 
-// bodyHeight is how many lines of the report fit on screen, above the bar.
-func (m *liveStatus) bodyHeight() int { return max(1, m.height-1) }
+// bodyHeight is how many screen lines the report's lines get, between the
+// headings and the bar.
+func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)) }
 
-// scroll moves the screen as little as keeps the cursor on it.
+// drawnHeight is how many screen lines the shown lines from i to j take.
+func (m *liveStatus) drawnHeight(i, j int) int {
+	n := 0
+	for _, l := range m.shown[i:j] {
+		n += len(l.drawn)
+	}
+	return n
+}
+
+// cursorSpan is the screen lines the cursor's line takes, from start up to
+// end, counted from the first shown line.
+func (m *liveStatus) cursorSpan() (start, end int) {
+	if m.cursor >= len(m.shown) {
+		return 0, 0
+	}
+	start = m.drawnHeight(0, m.cursor)
+	return start, start + len(m.shown[m.cursor].drawn)
+}
+
+// lineAt is the shown line that takes screen line n, counted from the first
+// shown line.
+func (m *liveStatus) lineAt(n int) int {
+	for i, l := range m.shown {
+		if n < len(l.drawn) {
+			return i
+		}
+		n -= len(l.drawn)
+	}
+	return len(m.shown) - 1
+}
+
+// step moves the cursor one line up or down. On a line taller than the
+// screen, it scrolls through that line first.
+func (m *liveStatus) step(by int) {
+	start, end := m.cursorSpan()
+	switch {
+	case by > 0 && end > m.top+m.bodyHeight():
+		m.top++
+	case by < 0 && start < m.top:
+		m.top--
+	default:
+		m.moveTo(m.cursor + by)
+		return
+	}
+	m.scroll()
+}
+
+// page moves the screen a screenful up or down, and the cursor to the line on
+// the screen line just past the old screen's edge, so every line shows on one
+// screen or the next.
+func (m *liveStatus) page(by int) {
+	body := m.bodyHeight()
+	edge := m.top + body
+	if by < 0 {
+		edge = m.top - 1
+	}
+	m.top += by * body
+	m.moveTo(m.lineAt(edge))
+}
+
+// scroll moves the screen as little as keeps the cursor's line on it: all of
+// it when it fits, and otherwise as much as fits, the screen not leaving it.
+// The screen never leaves room empty at the bottom while lines are above it.
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
-	m.top = min(m.top, m.cursor)
-	m.top = max(m.top, m.cursor-body+1)
-	m.top = max(0, min(m.top, len(m.shown)-body))
+	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-body))
+	// A cursor's line that fits stays all on screen: the screen starts between
+	// end-body and start. One taller than the screen fills it: the screen
+	// starts between start and end-body.
+	start, end := m.cursorSpan()
+	low, high := min(start, end-body), max(start, end-body)
+	m.top = min(max(m.top, low), high)
 }
 
 var cursorStyle = lipgloss.NewStyle().Reverse(true)
 
+// View is the headings, the lines on show from the top, and the bar. The
+// cursor's line is highlighted across the screen, all of it when it wraps.
 func (m *liveStatus) View() tea.View {
-	var b strings.Builder
-	for i := m.top; i < m.top+m.bodyHeight(); i++ {
-		line := ""
-		if i < len(m.shown) {
-			line = fit(m.shown[i].text(), m.width)
-			if i == m.cursor {
-				line = cursorStyle.Render(line)
-			}
-		}
-		b.WriteString(line + "\n")
+	body := m.bodyHeight()
+	var screen []string
+	for _, line := range m.headings {
+		screen = append(screen, fit(line, m.width))
 	}
-	b.WriteString(fit(m.bar(), m.width))
-	v := tea.NewView(b.String())
+	n := 0 // how many screen lines of shown come before this one
+	for i, l := range m.shown {
+		for _, line := range l.drawn {
+			if n >= m.top && n < m.top+body {
+				line = fit(line, m.width)
+				if i == m.cursor {
+					line = cursorStyle.Width(m.width).Render(line)
+				}
+				screen = append(screen, line)
+			}
+			n++
+		}
+	}
+	for len(screen) < len(m.headings)+body {
+		screen = append(screen, "")
+	}
+	v := tea.NewView(strings.Join(append(screen, fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
 	return v
 }
 
-// text is the line as the live view shows it: indented by its depth, with a
-// marker for whether it's open, closed, or has nothing under it. The marker
-// takes two columns more than the text's lines, so the columns start two later.
-func (l shownLine) text() string {
+// indent is what goes before the line's head: two spaces for each level
+// it's under, and a marker for whether it's open, closed, or has nothing under
+// it.
+func (l shownLine) indent() string {
 	marker := " "
 	if len(l.kids) > 0 {
 		marker = "▸"
@@ -398,8 +508,12 @@ func (l shownLine) text() string {
 			marker = "▾"
 		}
 	}
-	return l.statusLine.text(strings.Repeat("  ", l.depth)+marker+" ", idColumn+2)
+	return strings.Repeat("  ", l.depth) + marker + " "
 }
+
+// indentWidth is how wide a line's indent is at a depth: two spaces a level,
+// then the fold marker and a space (shownLine.indent).
+func indentWidth(depth int) int { return 2*depth + 2 }
 
 // bar is the line at the bottom: how fresh the report is, and the keys.
 func (m *liveStatus) bar() string {
@@ -416,7 +530,8 @@ func (m *liveStatus) bar() string {
 	return state + "   ↑↓ move  ←→ fold  r refresh  q quit"
 }
 
-// fit cuts a line to the screen's width.
+// fit cuts a line to the screen's width: the bar, or a line indented past the
+// width of a very narrow screen.
 func fit(line string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }

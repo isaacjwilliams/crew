@@ -359,27 +359,28 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
 `crew status` lists each goal with its tasks under it, grouped by where they stand:
 
 ```
-  goal 002-do-next-column            running   lead: idle   4 of 37 task(s) merged, 3/3 in flight: full
+  task                                   status   worker   PR     model   effort  notes
+  goal 002-do-next-column                running  idle                            4 of 37 task(s) merged, 3/3 in flight: full
     in flight
-      146-passthrough-run-sources    pr-open   worker: done     #2303
-      147-remove-course-leader-board pr-open   worker: done     #2305
-      149-historical-stage-topology  working   worker: working  #2309
+      146-passthrough-run-sources        pr-open  done     #2303
+      147-remove-course-leader-board     pr-open  done     #2305
+      149-historical-stage-topology      working  working  #2309  sonnet
     next, in dispatch order
-      1  174-authorize-cable-channel ready                      -      priority 2
-      2  164-course-standings-extern ready                      -      priority 1
-      3  150-todo-doc-triage         ready                      -
-      4  151-recaptcha-create-assess ready                      -
-      5  153-drop-stale-secondary-sa ready                      -
+      1  174-authorize-cable-channel     ready                                    priority 2
+      2  164-course-standings-export     ready                                    priority 1
+      3  150-todo-doc-triage             ready
+      4  151-recaptcha-assessment        ready
+      5  153-drop-stale-replica          ready
       … (5 more)
     waiting on other tasks
-         158-division-results-versio ready                      -      priority 2  after 146
-         160-retire-course-leader-bo ready                      -      after 11 tasks
-        └ 165-remove-course-leader-b ready                      -
+         158-division-results            ready                                    priority 2  after 146
+         160-retire-course-leader-board  ready                                    after 11 tasks
+        └ 165-remove-leader-board-css    ready
     parked
-         154-final-invoice-on-cancel draft                      -      1 open question(s)
+         154-final-invoice-on-cancel     draft                                    1 open question(s)
 ```
 
-(The columns are narrower here than in a terminal.) `next` is the order `crew tick` will dispatch them in: the first 5, and any later one with a question for you in its stack. A goal that isn't running yet lists them under `ready`, unnumbered. A task waiting on others names them (`after 146, 149`, or `after 11 tasks`), and always names one that was abandoned, since that one will never merge. `parked` lists the drafts with a question for you, and `planning` the ones the goal lead is still working on. `full` on a goal's line means it's at its `max_in_flight`: its other ready tasks wait until enough of its tasks merge or are abandoned to bring it under. The `workers running` line says `full` when no project has a worker slot free, and each project without one says `workers full` on its own line, with its own limit. A cap set to something that isn't a whole number shows as `?`, with what's wrong on the project's or goal's line, or on the rows of a done or abandoned goal's ready tasks. The goal file, `projects/<project>/goals/NNN-<slug>.md`, records your words, the goal lead's list of items and their tasks, and your notes.
+Each task and goal sits in a row under the headings: its ID, then its status, its worker's state (a goal's lead's, on a goal's row), its PR, the model and effort it runs its worker on, and its notes. Each column is as wide as its widest value. `next` is the order `crew tick` will dispatch them in: the first 5, and any later one with a question for you in its stack. A goal that isn't running yet lists them under `ready`, unnumbered. A task waiting on others names them (`after 146, 149`, or `after 11 tasks`), and always names one that was abandoned, since that one will never merge. `parked` lists the drafts with a question for you, and `planning` the ones the goal lead is still working on. `full` on a goal's line means it's at its `max_in_flight`: its other ready tasks wait until enough of its tasks merge or are abandoned to bring it under. The `workers running` line says `full` when no project has a worker slot free, and each project without one says `workers full` on its own line, with its own limit. A cap set to something that isn't a whole number shows as `?`, with what's wrong on the project's or goal's line, or on the rows of a done or abandoned goal's ready tasks. The goal file, `projects/<project>/goals/NNN-<slug>.md`, records your words, the goal lead's list of items and their tasks, and your notes.
 
 ### Check status
 
@@ -390,7 +391,7 @@ crew status        # the project whose repo you're in, or all of them elsewhere 
 crew tick          # sync with GitHub and do whatever needs no decision (see below)
 ```
 
-In a terminal, `crew status` stays open and keeps itself up to date. It shows the same lines as the text, as a tree: ↑↓ move, ← closes the line you're on (or goes up to the one it's under), → opens it, and enter or space does either. Drafts with nothing to ask, and a running goal's next tasks after the fifth, start closed. It builds the report again every 3 seconds, so a change to the ledger shows within seconds. It lists the workers and checks the branches for restacks every 15 seconds, reads your PRs on GitHub every 30 seconds and, on a machine that doesn't run the crew, pulls the ledger every minute; `r` does all of them now. q quits. `crew status --plain`, or `crew status` piped or run by a script, prints the text and exits.
+In a terminal, `crew status` stays open and keeps itself up to date. It shows the same lines as the text, as a tree: ↑↓ move (through a line taller than the screen first), ← closes the line you're on (or goes up to the one it's under), → opens it, and enter or space does either. Drafts with nothing to ask, and a running goal's next tasks after the fifth, start closed. The columns fit the terminal, with their headings kept at the top: a value too long for its column wraps inside it, onto the lines below. On a terminal too narrow for the columns, each task and goal shows as a card instead: its ID, then each field on a line of its own, such as `status: working`. It builds the report again every 3 seconds, so a change to the ledger shows within seconds. It lists the workers and checks the branches for restacks every 15 seconds, reads your PRs on GitHub every 30 seconds and, on a machine that doesn't run the crew, pulls the ledger every minute; `r` does all of them now. q quits. `crew status --plain`, or `crew status` piped or run by a script, prints the text and exits.
 
 Outside a goal, a ready task says `dispatch by hand`, unless it has a go-ahead: `crew tick` dispatches a goal's tasks and those whose go-ahead is met, so you or the lead run `crew dispatch` for the rest. A go-ahead waits for another task: tell the lead "dispatch 222 once 221 is pr-open", and it records `crew set 222 go_ahead "221 pr-open"`. The task then says `go-ahead once 221 is pr-open`, and the first `crew tick` after 221 gets there dispatches 222, as `MAX_WORKERS` and its dependencies allow, and the lead hears it did. A go-ahead can wait for `pr-open`, `merged` or `done`. One waiting on a task that's since been abandoned is never met, and says so. It's withdrawn with `crew set 222 go_ahead`, and ends when 222 leaves `ready`. Drafts with nothing to ask or learn are counted in one line (`crew list --project <project> --status draft` lists them); a draft with open questions is listed, since it waits on you, and so is one with something still to learn, with its spikes (see [Spikes](#spikes-try-a-path-before-planning-on-it)). `--done` adds merged and abandoned tasks, and done spikes.
 
@@ -496,9 +497,9 @@ Every task has a risk tier, which says how closely you need to look at its PR. T
 
 A high-risk task's worker also runs Claude Code's `/security-review` before handing the PR over, and records what it found beside the rest of its evidence. Each PR's Risk section opens with its tier and look.
 
-**The worker's model and automated review.** The lead makes more choices at intake, and names them in its summary. A task runs its worker on Sonnet (`model: sonnet`) unless the worker has to design structure, that is, decide what to add or change in the code's shape (a new command, file or data shape). Fixes and changes inside existing code, tests, docs, copy, and bumps or renames the gates spell out run on Sonnet; work that adds or changes structure runs on Claude Code's default model. The risk tier doesn't decide it. Goal leads apply the same rule. A task whose gates check everything a reviewer would can have its automated review turned off (`auto_review: no`) and its worker's pre-PR passes (`/simplify` and the casual observer) too (`pre_pr_review: no`); a high-risk task runs them whatever it says. `crew status` shows the model and the automated review on the task's row: `model sonnet`, `automated review off`; the pre-PR passes show only in the lead's summary and the task's `pre_pr_review`. Changing a task's model after dispatch takes effect the next time crew has something for its worker: it starts the worker fresh on the new model, and says so.
+**The worker's model and automated review.** The lead makes more choices at intake, and names them in its summary. A task runs its worker on Sonnet (`model: sonnet`) unless the worker has to design structure, that is, decide what to add or change in the code's shape (a new command, file or data shape). Fixes and changes inside existing code, tests, docs, copy, and bumps or renames the gates spell out run on Sonnet; work that adds or changes structure runs on Claude Code's default model. The risk tier doesn't decide it. Goal leads apply the same rule. A task whose gates check everything a reviewer would can have its automated review turned off (`auto_review: no`) and its worker's pre-PR passes (`/simplify` and the casual observer) too (`pre_pr_review: no`); a high-risk task runs them whatever it says. `crew status` shows the model in the task's model column, and `automated review off` in its notes; the pre-PR passes show only in the lead's summary and the task's `pre_pr_review`. Changing a task's model after dispatch takes effect the next time crew has something for its worker: it starts the worker fresh on the new model, and says so.
 
-**The worker's effort.** A task can also name the effort its worker runs at (`crew set <task> effort medium`; `low`, `medium`, `high`, `xhigh` or `max`). Without one, a worker runs at your own setting. It works as the model does: `crew status` shows `effort medium` on the task's row, and changing or clearing it starts the worker fresh at its next followup. A restack session runs at your own setting, and the worker that follows it at the task's effort.
+**The worker's effort.** A task can also name the effort its worker runs at (`crew set <task> effort medium`; `low`, `medium`, `high`, `xhigh` or `max`). Without one, a worker runs at your own setting. It works as the model does: `crew status` shows it in the task's effort column, and changing or clearing it starts the worker fresh at its next followup. A restack session runs at your own setting, and the worker that follows it at the task's effort.
 
 **Sensitive paths.** List the paths where a change always needs your close look, in the project's `projects/<project>/project.env`, as git pathspecs:
 
@@ -511,8 +512,9 @@ When a task's branch changes a file that matches one, crew raises its tier to `h
 **In `crew status`**, each open PR's row says whether you can merge it now, and the look it needs:
 
 ```
-  041-season-export   pr-open   worker: done   #41   merge now  low: approve from the evidence
-  038-season-admin    pr-open   worker: done   #38   not yet: CI running; draft  medium: read the diff
+  task               status   worker  PR   model   effort  notes
+  041-season-export  pr-open  done    #41                  merge now  low: approve from the evidence
+  038-season-admin   pr-open  done    #38  sonnet          not yet: CI running; draft  medium: read the diff
 ```
 
 `merge now` means GitHub has the PR open, ready, clean against its base, its checks passing, no changes requested and nothing its branch rules still want, and crew has nothing more to do on it: its worker is idle, its automated review is recorded, it needs no restack and has no open question. Otherwise `not yet:` names what stands in the way, what's likely to clear soonest first. Status reads each PR from GitHub as it runs; when it can't, it goes by the last `crew sync` and says `(couldn't read GitHub; as of the last sync)`. On a machine that doesn't run the crew, it can't see the workers, so it never says `merge now` there. A PR merged or closed on GitHub that sync hasn't caught up with says `merged on GitHub` or `closed on GitHub`.

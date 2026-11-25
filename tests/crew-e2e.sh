@@ -488,7 +488,7 @@ passing='"status": "COMPLETED", "conclusion": "SUCCESS"'
 cp "$HOME/agents.json" "$HOME/agents.before"; setstate "done" null   # the worker is idle
 echo OPEN >"$HOME/gh-pr-state"; echo main >"$HOME/gh-pr-base-12"; checks "$passing"
 check "status says merge now for an open PR that merges cleanly, with its checks passing and its automated review recorded" \
-  '[[ $(merge_note) == *" #12    merge now  high: read the diff; security review ran" ]]'
+  '[[ $(merge_note) == *" #12  "*"  merge now  high: read the diff; security review ran" ]]'
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; a=$(merge_note); rm "$HOME/gh-pr-mergeable"
 touch "$HOME/gh-pr-draft"; b=$(merge_note); rm "$HOME/gh-pr-draft"
 checks '"status": "COMPLETED", "conclusion": "FAILURE"'; c=$(merge_note); checks '"status": "IN_PROGRESS"'; d=$(merge_note); checks "$passing"
@@ -760,7 +760,7 @@ check "a task whose automated review is off gets none, and crew config --task li
 crew set 1 auto_review ""
 check "status shows neither a model nor automated review on the row of a task that sets neither" 'r=$(row1); [[ $r != *model* && $r != *"automated review"* ]]'
 crew set 1 model sonnet; crew set 1 auto_review no
-check "status shows the model, and that automated review is off, on the row of a task that sets them" '[[ $(row1) == *"  model sonnet  automated review off"* ]]'
+check "status shows the model, and that automated review is off, on the row of a task that sets them" '[[ $(row1) == *"  sonnet  "*"  automated review off"* ]]'
 crew set 1 model ""; crew set 1 auto_review ""; crew set 1 risk high
 check "running workers are counted by recorded job, whatever their name" '[[ $(crew status) == *"workers running: 1/"* ]]'
 setstate blocked null
@@ -1025,7 +1025,9 @@ check "the stacked worktree starts on the parent's tip, which is recorded" '[[ $
 check "the worker is told which task and PR it is stacked on" 'grep -q "stacked on task 009-season-model (PR #21): agent/season-model" "$HOME/claude-calls.log"'
 work "$WT10" admin.txt; crew set 10 pr https://github.com/isaac/webapp/pull/22; hand_over 10
 out=$(crew status)
-check "status lists a stacked task under its parent, columns aligned" '[[ $(grep -A1 "^  009-season-model " <<<"$out" | tail -1) == "    └ 010-season-admin                    pr-open "* ]]'
+parent=$(grep "^  009-season-model " <<<"$out"); child=$(grep -A1 "^  009-season-model " <<<"$out" | tail -1)
+check "status lists a stacked task under its parent, columns aligned" \
+  '[[ $child == "    └ 010-season-admin  "*" pr-open "* ]] && (LC_ALL=C.UTF-8; p=${parent%%pr-open*} c=${child%%pr-open*}; ((${#p} == ${#c})))'
 # The PRs waiting on the user, by the look they need: 9 and 10 are pr-open, and 2
 # and 5 join them for a moment.
 crew set 2 pr https://github.com/isaac/webapp/pull/41; hand_over 2
@@ -1052,7 +1054,7 @@ check "restack sends the worker the rebase, cut at the parent's old tip" '[[ $(l
 check "a restack session is told to read only what its steps need, not the whole task file" \
   '[[ $(last_launch) == *"Don'"'"'t read the whole task file or review the branch first; read only what a step of your restack workflow needs."* && $(last_launch) != *"Read the whole task file"* ]]'
 check "status shows the restack a working task needs, and no merge check" \
-  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  needs restack: 009-season-model moved  effort medium" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
+  '[[ $(crew status | grep "└ 010-season-admin") == *" working "*"  medium  "*"  needs restack: 009-season-model moved" && $(crew status | grep "└ 010-season-admin") != *"not yet"* ]]'
 setstate "done" null; n=$(launches); out=$(crew restack 10 --again 2>&1); st=$?
 check "restack by hand waits until the task is pr-open, and starts nothing" \
   '((st == 4)) && [[ $out == *"010-season-admin is working; a restack waits until it'"'"'s pr-open"* && $(launches) == "$n" ]]'
@@ -1222,7 +1224,7 @@ out=$(crew tick)
 check "tick sends a round to a worker that ended its turn on a question" '[[ $out == *"013-tick-routing: round 2 sent to its worker"* && $(crew get 13 last_round_sent) == 2 && $(resumes) == $((n + 1)) && $(crew get 13 status) == addressing-feedback ]]'
 setstate "done" null; hand_over 13
 s13=$(crew get 13 worker_session); crew set 13 feedback_since 1970-01-01T00:00:00Z; setstate working 4242 busy; transcript "$s13" ended; n=$(resumes)
-check "status shows a worker whose turn ended as idle, though a shell it left running keeps it working" '[[ $(crew status) == *"worker: idle, background task running"* ]]'
+check "status shows a worker whose turn ended as idle, though a shell it left running keeps it working" '[[ $(crew status | grep "^  013-tick-routing ") == *"  idle, background task running  "* ]]'
 out=$(crew tick)
 check "tick sends a round to a worker whose turn ended, though a shell it left running keeps it working" '[[ $out == *"013-tick-routing: round 3 sent to its worker"* && $(crew get 13 last_round_sent) == 3 && $(resumes) == $((n + 1)) ]]'
 rm -f "$HOME/.claude/projects/stub/$s13.jsonl"; setstate working 4242; hand_over 13
