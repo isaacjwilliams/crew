@@ -1324,7 +1324,7 @@ func TestSessionMemoryTooLongToLoad(t *testing.T) {
 }
 
 // A task whose worker stalled again, so crew nudge asked the lead, with each
-// kind of question someone else may ask beside it. head is what the Log says
+// kind of question someone else may ask beside it. after is what the Log says
 // after the question, one line each.
 func nudgeQuestionTask(t *testing.T, after ...string) Task {
 	text := "---\nid: 1\nstatus: needs-input\n---\n## Open questions\n" +
@@ -1382,5 +1382,17 @@ func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
 	want := "- [x] " + nudgeQuestionStart + " again after a nudge, with no new commit. Settled: new commit bbb2222."
 	if !strings.Contains(contents(t, task.Doc), want) {
 		t.Errorf("the settled question isn't marked as settled:\n%s", contents(t, task.Doc))
+	}
+}
+
+// A handed-over task that tick marked needs-input for a nudge question goes
+// back to pr-open, not to its worker's turn.
+func TestStatusBeforeNeedsInputKeepsAHandOver(t *testing.T) {
+	task := nudgeQuestionTask(t, "status → pr-open", "status → needs-input")
+	if got := statusBeforeNeedsInput(task); got != PROpen {
+		t.Errorf("statusBeforeNeedsInput = %s, want pr-open", got)
+	}
+	if got := backToWorker(task); got != Working {
+		t.Errorf("backToWorker = %s, want working: a followup note sends the worker back to work", got)
 	}
 }

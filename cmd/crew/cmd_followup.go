@@ -235,13 +235,19 @@ func unsentRounds(t Task) string {
 // to working.
 func backToWorker(t Task) Status {
 	if t.Status() == NeedsInput {
-		for _, e := range slices.Backward(t.LogEntries()) {
-			if s, ok := e.status(); ok && s != NeedsInput {
-				if s.WorkersTurn() {
-					return s
-				}
-				break
-			}
+		if s := statusBeforeNeedsInput(t); s.WorkersTurn() {
+			return s
+		}
+	}
+	return Working
+}
+
+// statusBeforeNeedsInput is the last status in the task's Log that isn't
+// needs-input, or working when it has none.
+func statusBeforeNeedsInput(t Task) Status {
+	for _, e := range slices.Backward(t.LogEntries()) {
+		if s, ok := e.status(); ok && s != NeedsInput {
+			return s
 		}
 	}
 	return Working
@@ -631,9 +637,11 @@ func cmdSettle(c *Crew, args []string) error {
 	if err := t.SettleNudgeQuestions(by); err != nil {
 		return err
 	}
-	// The question was all the task waited on, so its worker has the turn again.
+	// The question was all the task waited on, so it goes back to the status it
+	// had before: its worker's turn, or pr-open when tick marked a handed-over
+	// task needs-input.
 	if t.Status() == NeedsInput && t.OpenQuestions() == 0 {
-		t.SetStatus(backToWorker(t))
+		t.SetStatus(statusBeforeNeedsInput(t))
 	}
 	t.Log(nudgeSettled + by)
 	t.Touch()
