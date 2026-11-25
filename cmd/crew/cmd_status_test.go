@@ -6,11 +6,17 @@ import (
 	"testing"
 )
 
-// fullStatusLedger is statusLedger with what's left to show: an open proposal
-// and a memory suggestion in p, and a third project, r, with a task that asks.
+// fullStatusLedger is statusLedger with what's left to show: a goal lead, a
+// task's model and effort, an open proposal and a memory suggestion in p, and a
+// third project, r, with a task that asks.
 func fullStatusLedger(t *testing.T) *Crew {
 	t.Helper()
 	c := statusLedger(t)
+	writeFile(t, c, `#!/bin/sh
+echo '[{"id":"w1","state":"working","pid":1},{"id":"g1","state":"idle","pid":2}]'
+`, "bin", "claude")
+	writeFile(t, c, "---\nid: 001-launch\nstatus: running\nlead_job: g1\n---\n# launch\n\n## Log\n", "projects", "p", "goals", "001-launch.md")
+	reportTask(t, c, "p", "010-parent", false, "status: working", "base: main", "branch: agent/parent", "model: sonnet", "effort: high")
 	writeFile(t, c, "---\nstatus: open\n---\n# An idea\n", "projects", "p", "proposals", "an-idea.md")
 	writeFile(t, c, "# Memory suggestions: p\n\n- [ ] **B** b. (lead, 2026-11-09)\n", "projects", "p", "memory-suggestions.md")
 	writeFile(t, c, "", "projects", "r", "project.env")
@@ -32,7 +38,7 @@ func TestPrintReport(t *testing.T) {
 workers running: 1/3
 
 p
-  goal 001-launch                         running                                         0 of 9 task(s) merged, 1/2 in flight
+  goal 001-launch                         running              lead: idle                 0 of 9 task(s) merged, 1/2 in flight
     in flight
       001-in-flight                       working              worker: working            -      
     next, in dispatch order
@@ -44,7 +50,7 @@ p
       … (2 more)
     parked
          009-parked                       draft                                           -      1 open question(s)
-  010-parent                              working                                         -      
+  010-parent                              working                                         -      model sonnet  effort high
     └ 011-child                           draft                                           -      1 open question(s)
   013-risky                               pr-open                                         #9     not yet: no security review yet (couldn't read GitHub; as of the last sync)  high
   014-later                               pr-open                                         #12    not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
