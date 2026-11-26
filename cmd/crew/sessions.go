@@ -185,71 +185,80 @@ func turnEnded(session string) bool {
 // Bash result that has a backgroundTaskId, whether it ran in the background or
 // was moved there at its timeout. It finishes with the task notification Claude
 // Code queues for it, which has a status, or with a TaskStop that stopped it,
-// which writes none. It's nil when none is running, and when the transcript
-// can't say: there's none, a line doesn't read, or a start or a finish isn't in
-// a shape crew knows. Subagents' lines don't count.
+// which writes none. Subagents' lines don't count.
+//
+// It's nil when none is running, and also when the transcript can't say: there's
+// none, a line doesn't read, or a start or a finish isn't in a shape crew knows.
+// Then the worker is shown, and stalls, as it did before crew read them.
 func backgroundCommands(path string) []string {
-	type call struct{ tool, what string }
-	type command struct{ id, what string }
+	type call struct{ tool, label string }
+	type command struct{ id, label string }
 	calls := map[string]call{} // by tool_use ID
 	var running []command
+	isRunning := func(id string) bool {
+		return slices.ContainsFunc(running, func(c command) bool { return c.id == id })
+	}
 	finish := func(id string) {
 		running = slices.DeleteFunc(running, func(c command) bool { return c.id == id })
 	}
-	known := true
+	readable := true // every start and finish so far is in a shape crew knows
 	unread, err := scanLines(path, "", func(l transcriptLine) bool {
 		if l.IsSidechain {
 			return true
 		}
 		switch l.Type {
-		case "assistant":
+		case "assistant": // tool calls, kept for the results that answer them
 			for _, u := range l.toolUses() {
 				var in struct{ Command, Description string }
 				json.Unmarshal(u.Input, &in)
 				calls[u.ID] = call{u.Name, cmp.Or(in.Description, in.Command)}
 			}
-		case "user":
+		case "user": // a tool's result: a start, or a TaskStop's finish
 			var result struct {
 				BackgroundTaskID string `json:"backgroundTaskId"`
 				TaskID           string `json:"task_id"`
 			}
-			if json.Unmarshal(l.ToolUseResult, &result) != nil || result.BackgroundTaskID == "" && result.TaskID == "" {
-				return true
-			}
+			json.Unmarshal(l.ToolUseResult, &result)
 			c := calls[l.toolResultID()]
 			switch {
-			case result.BackgroundTaskID != "" && c.tool == "Bash" && c.what != "":
-				running = append(running, command{result.BackgroundTaskID, c.what})
-			case result.BackgroundTaskID != "":
-				known = false // a start crew can't name
-			case c.tool == "TaskStop":
+			case result.BackgroundTaskID != "" && c.tool == "Bash" && c.label != "":
+				running = append(running, command{result.BackgroundTaskID, c.label})
+			case result.BackgroundTaskID != "": // a start crew can't name
+				readable = false
+			case result.TaskID != "" && c.tool == "TaskStop":
 				finish(result.TaskID)
 			}
-		case "queue-operation":
+		case "queue-operation": // a task notification: a finish
 			var content string
 			if l.Operation != "enqueue" || json.Unmarshal(l.Content, &content) != nil || !strings.Contains(content, "<task-notification>") {
 				return true
 			}
-			id, status := xmlText(content, "task-id"), xmlText(content, "status")
-			mine := slices.ContainsFunc(running, func(c command) bool { return c.id == id })
+			id, status := tagText(content, "task-id"), tagText(content, "status")
 			switch {
-			case id == "" || mine && !slices.Contains([]string{"completed", "failed", "killed"}, status):
-				known = false
-			case mine:
+			case id == "":
+				readable = false
+			case !isRunning(id): // a subagent's or a monitor's
+			case slices.Contains(finalStatuses, status):
 				finish(id)
+			default:
+				readable = false
 			}
 		}
-		return known
+		return readable // scanLines stops at the first false
 	})
-	if err != nil || unread > 0 || !known {
+	if err != nil || unread > 0 || !readable {
 		return nil
 	}
-	var what []string
+	var labels []string
 	for _, c := range running {
-		what = append(what, c.what)
+		labels = append(labels, c.label)
 	}
-	return what
+	return labels
 }
+
+// finalStatuses are the statuses a background command's task notification
+// gives when it has finished.
+var finalStatuses = []string{"completed", "failed", "killed"}
 
 // toolResultID is the ID of the tool call whose result a user line holds, or
 // "" when it holds none.
@@ -267,8 +276,8 @@ func (l transcriptLine) toolResultID() string {
 	return ""
 }
 
-// xmlText is the text of the first <tag> element in s, or "".
-func xmlText(s, tag string) string {
+// tagText is the text inside the first <tag>…</tag> in s, or "".
+func tagText(s, tag string) string {
 	_, after, ok := strings.Cut(s, "<"+tag+">")
 	text, _, closed := strings.Cut(after, "</"+tag+">")
 	if !ok || !closed {
@@ -404,7 +413,7 @@ func (a Agent) stateText() string {
 	switch {
 	case len(a.Background) > 0:
 		return "idle (" + strings.Join(a.Background, ", ") + ")"
-	case a.TurnEnded && a.open():
+	case a.TurnEnded && a.open(): // with background commands crew can't name
 		return "idle, background task running"
 	case a.TurnEnded:
 		return "idle"
