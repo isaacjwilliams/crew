@@ -163,7 +163,11 @@ type transcriptLine struct {
 	Effort      string
 	Entrypoint  string // how the session was run: "cli" for claude, "sdk-cli" for claude -p
 	IsSidechain bool   // a subagent's line, where a session's own transcript holds one
-	Message     struct {
+	// A tool's result as Claude Code read it, beside the message's own result block.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Operation     string          // a queue-operation's: enqueue, dequeue or remove
+	Content       json.RawMessage // a queue-operation's: what it queued
+	Message       struct {
 		ID      string
 		Model   string
 		Usage   *claudeUsage

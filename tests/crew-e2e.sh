@@ -1510,6 +1510,12 @@ for quiet in "9 minutes" "3 hours"; do
     '[[ -z $out && $byhand == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $(resumes) == "$n" && -z $(asked13) ]]'
 done
 check "status names the background command a worker waits on" '[[ $(crew status | grep "^  013-tick-routing ") == *"  idle (Run the clone checks)  "* ]]'
+r=$(crew get 13 review_rounds); crew set 13 feedback_since 1970-01-01T00:00:00Z; out=$(crew tick 2>/dev/null)
+check "a worker waiting on its own background command takes a review round" \
+  '[[ $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(crew get 13 last_round_sent) == $((r + 1)) && $(resumes) == $((n + 1)) ]]'
+background "$s13" "Run the clone checks"; setstate working 4242 busy; crew followup 13 --note "Let the checks run on." >/dev/null 2>&1
+check "and a followup" '[[ $(resumes) == $((n + 2)) && $(last_prompt) == *"Let the checks run on."* ]]'
+answer13; crew set 13 status working; n=$(resumes)
 for state in stopped gone; do
   stall13 "done" null
   if [[ $state == stopped ]]; then setstate stopped null; else cp "$HOME/agents.json" "$HOME/agents.kept"; jq --arg j "$(crew get 13 worker_job)" 'map(select(.id != $j))' "$HOME/agents.kept" >"$HOME/agents.json"; fi

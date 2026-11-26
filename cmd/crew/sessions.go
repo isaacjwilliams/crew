@@ -29,6 +29,10 @@ type Agent struct {
 	// TurnEnded: the session's transcript says its last turn has ended, though its
 	// state is still working (see busy), with its process running or not.
 	TurnEnded bool
+	// Background is what the background commands it's waiting on do, when its
+	// turn ended with its process running and its transcript names them
+	// (backgroundCommands).
+	Background []string
 }
 
 type Agents []Agent
@@ -102,6 +106,9 @@ func (c *Crew) listAgents() (Agents, error) {
 		// still read working, and its transcript says whether the turn ended.
 		if a.State == "working" && a.SessionID != "" {
 			a.TurnEnded = turnEnded(a.SessionID)
+			if a.TurnEnded && a.PID {
+				a.Background = backgroundCommands(transcript(a.SessionID))
+			}
 		}
 		as = append(as, a)
 	}
@@ -170,6 +177,111 @@ func turnEnded(session string) bool {
 		}
 	}
 	return false
+}
+
+// backgroundCommands is what the session's background commands still running
+// do, as its transcript at path says, in the order they started: each by its
+// Bash call's description, or its command without one. A command starts with a
+// Bash result that has a backgroundTaskId, whether it ran in the background or
+// was moved there at its timeout. It finishes with the task notification Claude
+// Code queues for it, which has a status, or with a TaskStop that stopped it,
+// which writes none. It's nil when none is running, and when the transcript
+// can't say: there's none, a line doesn't read, or a start or a finish isn't in
+// a shape crew knows. Subagents' lines don't count.
+func backgroundCommands(path string) []string {
+	type call struct{ tool, what string }
+	type command struct{ id, what string }
+	calls := map[string]call{} // by tool_use ID
+	var running []command
+	finish := func(id string) {
+		running = slices.DeleteFunc(running, func(c command) bool { return c.id == id })
+	}
+	known := true
+	unread, err := scanLines(path, "", func(l transcriptLine) bool {
+		if l.IsSidechain {
+			return true
+		}
+		switch l.Type {
+		case "assistant":
+			for _, b := range contentBlocks(l.Message.Content) {
+				if b.Type == "tool_use" {
+					var in struct{ Command, Description string }
+					json.Unmarshal(b.Input, &in)
+					calls[b.ID] = call{b.Name, cmp.Or(in.Description, in.Command)}
+				}
+			}
+		case "user":
+			var result struct {
+				BackgroundTaskID string `json:"backgroundTaskId"`
+				TaskID           string `json:"task_id"`
+			}
+			if json.Unmarshal(l.ToolUseResult, &result) != nil || result.BackgroundTaskID == "" && result.TaskID == "" {
+				return true
+			}
+			var c call
+			for _, b := range contentBlocks(l.Message.Content) {
+				if b.Type == "tool_result" {
+					c = calls[b.ToolUseID]
+				}
+			}
+			switch {
+			case result.BackgroundTaskID != "" && c.tool == "Bash" && c.what != "":
+				running = append(running, command{result.BackgroundTaskID, c.what})
+			case result.BackgroundTaskID != "":
+				known = false // a start crew can't name
+			case c.tool == "TaskStop":
+				finish(result.TaskID)
+			}
+		case "queue-operation":
+			var content string
+			if l.Operation != "enqueue" || json.Unmarshal(l.Content, &content) != nil || !strings.Contains(content, "<task-notification>") {
+				return true
+			}
+			id, status := xmlText(content, "task-id"), xmlText(content, "status")
+			mine := slices.ContainsFunc(running, func(c command) bool { return c.id == id })
+			switch {
+			case id == "" || mine && !slices.Contains([]string{"completed", "failed", "killed"}, status):
+				known = false
+			case mine:
+				finish(id)
+			}
+		}
+		return known
+	})
+	if err != nil || unread > 0 || !known {
+		return nil
+	}
+	var what []string
+	for _, c := range running {
+		what = append(what, c.what)
+	}
+	return what
+}
+
+// contentBlock is one block of a transcript message's content: a tool call,
+// with its input, or a tool's result.
+type contentBlock struct {
+	Type, ID, Name string
+	Input          json.RawMessage
+	ToolUseID      string `json:"tool_use_id"`
+}
+
+// contentBlocks is a message's content blocks, or none when its content is
+// plain text.
+func contentBlocks(content json.RawMessage) []contentBlock {
+	var blocks []contentBlock
+	json.Unmarshal(content, &blocks)
+	return blocks
+}
+
+// xmlText is the text of the first <tag> element in s, or "".
+func xmlText(s, tag string) string {
+	_, after, ok := strings.Cut(s, "<"+tag+">")
+	text, _, closed := strings.Cut(after, "</"+tag+">")
+	if !ok || !closed {
+		return ""
+	}
+	return text
 }
 
 func (as Agents) find(job string) *Agent {
@@ -293,10 +405,12 @@ func lastRequest(path string) (at time.Time, tokens int, ok bool) {
 func (a Agent) open() bool { return a.PID }
 
 // stateText says what an agent is doing, for status lines: its state, and the
-// prompt it's waiting on, if any. Nothing for the zero Agent, a job that isn't
+// prompt or the background commands it's waiting on, if any. Nothing for the zero Agent, a job that isn't
 // listed.
 func (a Agent) stateText() string {
 	switch {
+	case len(a.Background) > 0:
+		return "idle (" + strings.Join(a.Background, ", ") + ")"
 	case a.TurnEnded && a.open():
 		return "idle, background task running"
 	case a.TurnEnded:
