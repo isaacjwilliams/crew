@@ -220,8 +220,8 @@ const turnEnd = `{"type":"assistant","message":{"role":"assistant","content":[{"
 
 // A transcript names each background command still running, by its
 // description, or its command without one; a finished or stopped one isn't
-// named. When a start or a finish isn't in a shape crew knows, or a line doesn't
-// read, it names none.
+// named. When a line doesn't read, a start can't be named, or a notice has no
+// task ID or gives one of its commands a status crew doesn't know, it names none.
 func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s1.jsonl")

@@ -190,8 +190,10 @@ func turnEnded(session string) bool {
 // Subagents' lines don't count.
 //
 // It's nil when none is running, and also when the transcript can't say: there's
-// none, a line doesn't read, or a start or a finish isn't in a shape crew knows.
-// Then the worker is shown, and stalls, as it did before crew read them.
+// none, a line doesn't read, a start can't be named, or a notice has no task ID
+// or gives one of its commands a status crew doesn't know. Then the worker is
+// shown, and stalls, as it did before crew read them. A finish it can't match to
+// a start, by task ID, leaves that command named.
 func backgroundCommands(path string) []string {
 	type call struct{ tool, label string }
 	type command struct{ id, label string }
