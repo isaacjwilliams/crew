@@ -2119,7 +2119,8 @@ crew set "$SR" status abandoned
 st=$(crew status)
 check "status lists a task stacked through its base on an abandoned one as waiting, after it" '[[ $(heading "$st" "waiting on other tasks") == *"$(num "$SY")-"*"after $(num "$SR") (abandoned)"* ]]'
 crew set "$SY" status abandoned
-SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK")"
+# SH waits for SI, so the note leaves SI out and counts the other five.
+SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK") $(num "$SN")"
 st=$(crew status)
 check "status names an abandoned dependency even where it only counts the rest" '[[ $(row "$(num "$SZ")-") == *"after 5 tasks, $(num "$SA") abandoned" ]]'
 crew set "$SZ" status abandoned
