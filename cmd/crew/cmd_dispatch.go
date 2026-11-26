@@ -218,7 +218,7 @@ func (c *Crew) pendingDeps(idx Branches, t Task) ([]Task, error) {
 	if parent, ok := idx.abandonedParent(t); ok {
 		deps = append(deps, parent)
 	}
-	names := strings.Fields(strings.NewReplacer(",", " ", "[", "", "]", "").Replace(t.Get("depends_on")))
+	names := dependencyNames(t.Get("depends_on"))
 	if len(names) == 0 {
 		return deps, nil // listing the project's task files is the costly part
 	}
@@ -237,6 +237,12 @@ func (c *Crew) pendingDeps(idx Branches, t Task) ([]Task, error) {
 		}
 	}
 	return deps, nil
+}
+
+// dependencyNames are the entries of a depends_on value, which may be space or
+// comma separated, or bracketed.
+func dependencyNames(value string) []string {
+	return strings.Fields(strings.NewReplacer(",", " ", "[", "", "]", "").Replace(value))
 }
 
 // slots is a count against its limit: workers running against MAX_WORKERS, or a

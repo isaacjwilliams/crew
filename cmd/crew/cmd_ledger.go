@@ -332,7 +332,34 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 	if key == "go_ahead" && value != "" {
 		return c.checkGoAhead(t, value)
 	}
+	if key == "depends_on" {
+		return c.withoutDelivered(t, value), nil
+	}
 	return value, nil
+}
+
+// withoutDelivered is a depends_on value without its merged tasks and done
+// spikes, which hold nothing back. An entry that doesn't name exactly one task
+// stays, for crew dispatch to refuse. Stacking reads base, never depends_on, so
+// dropping a merged parent doesn't unstack the task.
+func (c *Crew) withoutDelivered(t Task, value string) string {
+	names := dependencyNames(value)
+	if len(names) == 0 {
+		return value // listing the project's task files is the costly part
+	}
+	files := c.files("tasks", taskProjectDir(t))
+	var kept []string
+	for _, name := range names {
+		f, _ := resolveIn(name, files)
+		delivered := f != "" && (Task{Doc{f}}).Status().Delivered()
+		if !delivered {
+			kept = append(kept, name)
+		}
+	}
+	if len(kept) == len(names) {
+		return value // nothing dropped: leave the writer's own format alone
+	}
+	return strings.Join(kept, " ")
 }
 
 // checkGoAhead is the go_ahead crew set records for a ready task outside a
