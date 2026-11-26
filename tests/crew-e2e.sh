@@ -2078,8 +2078,23 @@ setstate "done" null
 out=$(crew tick 2>&1)
 check "a goal abandoned while tick sets up its task's worktree starts no worker for it, and says why" \
   '[[ $out == *"$TS: dispatch held back: goal $G4 is abandoned now; leaving $TS ready"* && $(gget "$GF4" status) == abandoned && $(crew get "$PS" status) == ready ]]'
+# A dependency that merges while tick dispatches an earlier task no longer holds
+# back a later one, though the note of a task tried before them both named it.
+GF6=$(crew goal new "Season sides" --max-in-flight 3); G6=$(basename "$GF6" .md)
+sed -i '/^## Goal$/a "Ship the sides."' "$GF6"; crew goal start "$GF6" >/dev/null
+PDS=$(goal_task "$GF6" "Sides spike"); crew set "$PDS" status working
+PDB=$(goal_task "$GF6" "Sides after spike"); crew set "$PDB" priority 3; crew set "$PDB" depends_on "$(basename "$PDS" .md)"
+PDA=$(goal_task "$GF6" "Sides last"); crew set "$PDA" priority 5; crew set "$PDA" depends_on "$(basename "$PDB" .md)"
+PDX=$(goal_task "$GF6" "Sides free"); crew set "$PDX" priority 4
+printf 'crew set %s status merged >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$PDS" >"$HOME/wt-hook-cmd"
+echo "MAX_WORKERS=20" >>"$PE"; setstate "done" null
+out=$(crew tick 2>&1)
+check "a dependency merged while tick dispatches an earlier task lets a later one go in the same tick" \
+  '[[ $out == *"$(basename "$PDA" .md): dispatch waits: it comes after $(basename "$PDB" .md | cut -d- -f1)"* && $out == *"$(basename "$PDX" .md): dispatched for goal $G6"* && $out == *"$(basename "$PDB" .md): dispatched for goal $G6"* ]]'
+sed -i '/^MAX_WORKERS=20$/d' "$PE"
 sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
-for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$PS" "$NG"; do crew set "$f" status abandoned; done
+for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$PS" "$NG" "$PDA" "$PDB" "$PDX"; do crew set "$f" status abandoned; done
+crew goal abandon "$G6" >/dev/null
 # crew status groups a goal's tasks by where they stand, in the order crew tick
 # dispatches them, and says what each one not yet dispatched waits for.
 num() { basename "$1" .md | cut -d- -f1; }
@@ -2119,7 +2134,8 @@ crew set "$SR" status abandoned
 st=$(crew status)
 check "status lists a task stacked through its base on an abandoned one as waiting, after it" '[[ $(heading "$st" "waiting on other tasks") == *"$(num "$SY")-"*"after $(num "$SR") (abandoned)"* ]]'
 crew set "$SY" status abandoned
-SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK")"
+# SH waits for SI, so the note leaves SI out and counts the other five.
+SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK") $(num "$SN")"
 st=$(crew status)
 check "status names an abandoned dependency even where it only counts the rest" '[[ $(row "$(num "$SZ")-") == *"after 5 tasks, $(num "$SA") abandoned" ]]'
 crew set "$SZ" status abandoned

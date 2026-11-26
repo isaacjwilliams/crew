@@ -274,3 +274,254 @@ func TestReadPRsKeepsEachProjectsPRsApart(t *testing.T) {
 		}
 	}
 }
+
+// goalLedger is a home with one project, p, and a running goal, 002-boards, for
+// tests of how status lists a goal's tasks. Each task is "NNN status [key:
+// value…]", in goal 002-boards and based on main unless it says otherwise.
+func goalLedger(t *testing.T, tasks ...string) *Crew {
+	t.Helper()
+	c := &Crew{Home: t.TempDir(), Host: "here", Settings: Settings{"MAX_WORKERS": "3", "GOAL_MAX_IN_FLIGHT": "3"}}
+	writeFile(t, c, "here\n", "host")
+	writeFile(t, c, "", "projects", "p", "project.env")
+	writeFile(t, c, "---\nid: 002-boards\nstatus: running\n---\n# boards\n\n## Log\n", "projects", "p", "goals", "002-boards.md")
+	for _, task := range tasks {
+		id, rest, _ := strings.Cut(task, " ")
+		status, keys, _ := strings.Cut(rest, " ")
+		fields := []string{"project: p", "goal: 002-boards", "status: " + status}
+		for _, kv := range strings.Split(keys, ";") {
+			if kv = strings.TrimSpace(kv); kv != "" {
+				fields = append(fields, kv)
+			}
+		}
+		if !strings.Contains(keys, "base: ") {
+			fields = append(fields, "base: main")
+		}
+		reportTask(t, c, "p", id, false, fields...)
+	}
+	return c
+}
+
+// boardsGoal is shaped like a real goal whose 12 tasks wait on each other in a
+// single line, 160 → 259 → 195 → [235 → 165 → 236 → 170] → 242 → 166 → [148 →
+// 243 → 244], brackets being stacks. Some tasks also name a task further down
+// the line in depends_on, as 166 names 170.
+var boardsGoal = []string{
+	"160 pr-open branch: b160",
+	"259 working depends_on: 160; priority: 3",
+	"195 ready depends_on: 259; priority: 2",
+	"235 ready base: b160; branch: b235; depends_on: 160, 195",
+	"165 ready base: b235; branch: b165; depends_on: 235, 160; priority: 1",
+	"236 ready base: b165; branch: b236; depends_on: 165, 160",
+	"170 ready base: b236; branch: b170; depends_on: 236; priority: 1",
+	"242 ready depends_on: 170",
+	"166 ready depends_on: 170, 242",
+	"148 ready branch: b148; depends_on: 166",
+	"243 ready base: b148; branch: b243; depends_on: 148, 166",
+	"244 ready base: b243; branch: b244; depends_on: 243, 166",
+}
+
+// goalReportOf is the report of p's one goal, built without reading GitHub,
+// the workers or the branches.
+func goalReportOf(c *Crew) goalReport {
+	return buildReport(c, []string{"p"}, false, statusReads{}).Projects[0].Goals[0]
+}
+
+// groupOf is the goal's group of that kind, or nil.
+func groupOf(g goalReport, k groupKind) []taskRow {
+	for _, group := range g.Groups {
+		if group.Kind == k {
+			return group.Rows
+		}
+	}
+	return nil
+}
+
+// rowOf is the row of the task with that ID, wherever it is in the goal.
+func rowOf(t *testing.T, g goalReport, id string) taskRow {
+	t.Helper()
+	var find func(rows []taskRow) (taskRow, bool)
+	find = func(rows []taskRow) (taskRow, bool) {
+		for _, r := range rows {
+			if r.Task.ID() == id {
+				return r, true
+			}
+			if k, ok := find(r.Kids); ok {
+				return k, true
+			}
+		}
+		return taskRow{}, false
+	}
+	for _, group := range g.Groups {
+		if r, ok := find(group.Rows); ok {
+			return r
+		}
+	}
+	t.Fatalf("no row for %s", id)
+	return taskRow{}
+}
+
+// afterNote is the "after" note on a task's row, or "".
+func afterNote(t *testing.T, g goalReport, id string) string {
+	t.Helper()
+	for _, n := range rowOf(t, g, id).Notes {
+		if strings.HasPrefix(n, "after ") {
+			return n
+		}
+	}
+	return ""
+}
+
+// waitingInText are the tasks plain crew status lists under the goal's
+// "waiting on other tasks", in order, stacked ones included.
+func waitingInText(t *testing.T, c *Crew) []string {
+	t.Helper()
+	text := plainText(buildReport(c, []string{"p"}, false, statusReads{}))
+	_, waiting, ok := strings.Cut(text, "    waiting on other tasks\n")
+	if !ok {
+		t.Fatalf("no waiting group in:\n%s", text)
+	}
+	var ids []string
+	for _, l := range strings.Split(waiting, "\n") {
+		if !strings.HasPrefix(l, "      ") {
+			break
+		}
+		ids = append(ids, strings.Fields(strings.TrimLeft(l, " └"))[0])
+	}
+	return ids
+}
+
+func TestGoalListsWaitingTasksInRunOrder(t *testing.T) {
+	c := goalLedger(t, boardsGoal...)
+	if got, want := rowIDs(groupOf(goalReportOf(c), groupWaiting)), []string{"195", "235", "242", "166", "148"}; !slices.Equal(got, want) {
+		t.Errorf("waiting rows = %v, want %v", got, want)
+	}
+	want := []string{"195", "235", "165", "236", "170", "242", "166", "148", "243", "244"}
+	if got := waitingInText(t, c); !slices.Equal(got, want) {
+		t.Errorf("plain text lists the waiting tasks as %v, want %v", got, want)
+	}
+}
+
+func TestGoalListsWaitingTasksByDependencyThenPriority(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w",
+		"b ready depends_on: a; priority: 5",
+		"c ready depends_on: w; priority: 3",
+	))
+	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"c", "a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("waiting = %v, want %v", got, want)
+	}
+}
+
+func TestGoalListsFirstOfTwoRowsTheOneWhoseTopTaskTheOtherWaitsOn(t *testing.T) {
+	// b waits on a, and a2, stacked on a, waits on b: the rows wait on each
+	// other, but only a2 makes a's row wait.
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w; branch: ba",
+		"b ready depends_on: a; priority: 5",
+		"a2 ready base: ba; depends_on: b",
+	))
+	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("waiting = %v, want %v", got, want)
+	}
+}
+
+func TestGoalListsWaitingTasksInALoopOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tasks []string
+		want  []string
+	}{
+		{"tasks that wait for each other", []string{
+			"w working",
+			"a ready depends_on: b",
+			"b ready depends_on: a",
+			"c ready depends_on: a",
+		}, []string{"a", "b", "c"}},
+		// p is in flight, so k1 and k2, stacked on it, are listed on their own,
+		// each with its own stack; k1's stack waits for k2, and k2's for k1.
+		{"two branches of a forked stack", []string{
+			"w working",
+			"p working branch: bp",
+			"k1 ready base: bp; branch: b1; depends_on: w",
+			"k2 ready base: bp; branch: b2; depends_on: w",
+			"k1a draft base: b1; branch: b1a; depends_on: k2",
+			"k2a draft base: b2; branch: b2a; depends_on: k1",
+			"x ready depends_on: k2a",
+		}, []string{"k1", "k1a", "k2", "k2a", "x"}},
+	} {
+		c := goalLedger(t, tc.tasks...)
+		if got := waitingInText(t, c); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: waiting = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestGoalAfterNotesNameOnlyWhatEachTaskWaitsOnNext(t *testing.T) {
+	g := goalReportOf(goalLedger(t, boardsGoal...))
+	for id, want := range map[string]string{
+		"195": "after 259",
+		"235": "after 195",
+		// 235 can be dispatched once 160's branch is pushed, but 165 waits for 160
+		// to merge.
+		"165": "after 160",
+		// 165, the stack parent, can't be dispatched until 160 has merged.
+		"236": "",
+		"170": "",
+		"242": "after 170",
+		// 242 can't be dispatched until 170 has merged.
+		"166": "after 242",
+		"148": "after 166",
+		// 148, then 243, the stack parents, can't be dispatched until 166 has
+		// merged.
+		"243": "",
+		"244": "",
+	} {
+		if got := afterNote(t, g, id); got != want {
+			t.Errorf("%s's note = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestGoalAfterNoteNamesWhatsStillToMergeOnceAParentIsInFlight(t *testing.T) {
+	tasks := slices.Clone(boardsGoal)
+	tasks[1] = "259 merged depends_on: 160"
+	tasks[2] = "195 merged depends_on: 259"
+	tasks[3] = "235 working base: b160; branch: b235; depends_on: 160, 195"
+	if got := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "165"); got != "after 160" {
+		t.Errorf("165's note = %q, want %q", got, "after 160")
+	}
+}
+
+func TestGoalAfterNoteAlwaysNamesAnAbandonedTask(t *testing.T) {
+	tasks := slices.Clone(boardsGoal)
+	tasks[7] = "242 abandoned depends_on: 170"
+	if got, want := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "166"), "after 170, 242 (abandoned)"; got != want {
+		t.Errorf("166's note = %q, want %q", got, want)
+	}
+}
+
+func TestGoalAfterNoteLeavesOutWhatItWaitsOnThroughATaskItDoesntName(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w",
+		"x ready depends_on: a",
+		"b ready depends_on: x",
+		"c ready depends_on: a, b",
+	))
+	if got, want := afterNote(t, g, "c"), "after b"; got != want {
+		t.Errorf("c's note = %q, want %q", got, want)
+	}
+}
+
+func TestGoalAfterNoteNamesTasksThatWaitOnEachOther(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"a ready depends_on: b",
+		"b ready depends_on: a",
+		"c ready depends_on: a, b",
+	))
+	if got, want := afterNote(t, g, "c"), "after a, b"; got != want {
+		t.Errorf("c's note = %q, want %q", got, want)
+	}
+}
