@@ -21,6 +21,12 @@ func cmdMigrate(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Committed however the run ends, so what it moved before a project stopped
+	// it, or before an earlier run was cut short, isn't left out of the ledger.
+	// crew upgrade, which runs it, needs a clean home to run again. Each write
+	// leaves its file whole, so a second run carries on from where this one
+	// stopped.
+	defer c.commit("migrate the ledger to format " + fmt.Sprint(ledgerFormat))
 	template, err := Task{Doc{c.path("templates", "task.md")}}.read()
 	if err != nil {
 		return err
@@ -55,9 +61,7 @@ func cmdMigrate(c *Crew, args []string) error {
 	}
 	if migrated == 0 {
 		fmt.Println("Every project's ledger is already migrated.")
-		return nil
 	}
-	c.commit("migrate the ledger to format " + fmt.Sprint(ledgerFormat))
 	return nil
 }
 

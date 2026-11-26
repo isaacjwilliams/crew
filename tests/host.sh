@@ -399,11 +399,20 @@ check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew
 head=$(git -C "$H" rev-parse @); out=$(up --yes)
 check "run again on the release it has, upgrade pauses nothing, and installs it again" \
   '[[ $out == "crew 9.9.9 is merged into the home already, so nothing is paused"*"Done (crew 9.9.9)"*"crew upgraded to 9.9.9" && $out != *paused\ busy* && $(git -C "$H" rev-parse @) == "$head" ]]'
-echo x >"$H/projects/left/ledger-format"; git -C "$H" commit -qam "a ledger format crew can't read"
+# A migration that stops at left, after it migrated busy, under the pause an
+# upgrade cut short left.
+printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/busy/paused"
+git -C "$H" rm -q projects/busy/ledger-format; echo x >"$H/projects/left/ledger-format"
+git -C "$H" add -A projects; git -C "$H" commit -qm "an upgrade cut short, and a ledger format crew can't read"
 rc=0; out=$(up --yes) || rc=$?
 check "a migration that fails after the install says why, and to run upgrade again" \
   '[[ $rc == 1 && $out == *"holds \"x\", not a format number"*"couldn'"'"'t migrate the ledger, so the crew stays paused; run crew upgrade again to finish" ]]'
+check "and keeps the pause, and commits what it migrated before it stopped" \
+  '[[ -e $H/projects/busy/paused && -z $(git -C "$H" status --porcelain) ]] && committed projects/busy/ledger-format'
 echo 1 >"$H/projects/left/ledger-format"; git -C "$H" commit -qam "format 1"
+out=$(up --yes)
+check "so upgrade run again finishes the migration, and lifts the pause" \
+  '[[ $out == *"Every project'"'"'s ledger is already migrated."*"crew upgraded to 9.9.9" && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused'
 echo "an edit" >>"$H/README.md"
 out=$(up --yes)
 check "upgrade refuses a home with uncommitted changes, and pauses nothing" '[[ $out == *"uncommitted changes"* && ! -e $H/projects/busy/paused ]]'
