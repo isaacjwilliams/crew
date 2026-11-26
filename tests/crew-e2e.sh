@@ -2403,7 +2403,13 @@ mv "$PD/ledger-format" "$HOME/ledger-format"
 out=$(crew ready "$UT" 2>&1); r1=$?; st=$(crew status)
 check "in a project not yet migrated, ready refuses a draft rather than count its items as none, and status says to migrate" \
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
-mv "$HOME/ledger-format" "$PD/ledger-format"
+rm "$HOME/ledger-format"
+sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+out=$(crew migrate); sh=$(shown "$UT")
+check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
+check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 crew set "$UT" status abandoned
 
 # Two crew processes at once on one machine both get the ledger lock in turn, so

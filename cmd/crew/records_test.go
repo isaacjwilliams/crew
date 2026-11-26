@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,85 @@ func TestShownTask(t *testing.T) {
 	os.WriteFile(noSection.RecordsPath(), []byte("oops\n"), 0o644)
 	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Still to learn\ncrew can't read the items still to learn: 001-a.records.jsonl:1: not a record crew can read") {
 		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in the section", got)
+	}
+}
+
+func TestMigrateStillToLearn(t *testing.T) {
+	task := learnTask(t, `---
+status: draft
+---
+## Goal
+G.
+
+## Still to learn
+<!-- The old comment: tick each item. -->
+- [x] Is it an indented answer?
+  - Yes, on one line.
+- [ ] Still open?
+  A note under an open item.
+- [x] Several lines?
+  - **Answer:**
+    - one
+      - nested
+    - two
+
+- [x] Answered on its own line? Yes: like this.
+- [x] Ticked with nothing?
+Some prose that isn't an item.
+
+## Plan
+`)
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	comment := []string{"<!-- The new comment. -->", ""}
+	n, err := migrateStillToLearn(task, comment)
+	if err != nil || n != 5 {
+		t.Fatalf("migrateStillToLearn = %d, %v; want 5 items", n, err)
+	}
+	records, err := task.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type item struct {
+		text    string
+		answers []string
+	}
+	var got []item
+	for _, i := range learnItems(records) {
+		it := item{text: i.ToLearn.Text}
+		for _, a := range i.Answers {
+			it.answers = append(it.answers, a.Learned.Answer)
+		}
+		got = append(got, it)
+		if i.By != "crew migrate" {
+			t.Errorf("%q is by %q, want crew migrate", i.ToLearn.Text, i.By)
+		}
+	}
+	want := []item{
+		{"Is it an indented answer?", []string{"Yes, on one line."}},
+		{"Still open?", nil},
+		{"Several lines?", []string{"- **Answer:**\n  - one\n    - nested\n  - two"}},
+		{"Answered on its own line?", []string{"Yes: like this."}},
+		{"Ticked with nothing?", []string{noAnswer}},
+	}
+	if !slices.EqualFunc(got, want, func(a, b item) bool { return a.text == b.text && slices.Equal(a.answers, b.answers) }) {
+		t.Errorf("items = %q\nwant %q", got, want)
+	}
+	b, _ := os.ReadFile(task.Path)
+	wantFile := `---
+status: draft
+---
+## Goal
+G.
+
+## Still to learn
+<!-- The new comment. -->
+
+  A note under an open item.
+Some prose that isn't an item.
+
+## Plan
+`
+	if string(b) != wantFile {
+		t.Errorf("task file =\n%s\nwant\n%s", b, wantFile)
 	}
 }
