@@ -148,21 +148,26 @@ func (r Record) check() error {
 	return nil
 }
 
-// AddRecord appends a record to the file's records, in one write, so a reader
-// never sees half of it. The caller holds the ledger lock and commits.
-func (d Doc) AddRecord(r Record) error {
-	if err := r.check(); err != nil {
-		return err
-	}
-	b, err := json.Marshal(r)
-	if err != nil {
-		return err
+// AddRecords appends records to the file's records, in one write, so a reader
+// never sees some of them without the rest. The caller holds the ledger lock and
+// commits.
+func (d Doc) AddRecords(rs ...Record) error {
+	var lines []byte
+	for _, r := range rs {
+		if err := r.check(); err != nil {
+			return err
+		}
+		b, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		lines = append(append(lines, b...), '\n')
 	}
 	f, err := os.OpenFile(d.RecordsPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	if _, err := f.Write(lines); err != nil {
 		f.Close()
 		return err
 	}

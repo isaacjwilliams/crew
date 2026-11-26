@@ -64,6 +64,10 @@ func cmdMigrate(c *Crew, args []string) error {
 // migrateStillToLearn moves the checkboxes under the task's Still to learn into
 // records, and gives the section the template's comment, keeping any line that
 // wasn't part of an item. It says how many items it moved.
+//
+// It writes the task's records in one go, and only then changes its file. A run
+// stopped in between leaves both, so a task that has records crew migrate wrote
+// has had its items moved already, and a second run only changes its file.
 func migrateStillToLearn(t Task, comment []string) (int, error) {
 	ls, err := t.read()
 	if err != nil || !slices.Contains(ls, learnHeading) {
@@ -76,20 +80,23 @@ func migrateStillToLearn(t Task, comment []string) (int, error) {
 			return 0, err
 		}
 	}
+	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" }) {
+		items = nil
+	}
+	var moved []Record
 	for _, i := range items {
 		r := newRecord("crew migrate", records)
 		r.ToLearn = &ToLearn{Text: i.text}
-		records = append(records, r)
-		if err := t.AddRecord(r); err != nil {
-			return 0, err
-		}
+		records, moved = append(records, r), append(moved, r)
 		if !i.ticked {
 			continue
 		}
 		a := newRecord("crew migrate", records)
 		a.Learned = &Learned{Item: r.ID, Answer: i.answer}
-		records = append(records, a)
-		if err := t.AddRecord(a); err != nil {
+		records, moved = append(records, a), append(moved, a)
+	}
+	if len(moved) > 0 {
+		if err := t.AddRecords(moved...); err != nil {
 			return 0, err
 		}
 	}

@@ -32,7 +32,7 @@ func add(t *testing.T, task Task, r Record) Record {
 	records, _ := task.Records()
 	n := newRecord("test", records)
 	n.ToLearn, n.Learned = r.ToLearn, r.Learned
-	if err := task.AddRecord(n); err != nil {
+	if err := task.AddRecords(n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -108,7 +108,7 @@ func TestShownTask(t *testing.T) {
 	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
 	write := func(task Task, records ...Record) {
 		for _, r := range records {
-			if err := task.AddRecord(r); err != nil {
+			if err := task.AddRecords(r); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -231,5 +231,35 @@ Some prose that isn't an item.
 `
 	if string(b) != wantFile {
 		t.Errorf("task file =\n%s\nwant\n%s", b, wantFile)
+	}
+}
+
+// A crew migrate stopped after writing a task's records, and before taking the
+// checkboxes out of its file, leaves both. Run again, it only takes them out.
+func TestMigrateStillToLearnAfterARunCutShort(t *testing.T) {
+	file := `---
+status: draft
+---
+## Still to learn
+- [x] Settled? Yes.
+- [ ] Open?
+`
+	task := learnTask(t, file)
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	if _, err := migrateStillToLearn(task, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(task.RecordsPath())
+	if err := os.WriteFile(task.Path, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := migrateStillToLearn(task, nil); err != nil || n != 0 {
+		t.Fatalf("migrateStillToLearn run again = %d, %v; want 0 items", n, err)
+	}
+	if after, _ := os.ReadFile(task.RecordsPath()); string(after) != string(before) {
+		t.Errorf("records run again =\n%s\nwant them as the first run left them\n%s", after, before)
+	}
+	if b, _ := os.ReadFile(task.Path); strings.Contains(string(b), "- [") {
+		t.Errorf("task file still has its checkboxes:\n%s", b)
 	}
 }

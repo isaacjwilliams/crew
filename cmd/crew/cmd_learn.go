@@ -36,7 +36,7 @@ func cmdToLearn(c *Crew, args []string) error {
 	}
 	r := newRecord("crew to-learn", records)
 	r.ToLearn = &ToLearn{Text: text}
-	if err := t.AddRecord(r); err != nil {
+	if err := t.AddRecords(r); err != nil {
 		return err
 	}
 	c.commit("to-learn " + t.ID())
@@ -76,7 +76,7 @@ func cmdLearned(c *Crew, args []string) error {
 	}
 	r := newRecord("crew learned", records)
 	r.Learned = &Learned{Item: id, Answer: answer}
-	if err := t.AddRecord(r); err != nil {
+	if err := t.AddRecords(r); err != nil {
 		return err
 	}
 	c.commit("learned " + t.ID())
