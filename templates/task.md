@@ -57,10 +57,11 @@ updated: {{NOW}}
      traps, the user's decisions, links. Facts, not instructions. -->
 
 ## Still to learn
-<!-- What the objective or its gates rest on that nobody has checked yet, one unchecked item each
-     ("- [ ] …"). A spike can answer one: crew new --kind spike --informs <this task>. When its
-     answers are in, write them side by side under the item and tick it. crew ready refuses while
-     any is open. -->
+<!-- What the objective or its gates rest on that nobody has checked yet. crew keeps these items:
+     add one with crew to-learn <this task> "<item>", and settle it with crew learned <this task>
+     <item> "<answer>". crew show lists them here, each with its answer; a line typed here isn't
+     one. A spike can answer one: crew new --kind spike --informs <this task>. crew ready refuses
+     while any is open. -->
 
 ## Plan
 <!-- A spike's only: what to try, and a time box. Any other brief leaves it empty, and crew ready

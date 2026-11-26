@@ -251,8 +251,12 @@ func cmdReady(c *Crew, args []string) error {
 			return fail("write each acceptance criterion as a '- ' item, any detail indented under it; this line isn't one: %s", l)
 		}
 	}
-	if n := t.StillToLearn(); n > 0 {
-		return fail("%d item(s) under Still to learn are open: answer each, with a spike where it needs trying (crew new --kind spike --informs %s), then tick it", n, t.ID())
+	items, err := t.StillToLearn()
+	if err != nil {
+		return fail("can't read what %s still has to learn: %v", t.ID(), err)
+	}
+	if n := openItems(items); n > 0 {
+		return fail("%d item(s) still to learn are open: answer each, with a spike where it needs trying (crew new --kind spike --informs %s), then settle it with crew learned %s ITEM ANSWER", n, t.ID(), t.ID())
 	}
 	if rules.pr && !t.Risk().Valid() {
 		return fail("set its risk: crew set %s risk low|medium|high", t.ID())

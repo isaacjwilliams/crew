@@ -69,11 +69,15 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    from title). --on stacks it on TASK's unmerged
                                    branch; --goal makes it one of GOAL's tasks
   crew ready TASK                  Check the brief is complete for its kind, with
-                                   nothing left under Still to learn, and mark it
+                                   nothing open still to learn, and mark it
                                    ready. A build needs a Goal, Acceptance criteria,
                                    a Size and a risk tier, and nothing under
                                    Structure, Plan or Constraints and conventions. A
                                    fix also needs fixes and missed_by
+  crew to-learn TASK "<item>"      Add something a draft's objective or gates rest
+                                   on that nobody has checked yet; prints its ID
+  crew learned TASK ITEM "<answer>"
+                                   Settle an item still to learn with its answer
   crew dispatch TASK [--force|--tick]
                                    Create worktree + branch and start an implementer.
                                    --force dispatches a task that isn't ready; a
@@ -269,7 +273,8 @@ Project memory  (facts about a project you approved, which its agents load)
                                    exits 0)
 
 Reading the ledger  (with no type word, the argument is a task, as for any TASK)
-  crew show [task] TASK            Print a task file
+  crew show [task] TASK            Print a task file, with its items still to
+                                   learn and their answers
   crew show proposal PROPOSAL      Print a proposal
   crew show goal GOAL              Print a goal
   crew show memory [--project P]   Print the project's memory.md as it is on disk

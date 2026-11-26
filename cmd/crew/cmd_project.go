@@ -63,6 +63,10 @@ DEFAULT_BRANCH=%s
 		if err := os.WriteFile(filepath.Join(pdir, "project.env"), []byte(env), 0o644); err != nil {
 			return err
 		}
+		// A new project has no ledger to migrate.
+		if err := writeLedgerFormat(pdir); err != nil {
+			return err
+		}
 		fmt.Printf("Registered %s (%s, default branch %s).\n", slug, remote, def)
 	} else {
 		fmt.Printf("%s is already registered; left project.env as is.\n", slug)

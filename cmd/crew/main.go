@@ -34,6 +34,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"proposals":      cmdProposals,
 	"new":            cmdNew,
 	"ready":          cmdReady,
+	"to-learn":       cmdToLearn,
+	"learned":        cmdLearned,
 	"hand-over":      cmdHandOver,
 	"check-base":     cmdCheckBase,
 	"promote":        cmdPromote,

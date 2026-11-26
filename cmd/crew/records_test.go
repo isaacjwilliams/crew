@@ -1,0 +1,154 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// learnTask is a task file in a project whose ledger is in this crew's format.
+func learnTask(t *testing.T, content string) Task {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "projects", "p")
+	if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLedgerFormat(dir); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "tasks", "001-a.md")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Task{Doc{p}}
+}
+
+// add appends a record, as crew to-learn or crew learned does, and returns it.
+func add(t *testing.T, task Task, r Record) Record {
+	t.Helper()
+	records, _ := task.Records()
+	n := newRecord("test", records)
+	n.ToLearn, n.Learned = r.ToLearn, r.Learned
+	if err := task.AddRecord(n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestStillToLearnReadsRecordsAlone(t *testing.T) {
+	// Checkboxes typed into the section count for nothing.
+	task := learnTask(t, "## Still to learn\n- [ ] typed by hand\n- [x] and ticked\n\n## Log\n")
+	if items, err := task.StillToLearn(); err != nil || len(items) != 0 {
+		t.Fatalf("StillToLearn with only typed lines = %v, %v; want none", items, err)
+	}
+	a := add(t, task, Record{ToLearn: &ToLearn{"Does the API page?"}})
+	b := add(t, task, Record{ToLearn: &ToLearn{"Is a scan fast enough?"}})
+	add(t, task, Record{Learned: &Learned{Item: b.ID, Answer: "Yes, under 50 ms."}})
+	add(t, task, Record{Learned: &Learned{Item: b.ID, Answer: "Yes."}})
+	items, err := task.StillToLearn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != a.ID || !items[0].Open() || items[1].ID != b.ID || len(items[1].Answers) != 2 || openItems(items) != 1 {
+		t.Errorf("StillToLearn = %+v; want %s open, then %s with both answers", items, a.ID, b.ID)
+	}
+}
+
+func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
+	good := `{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"Q?"}}`
+	for line, want := range map[string]string{
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?"},"extra":1}`:                                 `unknown field "extra"`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?","why":"newer"}}`:                             `unknown field "why"`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x"}`:                                                                    "not 0",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"},"learned":{"item":"aaaaaaaa","answer":"A"}}`: "not 2",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":" "}}`:                                            "needs its text",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                          "needs its item and its answer",
+		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                        "needs an id, an at and a by",
+		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                            "already taken",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "settles cccccccc, which no line adds",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}} {}`:                                         "more than one value",
+		`- [ ] typed by hand`: "not a record crew can read",
+		``:                    "not a record crew can read",
+	} {
+		task := learnTask(t, "## Log\n")
+		if err := os.WriteFile(task.RecordsPath(), []byte(good+"\n"+line+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := task.StillToLearn()
+		if err == nil || !strings.Contains(err.Error(), "001-a.records.jsonl:2: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("StillToLearn with %s = %v; want an error at line 2 saying %q", line, err, want)
+		}
+	}
+}
+
+func TestLedgerFormat(t *testing.T) {
+	task := learnTask(t, "## Log\n")
+	marker := ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path)))
+	for content, want := range map[string]string{
+		"":    "p's ledger isn't migrated to this crew's records yet: run crew migrate",
+		"0\n": "run crew migrate",
+		"2\n": "p's ledger is from a newer crew: run crew upgrade",
+		"x\n": `holds "x", not a format number`,
+	} {
+		if content == "" {
+			os.Remove(marker)
+		} else if err := os.WriteFile(marker, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := task.StillToLearn(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("StillToLearn with ledger-format %q = %v; want %q", content, err, want)
+		}
+	}
+}
+
+func TestShownTask(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	write := func(task Task, records ...Record) {
+		for _, r := range records {
+			if err := task.AddRecord(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	task := learnTask(t, "# A\n\n## Still to learn\n<!-- Items: crew to-learn.\n     More. -->\n- [ ] typed by hand\n\n## Plan\n\n## Log\n- x\n")
+	write(task,
+		Record{ID: "aaaaaaaa", At: at, By: "crew to-learn", ToLearn: &ToLearn{"Does the API page?"}},
+		Record{ID: "bbbbbbbb", At: at, By: "crew migrate", ToLearn: &ToLearn{"Which index?"}},
+		Record{ID: "cccccccc", At: at.Add(time.Hour), By: "crew learned", Learned: &Learned{"bbbbbbbb", "The existing one."}},
+		Record{ID: "dddddddd", At: at.Add(2 * time.Hour), By: "crew learned", Learned: &Learned{"bbbbbbbb", "Either:\n- the existing one\n- a new one"}},
+	)
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Still to learn\n<!-- Items: crew to-learn.\n     More. -->\n" +
+		"- [ ] Does the API page? (aaaaaaaa, added 2026-11-25 10:00 by crew to-learn)\n" +
+		"- [x] Which index? (bbbbbbbb, added 2026-11-25 10:00 by crew migrate)\n" +
+		"  - settled 2026-11-25 11:00 by crew learned: The existing one.\n" +
+		"  - settled 2026-11-25 12:00 by crew learned:\n    Either:\n    - the existing one\n    - a new one\n" +
+		"\nTyped into the file, so not items crew counts (crew to-learn adds one):\n- [ ] typed by hand\n" +
+		"\n## Plan\n\n## Log\n- x\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+
+	plain := "# B\n\n## Still to learn\n<!-- Items. -->\n\n## Log\n"
+	bare := learnTask(t, plain)
+	if got, _ := shownTask(bare.Path); got != plain {
+		t.Errorf("shownTask of a task with no items = %q; want the file as it is", got)
+	}
+	noSection := learnTask(t, "# C\n\n## Log\n- x\n")
+	if got, _ := shownTask(noSection.Path); got != "# C\n\n## Log\n- x\n" {
+		t.Errorf("shownTask of a task with no section and no items = %q; want the file as it is", got)
+	}
+	write(noSection, Record{ID: "aaaaaaaa", At: at, By: "crew to-learn", ToLearn: &ToLearn{"Q?"}})
+	if got, _ := shownTask(noSection.Path); got != "# C\n\n## Still to learn\n- [ ] Q? (aaaaaaaa, added 2026-11-25 10:00 by crew to-learn)\n\n## Log\n- x\n" {
+		t.Errorf("shownTask of a task with items and no section = %q; want the section before Log", got)
+	}
+	os.WriteFile(noSection.RecordsPath(), []byte("oops\n"), 0o644)
+	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Still to learn\ncrew can't read the items still to learn: 001-a.records.jsonl:1: not a record crew can read") {
+		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in the section", got)
+	}
+}
