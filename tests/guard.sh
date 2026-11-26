@@ -45,6 +45,13 @@ for role in worker gardener lead; do
 done
 w block worker "$W" "$L/projects/p/MCP.json"
 w allow lead "$M" "$L/projects/p/tasks/mcp.json"   # only the project's own file, not one of that name in a task folder
+# --- no agent edits records or the ledger's format: only crew commands write them
+for role in worker gardener lead; do
+  w block $role "$M" "$L/projects/p/tasks/001-x.records.jsonl"
+  w block $role "$M" "$L/projects/p/ledger-format"
+done
+out=$(jq -n --arg p "$L/projects/p/tasks/001-x.records.jsonl" --arg d "$M" '{cwd:$d,tool_input:{file_path:$p}}' | CREW_HOME=$L "$G" worker 2>&1)
+check "the guard names the crew commands that write still-to-learn records" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"* ]]'
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"

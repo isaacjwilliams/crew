@@ -114,6 +114,16 @@ func (g guard) check(input []byte) error {
 				return fmt.Errorf("%s gives the project's sessions and every lead their MCP servers, so only the user edits mcp.json. Ask them to make the change.", path)
 			}
 		}
+		// Records are typed facts crew decides from, and only its commands write
+		// them; ledger-format says which records a project's ledger has.
+		if under(path, filepath.Join(home, "projects")) {
+			switch name := strings.ToLower(filepath.Base(path)); {
+			case strings.HasSuffix(name, ".records.jsonl"):
+				return fmt.Errorf("%s holds records only crew commands write. Add an item still to learn with 'crew to-learn TASK \"<item>\"', and settle one with 'crew learned TASK ITEM \"<answer>\"'.", path)
+			case name == "ledger-format":
+				return fmt.Errorf("%s says which records the project's ledger has, and only crew migrate changes it.", path)
+			}
+		}
 		for _, s := range statePaths {
 			if under(path, filepath.Join(home, s)) {
 				return nil
