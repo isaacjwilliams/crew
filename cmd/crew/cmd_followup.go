@@ -517,12 +517,14 @@ const stalledNote = "Your last turn ended while this task's status still says yo
 //   - a is listed and not stopped: a stopped worker was stopped on purpose, by
 //     crew pause, say;
 //   - a isn't mid-turn, whatever other state claude agents gives it;
+//   - a isn't waiting on a background command it started, however long that
+//     runs: its status row names the command, for the user to judge;
 //   - its transcript has been quiet for stallAfter.
 func stalled(t Task, a *Agent) bool {
 	if !t.Status().WorkersTurn() || t.OpenQuestions() > 0 {
 		return false
 	}
-	if a == nil || a.State == "stopped" || a.busy() {
+	if a == nil || a.State == "stopped" || a.busy() || len(a.Background) > 0 {
 		return false
 	}
 	quiet, ok := a.quietFor()

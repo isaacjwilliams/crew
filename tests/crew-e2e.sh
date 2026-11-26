@@ -43,6 +43,23 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
   echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}' >>"$f"
   if [[ $2 == ended ]]; then echo '{"type":"system","subtype":"turn_duration"}' >>"$f"; fi
 }
+background() {  # session description [finished]: the session's last turn started a background command and ended; with finished, the command's notice started a turn that ended too
+  mkdir -p "$HOME/.claude/projects/stub"
+  local f="$HOME/.claude/projects/stub/$1.jsonl"
+  {
+    echo '{"type":"user","message":{"role":"user","content":"New input"}}'
+    jq -nc --arg d "$2" '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: "toolu_bg1", name: "Bash", input: {command: "bin/check", description: $d, run_in_background: true}}]}}'
+    echo '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bg1","type":"tool_result","content":"Command running in background with ID: bg1."}]},"toolUseResult":{"backgroundTaskId":"bg1"}}'
+    echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}'
+    echo '{"type":"system","subtype":"turn_duration"}'
+    if [[ ${3:-} == finished ]]; then
+      echo '{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}'
+      echo '{"type":"user","message":{"role":"user","content":"<task-notification>"},"origin":{"kind":"task-notification"}}'
+      echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}'
+      echo '{"type":"system","subtype":"turn_duration"}'
+    fi
+  } >"$f"
+}
 request() {  # session minutes tokens: the session's transcript ends with a turn whose last request was minutes ago and sent tokens of context
   mkdir -p "$HOME/.claude/projects/stub"
   printf '{"type":"assistant","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":500}}}\n{"type":"system","subtype":"turn_duration"}\n' \
@@ -1485,6 +1502,20 @@ n=$(resumes); work "$WT13" nudge6.txt  # a new commit, so the nudge above no lon
 stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
 out=$(crew tick 2>/dev/null)
 check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
+s13=$(crew get 13 worker_session); setstate working 4242 busy; background "$s13" "Run the clone checks"
+for quiet in "9 minutes" "3 hours"; do
+  touch -d "$quiet ago" "$STUB/$s13.jsonl"
+  out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1)
+  check "a worker waiting on its own background command, quiet for $quiet, isn't nudged by tick or by hand, and no one is asked" \
+    '[[ -z $out && $byhand == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $(resumes) == "$n" && -z $(asked13) ]]'
+done
+check "status names the background command a worker waits on" '[[ $(crew status | grep "^  013-tick-routing ") == *"  idle (Run the clone checks)  "* ]]'
+r=$(crew get 13 review_rounds); crew set 13 feedback_since 1970-01-01T00:00:00Z; out=$(crew tick 2>/dev/null)
+check "a worker waiting on its own background command takes a review round" \
+  '[[ $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(crew get 13 last_round_sent) == $((r + 1)) && $(resumes) == $((n + 1)) ]]'
+background "$s13" "Run the clone checks"; setstate working 4242 busy; crew followup 13 --note "Let the checks run on." >/dev/null 2>&1
+check "and a followup" '[[ $(resumes) == $((n + 2)) && $(last_prompt) == *"Let the checks run on."* ]]'
+answer13; crew set 13 status working; n=$(resumes)
 for state in stopped gone; do
   stall13 "done" null
   if [[ $state == stopped ]]; then setstate stopped null; else cp "$HOME/agents.json" "$HOME/agents.kept"; jq --arg j "$(crew get 13 worker_job)" 'map(select(.id != $j))' "$HOME/agents.kept" >"$HOME/agents.json"; fi
