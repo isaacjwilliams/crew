@@ -413,6 +413,20 @@ func TestGoalListsWaitingTasksByDependencyThenPriority(t *testing.T) {
 	}
 }
 
+func TestGoalListsFirstOfTwoRowsTheOneWhoseTopTaskTheOtherWaitsOn(t *testing.T) {
+	// b waits on a, and a2, stacked on a, waits on b: the rows wait on each
+	// other, but only a2 makes a's row wait.
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w; branch: ba",
+		"b ready depends_on: a; priority: 5",
+		"a2 ready base: ba; depends_on: b",
+	))
+	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("waiting = %v, want %v", got, want)
+	}
+}
+
 func TestGoalListsWaitingTasksInALoopOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

@@ -481,8 +481,10 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
 
 // inRunOrder puts rows in the order their tasks can run: each after every row
 // holding a task that one of its own waits for, directly or through other rows,
-// and otherwise in the order given. Rows that wait for each other in a loop keep
-// the order given among themselves.
+// and otherwise in the order given. Two rows can wait for each other only
+// through the tasks stacked in them; then the one whose top task waits for the
+// other's goes second. Rows that still wait for each other keep the order
+// given among themselves.
 func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 	rowOf := map[string]int{} // a task's file → the row holding it
 	for i, r := range rows {
@@ -490,13 +492,46 @@ func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 			rowOf[t.Path] = i
 		}
 	}
-	// waits[i][j]: row i waits for row j, directly or not. The closure below
-	// counts a wait through a middle row, even when it's a task stacked in that
-	// row that waits, not the one row i waits on.
+	waits := s.rowWaits(rows, rowOf, taskRow.stack)
+	tops := s.rowWaits(rows, rowOf, func(r taskRow) []Task { return []Task{r.Task} })
+	// goesAfter: row i goes after row j.
+	goesAfter := func(i, j int) bool {
+		if waits[i][j] != waits[j][i] {
+			return waits[i][j]
+		}
+		return waits[i][j] && tops[i][j] && !tops[j][i]
+	}
+	listed := make([]bool, len(rows))
+	free := func(i int) bool {
+		for j := range rows {
+			if !listed[j] && goesAfter(i, j) {
+				return false
+			}
+		}
+		return !listed[i]
+	}
+	ordered := make([]taskRow, 0, len(rows))
+	for range rows {
+		// Some row is always free, since going after never comes back round:
+		// through the closure, rows in a loop all wait for each other, so none
+		// of them waits one way, and the same holds for their top tasks.
+		i := 0
+		for !free(i) {
+			i++
+		}
+		listed[i] = true
+		ordered = append(ordered, rows[i])
+	}
+	return ordered
+}
+
+// rowWaits[i][j] says row i waits for row j, directly or through other rows:
+// that a task of row i's tasks waits for one that row j holds.
+func (s *statusView) rowWaits(rows []taskRow, rowOf map[string]int, tasks func(taskRow) []Task) [][]bool {
 	waits := make([][]bool, len(rows))
 	for i, r := range rows {
 		waits[i] = make([]bool, len(rows))
-		for _, t := range r.stack() {
+		for _, t := range tasks(r) {
 			for dep := range s.deps.deliveredBefore(t) {
 				if j, ok := rowOf[dep]; ok && j != i {
 					waits[i][j] = true
@@ -511,29 +546,7 @@ func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 			}
 		}
 	}
-	listed := make([]bool, len(rows))
-	free := func(i int) bool {
-		for j := range rows {
-			if !listed[j] && waits[i][j] && !waits[j][i] {
-				return false
-			}
-		}
-		return !listed[i]
-	}
-	ordered := make([]taskRow, 0, len(rows))
-	for range rows {
-		// Some row is always free. If row i weren't, it would wait one way on
-		// another row, that one on a third, and so on. With finitely many rows
-		// the chain comes back on itself, so through the closure each row in it
-		// waits on the one before it too, and none of them waits only one way.
-		i := 0
-		for !free(i) {
-			i++
-		}
-		listed[i] = true
-		ordered = append(ordered, rows[i])
-	}
-	return ordered
+	return waits
 }
 
 // row works out one task's row, then the rows of the tasks stacked on it.
