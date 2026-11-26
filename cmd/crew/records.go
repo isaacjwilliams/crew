@@ -87,21 +87,21 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	ids := map[string]bool{}
+	toLearn := map[string]bool{} // whether the record with each ID adds an item
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if err == nil && ids[r.ID] {
+		if _, taken := toLearn[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		ids[r.ID] = true
+		toLearn[r.ID] = r.ToLearn != nil
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !slices.ContainsFunc(records, func(t Record) bool { return t.ID == r.Learned.Item && t.ToLearn != nil }) {
+		if r.Learned != nil && !toLearn[r.Learned.Item] {
 			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
 		}
 	}

@@ -199,6 +199,14 @@ func uncommented(lines []string) []string {
 	return out
 }
 
+// trimBlankEnd is lines without the blank lines at their end.
+func trimBlankEnd(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
 // OpenQuestions counts the unchecked items under Open questions: each is a
 // question still waiting on the user.
 func (d Doc) OpenQuestions() int { return unchecked(d.Section("## Open questions")) }

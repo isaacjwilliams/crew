@@ -120,10 +120,7 @@ func shownTask(path string) (string, error) {
 			typed = append(typed, ls[start+1+i])
 		}
 	}
-	for len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
-		kept = kept[:len(kept)-1]
-	}
-	body := append(kept, items...)
+	body := append(trimBlankEnd(kept), items...)
 	if len(typed) > 0 {
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}

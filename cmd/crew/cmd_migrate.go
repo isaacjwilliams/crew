@@ -34,7 +34,7 @@ func cmdMigrate(c *Crew, args []string) error {
 			return fail("%v", err)
 		}
 		if have > ledgerFormat {
-			return fail("%s's ledger is from a newer crew: run crew upgrade", p)
+			return fail("%v", checkLedgerFormat(pdir))
 		}
 		if have == ledgerFormat {
 			continue
@@ -172,12 +172,4 @@ func answerFrom(under []string) string {
 		return strings.TrimPrefix(out[0], "- ")
 	}
 	return strings.Join(out, "\n")
-}
-
-// trimBlankEnd is lines without the blank lines at their end.
-func trimBlankEnd(lines []string) []string {
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
 }
