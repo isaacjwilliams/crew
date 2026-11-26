@@ -540,7 +540,7 @@ you ⇄ lead: what the goal is for, where its items come from, what bounds it
   - `go-ahead once <task> is <status>`: a ready task outside a goal that `crew tick` dispatches once that task gets there, and `go-ahead met: <task> reached <status>` once it has: the next tick dispatches it, as its caps allow. `go-ahead never met: <task> abandoned`, with `dispatch by hand`, when the task it waits on was abandoned.
   - `dispatch by hand`: a ready task no running or draft goal, and no go-ahead, will dispatch. `goal <id> full` beside it means a done or abandoned goal's cap still holds it; a bad cap on that goal is said there too, since status doesn't list the goal.
   - `N to learn; <spike> <status>, …` on a draft: its open items under Still to learn, and the spikes that inform it. `informs <draft>` on a spike.
-  - `N draft(s)`: drafts outside a goal with no open questions and nothing to learn, counted rather than listed.
+  - `N draft(s)`: drafts outside a goal with no open questions and nothing to learn (no open item, every spike finished), counted rather than listed.
   - `automated review off` on a task: the lead's choice at intake (`auto_review`). Its other choices, `model` and `effort`, have columns of their own.
   - `paused (crew resume --project <p>)` on a project's line: nothing dispatches for it, whatever its groups say, until it's resumed. `interrupted by a pause` on a task: the pause cut its worker's turn short, and `crew tick` tells it to carry on once the project is resumed.
   - Status lists a project's next tasks even when it isn't cloned here, though `crew tick` dispatches only projects cloned on its machine.

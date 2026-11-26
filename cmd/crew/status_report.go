@@ -577,10 +577,10 @@ func leavesStack(t, parent Task) bool {
 }
 
 // folds: a draft outside a goal, and every draft stacked on it, has no open
-// question and nothing still to learn, so the plain text counts the stack in one
-// line rather than listing it.
+// question and nothing still to learn (no open item, and every spike finished),
+// so the plain text counts the stack in one line rather than listing it.
 func (s *statusView) folds(t Task) bool {
-	if t.Status() != Draft || t.OpenQuestions() > 0 || s.learning(t) != "" {
+	if t.Status() != Draft || t.OpenQuestions() > 0 || t.StillToLearn() > 0 || s.hasUnfinishedSpike(t) {
 		return false
 	}
 	for _, k := range s.kids[t.Path] {
@@ -589,6 +589,17 @@ func (s *statusView) folds(t Task) bool {
 		}
 	}
 	return true
+}
+
+// hasUnfinishedSpike: a spike that informs the draft hasn't finished, so it
+// still has something to tell the draft.
+func (s *statusView) hasUnfinishedSpike(t Task) bool {
+	for _, sp := range s.spikes[t.ID()] {
+		if !sp.Status().Finished() {
+			return true
+		}
+	}
+	return false
 }
 
 // waits: the task waits on other tasks, or on a dependency it can't name.
