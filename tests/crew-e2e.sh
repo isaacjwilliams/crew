@@ -2351,6 +2351,7 @@ check "set clears a list whose entries are all delivered" '[[ -z $(dep "$(num "$
 check "set keeps a list with nothing to drop as written" '[[ $(dep "[$(num "$DB"), $(num "$DW")]") == "[$(num "$DB"), $(num "$DW")]" ]]'
 check "set keeps an entry that names no task, or several, as written" \
   '[[ $(dep "nonesuch $(num "$DM") dep") == "nonesuch dep" ]]'
+for f in "$DW" "$DT"; do crew set "$f" status abandoned; done
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "tick cleans up a done spike's worktree and local branch" \
