@@ -148,11 +148,14 @@ func (r Record) check() error {
 	return nil
 }
 
-// AddRecords appends records to the file's records, in one write, so a reader
+// AddRecords adds records after the file's records, in one write, so a reader
 // never sees some of them without the rest. The caller holds the ledger lock and
 // commits.
 func (d Doc) AddRecords(rs ...Record) error {
-	var lines []byte
+	lines, err := os.ReadFile(d.RecordsPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	for _, r := range rs {
 		if err := r.check(); err != nil {
 			return err
@@ -163,15 +166,7 @@ func (d Doc) AddRecords(rs ...Record) error {
 		}
 		lines = append(append(lines, b...), '\n')
 	}
-	f, err := os.OpenFile(d.RecordsPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(lines); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	return replaceFile(d.RecordsPath(), lines)
 }
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
@@ -218,5 +213,5 @@ func checkLedgerFormat(projectDir string) error {
 
 // writeLedgerFormat records that the project's ledger is in ledgerFormat.
 func writeLedgerFormat(projectDir string) error {
-	return os.WriteFile(ledgerFormatPath(projectDir), []byte(strconv.Itoa(ledgerFormat)+"\n"), 0o644)
+	return replaceFile(ledgerFormatPath(projectDir), []byte(strconv.Itoa(ledgerFormat)+"\n"))
 }

@@ -317,13 +317,38 @@ func splitLines(text string) []string {
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
-// writeLines rewrites the file in place, each line ending in a newline.
+// writeLines rewrites the file, each line ending in a newline.
 func (d Doc) writeLines(ls []string) error {
 	var b strings.Builder
 	for _, l := range ls {
 		b.WriteString(l + "\n")
 	}
-	return os.WriteFile(d.Path, []byte(b.String()), 0o644)
+	return replaceFile(d.Path, []byte(b.String()))
+}
+
+// replaceFile writes a ledger file in one step, so a write that fails partway
+// leaves the old file rather than part of the new one. It writes a temporary
+// file beside it, <file>.new-<random>, which .gitignore covers, and renames it
+// over the file.
+func replaceFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".new-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
 }
 
 // appendRaw adds text at the end of the file, after a newline if the file

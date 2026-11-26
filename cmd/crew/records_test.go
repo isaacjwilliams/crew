@@ -84,6 +84,47 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 	}
 }
 
+// crew migrate writes a task's records, then its file, then the project's
+// format. Each replaces the file whole, so a write that fails partway leaves the
+// old file, never part of the new one: a reader holding the old file open still
+// reads it as it was, and no temporary file is left beside it.
+func TestMigrationWritesReplaceTheFileWhole(t *testing.T) {
+	task := learnTask(t, "## Still to learn\n- [ ] Open?\n")
+	add(t, task, Record{ToLearn: &ToLearn{Text: "First?"}})
+	second := newRecord("test", nil)
+	second.ToLearn = &ToLearn{Text: "Second?"}
+	project := filepath.Dir(filepath.Dir(task.Path))
+	if err := os.WriteFile(ledgerFormatPath(project), []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []struct {
+		name, path string
+		write      func() error
+	}{
+		{"AddRecords", task.RecordsPath(), func() error { return task.AddRecords(second) }},
+		{"ReplaceSection", task.Path, func() error { return task.ReplaceSection(learnHeading, "") }},
+		{"writeLedgerFormat", ledgerFormatPath(project), func() error { return writeLedgerFormat(project) }},
+	} {
+		before, _ := os.ReadFile(w.path)
+		f, err := os.Open(w.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.write(); err != nil {
+			t.Fatalf("%s: %v", w.name, err)
+		}
+		kept := make([]byte, len(before)+100)
+		n, _ := f.Read(kept)
+		f.Close()
+		if string(kept[:n]) != string(before) {
+			t.Errorf("%s wrote into the file: one opened before it reads\n%s\nwant\n%s", w.name, kept[:n], before)
+		}
+		if left, _ := filepath.Glob(w.path + ".*"); len(left) > 0 {
+			t.Errorf("%s left %v", w.name, left)
+		}
+	}
+}
+
 func TestLedgerFormat(t *testing.T) {
 	task := learnTask(t, "## Log\n")
 	marker := ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path)))
