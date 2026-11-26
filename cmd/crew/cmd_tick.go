@@ -377,7 +377,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 // waitsFor says what a task with dependencies left waits for next. When its
 // stack parent waits for all of them too, that's the parent's dispatch.
 func waitsFor(deps *dependencies, t Task) string {
-	if next := deps.next(t); len(next) > 0 {
+	if next, _ := deps.next(t); len(next) > 0 {
 		return "it comes " + after(next)
 	}
 	p, _ := deps.branches.liveParent(t)

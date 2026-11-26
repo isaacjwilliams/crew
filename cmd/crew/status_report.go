@@ -635,9 +635,9 @@ func (s *statusView) notes(t Task) []string {
 		notes = append(notes, "on "+taskNumber(p))
 	}
 	if !st.InFlight() && !st.Finished() {
-		if _, err := s.deps.of(t); err != nil {
+		if next, err := s.deps.next(t); err != nil {
 			notes = append(notes, err.Error())
-		} else if next := s.deps.next(t); len(next) > 0 {
+		} else if len(next) > 0 {
 			notes = append(notes, after(next))
 		}
 	}
@@ -745,6 +745,7 @@ type dependencies struct {
 	*Crew
 	branches Branches // the index pendingDeps reads
 	pending  map[string]depsOf
+	before   map[string]map[string]bool // a task's file → deliveredBefore
 }
 
 // depsOf is what a task waits on, error and all.
@@ -754,7 +755,7 @@ type depsOf struct {
 }
 
 func newDependencies(c *Crew, idx Branches) *dependencies {
-	return &dependencies{Crew: c, branches: idx, pending: map[string]depsOf{}}
+	return &dependencies{Crew: c, branches: idx, pending: map[string]depsOf{}, before: map[string]map[string]bool{}}
 }
 
 // of are the tasks t waits on.
@@ -771,8 +772,8 @@ func (d *dependencies) of(t Task) ([]Task, error) {
 // or t's stack parent, waits for too, since that one has to go first. An
 // abandoned task is always named, since it will never be delivered, and so are
 // tasks that wait for each other in a loop, since none of them goes first.
-func (d *dependencies) next(t Task) []Task {
-	deps, _ := d.of(t)
+func (d *dependencies) next(t Task) ([]Task, error) {
+	deps, err := d.of(t)
 	var parentWaits map[string]bool
 	if p, ok := d.branches.liveParent(t); ok {
 		parentWaits = d.deliveredBefore(p)
@@ -790,7 +791,7 @@ func (d *dependencies) next(t Task) []Task {
 			next = append(next, e)
 		}
 	}
-	return next
+	return next, err
 }
 
 // deliveredBefore are the tasks that must be delivered before t can be
@@ -798,10 +799,13 @@ func (d *dependencies) next(t Task) []Task {
 // stack parent's dispatch waits for. It's empty for a task that's been
 // dispatched already, or never will be.
 func (d *dependencies) deliveredBefore(t Task) map[string]bool {
+	if b, ok := d.before[t.Path]; ok {
+		return b
+	}
 	delivered, seen := map[string]bool{}, map[string]bool{}
 	var visit func(t Task)
 	visit = func(t Task) {
-		if seen[t.Path] || t.Status().InFlight() || t.Status().Finished() {
+		if st := t.Status(); seen[t.Path] || st.InFlight() || st.Finished() {
 			return
 		}
 		seen[t.Path] = true
@@ -815,6 +819,7 @@ func (d *dependencies) deliveredBefore(t Task) map[string]bool {
 		}
 	}
 	visit(t)
+	d.before[t.Path] = delivered
 	return delivered
 }
 
