@@ -343,13 +343,14 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 // entry that doesn't name exactly one task stays, for crew dispatch to refuse.
 func (c *Crew) withoutDelivered(t Task, value string) string {
 	files := c.files("tasks", taskProjectDir(t))
+	names := dependencyNames(value)
 	var kept []string
-	for _, name := range dependencyNames(value) {
+	for _, name := range names {
 		if f, _ := resolveIn(name, files); f == "" || !(Task{Doc{f}}).Status().Delivered() {
 			kept = append(kept, name)
 		}
 	}
-	if len(kept) == len(dependencyNames(value)) {
+	if len(kept) == len(names) {
 		return value
 	}
 	return strings.Join(kept, " ")
