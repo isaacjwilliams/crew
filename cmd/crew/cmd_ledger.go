@@ -332,7 +332,27 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 	if key == "go_ahead" && value != "" {
 		return c.checkGoAhead(t, value)
 	}
+	if key == "depends_on" {
+		return c.withoutDelivered(t, value), nil
+	}
 	return value, nil
+}
+
+// withoutDelivered is a depends_on value without its merged tasks and done
+// spikes, which hold nothing back, space separated when it dropped any. An
+// entry that doesn't name exactly one task stays, for crew dispatch to refuse.
+func (c *Crew) withoutDelivered(t Task, value string) string {
+	files := c.files("tasks", taskProjectDir(t))
+	var kept []string
+	for _, name := range dependencyNames(value) {
+		if f, _ := resolveIn(name, files); f == "" || !(Task{Doc{f}}).Status().Delivered() {
+			kept = append(kept, name)
+		}
+	}
+	if len(kept) == len(dependencyNames(value)) {
+		return value
+	}
+	return strings.Join(kept, " ")
 }
 
 // checkGoAhead is the go_ahead crew set records for a ready task outside a

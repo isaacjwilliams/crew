@@ -2336,6 +2336,20 @@ st=$(crew status)
 check "a done spike doesn't hold its goal's slot, and is listed only with --done" \
   '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
 check "a task that depends on a done spike no longer waits for it" '[[ $(row "$KAI") != *after* ]]'
+# depends_on keeps only what can still hold a task back: crew set drops the merged and the done.
+DM=$(crew new "Dep merged"); crew set "$DM" status merged
+DB=$(crew new "Dep abandoned"); crew set "$DB" status abandoned
+DW=$(crew new "Dep working"); crew set "$DW" status working
+DT=$(crew new "Dep waiting"); fill "$DT"
+dep() { crew set "$DT" depends_on "$@" && crew get "$DT" depends_on; }
+check "set keeps only the dependencies that can still hold the task back, in their order" \
+  '[[ $(dep "$(basename "$DM" .md) $(basename "$DB" .md) $KSI $(basename "$DW" .md)") == "$(basename "$DB" .md) $(basename "$DW" .md)" ]]'
+check "set drops merged and done dependencies from comma separated, bracketed and short-number lists" \
+  '[[ $(dep "$(num "$DW"), $(num "$DM"),$(num "$KS")") == "$(num "$DW")" && $(dep "[$(num "$DM") $(num "$DB") $(num "$KS")]") == "$(num "$DB")" ]]'
+check "set clears a list whose entries are all delivered" '[[ -z $(dep "$(num "$DM") $KSI") ]]'
+check "set keeps a list with nothing to drop as written" '[[ $(dep "[$(num "$DB"), $(num "$DW")]") == "[$(num "$DB"), $(num "$DW")]" ]]'
+check "set keeps an entry that names no task, or several, as written" \
+  '[[ $(dep "nonesuch $(num "$DM") dep") == "nonesuch dep" ]]'
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "tick cleans up a done spike's worktree and local branch" \
@@ -3162,5 +3176,13 @@ out=$(ci_round 0000dddffff0)
 check "branch caused, handed back, branch caused: a new red head is a question, after 2 CI rounds" '[[ $out == *"$TCM: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CM" status) == needs-input && $(crew get "$CM" review_rounds) == 3 ]] && [[ $(section "$CM" "## Open questions") == *"- [ ] CI is still red on 0000ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
 crew set "$CM" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
+
+DM=$(crew new "Dep merged"); crew set "$DM" status merged
+DW=$(crew new "Dep working"); crew set "$DW" status working
+DT=$(crew new "Dep waiting"); fill "$DT"; crew set "$DT" depends_on "$(basename "$DM" .md) $(basename "$DW" .md)"; crew ready "$DT" >/dev/null
+check "dispatch waits for the unmerged dependency a merged one was written beside" \
+  '[[ $(crew dispatch "$DT" 2>&1) == *"depends on $(basename "$DW" .md), which is '"'"'working'"'"'"* && $(crew get "$DT" status) == ready ]]'
+crew set "$DW" status merged
+check "dispatch goes ahead once that dependency merges" 'crew dispatch "$DT" >/dev/null && [[ $(crew get "$DT" status) == working ]]'
 
 summary crew-e2e
