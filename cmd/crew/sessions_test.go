@@ -235,6 +235,7 @@ func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
 		{"one started and finished", checks + turnEnd + notice("b2", "completed") + turnEnd, nil},
 		{"one of two finished", server + checks + notice("b2", "failed") + turnEnd, []string{"bin/rails server"}},
 		{"one killed", checks + notice("b2", "killed") + turnEnd, nil},
+		{"one that finished before its start was written", server + notice("b2", "failed") + checks + turnEnd, []string{"bin/rails server"}},
 		{"one stopped with TaskStop, which sends no notice", server + taskStop("b1") + turnEnd, nil},
 		{"one moved to the background at its timeout", bashCall("b3", `"command":"bin/rake db:restore","description":"Restore the backup"`, "") + turnEnd, []string{"Restore the backup"}},
 		{"one with no description", bashCall("b4", `"command":"npm run dev"`, `"run_in_background":true,`) + turnEnd, []string{"npm run dev"}},
@@ -247,6 +248,7 @@ func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
 		{"a start with neither a description nor a command", checks + bashCall("b5", `"timeout":600000`, `"run_in_background":true,`) + turnEnd, nil},
 		{"a notice with no task ID", server + queued(`<status>completed</status>`) + turnEnd, nil},
 		{"a notice of its own with a status crew doesn't know", server + checks + notice("b1", "paused") + turnEnd, nil},
+		{"a notice of its own, before its start, with a status crew doesn't know", notice("b1", "paused") + server + checks + turnEnd, nil},
 		{"a notice of its own with no status", server + checks + queued(`<task-id>b1</task-id>`) + turnEnd, nil},
 	} {
 		os.WriteFile(path, []byte(c.transcript), 0o644)

@@ -185,7 +185,9 @@ func turnEnded(session string) bool {
 // Bash result that has a backgroundTaskId, whether it ran in the background or
 // was moved there at its timeout. It finishes with the task notification Claude
 // Code queues for it, which has a status, or with a TaskStop that stopped it,
-// which writes none. Subagents' lines don't count.
+// which writes none. A finish may come before its start: Claude Code can queue
+// the notification of a command that fails at once before it writes the start.
+// Subagents' lines don't count.
 //
 // It's nil when none is running, and also when the transcript can't say: there's
 // none, a line doesn't read, or a start or a finish isn't in a shape crew knows.
@@ -194,14 +196,10 @@ func backgroundCommands(path string) []string {
 	type call struct{ tool, label string }
 	type command struct{ id, label string }
 	calls := map[string]call{} // by tool_use ID
-	var running []command
-	isRunning := func(id string) bool {
-		return slices.ContainsFunc(running, func(c command) bool { return c.id == id })
-	}
-	finish := func(id string) {
-		running = slices.DeleteFunc(running, func(c command) bool { return c.id == id })
-	}
-	readable := true // every start and finish so far is in a shape crew knows
+	var started []command
+	finished := map[string]bool{} // by task ID
+	unclear := map[string]bool{}  // task IDs with a notice of a status crew doesn't know
+	readable := true              // every start and notice so far is in a shape crew knows
 	unread, err := scanLines(path, "", func(l transcriptLine) bool {
 		if l.IsSidechain {
 			return true
@@ -222,13 +220,13 @@ func backgroundCommands(path string) []string {
 			c := calls[l.toolResultID()]
 			switch {
 			case result.BackgroundTaskID != "" && c.tool == "Bash" && c.label != "":
-				running = append(running, command{result.BackgroundTaskID, c.label})
+				started = append(started, command{result.BackgroundTaskID, c.label})
 			case result.BackgroundTaskID != "": // a start crew can't name
 				readable = false
 			case result.TaskID != "" && c.tool == "TaskStop":
-				finish(result.TaskID)
+				finished[result.TaskID] = true
 			}
-		case "queue-operation": // a task notification: a finish
+		case "queue-operation": // a task notification: a finish, or a subagent's or a monitor's
 			var content string
 			if l.Operation != "enqueue" || json.Unmarshal(l.Content, &content) != nil || !strings.Contains(content, "<task-notification>") {
 				return true
@@ -237,11 +235,10 @@ func backgroundCommands(path string) []string {
 			switch {
 			case id == "":
 				readable = false
-			case !isRunning(id): // a subagent's or a monitor's
 			case slices.Contains(finalStatuses, status):
-				finish(id)
+				finished[id] = true
 			default:
-				readable = false
+				unclear[id] = true
 			}
 		}
 		return readable // scanLines stops at the first false
@@ -250,14 +247,18 @@ func backgroundCommands(path string) []string {
 		return nil
 	}
 	var labels []string
-	for _, c := range running {
-		labels = append(labels, c.label)
+	for _, c := range started {
+		switch {
+		case finished[c.id]:
+		case unclear[c.id]:
+			return nil
+		default:
+			labels = append(labels, c.label)
+		}
 	}
 	return labels
 }
 
-// finalStatuses are the statuses a background command's task notification
-// gives when it has finished.
 var finalStatuses = []string{"completed", "failed", "killed"}
 
 // toolResultID is the ID of the tool call whose result a user line holds, or
