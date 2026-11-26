@@ -2385,6 +2385,14 @@ check "typed checkboxes count for nothing in ready or status, and show sets them
 crew learned "$LT" "$L2" $'Yes, under 50 ms\nfor 10,000 rows.' >/dev/null; sh=$(shown "$LT")
 check "once every item is settled, ready accepts the draft, typed checkboxes or not, and show gives a long answer under its item" \
   'crew ready "$LT" >/dev/null && [[ $(crew get "$LT" status) == ready ]] && has "^- \[x\] Is a full scan fast enough\? \($L2, " && has "^  - settled .* by crew learned:$" && has "^    Yes, under 50 ms$" && has "^    for 10,000 rows\.$"'
+# A ready waiting for the ledger lock counts the items as they are once it has
+# it: the line appended meanwhile is what a crew to-learn holding the lock writes
+# (-o: crew ready mustn't inherit the lock flock holds).
+WT=$(crew new "Learning meanwhile"); fill "$WT"
+flock -o "$L/.crew.lock" bash -c 'crew ready "$1" >"$HOME/ready.out" 2>&1 & sleep 0.5; echo "{\"id\":\"0a0b0c0d\",\"at\":\"2026-11-25T10:00:00Z\",\"by\":\"crew to-learn\",\"to_learn\":{\"text\":\"Added meanwhile?\"}}" >>"${1%.md}.records.jsonl"' _ "$WT"
+check "a ready waiting on the lock refuses a draft that gained an item meanwhile" \
+  'wait_for "grep -q \"1 item(s) still to learn are open\" \"\$HOME/ready.out\"" && [[ $(crew get "$WT" status) == draft ]]'
+crew set "$WT" status abandoned
 # A records file with a line crew can't read never reads as fewer items.
 BT=$(crew new "Unreadable records"); BTI=$(basename "$BT" .md); fill "$BT"; B1=$(crew to-learn "$BT" "Q?"); crew learned "$BT" "$B1" "A." >/dev/null
 echo '{"id":"0badf00d","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"From a newer crew?","why":"newer"}}' >>"${BT%.md}.records.jsonl"
