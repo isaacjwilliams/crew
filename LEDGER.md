@@ -22,6 +22,8 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     mcp.json             optional: MCP servers for this project's sessions, secrets as ${NAME} (see SETUP.md)
     mcp.local.json       written by crew from mcp.json, values filled in; never edit (not committed)
     tasks/NNN-<name>.md  one file per task; <name> is the branch name without BRANCH_PREFIX
+    tasks/NNN-<name>.records.jsonl  the task's records, which only crew commands write (see Records)
+    ledger-format        the format the project's ledger is in, which only crew migrate changes (see Records)
     goals/NNN-<slug>.md  one file per goal: a batch of items a goal lead works through
     proposals/*.md       ideas worth keeping that aren't tasks yet (see Proposals)
     memory.md            facts about the project the user approved (see Project memory)
@@ -76,7 +78,7 @@ A task's `kind` says what it makes, and so what `crew ready` asks of its brief a
 
 A build's brief says what done looks like and leaves how to the worker. Structure, Plan and Constraints and conventions are where briefs once held the design: `crew ready` refuses a build's brief with anything under them, and `crew dispatch` refuses a task readied before then, from `crew tick` too. SETUP.md's "Rewriting briefs that still have a plan" has the prompt that has a lead rewrite them.
 
-A **spike** answers a question a draft's objective or gates rest on. The draft lists those questions under `## Still to learn`, one `- [ ]` item each, and `crew ready` refuses it while any is unchecked. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. So a spike takes no part in stacks: it can't be stacked, and nothing can stack on it; `crew new --on` and `crew set` of a `base` or `kind` refuse either. A task that `depends_on` a spike can be dispatched once the spike is done. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the brief, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft writes the spikes' answers side by side under the item, ticks it, and finishes the brief.
+A **spike** answers a question a draft's objective or gates rest on. Those questions are the draft's items still to learn: records in `tasks/<id>.records.jsonl` (see [Records](#records)), added with `crew to-learn <draft> "<item>"` and settled with `crew learned <draft> <item> "<answer>"`. `crew ready` refuses the draft while any is open, and `crew show <draft>` lists them under `## Still to learn`, each with its answer. `crew new --kind spike --informs <draft>` ties a spike to the draft (`informs`), and several spikes may inform one draft. A spike is dispatched like any task, and counts as in flight, toward `MAX_WORKERS` and its goal's `max_in_flight`, while it runs. Its worker commits locally and never pushes: the code is thrown away, and the report in the ledger is the record. So a spike takes no part in stacks: it can't be stacked, and nothing can stack on it; `crew new --on` and `crew set` of a `base` or `kind` refuse either. A task that `depends_on` a spike can be dispatched once the spike is done. It writes `## Report`, before `## Automated reviews` (or before `## Log`): first the line `Answer: <one line>`, then what it tried, the evidence (commands and outputs), what it means for the brief, and surprises. `crew hand-over` then sets `done`. A goal's done spike reaches its goal lead through `crew goal followup`, once (`report_sent`); outside a goal, `crew status` shows each draft's open items and its spikes on its row (`2 to learn; 041 done, 042 working`). Whoever owns the draft settles the item with the spikes' answers side by side, and finishes the brief.
 
 ## Fixes
 
@@ -198,6 +200,17 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 | `worker_fingerprint` | 12 hex characters | a hash of the agent files, settings and launch flags the worker started with, and for a restack session its restack-only prompt; a followup that would load something else starts fresh |
 | `worker_model` | `sonnet` | the model the worker started on: the task's `model`, empty for the default, or `sonnet` for a restack session; a followup on another model starts fresh |
 | `worker_effort` | `medium` | the effort the worker started at: the task's `effort`, empty for the user's own setting, and always empty for a restack session; a followup at another effort starts fresh. A worker recorded before crew kept efforts has none, which counts as no effort |
+
+## Records
+
+A task's **records** are facts crew decides from, kept beside the task file in `tasks/<id>.records.jsonl`. Only crew commands write them: the guard refuses an edit of the file, for every role. Each record is one JSON line, appended under the ledger lock and never changed, with an `id`, the time it was written (`at`) and the command that wrote it (`by`), and one payload. A later fact is a new record that names the one it follows. Two clones that each add records merge without a conflict: `.gitattributes` has git keep both sides' lines. crew reads the file strictly: a line it can't read, from a newer crew or typed by hand, stops any decision that rests on the records, naming the file and line, rather than reading as fewer records.
+
+| Payload | Written by | What it says |
+|---|---|---|
+| `to_learn` (`text`) | `crew to-learn TASK "<item>"` | something a draft's objective or gates rest on that nobody has checked yet |
+| `learned` (`item`, `answer`) | `crew learned TASK ITEM "<answer>"` | the answer that settles the `to_learn` record `item`; two clones may each settle one, and both answers are kept |
+
+A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment.
 
 ## Decisions
 
