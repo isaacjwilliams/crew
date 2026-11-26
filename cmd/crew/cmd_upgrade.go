@@ -44,8 +44,8 @@ func cmdUpgrade(c *Crew, args []string) error {
 	}
 	// A crew command killed between its write and its commit (a crew migrate
 	// during the last upgrade, say) leaves the ledger changed. Commit it, as
-	// that command's own commit would have, so only changes to the home's
-	// code stop the upgrade.
+	// that command's own commit would have, so only changes outside the
+	// ledger (crew's code, the user's settings) stop the upgrade.
 	c.commit("commit what the ledger held before crew upgrade")
 	tag, err := c.upgradeTarget()
 	// Not held on through the wait for sessions to wrap up, so they can log
