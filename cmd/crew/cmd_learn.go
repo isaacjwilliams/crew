@@ -88,7 +88,9 @@ const learnHeading = "## Still to learn"
 
 // shownTask is a task as crew show prints it: its file, with its still-to-learn
 // items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts.
+// section stays below them, marked as not being items crew counts. When crew
+// can't read the items, the section says why, and shows what's typed in it as
+// it is: in a project not yet migrated, those are the items.
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
@@ -96,8 +98,9 @@ func shownTask(path string) (string, error) {
 		return "", err
 	}
 	var items []string
-	if learning, err := t.StillToLearn(); err != nil {
-		items = []string{"crew can't read the items still to learn: " + err.Error()}
+	learning, unread := t.StillToLearn()
+	if unread != nil {
+		items = []string{"crew can't read the items still to learn: " + unread.Error()}
 	} else {
 		items = learnLines(learning)
 	}
@@ -124,7 +127,10 @@ func shownTask(path string) (string, error) {
 		}
 	}
 	body := append(trimBlankEnd(kept), items...)
-	if len(typed) > 0 {
+	switch {
+	case unread != nil:
+		body = append(body, typed...)
+	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
 	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])

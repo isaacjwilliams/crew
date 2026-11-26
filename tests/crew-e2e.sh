@@ -2413,6 +2413,9 @@ check "in a project not yet migrated, ready refuses a draft rather than count it
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+sh=$(shown "$UT")
+check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
+  '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
   '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
