@@ -98,8 +98,9 @@ func (g guard) check(input []byte) error {
 		return fmt.Errorf("can't work out where the crew home %s is (%v)", g.home, err)
 	}
 	if under(path, home) {
-		// A few of a project's files are off limits to some agents or all. They're in projects/,
-		// a state path, so this comes before the check below, which allows them all.
+		// Some agents may not edit memory.md, and none may edit mcp.json or
+		// ledger-format. They're in projects/, a state path, so this comes before
+		// the check below, which allows them all.
 		// Names are compared ignoring case: on a Mac, Memory.md is the same file.
 		if filepath.Dir(filepath.Dir(path)) == filepath.Join(home, "projects") {
 			switch strings.ToLower(filepath.Base(path)) {

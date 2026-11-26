@@ -112,7 +112,8 @@ const noAnswer = "Ticked in the task file, with no answer written."
 // checkboxes splits a Still to learn section, as task files kept it before
 // records, into its items and the lines that weren't part of one, without
 // their comments. An item is a "- [ ]" or "- [x]" line. A ticked item's answer
-// is the lines indented under it or, with none, what follows its first "? ".
+// is the lines indented under it or, with none, what follows its first "? ":
+// the lead wrote some answers on the item's own line, "Does it page? Yes: …".
 // An open item has no answer, so any lines under it are kept.
 func checkboxes(section []string) (items []checkbox, rest []string) {
 	plain := uncommented(section)
@@ -125,7 +126,7 @@ func checkboxes(section []string) (items []checkbox, rest []string) {
 			}
 			continue
 		}
-		item := checkbox{text: strings.TrimSpace(text), ticked: line[3] != ' '}
+		item := checkbox{text: strings.TrimSpace(text), ticked: !strings.HasPrefix(line, "- [ ]")}
 		if !item.ticked {
 			items = append(items, item)
 			continue

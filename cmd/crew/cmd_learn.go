@@ -45,7 +45,8 @@ func cmdToLearn(c *Crew, args []string) error {
 }
 
 // crew learned TASK ITEM "<answer>": settles a still-to-learn item with its
-// answer, which may run to several lines.
+// answer, which may run to several lines. Unlike crew to-learn, it takes a task
+// in any status: crew migrate may have moved an open item from one past draft.
 func cmdLearned(c *Crew, args []string) error {
 	if len(args) != 3 {
 		return usage(`crew learned TASK ITEM "<answer>"`)
@@ -112,6 +113,8 @@ func shownTask(path string) (string, error) {
 		ls = slices.Insert(ls, start, learnHeading, "")
 	}
 	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
+	// uncommented blanks out comment lines rather than dropping them, so its
+	// lines line up with the section's.
 	var kept, typed []string // the section's comments and blank lines, and the rest
 	for i, l := range uncommented(ls[start+1 : end]) {
 		if strings.Trim(l, " \t") == "" {

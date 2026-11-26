@@ -703,10 +703,14 @@ func (i LearnItem) Open() bool { return len(i.Answers) == 0 }
 // the order they were added. crew ready refuses a draft while one is open.
 func (t Task) StillToLearn() ([]LearnItem, error) {
 	records, err := t.Records()
-	return learnItems(records), err
+	if err != nil {
+		return nil, err
+	}
+	return learnItems(records), nil
 }
 
 // learnItems are the still-to-learn items records add, with their answers.
+// Records from readRecords name only items they add, which it checks.
 func learnItems(records []Record) []LearnItem {
 	var items []LearnItem
 	for _, r := range records {
