@@ -2336,22 +2336,12 @@ st=$(crew status)
 check "a done spike doesn't hold its goal's slot, and is listed only with --done" \
   '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
 check "a task that depends on a done spike no longer waits for it" '[[ $(row "$KAI") != *after* ]]'
-# depends_on keeps only what can still hold a task back: crew set drops the merged and the done.
-# $KSI is the spike that went done above.
+# crew set drops the merged and done from depends_on; TestWithoutDelivered covers the forms and edge cases.
 DM=$(crew new "Dep merged"); crew set "$DM" status merged
-DB=$(crew new "Dep abandoned"); crew set "$DB" status abandoned
 DW=$(crew new "Dep working"); crew set "$DW" status working
-DT=$(crew new "Dep waiting"); fill "$DT"
-dep() { crew set "$DT" depends_on "$@" && crew get "$DT" depends_on; }
-check "set keeps only the dependencies that can still hold the task back, in their order" \
-  '[[ $(dep "$(basename "$DM" .md) $(basename "$DB" .md) $KSI $(basename "$DW" .md)") == "$(basename "$DB" .md) $(basename "$DW" .md)" ]]'
-check "set drops merged and done dependencies from comma separated, bracketed and short-number lists" \
-  '[[ $(dep "$(num "$DW"), $(num "$DM"),$(num "$KS")") == "$(num "$DW")" && $(dep "[$(num "$DM") $(num "$DB") $(num "$KS")]") == "$(num "$DB")" ]]'
-check "set clears a list whose entries are all delivered" '[[ -z $(dep "$(num "$DM") $KSI") ]]'
-check "set keeps a list with nothing to drop as written" '[[ $(dep "[$(num "$DB"), $(num "$DW")]") == "[$(num "$DB"), $(num "$DW")]" ]]'
-check "set keeps an entry that names no task, or several, as written" \
-  '[[ $(dep "nonesuch $(num "$DM") dep") == "nonesuch dep" ]]'
-for f in "$DW" "$DT"; do crew set "$f" status abandoned; done
+check "set drops merged and done dependencies, keeping the rest in order" \
+  '[[ $(crew set "$DW" depends_on "$(basename "$DM" .md) $KSI $(num "$KA")" && crew get "$DW" depends_on) == "$(num "$KA")" ]]'
+crew set "$DW" status abandoned
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "tick cleans up a done spike's worktree and local branch" \
