@@ -481,10 +481,9 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
 
 // inRunOrder puts rows in the order their tasks can run: each after every row
 // holding a task that one of its own waits for, directly or through other rows,
-// and otherwise in the order given. Two rows can wait for each other only
-// through the tasks stacked in them; then the one whose top task waits for the
-// other's goes second. Rows that still wait for each other keep the order
-// given among themselves.
+// and otherwise in the order given. When two rows wait for each other, the one
+// whose top task waits for the other's goes second. Rows whose top tasks wait
+// for each other too keep the order given among themselves.
 func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 	rowOf := map[string]int{} // a task's file → the row holding it
 	for i, r := range rows {
