@@ -287,7 +287,7 @@ func goalLedger(t *testing.T, tasks ...string) *Crew {
 	for _, task := range tasks {
 		id, rest, _ := strings.Cut(task, " ")
 		status, keys, _ := strings.Cut(rest, " ")
-		fields := []string{"goal: 002-boards", "status: " + status}
+		fields := []string{"project: p", "goal: 002-boards", "status: " + status}
 		for _, kv := range strings.Split(keys, ";") {
 			if kv = strings.TrimSpace(kv); kv != "" {
 				fields = append(fields, kv)
