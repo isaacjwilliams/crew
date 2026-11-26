@@ -329,12 +329,9 @@ func (d Doc) writeLines(ls []string) error {
 
 // replaceFile writes a ledger file in one step, so a write that fails partway
 // leaves the old file rather than part of the new one. It writes a temporary
-// file beside it, <file>.new-<random>, which .gitignore covers, and renames it
-// over the file. The file ends up with the mode os.WriteFile would give it: the
-// old file's, or for a new one 0644 under the umask.
+// file beside it (createReplacement) and renames it over the file.
 func replaceFile(path string, data []byte) error {
-	tmp := path + ".new-" + rand.Text()
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := createReplacement(path)
 	if err != nil {
 		return err
 	}
@@ -342,16 +339,38 @@ func replaceFile(path string, data []byte) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if old, serr := os.Stat(path); err == nil && serr == nil {
-		err = os.Chmod(tmp, old.Mode().Perm())
-	}
 	if err == nil {
-		err = os.Rename(tmp, path)
+		err = os.Rename(f.Name(), path)
 	}
 	if err != nil {
-		os.Remove(tmp)
+		os.Remove(f.Name())
 	}
 	return err
+}
+
+// createReplacement makes the temporary file replaceFile writes:
+// <file>.new-<random>, which .gitignore covers. It has the mode os.WriteFile
+// would give the file before anything is written to it, so no more people can
+// read the data than can read the file: the old file's mode, or for a new file
+// 0644 under the umask.
+func createReplacement(path string) (*os.File, error) {
+	tmp := path + ".new-" + rand.Text()
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	old, err := os.Stat(path)
+	if err != nil {
+		return os.OpenFile(tmp, flags, 0o644)
+	}
+	// The umask can only narrow the old mode here, and Chmod then sets it exactly.
+	f, err := os.OpenFile(tmp, flags, old.Mode().Perm())
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(old.Mode().Perm()); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return nil, err
+	}
+	return f, nil
 }
 
 // appendRaw adds text at the end of the file, after a newline if the file

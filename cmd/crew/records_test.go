@@ -127,20 +127,53 @@ func TestMigrationWritesReplaceTheFileWhole(t *testing.T) {
 }
 
 func TestReplaceFileGivesTheModeWriteFileWould(t *testing.T) {
-	dir := t.TempDir()
-	kept := filepath.Join(dir, "kept.md")
-	if err := os.WriteFile(kept, []byte("old\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Umask(syscall.Umask(0o077))
-	made := filepath.Join(dir, "made.md")
-	for path, want := range map[string]os.FileMode{kept: 0o640, made: 0o600} {
-		if err := replaceFile(path, []byte("new\n")); err != nil {
-			t.Fatal(err)
-		}
-		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != want {
-			t.Errorf("%s: mode %v, want %v", filepath.Base(path), fi.Mode().Perm(), want)
-		}
+	for _, c := range []struct {
+		name      string
+		umask     int
+		old, want os.FileMode // old is 0 for no file yet
+	}{
+		{"an old file's mode, under a narrower umask", 0o077, 0o640, 0o640},
+		{"a private file's mode, under a wider umask", 0o022, 0o600, 0o600},
+		{"a new file, under the usual umask", 0o022, 0, 0o644},
+		{"a new file, under a narrower umask", 0o077, 0, 0o600},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "task.md")
+			if c.old != 0 {
+				if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, c.old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			defer syscall.Umask(syscall.Umask(c.umask))
+
+			f, err := createReplacement(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fi, err := f.Stat()
+			f.Close()
+			os.Remove(f.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != c.want {
+				t.Errorf("replacement made at %v before it's written, want %v", fi.Mode().Perm(), c.want)
+			}
+
+			if err := replaceFile(path, []byte("new\n")); err != nil {
+				t.Fatal(err)
+			}
+			fi, err = os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != c.want {
+				t.Errorf("file left at %v, want %v", fi.Mode().Perm(), c.want)
+			}
+		})
 	}
 }
 
