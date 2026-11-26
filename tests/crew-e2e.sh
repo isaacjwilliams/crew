@@ -2407,6 +2407,7 @@ stack3() { # <name>: sets ${1}_TOP, ${1}_MID, ${1}_END to the three drafts, top 
   t=$(crew new "$1 top"); m=$(crew new "$1 middle" --on "$(num "$t")"); e=$(crew new "$1 end" --on "$(num "$m")")
   printf -v "${1}_TOP" %s "$t"; printf -v "${1}_MID" %s "$m"; printf -v "${1}_END" %s "$e"
 }
+# FS: every spike finished; FU: a spike unfinished; FI: an open item; FQ: an open question.
 stack3 FS; FSD=$(crew new "FS done spike" --kind spike --informs "$(num "$FS_MID")"); FSA=$(crew new "FS abandoned spike" --kind spike --informs "$(num "$FS_MID")")
 sed -i "s/^status: .*/status: done/" "$FSD"; crew set "$FSA" status abandoned   # crew set refuses done
 st=$(crew status)
