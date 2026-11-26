@@ -344,15 +344,16 @@ func (c *Crew) dispatchReady(news *tickNews) {
 	}
 	sortForDispatch(ready)
 	idx := c.branches("")
-	deps := newDependencies(c, idx)
 	for _, t := range ready {
 		if !c.tickDispatches(t) {
 			continue
 		}
 		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
-		if waits, err := deps.waitsOn(t); err == nil && len(waits) > 0 {
-			news.heldBack(project, "%s: dispatch waits: %s", t.ID(), waitsFor(deps, t))
+		// Read afresh for each task: a dependency may have merged while tick
+		// dispatched the one before.
+		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
+			news.heldBack(project, "%s: dispatch waits: %s", t.ID(), waitsFor(newDependencies(c, idx), t))
 			continue
 		}
 		// Dispatching ends the go-ahead, so say what it was first. tickDispatches
