@@ -263,18 +263,13 @@ type statusView struct {
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
-	deps     map[string]depsOf // a task's file → the tasks it waits on
+	deps     *dependencies     // what the project's tasks wait on
 	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
 	prs      map[string]prRead // the project's PRs as its tasks name them → what GitHub answered when crew last asked; a PR missing wasn't asked for
 }
 
-// depsOf and capOf keep what status has worked out for a task or a goal, error
-// and all, so it's worked out once.
-type depsOf struct {
-	tasks []Task
-	err   error
-}
-
+// capOf keeps what status has worked out for a goal's cap, error and all, so
+// it's worked out once.
 type capOf struct {
 	slots
 	err error
@@ -326,7 +321,8 @@ func (s *statusView) project(name string) projectReport {
 	}
 	// A project's own MAX_WORKERS may not be the crew's.
 	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
-	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
+	s.kids, s.caps = map[string][]Task{}, map[string]capOf{}
+	s.deps = newDependencies(s.Crew, s.branches)
 	s.spikes = map[string][]Task{}
 	for _, t := range tasks {
 		if d := t.Get("informs"); d != "" {
@@ -514,20 +510,9 @@ func (s *statusView) folds(t Task) bool {
 	return true
 }
 
-// waitsOn are the tasks this one waits on, as crew dispatch sees them. A task's
-// row and its group both ask, so the answer is kept.
-func (s *statusView) waitsOn(t Task) ([]Task, error) {
-	if d, ok := s.deps[t.Path]; ok {
-		return d.tasks, d.err
-	}
-	deps, err := s.pendingDeps(s.branches, t)
-	s.deps[t.Path] = depsOf{deps, err}
-	return deps, err
-}
-
 // waits: the task waits on other tasks, or on a dependency it can't name.
 func (s *statusView) waits(t Task) bool {
-	deps, err := s.waitsOn(t)
+	deps, err := s.deps.of(t)
 	return err != nil || len(deps) > 0
 }
 
@@ -586,7 +571,7 @@ func (s *statusView) notes(t Task) []string {
 		notes = append(notes, "on "+taskNumber(p))
 	}
 	if !st.InFlight() && !st.Finished() {
-		if deps, err := s.waitsOn(t); err != nil {
+		if deps, err := s.deps.of(t); err != nil {
 			notes = append(notes, err.Error())
 		} else if len(deps) > 0 {
 			notes = append(notes, after(deps))
@@ -687,6 +672,35 @@ func (s *statusView) learning(t Task) string {
 		parts = append(parts, strings.Join(spikes, ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// dependencies are what tasks wait on, as crew dispatch sees them (pendingDeps).
+// A task's row, its group and the tasks that wait on it all ask, so each answer
+// is kept.
+type dependencies struct {
+	*Crew
+	branches Branches // the index pendingDeps reads
+	pending  map[string]depsOf
+}
+
+// depsOf is what a task waits on, error and all.
+type depsOf struct {
+	tasks []Task
+	err   error
+}
+
+func newDependencies(c *Crew, idx Branches) *dependencies {
+	return &dependencies{Crew: c, branches: idx, pending: map[string]depsOf{}}
+}
+
+// of are the tasks t waits on.
+func (d *dependencies) of(t Task) ([]Task, error) {
+	if p, ok := d.pending[t.Path]; ok {
+		return p.tasks, p.err
+	}
+	deps, err := d.pendingDeps(d.branches, t)
+	d.pending[t.Path] = depsOf{deps, err}
+	return deps, err
 }
 
 const afterNamed = 4 // how many tasks "after" names before it only counts them
