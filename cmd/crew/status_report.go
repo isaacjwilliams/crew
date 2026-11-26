@@ -126,6 +126,15 @@ type taskRow struct {
 	Folded bool
 }
 
+// stack is the row's task and every task stacked on it.
+func (r taskRow) stack() []Task {
+	tasks := []Task{r.Task}
+	for _, k := range r.Kids {
+		tasks = append(tasks, k.stack()...)
+	}
+	return tasks
+}
+
 // stackAsks: the task, or one stacked on it, has open questions.
 func (r taskRow) stackAsks() bool {
 	if r.Task.OpenQuestions() > 0 {
@@ -462,9 +471,64 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
 			}
 			group.Rows = append(group.Rows, row)
 		}
+		if k == groupWaiting {
+			group.Rows = s.inRunOrder(group.Rows)
+		}
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+// inRunOrder puts rows in the order their tasks can run: each after every row
+// holding a task that one of its own waits for, directly or through other rows,
+// and otherwise in the order given. Rows that wait for each other in a loop keep
+// the order given among themselves.
+func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
+	rowOf := map[string]int{} // a task's file → the row holding it
+	for i, r := range rows {
+		for _, t := range r.stack() {
+			rowOf[t.Path] = i
+		}
+	}
+	// waits[i][j]: row i waits for row j, directly or not.
+	waits := make([][]bool, len(rows))
+	for i, r := range rows {
+		waits[i] = make([]bool, len(rows))
+		for _, t := range r.stack() {
+			for dep := range s.deps.deliveredBefore(t) {
+				if j, ok := rowOf[dep]; ok && j != i {
+					waits[i][j] = true
+				}
+			}
+		}
+	}
+	for k := range rows {
+		for i := range rows {
+			for j := range rows {
+				waits[i][j] = waits[i][j] || waits[i][k] && waits[k][j]
+			}
+		}
+	}
+	listed := make([]bool, len(rows))
+	free := func(i int) bool {
+		for j := range rows {
+			if !listed[j] && waits[i][j] && !waits[j][i] {
+				return false
+			}
+		}
+		return !listed[i]
+	}
+	ordered := make([]taskRow, 0, len(rows))
+	for range rows {
+		// Outside a loop, rows wait for each other only one way, so one is free.
+		i := 0
+		for !free(i) {
+			i++
+		}
+		listed[i] = true
+		ordered = append(ordered, rows[i])
+	}
+	return ordered
 }
 
 // row works out one task's row, then the rows of the tasks stacked on it.

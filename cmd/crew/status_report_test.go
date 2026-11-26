@@ -371,10 +371,76 @@ func afterNote(t *testing.T, g goalReport, id string) string {
 	return ""
 }
 
-func TestGoalWaitingGroupOrder(t *testing.T) {
-	g := goalReportOf(goalLedger(t, boardsGoal...))
-	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"195", "148", "166", "235", "242"}; !slices.Equal(got, want) {
+// waitingInText are the tasks plain crew status lists under the goal's
+// "waiting on other tasks", in order, stacked ones included.
+func waitingInText(t *testing.T, c *Crew) []string {
+	t.Helper()
+	text := plainText(buildReport(c, []string{"p"}, false, statusReads{}))
+	_, waiting, ok := strings.Cut(text, "    waiting on other tasks\n")
+	if !ok {
+		t.Fatalf("no waiting group in:\n%s", text)
+	}
+	var ids []string
+	for _, l := range strings.Split(waiting, "\n") {
+		if !strings.HasPrefix(l, "      ") {
+			break
+		}
+		ids = append(ids, strings.Fields(strings.TrimLeft(l, " └"))[0])
+	}
+	return ids
+}
+
+func TestGoalListsWaitingTasksInRunOrder(t *testing.T) {
+	c := goalLedger(t, boardsGoal...)
+	if got, want := rowIDs(groupOf(goalReportOf(c), groupWaiting)), []string{"195", "235", "242", "166", "148"}; !slices.Equal(got, want) {
+		t.Errorf("waiting rows = %v, want %v", got, want)
+	}
+	want := []string{"195", "235", "165", "236", "170", "242", "166", "148", "243", "244"}
+	if got := waitingInText(t, c); !slices.Equal(got, want) {
+		t.Errorf("plain text lists the waiting tasks as %v, want %v", got, want)
+	}
+}
+
+func TestGoalListsWaitingTasksByDependencyThenPriority(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w",
+		"b ready depends_on: a; priority: 5",
+		"c ready depends_on: w; priority: 3",
+	))
+	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"c", "a", "b"}; !slices.Equal(got, want) {
 		t.Errorf("waiting = %v, want %v", got, want)
+	}
+}
+
+func TestGoalListsWaitingTasksInALoopOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tasks []string
+		want  []string
+	}{
+		{"tasks that wait for each other", []string{
+			"w working",
+			"a ready depends_on: b",
+			"b ready depends_on: a",
+			"c ready depends_on: a",
+		}, []string{"a", "b", "c"}},
+		// p is in flight, so k1 and k2, stacked on it, are listed on their own,
+		// each with its own stack; k1's stack waits for k2, and k2's for k1.
+		{"two branches of a forked stack", []string{
+			"w working",
+			"p working branch: bp",
+			"k1 ready base: bp; branch: b1; depends_on: w",
+			"k2 ready base: bp; branch: b2; depends_on: w",
+			"k1a draft base: b1; branch: b1a; depends_on: k2",
+			"k2a draft base: b2; branch: b2a; depends_on: k1",
+			"x ready depends_on: k2a",
+		}, []string{"k1", "k1a", "k2", "k2a", "x"}},
+	} {
+		c := goalLedger(t, tc.tasks...)
+		if got := waitingInText(t, c); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: waiting = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

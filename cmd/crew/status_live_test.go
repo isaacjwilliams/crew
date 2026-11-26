@@ -193,6 +193,34 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	}
 }
 
+func TestLiveStatusListsAGoalsTasksInTheTextsOrder(t *testing.T) {
+	r := buildReport(goalLedger(t, boardsGoal...), []string{"p"}, false, statusReads{})
+	m := liveOn(r)
+	m.Update(tea.WindowSizeMsg{Width: 400, Height: 200})
+	openAll(m)
+	goalTasks := map[string]bool{}
+	for _, task := range boardsGoal {
+		goalTasks[strings.Fields(task)[0]] = true
+	}
+	// The goal's tasks a listing names, in its order.
+	tasks := func(lines []string) []string {
+		var ids []string
+		for _, l := range lines {
+			if f := strings.Fields(strings.ReplaceAll(words(l), "└", "")); len(f) > 0 && goalTasks[f[0]] {
+				ids = append(ids, f[0])
+			}
+		}
+		return ids
+	}
+	want := []string{"160", "259", "195", "235", "165", "236", "170", "242", "166", "148", "243", "244"}
+	if text := tasks(strings.Split(plainText(r), "\n")); !slices.Equal(text, want) {
+		t.Errorf("the text lists the goal's tasks as %v, want %v", text, want)
+	}
+	if view := tasks(screen(m)); !slices.Equal(view, want) {
+		t.Errorf("the view lists the goal's tasks as %v, want %v", view, want)
+	}
+}
+
 func TestLiveStatusFoldsGoalsStacksAndWhatTheTextCounts(t *testing.T) {
 	m := liveOn(readReport(statusLedger(t), "p"))
 	for _, folded := range []string{"007-next", "008-next", "012-idea"} {
