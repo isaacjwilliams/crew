@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -121,6 +122,24 @@ func TestMigrationWritesReplaceTheFileWhole(t *testing.T) {
 		}
 		if left, _ := filepath.Glob(w.path + ".*"); len(left) > 0 {
 			t.Errorf("%s left %v", w.name, left)
+		}
+	}
+}
+
+func TestReplaceFileGivesTheModeWriteFileWould(t *testing.T) {
+	dir := t.TempDir()
+	kept := filepath.Join(dir, "kept.md")
+	if err := os.WriteFile(kept, []byte("old\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Umask(syscall.Umask(0o077))
+	made := filepath.Join(dir, "made.md")
+	for path, want := range map[string]os.FileMode{kept: 0o640, made: 0o600} {
+		if err := replaceFile(path, []byte("new\n")); err != nil {
+			t.Fatal(err)
+		}
+		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != want {
+			t.Errorf("%s: mode %v, want %v", filepath.Base(path), fi.Mode().Perm(), want)
 		}
 	}
 }

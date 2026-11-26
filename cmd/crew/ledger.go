@@ -8,6 +8,7 @@ package main
 // crew's ledger lock: agents edit these files too, so nothing is held in memory.
 
 import (
+	"crypto/rand"
 	"fmt"
 	"iter"
 	"maps"
@@ -329,24 +330,26 @@ func (d Doc) writeLines(ls []string) error {
 // replaceFile writes a ledger file in one step, so a write that fails partway
 // leaves the old file rather than part of the new one. It writes a temporary
 // file beside it, <file>.new-<random>, which .gitignore covers, and renames it
-// over the file.
+// over the file. The file ends up with the mode os.WriteFile would give it: the
+// old file's, or for a new one 0644 under the umask.
 func replaceFile(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".new-*")
+	tmp := path + ".new-" + rand.Text()
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = tmp.Write(data)
-	if cerr := tmp.Close(); err == nil {
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = os.Chmod(tmp.Name(), 0o644)
+	if old, serr := os.Stat(path); err == nil && serr == nil {
+		err = os.Chmod(tmp, old.Mode().Perm())
 	}
 	if err == nil {
-		err = os.Rename(tmp.Name(), path)
+		err = os.Rename(tmp, path)
 	}
 	if err != nil {
-		os.Remove(tmp.Name())
+		os.Remove(tmp)
 	}
 	return err
 }
