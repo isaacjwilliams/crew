@@ -490,7 +490,9 @@ func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 			rowOf[t.Path] = i
 		}
 	}
-	// waits[i][j]: row i waits for row j, directly or not.
+	// waits[i][j]: row i waits for row j, directly or not. The closure below
+	// counts a wait through a middle row, even when it's a task stacked in that
+	// row that waits, not the one row i waits on.
 	waits := make([][]bool, len(rows))
 	for i, r := range rows {
 		waits[i] = make([]bool, len(rows))
@@ -520,7 +522,10 @@ func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
 	}
 	ordered := make([]taskRow, 0, len(rows))
 	for range rows {
-		// Outside a loop, rows wait for each other only one way, so one is free.
+		// Some row is always free. If row i weren't, it would wait one way on
+		// another row, that one on a third, and so on. With finitely many rows
+		// the chain comes back on itself, so through the closure each row in it
+		// waits on the one before it too, and none of them waits only one way.
 		i := 0
 		for !free(i) {
 			i++
@@ -576,7 +581,7 @@ func (s *statusView) folds(t Task) bool {
 
 // waits: the task waits on other tasks, or on a dependency it can't name.
 func (s *statusView) waits(t Task) bool {
-	deps, err := s.deps.of(t)
+	deps, err := s.deps.waitsOn(t)
 	return err != nil || len(deps) > 0
 }
 
@@ -742,7 +747,7 @@ func (s *statusView) learning(t Task) string {
 // A task's row, its group and the tasks that wait on it all ask, so each answer
 // is kept.
 type dependencies struct {
-	*Crew
+	*Crew             // for pendingDeps
 	branches Branches // the index pendingDeps reads
 	pending  map[string]depsOf
 	before   map[string]map[string]bool // a task's file → deliveredBefore
@@ -758,8 +763,8 @@ func newDependencies(c *Crew, idx Branches) *dependencies {
 	return &dependencies{Crew: c, branches: idx, pending: map[string]depsOf{}, before: map[string]map[string]bool{}}
 }
 
-// of are the tasks t waits on.
-func (d *dependencies) of(t Task) ([]Task, error) {
+// waitsOn are the tasks t waits on.
+func (d *dependencies) waitsOn(t Task) ([]Task, error) {
 	if p, ok := d.pending[t.Path]; ok {
 		return p.tasks, p.err
 	}
@@ -772,8 +777,9 @@ func (d *dependencies) of(t Task) ([]Task, error) {
 // or t's stack parent, waits for too, since that one has to go first. An
 // abandoned task is always named, since it will never be delivered, and so are
 // tasks that wait for each other in a loop, since none of them goes first.
+// The error is waitsOn's, returned with what it found.
 func (d *dependencies) next(t Task) ([]Task, error) {
-	deps, err := d.of(t)
+	deps, err := d.waitsOn(t)
 	var parentWaits map[string]bool
 	if p, ok := d.branches.liveParent(t); ok {
 		parentWaits = d.deliveredBefore(p)
@@ -805,11 +811,12 @@ func (d *dependencies) deliveredBefore(t Task) map[string]bool {
 	delivered, seen := map[string]bool{}, map[string]bool{}
 	var visit func(t Task)
 	visit = func(t Task) {
+		// A task that's been dispatched, or never will be, holds nothing up.
 		if st := t.Status(); seen[t.Path] || st.InFlight() || st.Finished() {
 			return
 		}
 		seen[t.Path] = true
-		deps, _ := d.of(t)
+		deps, _ := d.waitsOn(t)
 		for _, dep := range deps {
 			delivered[dep.Path] = true
 			visit(dep)

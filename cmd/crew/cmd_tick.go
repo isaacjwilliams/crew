@@ -351,7 +351,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		}
 		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
-		if waits, err := deps.of(t); err == nil && len(waits) > 0 {
+		if waits, err := deps.waitsOn(t); err == nil && len(waits) > 0 {
 			news.heldBack(project, "%s: dispatch waits: %s", t.ID(), waitsFor(deps, t))
 			continue
 		}
@@ -374,8 +374,9 @@ func (c *Crew) dispatchReady(news *tickNews) {
 	}
 }
 
-// waitsFor says what a task with dependencies left waits for next. When its
-// stack parent waits for all of them too, that's the parent's dispatch.
+// waitsFor says what a task with dependencies left waits for next. next names
+// at least one of them, unless its stack parent waits for them all; then it
+// waits for the parent's dispatch.
 func waitsFor(deps *dependencies, t Task) string {
 	if next, _ := deps.next(t); len(next) > 0 {
 		return "it comes " + after(next)
