@@ -106,7 +106,7 @@ func (c *Crew) listAgents() (Agents, error) {
 		// still read working, and its transcript says whether the turn ended.
 		if a.State == "working" && a.SessionID != "" {
 			a.TurnEnded = turnEnded(a.SessionID)
-			if a.TurnEnded && a.PID {
+			if a.TurnEnded && a.open() {
 				a.Background = backgroundCommands(transcript(a.SessionID))
 			}
 		}
@@ -203,12 +203,10 @@ func backgroundCommands(path string) []string {
 		}
 		switch l.Type {
 		case "assistant":
-			for _, b := range contentBlocks(l.Message.Content) {
-				if b.Type == "tool_use" {
-					var in struct{ Command, Description string }
-					json.Unmarshal(b.Input, &in)
-					calls[b.ID] = call{b.Name, cmp.Or(in.Description, in.Command)}
-				}
+			for _, u := range l.toolUses() {
+				var in struct{ Command, Description string }
+				json.Unmarshal(u.Input, &in)
+				calls[u.ID] = call{u.Name, cmp.Or(in.Description, in.Command)}
 			}
 		case "user":
 			var result struct {
@@ -218,12 +216,7 @@ func backgroundCommands(path string) []string {
 			if json.Unmarshal(l.ToolUseResult, &result) != nil || result.BackgroundTaskID == "" && result.TaskID == "" {
 				return true
 			}
-			var c call
-			for _, b := range contentBlocks(l.Message.Content) {
-				if b.Type == "tool_result" {
-					c = calls[b.ToolUseID]
-				}
-			}
+			c := calls[l.toolResultID()]
 			switch {
 			case result.BackgroundTaskID != "" && c.tool == "Bash" && c.what != "":
 				running = append(running, command{result.BackgroundTaskID, c.what})
@@ -258,20 +251,20 @@ func backgroundCommands(path string) []string {
 	return what
 }
 
-// contentBlock is one block of a transcript message's content: a tool call,
-// with its input, or a tool's result.
-type contentBlock struct {
-	Type, ID, Name string
-	Input          json.RawMessage
-	ToolUseID      string `json:"tool_use_id"`
-}
-
-// contentBlocks is a message's content blocks, or none when its content is
-// plain text.
-func contentBlocks(content json.RawMessage) []contentBlock {
-	var blocks []contentBlock
-	json.Unmarshal(content, &blocks)
-	return blocks
+// toolResultID is the ID of the tool call whose result a user line holds, or
+// "" when it holds none.
+func (l transcriptLine) toolResultID() string {
+	var blocks []struct {
+		Type      string
+		ToolUseID string `json:"tool_use_id"`
+	}
+	json.Unmarshal(l.Message.Content, &blocks)
+	for _, b := range blocks {
+		if b.Type == "tool_result" {
+			return b.ToolUseID
+		}
+	}
+	return ""
 }
 
 // xmlText is the text of the first <tag> element in s, or "".
@@ -405,8 +398,8 @@ func lastRequest(path string) (at time.Time, tokens int, ok bool) {
 func (a Agent) open() bool { return a.PID }
 
 // stateText says what an agent is doing, for status lines: its state, and the
-// prompt or the background commands it's waiting on, if any. Nothing for the zero Agent, a job that isn't
-// listed.
+// prompt or the background commands it's waiting on, if any. Nothing for the
+// zero Agent, a job that isn't listed.
 func (a Agent) stateText() string {
 	switch {
 	case len(a.Background) > 0:

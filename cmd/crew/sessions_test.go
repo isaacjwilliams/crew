@@ -37,23 +37,29 @@ func TestTurnEndedReadsTheSessionTranscript(t *testing.T) {
 	}
 }
 
-// claude agents can list a job as working after its turn has ended: a shell it
-// started keeps it working, and the state can stay working once its process has
-// exited.
-func TestAWorkingJobWhoseTurnEnded(t *testing.T) {
+// claudeListing puts a claude on PATH whose `claude agents` lists jobs (JSON
+// entries), and writes each session's transcript under CLAUDE_CONFIG_DIR.
+func claudeListing(t *testing.T, jobs string, transcripts map[string]string) {
+	t.Helper()
 	bin, config := t.TempDir(), t.TempDir()
-	os.WriteFile(filepath.Join(bin, "claude"), []byte(`#!/bin/sh
-echo '[{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"live-s"},
-{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"}]'
-`), 0o755)
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho '["+jobs+"]'\n"), 0o755)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	dir := filepath.Join(config, "projects", "-home-me-work")
 	os.MkdirAll(dir, 0o755)
-	for _, s := range []string{"live-s", "gone-s"} {
-		os.WriteFile(filepath.Join(dir, s+".jsonl"), []byte(`{"type":"system","subtype":"turn_duration"}`+"\n"), 0o644)
+	for session, content := range transcripts {
+		os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(content), 0o644)
 	}
+}
+
+// claude agents can list a job as working after its turn has ended: a shell it
+// started keeps it working, and the state can stay working once its process has
+// exited.
+func TestAWorkingJobWhoseTurnEnded(t *testing.T) {
+	ended := `{"type":"system","subtype":"turn_duration"}` + "\n"
+	claudeListing(t, `{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"live-s"},
+{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"}`, map[string]string{"live-s": ended, "gone-s": ended})
 	as := (&Crew{Home: t.TempDir()}).agents()
 	if as.jobBusy("live") || as.jobState("live") != "idle, background task running" {
 		t.Errorf("with its process running: busy %v, state %q", as.jobBusy("live"), as.jobState("live"))
@@ -193,7 +199,12 @@ func background(id, description string) string {
 // notice is the task notification Claude Code queues when background task id
 // finishes with status.
 func notice(id, status string) string {
-	return fmt.Sprintf(`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>%s</task-id>\n<status>%s</status>\n</task-notification>"}`+"\n", id, status)
+	return queued(fmt.Sprintf(`<task-id>%s</task-id>\n<status>%s</status>`, id, status))
+}
+
+// queued is a task notification with body, as Claude Code queues it.
+func queued(body string) string {
+	return `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n` + body + `\n</task-notification>"}` + "\n"
 }
 
 // taskStop is a TaskStop call that stopped background task id, and its result.
@@ -228,15 +239,15 @@ func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
 		{"one moved to the background at its timeout", bashCall("b3", `"command":"bin/rake db:restore","description":"Restore the backup"`, "") + turnEnd, []string{"Restore the backup"}},
 		{"one with no description", bashCall("b4", `"command":"npm run dev"`, `"run_in_background":true,`) + turnEnd, []string{"npm run dev"}},
 		{"a subagent's notice and a monitor's event", checks + notice("a17", "completed") +
-			`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>m1</task-id>\n<event>ready</event>\n</task-notification>"}` + "\n" + turnEnd, []string{"Run the clone checks"}},
+			queued(`<task-id>m1</task-id>\n<event>ready</event>`) + turnEnd, []string{"Run the clone checks"}},
 		{"nothing in the background", turnEnd, nil},
 		{"a subagent's own background command", strings.ReplaceAll(server, `{"type":`, `{"isSidechain":true,"type":`) + turnEnd, nil},
 		{"a line that doesn't read", server + `{"type":"assistant","mess` + "\n" + turnEnd, nil},
 		{"a start whose call isn't in the transcript", checks + strings.SplitAfter(server, "\n")[1] + turnEnd, nil},
 		{"a start with neither a description nor a command", checks + bashCall("b5", `"timeout":600000`, `"run_in_background":true,`) + turnEnd, nil},
-		{"a notice with no task ID", server + `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<status>completed</status>\n</task-notification>"}` + "\n" + turnEnd, nil},
+		{"a notice with no task ID", server + queued(`<status>completed</status>`) + turnEnd, nil},
 		{"a notice of its own with a status crew doesn't know", server + checks + notice("b1", "paused") + turnEnd, nil},
-		{"a notice of its own with no status", server + checks + strings.Replace(notice("b1", ""), "<status></status>", "", 1) + turnEnd, nil},
+		{"a notice of its own with no status", server + checks + queued(`<task-id>b1</task-id>`) + turnEnd, nil},
 	} {
 		os.WriteFile(path, []byte(c.transcript), 0o644)
 		if got := backgroundCommands(path); !slices.Equal(got, c.want) {
@@ -245,22 +256,6 @@ func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
 	}
 	if got := backgroundCommands(filepath.Join(dir, "none.jsonl")); got != nil {
 		t.Errorf("with no transcript: backgroundCommands = %q; want none", got)
-	}
-}
-
-// claudeListing puts a claude on PATH whose `claude agents` lists jobs (JSON
-// entries), and writes each session's transcript under CLAUDE_CONFIG_DIR.
-func claudeListing(t *testing.T, jobs string, transcripts map[string]string) {
-	t.Helper()
-	bin, config := t.TempDir(), t.TempDir()
-	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho '["+jobs+"]'\n"), 0o755)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CLAUDE_CONFIG_DIR", config)
-	dir := filepath.Join(config, "projects", "-home-me-work")
-	os.MkdirAll(dir, 0o755)
-	for session, content := range transcripts {
-		os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(content), 0o644)
 	}
 }
 

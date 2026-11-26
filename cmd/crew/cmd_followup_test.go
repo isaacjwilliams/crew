@@ -475,7 +475,7 @@ func TestStalledLeavesAWorkerWaitingOnItsBackgroundCommand(t *testing.T) {
 {"id":"lags","state":"working","pid":4242,"status":"busy","sessionId":"lags-s"}`, map[string]string{
 		"waits-s": waiting, "gone-s": waiting, "done-s": waiting,
 		"unread-s":  `{"type":"assistant","mess` + "\n" + waiting,
-		"unknown-s": waiting + `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<status>completed</status>\n</task-notification>"}` + "\n",
+		"unknown-s": waiting + queued(`<status>completed</status>`),
 		"shell-s":   turnEnd, "idle-s": turnEnd, "finished-s": finished, "lags-s": finished,
 	})
 	task := Task{docWith(t, "---\nid: 001-a\nstatus: working\n---\n# a\n\n## Open questions\n\n## Log\n")}
