@@ -377,7 +377,7 @@ worker: crew react TASK eyes <every ID in the unsent rounds>
 ```
 
 ### Stacked tasks
-A task is *stacked* when its `base` is another task's `branch`; that task is its *parent*. Nothing else records the relationship (`parentOf` looks the base up among the project's task branches), so it can't disagree with `base`, and `crew set TASK base <a task's branch>` stacks an existing task. `depends_on` stays as it was written.
+A task is *stacked* when its `base` is another task's `branch`; that task is its *parent*. Nothing else records the relationship (`parentOf` looks the base up among the project's task branches), so it can't disagree with `base`, and `crew set TASK base <a task's branch>` stacks an existing task. `crew set TASK depends_on` drops the merged tasks and done spikes from what it writes, since they hold nothing back (`withoutDelivered`); abandoned ones stay, because they block for good. Entries already in a task file stay until crew next writes the list.
 
 ```
 crew new "<title>" --on PARENT   # base = parent's branch, depends_on = parent; refuses a finished parent or a spike
