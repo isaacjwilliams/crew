@@ -274,3 +274,126 @@ func TestReadPRsKeepsEachProjectsPRsApart(t *testing.T) {
 		}
 	}
 }
+
+// goalLedger is a home with one project, p, and a running goal, 002-boards, for
+// tests of how status lists a goal's tasks. Each task is "NNN status [key:
+// value…]", in goal 002-boards and based on main unless it says otherwise.
+func goalLedger(t *testing.T, tasks ...string) *Crew {
+	t.Helper()
+	c := &Crew{Home: t.TempDir(), Host: "here", Settings: Settings{"MAX_WORKERS": "3", "GOAL_MAX_IN_FLIGHT": "3"}}
+	writeFile(t, c, "here\n", "host")
+	writeFile(t, c, "", "projects", "p", "project.env")
+	writeFile(t, c, "---\nid: 002-boards\nstatus: running\n---\n# boards\n\n## Log\n", "projects", "p", "goals", "002-boards.md")
+	for _, task := range tasks {
+		id, rest, _ := strings.Cut(task, " ")
+		status, keys, _ := strings.Cut(rest, " ")
+		fields := []string{"goal: 002-boards", "status: " + status}
+		for _, kv := range strings.Split(keys, ";") {
+			if kv = strings.TrimSpace(kv); kv != "" {
+				fields = append(fields, kv)
+			}
+		}
+		if !strings.Contains(keys, "base: ") {
+			fields = append(fields, "base: main")
+		}
+		reportTask(t, c, "p", id, false, fields...)
+	}
+	return c
+}
+
+// boardsGoal is shaped like a real goal whose 12 tasks wait on each other in a
+// single line, 160 → 259 → 195 → [235 → 165 → 236 → 170] → 242 → 166 → [148 →
+// 243 → 244], brackets being stacks. Some tasks also name a task further down
+// the line in depends_on, as 166 names 170.
+var boardsGoal = []string{
+	"160 pr-open branch: b160",
+	"259 working depends_on: 160; priority: 3",
+	"195 ready depends_on: 259; priority: 2",
+	"235 ready base: b160; branch: b235; depends_on: 160, 195",
+	"165 ready base: b235; branch: b165; depends_on: 235, 160; priority: 1",
+	"236 ready base: b165; branch: b236; depends_on: 165, 160",
+	"170 ready base: b236; branch: b170; depends_on: 236; priority: 1",
+	"242 ready depends_on: 170",
+	"166 ready depends_on: 170, 242",
+	"148 ready branch: b148; depends_on: 166",
+	"243 ready base: b148; branch: b243; depends_on: 148, 166",
+	"244 ready base: b243; branch: b244; depends_on: 243, 166",
+}
+
+// goalReportOf is the report of p's one goal, built without reading GitHub,
+// the workers or the branches.
+func goalReportOf(c *Crew) goalReport {
+	return buildReport(c, []string{"p"}, false, statusReads{}).Projects[0].Goals[0]
+}
+
+// groupOf is the goal's group of that kind, or nil.
+func groupOf(g goalReport, k groupKind) []taskRow {
+	for _, group := range g.Groups {
+		if group.Kind == k {
+			return group.Rows
+		}
+	}
+	return nil
+}
+
+// rowOf is the row of the task with that ID, wherever it is in the goal.
+func rowOf(t *testing.T, g goalReport, id string) taskRow {
+	t.Helper()
+	var find func(rows []taskRow) (taskRow, bool)
+	find = func(rows []taskRow) (taskRow, bool) {
+		for _, r := range rows {
+			if r.Task.ID() == id {
+				return r, true
+			}
+			if k, ok := find(r.Kids); ok {
+				return k, true
+			}
+		}
+		return taskRow{}, false
+	}
+	for _, group := range g.Groups {
+		if r, ok := find(group.Rows); ok {
+			return r
+		}
+	}
+	t.Fatalf("no row for %s", id)
+	return taskRow{}
+}
+
+// afterNote is the "after" note on a task's row, or "".
+func afterNote(t *testing.T, g goalReport, id string) string {
+	t.Helper()
+	for _, n := range rowOf(t, g, id).Notes {
+		if strings.HasPrefix(n, "after ") {
+			return n
+		}
+	}
+	return ""
+}
+
+func TestGoalWaitingGroupOrder(t *testing.T) {
+	g := goalReportOf(goalLedger(t, boardsGoal...))
+	if got, want := rowIDs(groupOf(g, groupWaiting)), []string{"195", "148", "166", "235", "242"}; !slices.Equal(got, want) {
+		t.Errorf("waiting = %v, want %v", got, want)
+	}
+}
+
+func TestGoalAfterNotes(t *testing.T) {
+	g := goalReportOf(goalLedger(t, boardsGoal...))
+	for id, want := range map[string]string{
+		"195": "after 259",
+		"235": "after 195",
+		"165": "after 160",
+		"236": "after 160",
+		"170": "",
+		"242": "after 170",
+		"166": "after 170, 242",
+		"148": "after 166",
+		"243": "after 166",
+		"244": "after 166",
+	} {
+		if got := afterNote(t, g, id); got != want {
+			t.Errorf("%s's note = %q, want %q", id, got, want)
+		}
+	}
+}
