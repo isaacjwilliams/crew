@@ -374,6 +374,9 @@ check "a project added while the upgrade waits, which it never paused, stops it 
 git -C "$H" rm -rq projects/late; git -C "$H" commit -qm "no late"; busy working
 printf -- '---\nby: crew upgrade\nat: 2026-11-12T10:00:00Z\nhost: tower\n---\n' >"$H/projects/left/paused"; hcrew commit "an upgrade cut short" >/dev/null
 hcrew pause --project mine >/dev/null
+doctor_out=$(hcrew doctor 2>&1)
+check "crew doctor names a project whose ledger isn't migrated, and says to run crew migrate" \
+  '[[ $doctor_out == *"FAIL busy: ledger in this crew'"'"'s format — busy'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate"* ]]'
 up --yes >"$HOME/up.out" & upgrading=$!
 wait_for '[[ -e $H/projects/busy/paused ]]'
 logged=0; hcrew log "$BT" "noted where I stopped" >/dev/null 2>&1 && kill -0 "$upgrading" 2>/dev/null && logged=1
@@ -384,6 +387,8 @@ check "upgrade pauses every project, and waits for the sessions mid-turn" \
 check "upgrade merges the newest release into a home with ledger commits, and names it" '[[ $out == *"crew upgraded to 9.9.9"* ]] && git -C "$H" merge-base --is-ancestor "$before" @ && grep -q "# new in v2" "$H/agents/lead.md" && [[ -f $H/reports/n.md ]]'
 check "then lifts its pause, also the one an upgrade cut short left, and commits" \
   '[[ ! -e $H/projects/busy/paused && ! -e $H/projects/left/paused ]] && ! committed projects/busy/paused && ! committed projects/left/paused'
+check "upgrade runs the new version's crew migrate before it lifts the pause, and commits the migration" \
+  '[[ $out == *"busy: moved 0 item(s) still to learn into records"*"resumed busy"* && $out == *"mine: moved 0 item(s)"* ]] && committed projects/busy/ledger-format && committed projects/mine/ledger-format && [[ $(hcrew doctor 2>&1) == *"ok   busy: ledger in this crew'"'"'s format"* ]]'
 check "a project the user paused stays paused" '[[ $(sed -n "s/^by: //p" "$H/projects/mine/paused") == "crew pause" ]] && committed projects/mine/paused'
 check "a release, not whatever upstream's main has since" '! grep -q unreleased "$H/README.md"'
 check "the new version installs itself, with units that are on left unmentioned" '[[ $out == *"Done (crew 9.9.9)"* && $out != *"off on this machine"* ]]'
@@ -394,6 +399,11 @@ check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew
 head=$(git -C "$H" rev-parse @); out=$(up --yes)
 check "run again on the release it has, upgrade pauses nothing, and installs it again" \
   '[[ $out == "crew 9.9.9 is merged into the home already, so nothing is paused"*"Done (crew 9.9.9)"*"crew upgraded to 9.9.9" && $out != *paused\ busy* && $(git -C "$H" rev-parse @) == "$head" ]]'
+echo x >"$H/projects/left/ledger-format"; git -C "$H" commit -qam "a ledger format crew can't read"
+rc=0; out=$(up --yes) || rc=$?
+check "a migration that fails after the install says why, and to run upgrade again" \
+  '[[ $rc == 1 && $out == *"holds \"x\", not a format number"*"couldn'"'"'t migrate the ledger, so the crew stays paused; run crew upgrade again to finish" ]]'
+echo 1 >"$H/projects/left/ledger-format"; git -C "$H" commit -qam "format 1"
 echo "an edit" >>"$H/README.md"
 out=$(up --yes)
 check "upgrade refuses a home with uncommitted changes, and pauses nothing" '[[ $out == *"uncommitted changes"* && ! -e $H/projects/busy/paused ]]'

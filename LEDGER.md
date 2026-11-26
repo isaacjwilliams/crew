@@ -210,7 +210,7 @@ A task's **records** are facts crew decides from, kept beside the task file in `
 | `to_learn` (`text`) | `crew to-learn TASK "<item>"` | something a draft's objective or gates rest on that nobody has checked yet |
 | `learned` (`item`, `answer`) | `crew learned TASK ITEM "<answer>"` | the answer that settles the `to_learn` record `item`; two clones may each settle one, and both answers are kept |
 
-A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment.
+A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project, and `crew upgrade` runs `crew migrate` after installing a release. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment.
 
 ## Decisions
 

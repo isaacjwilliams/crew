@@ -71,9 +71,17 @@ func cmdUpgrade(c *Crew, args []string) error {
 			return err
 		}
 	}
-	// Once the release is merged, the crew stays paused until it's installed.
-	if err := c.installNewVersion(yes); err != nil {
-		return err
+	// Once the release is merged, the crew stays paused until it's installed and
+	// the ledger is in the format it reads.
+	install := []string{"install"}
+	if yes {
+		install = append(install, "--yes")
+	}
+	if c.runNewVersion(install...) != nil {
+		return fail("couldn't install the new version, so the crew stays paused; run crew upgrade again to finish")
+	}
+	if c.runNewVersion("migrate") != nil {
+		return fail("couldn't migrate the ledger, so the crew stays paused; run crew upgrade again to finish")
 	}
 	if err := c.liftUpgradePause(projects); err != nil {
 		return err
@@ -148,18 +156,12 @@ func (c *Crew) pauseAndMerge(tag string, projects []*Project) error {
 	return errors.Join(err, c.liftUpgradePause(thisRun))
 }
 
-// installNewVersion runs the merged version's crew install, so a change to
-// installing takes effect now.
-func (c *Crew) installNewVersion(yes bool) error {
-	install := exec.Command(c.path("bin/crew"), "install")
-	if yes {
-		install.Args = append(install.Args, "--yes")
-	}
-	install.Stdin, install.Stdout, install.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if install.Run() != nil {
-		return fail("couldn't install the new version, so the crew stays paused; run crew upgrade again to finish")
-	}
-	return nil
+// runNewVersion runs a command of the merged version's crew, so a change to
+// installing, or to the ledger's format, takes effect now.
+func (c *Crew) runNewVersion(args ...string) error {
+	cmd := exec.Command(c.path("bin/crew"), args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 // liftUpgradePause lifts the pauses crew upgrade made: this run's, and any a
