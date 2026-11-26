@@ -194,6 +194,9 @@ func projectLedgerFormat(projectDir string) (int, error) {
 	return n, nil
 }
 
+// errNotMigrated is why crew can't read a project's records before crew migrate.
+var errNotMigrated = errors.New("isn't migrated to this crew's records yet: run crew migrate")
+
 // checkLedgerFormat fails unless the project's ledger is in ledgerFormat: before
 // crew migrate, its records are missing what the task files still hold.
 func checkLedgerFormat(projectDir string) error {
@@ -204,7 +207,7 @@ func checkLedgerFormat(projectDir string) error {
 	project := filepath.Base(projectDir)
 	switch {
 	case have < ledgerFormat:
-		return fmt.Errorf("%s's ledger isn't migrated to this crew's records yet: run crew migrate", project)
+		return fmt.Errorf("%s's ledger %w", project, errNotMigrated)
 	case have > ledgerFormat:
 		return fmt.Errorf("%s's ledger is from a newer crew: run crew upgrade", project)
 	}

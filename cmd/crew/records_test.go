@@ -193,6 +193,10 @@ func TestShownTask(t *testing.T) {
 	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Still to learn\ncrew can't read the items still to learn: 001-a.records.jsonl:1: not a record crew can read") {
 		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in the section", got)
 	}
+	os.WriteFile(task.RecordsPath(), []byte("oops\n"), 0o644)
+	if got, _ := shownTask(task.Path); !strings.Contains(got, "\n\nTyped into the file, so not items crew counts (crew to-learn adds one):\n- [ ] typed by hand\n") {
+		t.Errorf("shownTask with an unreadable records file in a migrated project = %q; want what's typed still marked as not items", got)
+	}
 }
 
 func TestMigrateStillToLearn(t *testing.T) {

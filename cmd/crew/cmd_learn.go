@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -89,8 +90,8 @@ const learnHeading = "## Still to learn"
 // shownTask is a task as crew show prints it: its file, with its still-to-learn
 // items from its records under Still to learn. Anything typed into the file's
 // section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why, and shows what's typed in it as
-// it is: in a project not yet migrated, those are the items.
+// can't read the items, the section says why. In a project not yet migrated,
+// what's typed in it is the items, so it's shown as it is.
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
@@ -128,7 +129,7 @@ func shownTask(path string) (string, error) {
 	}
 	body := append(trimBlankEnd(kept), items...)
 	switch {
-	case unread != nil:
+	case errors.Is(unread, errNotMigrated):
 		body = append(body, typed...)
 	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
