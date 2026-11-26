@@ -378,22 +378,70 @@ func TestGoalWaitingGroupOrder(t *testing.T) {
 	}
 }
 
-func TestGoalAfterNotes(t *testing.T) {
+func TestGoalAfterNotesNameOnlyWhatEachTaskWaitsOnNext(t *testing.T) {
 	g := goalReportOf(goalLedger(t, boardsGoal...))
 	for id, want := range map[string]string{
 		"195": "after 259",
 		"235": "after 195",
+		// 235 can be dispatched once 160's branch is pushed, but 165 waits for 160
+		// to merge.
 		"165": "after 160",
-		"236": "after 160",
+		// 165, the stack parent, can't be dispatched until 160 has merged.
+		"236": "",
 		"170": "",
 		"242": "after 170",
-		"166": "after 170, 242",
+		// 242 can't be dispatched until 170 has merged.
+		"166": "after 242",
 		"148": "after 166",
-		"243": "after 166",
-		"244": "after 166",
+		// 148, then 243, the stack parents, can't be dispatched until 166 has
+		// merged.
+		"243": "",
+		"244": "",
 	} {
 		if got := afterNote(t, g, id); got != want {
 			t.Errorf("%s's note = %q, want %q", id, got, want)
 		}
+	}
+}
+
+func TestGoalAfterNoteNamesWhatsStillToMergeOnceAParentIsInFlight(t *testing.T) {
+	tasks := slices.Clone(boardsGoal)
+	tasks[1] = "259 merged depends_on: 160"
+	tasks[2] = "195 merged depends_on: 259"
+	tasks[3] = "235 working base: b160; branch: b235; depends_on: 160, 195"
+	if got := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "165"); got != "after 160" {
+		t.Errorf("165's note = %q, want %q", got, "after 160")
+	}
+}
+
+func TestGoalAfterNoteAlwaysNamesAnAbandonedTask(t *testing.T) {
+	tasks := slices.Clone(boardsGoal)
+	tasks[7] = "242 abandoned depends_on: 170"
+	if got, want := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "166"), "after 170, 242 (abandoned)"; got != want {
+		t.Errorf("166's note = %q, want %q", got, want)
+	}
+}
+
+func TestGoalAfterNoteLeavesOutWhatItWaitsOnThroughATaskItDoesntName(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"w working",
+		"a ready depends_on: w",
+		"x ready depends_on: a",
+		"b ready depends_on: x",
+		"c ready depends_on: a, b",
+	))
+	if got, want := afterNote(t, g, "c"), "after b"; got != want {
+		t.Errorf("c's note = %q, want %q", got, want)
+	}
+}
+
+func TestGoalAfterNoteNamesTasksThatWaitOnEachOther(t *testing.T) {
+	g := goalReportOf(goalLedger(t,
+		"a ready depends_on: b",
+		"b ready depends_on: a",
+		"c ready depends_on: a, b",
+	))
+	if got, want := afterNote(t, g, "c"), "after a, b"; got != want {
+		t.Errorf("c's note = %q, want %q", got, want)
 	}
 }

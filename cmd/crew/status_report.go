@@ -571,10 +571,10 @@ func (s *statusView) notes(t Task) []string {
 		notes = append(notes, "on "+taskNumber(p))
 	}
 	if !st.InFlight() && !st.Finished() {
-		if deps, err := s.deps.of(t); err != nil {
+		if _, err := s.deps.of(t); err != nil {
 			notes = append(notes, err.Error())
-		} else if len(deps) > 0 {
-			notes = append(notes, after(deps))
+		} else if next := s.deps.next(t); len(next) > 0 {
+			notes = append(notes, after(next))
 		}
 	}
 	// crew tick dispatches a goal's ready tasks, and others on a go-ahead, so
@@ -701,6 +701,57 @@ func (d *dependencies) of(t Task) ([]Task, error) {
 	deps, err := d.pendingDeps(d.branches, t)
 	d.pending[t.Path] = depsOf{deps, err}
 	return deps, err
+}
+
+// next are the tasks t waits on next. It leaves out one that another of them,
+// or t's stack parent, waits for too, since that one has to go first. An
+// abandoned task is always named, since it will never be delivered, and so are
+// tasks that wait for each other in a loop, since none of them goes first.
+func (d *dependencies) next(t Task) []Task {
+	deps, _ := d.of(t)
+	var parentWaits map[string]bool
+	if p, ok := d.branches.liveParent(t); ok {
+		parentWaits = d.deliveredBefore(p)
+	}
+	waits := map[string]map[string]bool{} // a dependency's file → what it waits for
+	for _, dep := range deps {
+		waits[dep.Path] = d.deliveredBefore(dep)
+	}
+	var next []Task
+	for _, e := range deps {
+		waitedFor := parentWaits[e.Path] || slices.ContainsFunc(deps, func(f Task) bool {
+			return waits[f.Path][e.Path] && !waits[e.Path][f.Path] // and not in a loop
+		})
+		if e.Status() == Abandoned || !waitedFor {
+			next = append(next, e)
+		}
+	}
+	return next
+}
+
+// deliveredBefore are the tasks that must be delivered before t can be
+// dispatched, by file: those it waits on, and theirs in turn, and those its
+// stack parent's dispatch waits for. It's empty for a task that's been
+// dispatched already, or never will be.
+func (d *dependencies) deliveredBefore(t Task) map[string]bool {
+	delivered, seen := map[string]bool{}, map[string]bool{}
+	var visit func(t Task)
+	visit = func(t Task) {
+		if seen[t.Path] || t.Status().InFlight() || t.Status().Finished() {
+			return
+		}
+		seen[t.Path] = true
+		deps, _ := d.of(t)
+		for _, dep := range deps {
+			delivered[dep.Path] = true
+			visit(dep)
+		}
+		if p, ok := d.branches.liveParent(t); ok {
+			visit(p)
+		}
+	}
+	visit(t)
+	return delivered
 }
 
 const afterNamed = 4 // how many tasks "after" names before it only counts them

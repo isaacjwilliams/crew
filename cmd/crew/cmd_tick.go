@@ -344,14 +344,15 @@ func (c *Crew) dispatchReady(news *tickNews) {
 	}
 	sortForDispatch(ready)
 	idx := c.branches("")
+	deps := newDependencies(c, idx)
 	for _, t := range ready {
 		if !c.tickDispatches(t) {
 			continue
 		}
 		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
-		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
-			news.heldBack(project, "%s: dispatch waits: it comes %s", t.ID(), after(deps))
+		if waits, err := deps.of(t); err == nil && len(waits) > 0 {
+			news.heldBack(project, "%s: dispatch waits: %s", t.ID(), waitsFor(deps, t))
 			continue
 		}
 		// Dispatching ends the go-ahead, so say what it was first. tickDispatches
@@ -371,6 +372,16 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
 		}
 	}
+}
+
+// waitsFor says what a task with dependencies left waits for next. When its
+// stack parent waits for all of them too, that's the parent's dispatch.
+func waitsFor(deps *dependencies, t Task) string {
+	if next := deps.next(t); len(next) > 0 {
+		return "it comes " + after(next)
+	}
+	p, _ := deps.branches.liveParent(t)
+	return "it's stacked on " + p.ID() + ", which hasn't been dispatched yet"
 }
 
 // sortForDispatch puts tasks in the order crew tick tries them: highest priority
