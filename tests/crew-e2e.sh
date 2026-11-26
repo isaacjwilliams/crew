@@ -2337,6 +2337,7 @@ check "a done spike doesn't hold its goal's slot, and is listed only with --done
   '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
 check "a task that depends on a done spike no longer waits for it" '[[ $(row "$KAI") != *after* ]]'
 # depends_on keeps only what can still hold a task back: crew set drops the merged and the done.
+# $KSI is the spike that went done above.
 DM=$(crew new "Dep merged"); crew set "$DM" status merged
 DB=$(crew new "Dep abandoned"); crew set "$DB" status abandoned
 DW=$(crew new "Dep working"); crew set "$DW" status working
@@ -3177,6 +3178,7 @@ check "branch caused, handed back, branch caused: a new red head is a question, 
 crew set "$CM" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
+# End to end: dispatch still waits on exactly what it did, with a merged entry written beside an unmerged one.
 DM=$(crew new "Dep merged"); crew set "$DM" status merged
 DW=$(crew new "Dep working"); crew set "$DW" status working
 DT=$(crew new "Dep waiting"); fill "$DT"; crew set "$DT" depends_on "$(basename "$DM" .md) $(basename "$DW" .md)"; crew ready "$DT" >/dev/null

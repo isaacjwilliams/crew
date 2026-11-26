@@ -339,19 +339,25 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 }
 
 // withoutDelivered is a depends_on value without its merged tasks and done
-// spikes, which hold nothing back, space separated when it dropped any. An
-// entry that doesn't name exactly one task stays, for crew dispatch to refuse.
+// spikes, which hold nothing back. An entry that doesn't name exactly one task
+// stays, for crew dispatch to refuse. Stacking reads base, never depends_on, so
+// dropping a merged parent doesn't unstack the task.
 func (c *Crew) withoutDelivered(t Task, value string) string {
-	files := c.files("tasks", taskProjectDir(t))
 	names := dependencyNames(value)
+	if len(names) == 0 {
+		return value // listing the project's task files is the costly part
+	}
+	files := c.files("tasks", taskProjectDir(t))
 	var kept []string
 	for _, name := range names {
-		if f, _ := resolveIn(name, files); f == "" || !(Task{Doc{f}}).Status().Delivered() {
+		f, _ := resolveIn(name, files)
+		delivered := f != "" && (Task{Doc{f}}).Status().Delivered()
+		if !delivered {
 			kept = append(kept, name)
 		}
 	}
 	if len(kept) == len(names) {
-		return value
+		return value // nothing dropped: leave the writer's own format alone
 	}
 	return strings.Join(kept, " ")
 }
