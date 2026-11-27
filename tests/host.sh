@@ -312,7 +312,7 @@ out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup makes the private repo origin and the public one upstream" '[[ $(git -C "$H" remote get-url origin) == "$HOME/remotes/isaac/crew.git" && $(git -C "$H" remote get-url upstream) == "$SB/public.git" ]]'
 check "and nothing can be pushed to the public repo" '! git -C "$H" push -q upstream main 2>/dev/null && [[ -z $(git --git-dir="$SB/public.git" log --oneline main -- config/crew.env) ]]'
 check "it commits the person's settings, from the template, to the private repo" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" log -1 --format=%s main -- config/crew.env) == "crew: set up for isaac" ]] && cmp -s "$H/config/crew.env" "$H/templates/crew.env"'
-check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]]'
+check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-tick.timer "$HOME/systemctl-enabled" && grep -qx crew-gardener.timer "$HOME/systemctl-enabled"'
 check "and its closing text says to put ~/.local/bin on PATH and run lead, and nothing more" '[[ $out == *"With ~/.local/bin on your PATH, run lead."* && $out != *"crew project add"* && $out != *"BRANCH_PREFIX"* ]]'
 out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'

@@ -17,8 +17,8 @@ import (
 // up yet changes nothing. Then crew upgrade says what the upgrade does to the
 // sessions working now and asks to go ahead, and pauses every project, so they
 // wrap up before the release is merged (pauseAndMerge). Once the release is
-// installed, it lifts the pause it made, pushes, restarts the lead's server, and
-// removes the binaries of other versions.
+// installed, it lifts the pause it made, pushes, and removes the binaries of
+// other versions.
 func cmdUpgrade(c *Crew, args []string) error {
 	yes := false
 	switch {

@@ -20,7 +20,7 @@ Setup
                                    with the public one as upstream, and run the crew here
   crew upgrade [--yes]             Pause the crew while sessions wrap up, merge the
                                    public repo's new version, install it, push,
-                                   restart the lead's server, and lift the pause.
+                                   and lift the pause.
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
