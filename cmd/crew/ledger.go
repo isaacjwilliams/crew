@@ -749,7 +749,7 @@ func (t Task) StillToLearn() ([]Item, error) {
 
 // learnItems are the still-to-learn items records add, with their answers.
 func learnItems(records []Record) []Item {
-	return items(records, itemToLearn)
+	return items(records, kindToLearn)
 }
 
 // DesignInBrief is an error when the brief says how to meet its objective, in

@@ -2,8 +2,8 @@ package main
 
 // Records are typed facts about a ledger file, kept beside it in its records
 // file: tasks/<id>.records.jsonl beside tasks/<id>.md, and
-// memory-suggestions.records.jsonl beside a project's memory-suggestions.md. crew decides from them,
-// never from the file's prose. Only crew commands write records, one JSON line
+// memory-suggestions.records.jsonl beside a project's memory-suggestions.md.
+// crew decides from them, never from the file's prose. Only crew commands write records, one JSON line
 // each, appended under the ledger lock, and none is ever changed: a later fact
 // is a new record that names the one it follows. Two clones that each append
 // records merge without a conflict, since git's union driver keeps both sides'
@@ -142,10 +142,10 @@ func (d Doc) readRecords() ([]Record, error) {
 	return records, nil
 }
 
-// The kinds of item records add, in the words an error names them by.
+// The kinds of item records add. Each is also the words an error names it by.
 const (
-	itemToLearn      = "an item to learn"
-	memorySuggestion = "a memory suggestion"
+	kindToLearn    = "an item to learn"
+	kindSuggestion = "a memory suggestion"
 )
 
 // adds is the kind of item the record adds for a later record to settle, or ""
@@ -153,9 +153,9 @@ const (
 func (r Record) adds() string {
 	switch {
 	case r.ToLearn != nil:
-		return itemToLearn
+		return kindToLearn
 	case r.Suggested != nil:
-		return memorySuggestion
+		return kindSuggestion
 	}
 	return ""
 }
@@ -165,18 +165,19 @@ func (r Record) adds() string {
 func (r Record) settles() (item, what string) {
 	switch {
 	case r.Learned != nil:
-		return r.Learned.Item, itemToLearn
+		return r.Learned.Item, kindToLearn
 	case r.Kept != nil:
-		return r.Kept.Suggestion, memorySuggestion
+		return r.Kept.Suggestion, kindSuggestion
 	case r.Declined != nil:
-		return r.Declined.Suggestion, memorySuggestion
+		return r.Declined.Suggestion, kindSuggestion
 	}
 	return "", ""
 }
 
 // An Item is something a record adds for later records to settle, an item
-// still to learn or a memory suggestion, and the records that settle it, oldest first. Two clones
-// may each settle it, so it can have more than one. It's open until one does.
+// still to learn or a memory suggestion, and the records that settle it, oldest
+// first. Two clones may each settle it, so it can have more than one. It's open
+// until one does.
 type Item struct {
 	Record
 	Settled []Record

@@ -102,6 +102,7 @@ func cmdDecline(c *Crew, args []string) error {
 // sets, for the project's open suggestion id, refusing an ID that isn't one. It
 // says the suggestion was done.
 func (c *Crew) settleSuggestion(proj, id, verb, done string, settle func(*Record)) error {
+	// parseText joins the words it's given, so a space means more than one ID.
 	if id == "" || strings.Contains(id, " ") {
 		return fail("name one suggestion to %s by its ID (crew show memory-suggestions lists them)", verb)
 	}
@@ -155,7 +156,7 @@ func suggestionsHead(proj string) string {
 // suggestions are the memory suggestions records add, in the order they were
 // made, each with what settled it.
 func suggestions(records []Record) []Item {
-	return items(records, memorySuggestion)
+	return items(records, kindSuggestion)
 }
 
 // memorySuggestions are a project's memory suggestions, from its records alone.
