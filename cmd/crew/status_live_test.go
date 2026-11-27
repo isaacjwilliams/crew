@@ -657,6 +657,29 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 	}
 }
 
+// A card wraps a field whose words are styled, as the user's are, showing each
+// word once.
+func TestACardWrapsStyledWordsOnce(t *testing.T) {
+	l := statusLine{head: "101-merge-now", fields: make([]wording, len(columns))}
+	l.fields[notesField] = joinNotes([]wording{
+		forUser("merge now", "merge"),
+		forUser("2 finding(s) left for you", "2 findings"),
+		forUser("no risk tier: read the diff", "no risk tier"),
+	})
+	want := "notes: merge 2 findings no risk tier"
+	for width := 12; width <= len(want)+2; width++ {
+		got := card("", l, width)
+		if under := uncolored(strings.Join(got[1:], " ")); squeezed(under) != squeezed(want) {
+			t.Errorf("at width %d, the card says %q, want %q", width, under, want)
+		}
+		for _, line := range got {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at width %d, a line of the card is %d wide: %q", width, w, line)
+			}
+		}
+	}
+}
+
 func TestLiveStatusPinsTheHeadingsOverRowsUnderAFold(t *testing.T) {
 	c := statusLedger(t)
 	writeFile(t, c, "", "projects", "s", "project.env")

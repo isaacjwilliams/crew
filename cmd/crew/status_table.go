@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The fields of a task's or a goal's line, in the order of their columns.
@@ -174,8 +175,12 @@ func hang(indent, text string, width int) []string {
 		return lines
 	}
 	under := strings.Repeat(" ", lipgloss.Width(indent)+2)
-	// Wrapping only puts line breaks in, so the first line starts the text.
-	rest := strings.TrimLeft(strings.TrimPrefix(text, first), " ")
+	// Wrapping only breaks lines at spaces and closes any style at a break, so
+	// the rest is the text after the first line's cells and the space it broke
+	// at. Cutting by cells keeps the rest's styles.
+	rest := ansi.TruncateLeft(text, lipgloss.Width(first), "")
+	broke := ansi.Strip(rest)
+	rest = ansi.TruncateLeft(rest, len(broke)-len(strings.TrimLeft(broke, " ")), "")
 	for _, l := range strings.Split(lipgloss.Wrap(rest, max(1, room-2), ""), "\n") {
 		lines = append(lines, under+l)
 	}
