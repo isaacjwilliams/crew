@@ -401,12 +401,13 @@ func rowLines(r taskRow, before string) statusLine {
 }
 
 // rowFields are what a task's row says after its ID: its status, its worker's
-// state, its PR, the model and effort it runs with, and in its notes its merge
-// check and the rest.
+// state, its PR (in the live view with its marks), the model and effort it runs
+// with, and in its notes its merge check and the rest.
 func rowFields(r taskRow) []wording {
-	pr := ""
+	var pr wording
 	if r.Task.PR() != "" {
-		pr = "#" + r.Task.PRNumber()
+		number := "#" + r.Task.PRNumber()
+		pr = wording{number, number + " " + prMarks(r.PR)}
 	}
 	notes := r.Notes
 	if r.Merge != nil {
@@ -415,7 +416,7 @@ func rowFields(r taskRow) []wording {
 	return []wording{
 		statusField: same(string(r.Task.Status())),
 		workerField: same(r.Worker.stateText()),
-		prField:     same(pr),
+		prField:     pr,
 		modelField:  same(r.Task.Model()),
 		effortField: same(r.Task.Effort()),
 		notesField:  same(strings.Join(notes, "  ")),

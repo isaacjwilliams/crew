@@ -117,6 +117,8 @@ type taskRow struct {
 	// Worker is its worker as claude agents lists it, zero when it isn't
 	// listed, or one in the state "not listed yet" before the first listing.
 	Worker Agent
+	// PR is its PR as GitHub answered, or as crew sync last recorded it.
+	PR gitHubPR
 	// Merge says whether a pr-open task's PR can merge now; nil for any other task.
 	Merge *mergeCheck
 	Notes []string
@@ -551,6 +553,7 @@ func (s *statusView) rowWaits(rows []taskRow, rowOf map[string]int, tasks func(t
 // row works out one task's row, then the rows of the tasks stacked on it.
 func (s *statusView) row(t Task) taskRow {
 	r := taskRow{Task: t, Worker: s.agent(t.WorkerJob()), Notes: s.notes(t)}
+	r.PR, _ = s.prOf(t)
 	r.Merge = s.mergeCheck(t, r.Worker)
 	for _, k := range s.kids[t.Path] {
 		r.Kids = append(r.Kids, s.row(k))

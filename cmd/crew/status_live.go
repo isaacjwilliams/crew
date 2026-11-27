@@ -466,7 +466,13 @@ func (m *liveStatus) scroll() {
 	m.top = min(max(m.top, low), high)
 }
 
-var cursorStyle = lipgloss.NewStyle().Reverse(true)
+// highlight shows the cursor's line reversed across the screen. A colored part
+// of the line ends by resetting every style, which ends the reverse too, so it
+// turns the reverse back on after each.
+func highlight(line string, width int) string {
+	const reset, reverse = "\x1b[m", "\x1b[7m"
+	return lipgloss.NewStyle().Reverse(true).Width(width).Render(strings.ReplaceAll(line, reset, reset+reverse))
+}
 
 // View is the headings, the lines on show from the top, and the bar. The
 // cursor's line is highlighted across the screen, all of it when it wraps.
@@ -482,7 +488,7 @@ func (m *liveStatus) View() tea.View {
 			if n >= m.top && n < m.top+body {
 				line = fit(line, m.width)
 				if i == m.cursor {
-					line = cursorStyle.Width(m.width).Render(line)
+					line = highlight(line, m.width)
 				}
 				screen = append(screen, line)
 			}

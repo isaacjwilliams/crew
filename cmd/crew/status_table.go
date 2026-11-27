@@ -31,7 +31,7 @@ var columns = [...]struct {
 }{
 	statusField: {"status", 11},
 	workerField: {"worker", 16},
-	prField:     {"PR", 6},
+	prField:     {"PR", 10},
 	modelField:  {"model", 8},
 	effortField: {"effort", 6},
 	notesField:  {"notes", 0},
@@ -44,7 +44,7 @@ var columns = [...]struct {
 const (
 	idHeading = "task"
 	idCap     = 40
-	minNotes  = 20
+	minNotes  = 16
 	columnGap = "  "
 )
 

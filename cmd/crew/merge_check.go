@@ -55,15 +55,11 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	if ref == "" {
 		return &mergeCheck{InTheWay: []string{"no PR"}}
 	}
-	read, asked := s.prs[ref]
-	if !asked {
+	if _, asked := s.prs[ref]; !asked {
 		return &mergeCheck{InTheWay: []string{"PR not read on GitHub yet"}}
 	}
-	m := &mergeCheck{}
-	pr := read.pr
-	if read.err != nil {
-		pr, m.LastSync = syncedPR(t), true
-	}
+	pr, answered := s.prOf(t)
+	m := &mergeCheck{LastSync: !answered}
 	switch pr.State {
 	case "MERGED", "CLOSED":
 		m.Closed = strings.ToLower(pr.State)
@@ -126,6 +122,16 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		m.AwaitingUser = reviews[len(reviews)-1].AwaitingUser()
 	}
 	return m
+}
+
+// prOf is t's PR as GitHub answered when crew status last asked, or else as
+// crew sync last recorded it: answered is false then. crew status asks GitHub
+// only for pr-open tasks' PRs.
+func (s *statusView) prOf(t Task) (pr gitHubPR, answered bool) {
+	if read, asked := s.prs[t.PR()]; asked && read.err == nil {
+		return read.pr, true
+	}
+	return syncedPR(t), false
 }
 
 // prRead is what GitHub answered when crew asked for a PR: the PR, or the error.
