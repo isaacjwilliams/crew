@@ -588,10 +588,11 @@ func (m *liveStatus) click(x, y int) {
 func (m *liveStatus) markerColumn() int {
 	l := m.shown[m.cursor]
 	before, _, found := strings.Cut(l.drawn[0], l.marker())
-	if !found || len(l.kids) == 0 || lipgloss.Width(before) >= m.width {
+	column := lipgloss.Width(before)
+	if !found || len(l.kids) == 0 || column >= m.width {
 		return -1
 	}
-	return lipgloss.Width(before)
+	return column
 }
 
 // wholly is whether the screen lines from start to end, counted from the first
