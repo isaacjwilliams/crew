@@ -219,9 +219,13 @@ func migrateMemorySuggestions(d Doc, project string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Every checkbox line is a suggestion, as crew counted them before records,
+	// read as it stands: crew remember wrote its text as given, "<!--" and all.
+	// Comments only decide which other lines are worth keeping.
+	plain := uncommented(ls)
 	var found []oldSuggestion
 	var rest []string
-	for i, l := range uncommented(ls) {
+	for i, l := range ls {
 		l = strings.TrimRight(l, " \t")
 		if _, ok := checklistItem(l); ok {
 			o, err := readOldSuggestion(l)
@@ -229,7 +233,7 @@ func migrateMemorySuggestions(d Doc, project string) (int, error) {
 				return 0, fmt.Errorf("%s:%d: %v", suggestionsFile, i+1, err)
 			}
 			found = append(found, o)
-		} else if t := strings.TrimSpace(l); t != "" && t != "# Memory suggestions: "+project {
+		} else if t := strings.TrimSpace(plain[i]); t != "" && t != "# Memory suggestions: "+project {
 			rest = append(rest, ls[i])
 		}
 	}

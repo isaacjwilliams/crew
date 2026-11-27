@@ -444,6 +444,29 @@ func TestMigrateMemorySuggestionsAfterARunCutShort(t *testing.T) {
 	}
 }
 
+// A suggestion's text may hold "<!--", which crew remember wrote as given: the
+// migration keeps it, and doesn't take it for a comment that hides the lines
+// after it.
+func TestMigrateMemorySuggestionsKeepsCommentMarkersInTheirText(t *testing.T) {
+	d := oldSuggestionsDoc(t, "# Memory suggestions: p\n\n"+
+		"- [x] **Imports keep `<!--private-->` markers** As `<!-- x -->` in the why. (lead, 2026-11-09) → declined: Only `<!--this-->` one.\n"+
+		"- [ ] **An open `<!--` marker** Never closed. (lead, 2026-11-10)\n"+
+		"- [ ] **The next one** Still read. (lead, 2026-11-11)\n")
+	if n, err := migrateMemorySuggestions(d, "p"); err != nil || n != 3 {
+		t.Fatalf("migrateMemorySuggestions = %d, %v; want 3 suggestions", n, err)
+	}
+	records, err := d.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := suggestions(records)
+	got := []string{all[0].Suggested.Fact, all[0].Suggested.Why, all[0].Settled[0].Declined.Reason, all[1].Suggested.Fact, all[2].Suggested.Fact}
+	want := []string{"Imports keep `<!--private-->` markers", "As `<!-- x -->` in the why", "Only `<!--this-->` one.", "An open `<!--` marker", "The next one"}
+	if !slices.Equal(got, want) {
+		t.Errorf("migrated %q, want %q", got, want)
+	}
+}
+
 // A suggestion line crew can't read stops the migration before it writes
 // anything, naming the line.
 func TestMigrateMemorySuggestionsRefusesWhatItCantRead(t *testing.T) {
