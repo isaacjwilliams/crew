@@ -357,6 +357,8 @@ check "worker-settings.json denies Agent(brief-reviewer) (brief review belongs t
 
 # --- automated review: the pr-review skill, which reaches workers through --add-dir <home>, and its read-only reviewer
 SK=$REPO_DIR/.claude/skills/pr-review
+check "pr-review records each review and finding through crew, and the worker each outcome and decision, with commands crew has" \
+  "grep -q '\"automated-review\": *cmdAutomatedReview' <<<\"\$SRC\" && grep -q '\"finding\": *cmdFinding' <<<\"\$SRC\" && grep -q '\"outcome\": *cmdOutcome' <<<\"\$SRC\" && grep -q '\"user-decided\": *cmdUserDecided' <<<\"\$SRC\" && grep -q '^1\. Record the review: .crew automated-review <task> <from sha>\.\.<HEAD sha> --fork <fork sha> --reviewers claude.' $SK/SKILL.md && grep -q '^2\. Record each finding, in the order you number them: .crew finding <task> \"<severity>\" \"<title>\".' $SK/SKILL.md && grep -q 'Record the same words through crew: .crew outcome <task> <N>\.<k> \"<outcome>\".' $A/implementer.md && grep -q 'crew user-decided <task> <N>\.<k> \"<their decision>\"' $A/implementer.md"
 check "the pr-review skill is where --add-dir <home> loads it, and names its rubric by its own folder" \
   "[[ -f $SK/SKILL.md && -f $SK/rubric.md ]] && grep -q '\"--add-dir\", c.Home' <<<\"\$SRC\" && grep -qF '\${CLAUDE_SKILL_DIR}/rubric.md' $SK/SKILL.md && ! grep -q '~/.claude/skills' $SK/*.md"
 check "crew review-eval's briefing has SKILL.md step 3's first line and headings, in its order" \

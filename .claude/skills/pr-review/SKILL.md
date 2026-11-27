@@ -372,9 +372,23 @@ the record:
 
 ## 8. Record the review
 
-Append the review to the task file under `## Automated reviews`. If the file has no such section (a task created
-before it existed), add the heading just before `## Review rounds`. Number it one past the last `### Automated review`
-heading there.
+Record it through crew first, then write it in the task file with the numbers crew gives.
+
+1. Record the review: `crew automated-review <task> <from sha>..<HEAD sha> --fork <fork sha> --reviewers claude`,
+   or `--reviewers claude,codex` when Codex ran. Add `--failed claude` or `--failed codex` for a reviewer that
+   didn't report: one that failed only in a round reported, so it isn't failed here. crew refuses a range that isn't
+   commits of the task's branch. It numbers the review and prints its heading: write that heading.
+2. Record each finding, in the order you number them: `crew finding <task> "<severity>" "<title>"`, with the agreed
+   severity's own word (`must fix`, `withdrawn`, `disputed` and so on) and its labels as switches:
+   - `--split` for `split: held at <severity>, …`, with the severity it's held at;
+   - `--flipped` for `flipped: <severity>, was …`, with the severity it's held at now;
+   - `--pre-existing` for `pre-existing: <severity>`, with that severity, alone or with `--split`.
+
+   crew prints the finding's number, `<N>.<k>`, and the `<k>` is the number on its `####` heading.
+
+If crew refuses a command, it says what's wrong: correct it and run it again, since a review crew hasn't recorded
+doesn't count. Then append the review to the task file under `## Automated reviews`. If the file has no such section
+(a task created before it existed), add the heading just before `## Review rounds`.
 
 **Every finding any reviewer raised goes in the record**, including the ones you disagree with, the ones withdrawn and
 the ones first raised in a round. You don't decide what is real; your verdict is annotation, not a filter.
