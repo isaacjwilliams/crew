@@ -7,12 +7,15 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -277,7 +280,9 @@ func cmdFeedback(c *Crew, args []string) error {
 	var n int
 	var round string
 	if !r.empty() {
-		n, round = r.add(t, num)
+		if n, round, err = r.add(t, num); err != nil {
+			return err
+		}
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
 		if len(r.reviewRequests) > 0 {
 			msg += ", with a request for another automated review"
@@ -329,7 +334,10 @@ func cmdReview(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	n, _, err := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	if err != nil {
+		return err
+	}
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -362,8 +370,8 @@ func isReviewRequest(cm ghComment) bool {
 type reviewRound struct {
 	reviews, inline, convo []ghComment
 	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
-	redCI                  *redCI
-	conflict               *baseConflict
+	redCI                  *RedCI
+	conflict               *BaseConflict
 }
 
 func (r reviewRound) empty() bool {
@@ -373,15 +381,15 @@ func (r reviewRound) empty() bool {
 // add writes the round into the task as its next, before ## Log, and counts it
 // in review_rounds. It returns the round's number and text. Run it with the
 // ledger lock held.
-func (r reviewRound) add(t Task, prNumber string) (int, string) {
+func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
-		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
+		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.Head, strings.Join(r.redCI.Checks, ", "))
 	}
 	if r.conflict != nil {
-		fmt.Fprintf(&b, "- [ ] %s%s at %s\n\n", conflictsWith, r.conflict.base, r.conflict.at)
+		fmt.Fprintf(&b, "- [ ] %s%s at %s\n\n", conflictsWith, r.conflict.Base, r.conflict.At)
 	}
 	if len(r.reviews) > 0 {
 		b.WriteString("**Review summaries**\n")
@@ -414,9 +422,74 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	if len(r.reviewRequests) > 0 {
 		b.WriteString("\n")
 	}
-	t.InsertBefore("## Log", b.String())
-	t.Set("review_rounds", fmt.Sprint(n))
-	return n, b.String()
+	if err := t.InsertBefore("## Log", b.String()); err != nil {
+		return 0, "", err
+	}
+	return n, b.String(), t.Set("review_rounds", fmt.Sprint(n))
+}
+
+// addRecorded adds the round, then the record of what it reports, and returns
+// the round's number. In that order, a run stopped between the two leaves no
+// record, so the next run sends the report again rather than never.
+func (r reviewRound) addRecorded(t Task, prNumber string, report Record) (int, error) {
+	n, _, err := r.add(t, prNumber)
+	if err != nil {
+		return 0, err
+	}
+	return n, t.AddRecords(report)
+}
+
+// withRoundReports is the task file's lines with the red CI and conflicts crew
+// sent its worker, from its records, at the top of Review rounds: what crew
+// decides from, where the rounds' own lines may have been ticked or edited.
+// When crew can't read the records, the section says why. A project not yet
+// migrated has no such records, so its file is shown as it is.
+func withRoundReports(t Task, ls []string) []string {
+	reports, err := t.RoundReports()
+	var shown []string
+	switch {
+	case errors.Is(err, errNotMigrated):
+		return ls
+	case err != nil:
+		shown = []string{"crew can't read the red CI and conflicts it sent: " + err.Error()}
+	case len(reports.RedCI)+len(reports.Conflicts) == 0:
+		return ls
+	default:
+		shown = append([]string{"Recorded by crew:"}, reports.lines()...)
+	}
+	ls, start := withSection(ls, "## Review rounds")
+	// After the section's own comment, if it has one.
+	at := start + 1
+	for _, l := range uncommented(ls[at:]) {
+		if strings.TrimSpace(l) != "" {
+			break
+		}
+		at++
+	}
+	return slices.Concat(ls[:at], shown, []string{""}, ls[at:])
+}
+
+// lines are the round reports as Markdown, oldest first: each red CI with its
+// checks, and under it the worker's word on its cause, then each conflict.
+func (rr RoundReports) lines() []string {
+	var out []string
+	for _, r := range rr.RedCI {
+		out = append(out, fmt.Sprintf("- Red CI on %s: %s (%s, sent %s)", r.RedCI.Head, cmp.Or(strings.Join(r.RedCI.Checks, ", "), "no checks named"), r.ID, stamp(r.Record)))
+		if len(r.Causes) == 0 {
+			out = append(out, "  - no word from the worker yet on whether its branch caused it")
+		}
+		for _, c := range r.Causes {
+			word := "the branch caused it"
+			if !c.CICause.BranchCaused {
+				word = "the branch didn't cause it"
+			}
+			out = append(out, fmt.Sprintf("  - %s, said %s", word, stamp(c)))
+		}
+	}
+	for _, r := range rr.Conflicts {
+		out = append(out, fmt.Sprintf("- Conflict with %s at %s (%s, sent %s)", r.BaseConflict.Base, r.BaseConflict.At, r.ID, stamp(r)))
+	}
+	return out
 }
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of

@@ -87,17 +87,12 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
-func shownTask(path string) (string, error) {
-	t := Task{Doc{path}}
-	ls, err := t.read()
-	if err != nil {
-		return "", err
-	}
+// withLearning is the task file's lines with its still-to-learn items from its
+// records under Still to learn. Anything typed into the file's section stays
+// below them, marked as not being items crew counts. When crew can't read the
+// items, the section says why. In a project not yet migrated, what's typed in
+// it is the items, so it's shown as it is.
+func withLearning(t Task, ls []string) []string {
 	var items []string
 	learning, unread := t.StillToLearn()
 	if unread != nil {
@@ -105,17 +100,10 @@ func shownTask(path string) (string, error) {
 	} else {
 		items = learnLines(learning)
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+	if len(items) == 0 && !slices.Contains(ls, learnHeading) {
+		return ls
 	}
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, learnHeading, "")
-	}
+	ls, start := withSection(ls, learnHeading)
 	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
@@ -134,8 +122,7 @@ func shownTask(path string) (string, error) {
 	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is

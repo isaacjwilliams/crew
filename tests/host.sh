@@ -409,11 +409,13 @@ check "a migration that fails after the install says why, and to run upgrade aga
   '[[ $rc == 1 && $out == *"holds \"x\", not a format number"*"couldn'"'"'t migrate the ledger, so the crew stays paused; run crew upgrade again to finish" ]]'
 check "and keeps the pause, and commits what it migrated before it stopped" \
   '[[ -e $H/projects/busy/paused && -z $(git -C "$H" status --porcelain) ]] && committed projects/busy/ledger-format'
-# A migration killed before its commit leaves what it wrote uncommitted.
-echo 1 >"$H/projects/left/ledger-format"
+# A migration killed before its commit leaves what it wrote uncommitted: the
+# format busy was migrated to above.
+format=$(cat "$H/projects/busy/ledger-format")
+echo "$format" >"$H/projects/left/ledger-format"
 out=$(up --yes)
 check "so upgrade run again, after a migration killed before its commit, commits what it wrote, finishes, and lifts the pause" \
-  '[[ $out == *"Every project'"'"'s ledger is already migrated."*"crew upgraded to 9.9.9" && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && [[ $(git -C "$H" show HEAD:projects/left/ledger-format) == 1 ]]'
+  '[[ $out == *"Every project'"'"'s ledger is already migrated."*"crew upgraded to 9.9.9" && ! -e $H/projects/busy/paused ]] && ! committed projects/busy/paused && [[ $(git -C "$H" show HEAD:projects/left/ledger-format) == "$format" ]]'
 echo "an edit" >>"$H/README.md"
 out=$(up --yes)
 check "upgrade refuses a home with uncommitted changes, and pauses nothing" '[[ $out == *"uncommitted changes"* && ! -e $H/projects/busy/paused ]]'

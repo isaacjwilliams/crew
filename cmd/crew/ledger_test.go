@@ -665,65 +665,57 @@ const reportsTask = "## Context\n- [ ] CI failed on 0000000: brief\n- [ ] Confli
 	"### Round 5 — 2026-11-11 14:00 (PR #12)\n\n- [ ] Conflicts with main at fff6666\n\n" +
 	"## Log\n"
 
-func TestCIFailures(t *testing.T) {
-	task := Task{docWith(t, reportsTask)}
-	if got := task.CIFailures(); !slices.Equal(got, []string{"aaa1111", "bbb2222"}) {
-		t.Errorf("CIFailures = %q", got)
+func TestRoundReportsReadRecordsAlone(t *testing.T) {
+	// Lines in the review rounds, ticked, marked or quoted, count for nothing.
+	task := learnTask(t, reportsTask)
+	if rr, err := task.RoundReports(); err != nil || rr.RedCI != nil || rr.Conflicts != nil {
+		t.Fatalf("RoundReports with only lines = %+v, %v; want none", rr, err)
 	}
-	if got := (Task{docWith(t, sampleTask)}).CIFailures(); got != nil {
-		t.Errorf("a task without review rounds: CIFailures = %q", got)
+	a := add(t, task, Record{RedCI: &RedCI{Head: "aaa1111", Checks: []string{"test", "lint"}}})
+	b := add(t, task, Record{RedCI: &RedCI{Head: "bbb2222", Checks: []string{"test"}}})
+	add(t, task, Record{BaseConflict: &BaseConflict{Base: "main", At: "eee5555"}})
+	add(t, task, Record{CICause: &CICause{RedCI: a.ID, BranchCaused: false}})
+	rr, err := task.RoundReports()
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestCIFixes(t *testing.T) {
-	if got := (Task{docWith(t, reportsTask)}).CIFixes(); got != 1 {
-		t.Errorf("CIFixes = %d, want 1: a round the branch didn't cause doesn't count", got)
+	if len(rr.RedCI) != 2 || rr.RedCI[0].ID != a.ID || rr.RedCI[1].ID != b.ID || len(rr.Conflicts) != 1 {
+		t.Fatalf("RoundReports = %+v; want red CI on aaa1111 and bbb2222, and a conflict", rr)
 	}
-	if got := (Task{docWith(t, sampleTask)}).CIFixes(); got != 0 {
-		t.Errorf("a task without review rounds: CIFixes = %d", got)
-	}
-}
-
-func TestRecordCICause(t *testing.T) {
-	task := Task{docWith(t, reportsTask)}
-	record := func(head string, branchCaused, wantChanged bool, wantFixes int) {
-		t.Helper()
-		changed, err := task.RecordCICause(head, branchCaused)
-		if err != nil || changed != wantChanged || task.CIFixes() != wantFixes {
-			t.Errorf("RecordCICause(%s, %v) = %v, %v with CIFixes %d; want %v with CIFixes %d", head, branchCaused, changed, err, task.CIFixes(), wantChanged, wantFixes)
+	for head, want := range map[string]int{"aaa1111": 1, "bbb2222": 1, "ccc3333": 0, "0000000": 0, "9999999": 0} {
+		if got := len(rr.CIOn(head)); got != want {
+			t.Errorf("CIOn(%s) has %d report(s), want %d", head, got, want)
 		}
 	}
-	record("bbb2222", false, true, 0)
-	if !strings.Contains(contents(t, task.Doc), "\n- [ ] CI failed on bbb2222: test (the branch didn't cause it)\n") {
-		t.Errorf("the round's line isn't marked:\n%s", contents(t, task.Doc))
+	for sha, want := range map[string]bool{"eee5555": true, "fff6666": false, "aaa1111": false} {
+		if got := rr.ConflictAt(sha); got != want {
+			t.Errorf("ConflictAt(%s) = %v, want %v", sha, got, want)
+		}
 	}
-	record("bbb2222", false, false, 0) // marked already
-	record("aaa1111", true, true, 1)   // the worker's later account wins
-	if !strings.Contains(contents(t, task.Doc), "\n- [x] CI failed on aaa1111: test, lint\n") {
-		t.Errorf("the mark isn't taken off:\n%s", contents(t, task.Doc))
-	}
-	record("ccc3333", false, false, 1) // only an open question reports it
-	record("0000000", false, false, 1) // only the brief mentions it
-	record("9999999", false, false, 1) // only a quote in a comment mentions it
-	if got := task.CIFailures(); !slices.Equal(got, []string{"aaa1111", "bbb2222"}) {
-		t.Errorf("CIFailures after marking = %q", got)
+	if got := rr.CIFixes(); got != 1 {
+		t.Errorf("CIFixes = %d, want 1: red CI the branch didn't cause doesn't count", got)
 	}
 }
 
-func TestCIReported(t *testing.T) {
-	task := Task{docWith(t, reportsTask)}
-	for head, want := range map[string]bool{"aaa1111": true, "bbb2222": true, "ccc3333": true, "0000000": false, "9999999": false, "ddd4444": false} {
-		if got := task.CIReported(head); got != want {
-			t.Errorf("CIReported(%s) = %v, want %v", head, got, want)
+func TestCIFixesTakeTheWorkersLatestWord(t *testing.T) {
+	task := learnTask(t, "## Log\n")
+	a := add(t, task, Record{RedCI: &RedCI{Head: "aaa1111", Checks: []string{"test"}}})
+	for _, step := range []struct {
+		branchCaused bool
+		fixes        int
+	}{{false, 0}, {true, 1}, {false, 0}} {
+		add(t, task, Record{CICause: &CICause{RedCI: a.ID, BranchCaused: step.branchCaused}})
+		if rr, err := task.RoundReports(); err != nil || rr.CIFixes() != step.fixes {
+			t.Errorf("after the worker says the branch caused it: %v, CIFixes = %d, %v; want %d", step.branchCaused, rr.CIFixes(), err, step.fixes)
 		}
 	}
 }
 
-func TestConflictReported(t *testing.T) {
+func TestCIQuestionAsked(t *testing.T) {
 	task := Task{docWith(t, reportsTask)}
-	for sha, want := range map[string]bool{"eee5555": true, "fff6666": true, "0000000": false, "9999999": false, "aaa1111": false, "ggg7777": false} {
-		if got := task.ConflictReported(sha); got != want {
-			t.Errorf("ConflictReported(%s) = %v, want %v", sha, got, want)
+	for head, want := range map[string]bool{"ccc3333": true, "aaa1111": false, "0000000": false, "9999999": false} {
+		if got := task.CIQuestionAsked(head); got != want {
+			t.Errorf("CIQuestionAsked(%s) = %v, want %v", head, got, want)
 		}
 	}
 }

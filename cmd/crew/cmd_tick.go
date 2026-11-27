@@ -180,13 +180,15 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	// crew sync's ci_state is only a filter: crew ci-fix reads the checks again,
 	// and decides. It exits 0 when it recorded a round or a question.
 	if st == PROpen && t.Get("ci_state") == string(ciFailing) {
-		rounds := t.Get("review_rounds")
+		before, _ := t.RoundReports() // when it can't be read, ci-fix refuses too
 		if c.step(nil, "ci-fix", t.Path) == 0 {
-			if now := t.Get("review_rounds"); now != rounds {
-				failures := t.CIFailures()
-				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, now, failures[len(failures)-1])
-			} else {
-				news.did(p.Name, "%s: CI still red after %d CI rounds the branch caused, for you", id, t.CIFixes())
+			switch after, err := t.RoundReports(); {
+			case err != nil:
+				warn("%s: %v", id, err)
+			case len(after.RedCI) > len(before.RedCI):
+				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, t.Get("review_rounds"), after.RedCI[len(after.RedCI)-1].RedCI.Head)
+			default:
+				news.did(p.Name, "%s: CI still red after %d CI rounds the branch caused, for you", id, after.CIFixes())
 			}
 		}
 	}

@@ -16,17 +16,10 @@ import (
 	"strings"
 )
 
-// baseConflict is a PR's conflict with its base branch at a commit of it, for
-// a review round to report.
-type baseConflict struct {
-	base string // the task's base branch
-	at   string // the base's commit, short SHA
-}
-
 // crew catch-up TASK: when the open PR of a task its worker handed over
 // conflicts with the task's base, and the task isn't stacked, sends the worker
-// the conflict as a review round, once for each commit of the base. Exits 3
-// when there's nothing to do.
+// the conflict as a review round, once for each commit of the base, and
+// records it. Exits 3 when there's nothing to do.
 func cmdCatchUp(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -95,14 +88,23 @@ func cmdCatchUp(c *Crew, args []string) error {
 	case st != PROpen:
 		return nothingToDo("%s is %s, and its conflicts are its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
-	conflict := baseConflict{base, shortSHA(sha)}
-	if t.ConflictReported(conflict.at) {
-		return nothingToDo("the conflict with %s at %s is reported already", conflict.base, conflict.at)
+	records, err := t.Records()
+	if err != nil {
+		return fail("%v", err)
 	}
-	n, _ := reviewRound{conflict: &conflict}.add(t, num)
-	t.Log(fmt.Sprintf("review round %d recorded: conflicts with %s at %s", n, conflict.base, conflict.at))
+	conflict := &BaseConflict{Base: base, At: shortSHA(sha)}
+	if roundReports(records).ConflictAt(conflict.At) {
+		return nothingToDo("the conflict with %s at %s is reported already", conflict.Base, conflict.At)
+	}
+	r := newRecord("crew catch-up", records)
+	r.BaseConflict = conflict
+	n, err := reviewRound{conflict: conflict}.addRecorded(t, num, r)
+	if err != nil {
+		return err
+	}
+	t.Log(fmt.Sprintf("review round %d recorded: conflicts with %s at %s", n, conflict.Base, conflict.At))
 	t.Touch()
 	c.commit("catch-up " + p.Name + "/" + t.ID())
-	fmt.Printf("round %d recorded: conflicts with %s at %s; crew tick sends it to the worker\n", n, conflict.base, conflict.at)
+	fmt.Printf("round %d recorded: conflicts with %s at %s; crew tick sends it to the worker\n", n, conflict.Base, conflict.At)
 	return nil
 }
