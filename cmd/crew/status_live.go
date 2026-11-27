@@ -244,6 +244,17 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startDue()
 	case tea.KeyPressMsg:
 		return m, m.press(msg.String())
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.wheel(-1)
+		case tea.MouseWheelDown:
+			m.wheel(1)
+		}
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			m.click(msg.X, msg.Y)
+		}
 	}
 	return m, nil
 }
@@ -521,6 +532,108 @@ func (m *liveStatus) page(by int) {
 	m.scroll()
 }
 
+// wheelStep is how many screen lines a turn of the mouse wheel scrolls.
+const wheelStep = 3
+
+// wheel scrolls the screen a turn up or down (by is -1 or 1), and not past
+// either end. A turn is wheelStep lines, or the whole screen when that's less.
+// The cursor stays on its line while that's still all on the screen. A line
+// taller than the screen shows each of its rows before the cursor leaves it.
+// Otherwise the cursor goes to the nearest line that's all on the screen.
+func (m *liveStatus) wheel(by int) {
+	n := by * min(wheelStep, m.bodyHeight())
+	was := m.top
+	m.top = max(0, min(m.top+n, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
+	target := m.top
+	start, end := m.cursorSpan()
+	if m.wholly(start, end) {
+		return
+	}
+	if end-start > m.bodyHeight() {
+		if m.scroll(); (m.top-was)*by > 0 {
+			return
+		}
+		m.top = target
+	}
+	m.setCursor(m.nearestWhole(n))
+	m.scroll()
+}
+
+// nearestWhole is the shown line nearest the cursor that's wholly on the
+// screen. When none is, none fits between the screen's edges, so it's the next
+// line in the direction of the wheel (n is its turn, up or down), and the
+// screen follows it there.
+func (m *liveStatus) nearestWhole(n int) int {
+	nearest, start := -1, 0
+	for i, l := range m.shown {
+		end := start + len(l.drawn)
+		if m.wholly(start, end) && (nearest < 0 || away(i, m.cursor) < away(nearest, m.cursor)) {
+			nearest = i
+		}
+		start = end
+	}
+	switch {
+	case nearest >= 0:
+		return nearest
+	case n > 0:
+		return min(m.lineAt(m.top)+1, len(m.shown)-1)
+	}
+	return max(m.lineAt(m.top+m.bodyHeight()-1)-1, 0)
+}
+
+// click puts the cursor on the line drawn at column x of screen line y, and
+// opens or closes it when x is on its marker. Anything else on the screen,
+// the headings, the strip, the bar and the room below the last line, is not
+// a line, and does nothing. The screen stays where it is, unless the new
+// line's strip leaves less room and cuts off a line that was whole or hides
+// the line, or leaves more and the report ends higher.
+func (m *liveStatus) click(x, y int) {
+	n := m.top + y - len(m.headings) // the screen line y, counted from the first shown line
+	if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() || n >= m.drawnHeight(0, len(m.shown)) {
+		return
+	}
+	i := m.lineAt(n)
+	start := m.drawnHeight(0, i)
+	end := start + len(m.shown[i].drawn)
+	wasWhole := m.wholly(start, end)
+	m.setCursor(i)
+	// A line cut off by the screen's edge stays as it is. A whole one that the
+	// new strip cuts off, and one it leaves no room for, come into view. Either
+	// way, a shorter strip never leaves empty room under the last line.
+	if !m.wholly(start, end) && (wasWhole || end <= m.top || start >= m.top+m.bodyHeight()) {
+		m.scroll()
+	}
+	m.top = min(m.top, max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
+	// Only a line's first row has its marker.
+	if n == start && x == m.markerColumn() {
+		m.setOpen(!m.shown[i].open)
+	}
+}
+
+// markerColumn is the screen column of the cursor's line's fold marker, or -1
+// when the line has none or the screen is too narrow to show it. It isn't
+// always at the line's depth: a card leaves out the indent's spaces when it's
+// short of room.
+func (m *liveStatus) markerColumn() int {
+	l := m.shown[m.cursor]
+	if len(l.kids) == 0 {
+		return -1
+	}
+	before, _, found := strings.Cut(l.drawn[0], l.marker())
+	column := lipgloss.Width(before)
+	if !found || column >= m.width {
+		return -1
+	}
+	return column
+}
+
+// wholly is whether the screen lines from start to end, counted from the first
+// shown line, are all on the screen, or fill it when they're too tall for it.
+func (m *liveStatus) wholly(start, end int) bool {
+	top, bottom := m.top, m.top+m.bodyHeight()
+	return start >= top && end <= bottom || start <= top && end >= bottom
+}
+
 // scroll moves the screen as little as keeps the cursor's line on it: all of
 // it when it fits, and otherwise as much as fits, the screen not leaving it.
 // The screen never leaves room empty at the bottom while lines are above it.
@@ -570,6 +683,7 @@ func (m *liveStatus) View() tea.View {
 	screen = append(screen, m.strip()...)
 	v := tea.NewView(strings.Join(append(screen, fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -577,14 +691,19 @@ func (m *liveStatus) View() tea.View {
 // it's under, and a marker for whether it's open, closed, or has nothing under
 // it.
 func (l shownLine) indent() string {
-	marker := " "
-	if len(l.kids) > 0 {
-		marker = "▸"
-		if l.open {
-			marker = "▾"
-		}
+	return strings.Repeat("  ", l.depth) + l.marker() + " "
+}
+
+// marker is ▾ for an open line, ▸ for a closed one, and a space for one with
+// nothing under it.
+func (l shownLine) marker() string {
+	switch {
+	case len(l.kids) == 0:
+		return " "
+	case l.open:
+		return "▾"
 	}
-	return strings.Repeat("  ", l.depth) + marker + " "
+	return "▸"
 }
 
 // indentWidth is how wide a line's indent is at a depth: two spaces a level,
@@ -611,3 +730,6 @@ func (m *liveStatus) bar() string {
 func fit(line string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }
+
+// away is how many lines apart two lines are.
+func away(i, j int) int { return max(i-j, j-i) }
