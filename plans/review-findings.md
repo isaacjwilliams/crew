@@ -1,16 +1,18 @@
-# Plan: the 2026-11-27 code review's twelve findings
+# Plan: the 2026-11-27 code review's twelve findings, and one addition
 
 On 2026-11-27 five independent reviewers read crew, each through one lens: state and concurrency, outside tools and failure, security and trust, structure and tests, and system design. They found twelve problems worth acting on. This file says what each one is, where it shows in the code, what it costs and which rule crew should hold instead. It also gives the order the work is done in, and how far it has got.
 
-The reviewers read commit `aa8782a`. Everything below was checked against `main` at `f5b790d`, after the typed task records (#119) merged. Where `main` has moved since, the entry says so. Counts are given only where they were measured on `main`; a figure the review gave and nobody has re-measured is marked "not measured".
+One item doesn't come from the reviewers or their reports: the user took up a suggestion from Codex on 2026-11-27, that the implementer's profile loads its procedures before it knows it needs them. It is [the addition](#addition-the-implementer-loads-every-procedure-at-start) after the twelve findings, and item 20. Codex's second suggestion, about `ARCHITECTURE.md`, is not an addition: it sharpens finding 12 and item 19.
+
+The reviewers read commit `aa8782a`. Everything below was checked against `main` at `f5b790d`, after the typed task records (#119) merged; the addition and the "Measured" paragraph of finding 12 were measured at `f7ab9b4`. Where `main` has moved since, the entry says so. Counts are given only where they were measured on `main`; a figure the review gave and nobody has re-measured is marked "not measured".
 
 Read this file, then `CLAUDE.md` and `ARCHITECTURE.md`, before taking an item. Keep [Progress](#progress) true: see [Keeping the list true](#keeping-the-list-true).
 
 ## Progress
 
-The twelve findings, described in full [below](#the-findings): 1 a failed lookup reads as "nothing there"; 2 ledger writes aren't safe; 3 nothing times out; 4 crew has no notion of who is calling; 5 the host lease; 6 the status machine isn't written down; 7 the tick infers what its steps did; 8 no seam for git, gh and claude; 9 prompts have no behavioural test; 10 model sessions do deterministic work; 11 proposals have no triage; 12 `ARCHITECTURE.md` has drifted. Below, "the Contract" is the IMP-style list of numbered obligations for each component, each tied to the tests that prove it; "the seam" is item 11's way to stand in for `git`, `gh` and `claude` in a Go test.
+The twelve findings, described in full [below](#the-findings), and one addition, item 20: 1 a failed lookup reads as "nothing there"; 2 ledger writes aren't safe; 3 nothing times out; 4 crew has no notion of who is calling; 5 the host lease; 6 the status machine isn't written down; 7 the tick infers what its steps did; 8 no seam for git, gh and claude; 9 prompts have no behavioural test; 10 model sessions do deterministic work; 11 proposals have no triage; 12 `ARCHITECTURE.md` has drifted; the addition is that the implementer loads every procedure at start. Below, "the Contract" is the IMP-style list of numbered obligations for each component, each tied to the tests that prove it; "the seam" is item 11's way to stand in for `git`, `gh` and `claude` in a Go test.
 
-Items are in the order they are done. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on.
+Items are in the order they are done. The one exception is an item added later: it takes the next number and sits in the group it waits on. Item 20 is numbered last but is done after the migration, with 13 to 17. Item 5 keeps its number and sits there too, because it waits on items 11 and 13. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on, and item 20 settles the addition, not a finding.
 
 ### Now, beside the records migration
 
@@ -20,9 +22,8 @@ These are small, and they touch little of what the records migration (moving cre
 |---|------|---------|----------|-------|
 | 1 | This document | none | nothing | done (#125) |
 | 2 | The Contract convention, settled by drafting the guard's Contract (a spike) **(needs intake)** | none | nothing | to do |
-| 3 | CI runs the suites on every PR | none | nothing | to do |
+| 3 | CI runs the suites on every PR | none | nothing | done (#124) |
 | 4 | CI fails a PR that breaks the Contract | none | 2, 3 | to do |
-| 5 | A clean restack or retarget starts no model session | 10 | nothing | to do |
 | 6 | A failed lookup is never read as "nothing there" | 1 | nothing | to do |
 | 7 | Every call to an outside tool has a time limit, no lock is held across the network, and a tick that didn't run shows in `crew status` | 3 | nothing | to do |
 | 8 | The guard and the allow rules close the gaps the security review names: `project.env`, `worker-settings.json`, force-push to any ref, `crew evidence` taking any file | 4 (configuration half) | nothing | to do |
@@ -40,7 +41,7 @@ They change no code the migration touches, so they start now. Each ends in a rep
 
 ### After the records migration has merged
 
-Each of these rewrites code that every piece of the migration edits. Doing them first would mean rebasing each piece of the migration over them, or the reverse.
+Each of these rewrites code that every piece of the migration edits. Doing them first would mean rebasing each piece of the migration over them, or the reverse. Item 5 is the exception: it waits on items 11 and 13, not on the migration itself.
 
 | # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
@@ -49,6 +50,8 @@ Each of these rewrites code that every piece of the migration edits. Doing them 
 | 15 | crew knows which role is calling, and a role can't clear its own gates **(needs intake)** | 4 (authority half) | the migration | to do |
 | 16 | The tick calls its steps directly and hears from each what it did | 7 | the migration, 11 | to do |
 | 17 | The e2e suite is split into cases that run alone, each tied to the obligation it proves | 8 (second half) | the migration, 2, 11 | to do |
+| 5 | A clean restack or retarget starts no model session | 10 | 11, 13 | to do |
+| 20 | The implementer's profile holds what applies to every task, and loads each procedure when its phase begins | the addition (from Codex, not a finding) | the migration, 5 | to do |
 
 ### After the Contract exists
 
@@ -57,16 +60,18 @@ Each of these rewrites code that every piece of the migration edits. Doing them 
 | 18 | Prompt rules that matter have a behavioural check, and `crew review-eval` is run | 9 | 2 | to do |
 | 19 | `ARCHITECTURE.md` keeps what code can't say and drops the narration | 12 | 2 | to do |
 
-Item 19 waits on the Contract because the Contract is what takes over the part of `ARCHITECTURE.md` that says what each component must do; what's left is the part code can't say.
+Item 19 waits on the Contract because the Contract is what takes over the part of `ARCHITECTURE.md` that says what each component must do; what's left is the part code can't say. It also gives a change a short required read and a way to find what it touches: see finding 12.
 
 ### Why this order
 
-- **Items 1 to 10 run beside the migration** because each is small and edits few of the files the migration edits: a document, CI, and changes to one command or one file's rules. The size of a change matters less than whether it overlaps: item 7 is not small, but it works on call sites, locks and a unit file, not on how a task is written.
+- **Items 1 to 4 and 6 to 10 run beside the migration** because each is small and edits few of the files the migration edits: a document, CI, and changes to one command or one file's rules. The size of a change matters less than whether it overlaps: item 7 is not small, but it works on call sites, locks and a unit file, not on how a task is written.
 - **Items 11 and 12 are spikes, started now,** because they only produce a design. No code the migration touches changes until the user has seen the answer.
 - **Items 13 to 17 wait for the migration** because each rewrites a layer the migration is still moving. Item 13 changes how every command writes a task, item 14 every `SetStatus` and status comparison, item 15 the checks in `checkTaskSet` and the guard, item 16 the tick, and item 17 the tests that exercise all of them. Doing them first would mean rewriting the migration's pieces, or the pieces rewriting them.
+- **Item 5 waits on the seam (11) and on whole-or-nothing transitions (13).** A restack session costs about 0.3% of spend (see finding 10), so the saving doesn't justify building item 5 first. The seam and whole-or-nothing writes would rewrite much of it, and with both in place a restack's failure cases are simpler. The open proposal's own revisit threshold was 3% of spend. The draft task `167-crew-does-clean-restacks` holds the brief and is parked until then.
 - **Items 16 and 17 also wait on the seam (11).** The tick can only call its steps directly if a step can run without starting real `git`, `gh` and `claude`; the e2e suite can only be split into cases a Go test can run if there is a way to stand in for them.
 - **Items 4, 17, 18 and 19 wait on the Contract.** Item 4 enforces it, 17 ties each test to an obligation in it, 18 checks the prompt rules it names, and 19 trims `ARCHITECTURE.md` once the Contract holds what it said.
-- **Item 4 also waits on CI (3):** there is nothing to enforce in until CI runs on a PR. Items 2 and 3 are both urgent for that reason, and independent of each other.
+- **Item 20 waits on the migration and on item 5.** Item 5 rewrites the implementer's "Stacked tasks" and "Workflow: restack" sections. The migration is still rewriting its instructions for questions, evidence and review records (tasks `161-ask-through-crew`, `144-evidence-records` and `163-record-reviews-through-crew`). Splitting the profile first would mean moving text that both are about to change. The user agreed to this order on 2026-11-27.
+- **Item 4 also waits on CI (3):** there is nothing to enforce in until CI runs on a PR. Item 3 is done (#124), so item 4 now waits on item 2 alone. Items 2 and 3 were both urgent for that reason, and independent of each other.
 - **Item 9 has no reason to wait for item 12:** the phone lead is going whatever the multi-machine design turns out to be.
 
 ### Keeping the list true
@@ -254,15 +259,16 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 - A restack is `git rebase --onto <sha> <sha>`, a leased push, and when needed `gh pr edit --base` and `crew set base`. `rebaseFor` computes all of it, and `sendRebase` and `startRestack` then start a worker on `restackModel`, which is `"sonnet"` (`cmd_followup.go`), with the commands in a note. The session loads `implementer.md`.
 - crew already calls `gh` itself for replies, reactions and summaries.
 - A stack k deep restacks one level at a time, each level waiting for the one below to push and for the next 3-minute tick.
-- Not measured: the review's counts of restacks and nudges over six days, and the token cost of each.
+- Measured on this machine, 2026-11-27: the 29 restack sessions in its Claude Code transcripts (`~/.claude/projects/**/*.jsonl`), those whose first user message starts "You are restacking task". All fall between 2026-11-22 and 2026-11-27. Each assistant message's usage is priced at `crew costs`' Sonnet rates: $2 per million input tokens, $10 output, $0.10 cache read, and cache writes at 1.25 times the input rate for five minutes or 2 times for an hour. They cost $5.40 in all: a median of $0.17 and a maximum of $0.52 for one, with 4 to 29 model calls each. `crew costs` puts the week's total spend, 2026-11-21 to 2026-11-27, at $1,885, so restack sessions are about 0.3% of it.
+- Not measured: the cost of the fresh worker that a later review round starts after a restack session, the review's counts of nudges, and latency.
 
-**What it costs.** Tokens and latency for a step with no judgment in it when the rebase is clean. Each session is also another chance to stall or improvise. A model is needed only when the rebase conflicts or the checks fail afterwards.
+**What it costs.** About 0.3% of spend (see the figures above), and latency, for a step with no judgment in it when the rebase is clean. Each session is also another chance to stall or improvise. A model is needed only when the rebase conflicts or the checks fail afterwards.
 
 **The rule.** A clean restack or retarget is done by crew, and a model session is started only when the rebase conflicts or the checks fail afterwards.
 
 **Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session when the rebase conflicts or the checks fail afterwards, and `ARCHITECTURE.md`'s "Stacked tasks" flow and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
 
-**Settled by** item 5. An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work, except that item 5 also keeps a session for checks that fail after a clean rebase.
+**Settled by** item 5, which waits on the seam (item 11) and item 13; see "Why this order". An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work, except that item 5 also keeps a session for checks that fail after a clean rebase.
 
 ### 11. Proposals have no triage
 
@@ -297,9 +303,48 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **What it costs.** A standing tax on every change, and a file too long to read before "any structural change", as `CLAUDE.md` asks. Once it holds claims that are false, a reader can't tell which.
 
-**The rule.** `ARCHITECTURE.md` holds what code can't say (the principles, the flows, the assumptions about Claude Code, the Contracts) and leaves the rest to the code.
+**The rule.** `ARCHITECTURE.md` holds what code can't say (the principles, the flows, the assumptions about Claude Code, the Contracts) and leaves the rest to the code. A change starts from a short required read, the design principles, and has a way to find the flows and contracts it touches, so it doesn't have to read the whole file. This is Codex's second suggestion, which the user took up on 2026-11-27.
 
-**Settled by** item 19, after the Contract exists: the Contract is where the part of the narration that says what each component must do goes. Item 19 trims and rewrites; this document only says it is to.
+**Measured at `f7ab9b4`.** `ARCHITECTURE.md` is 262,781 bytes (Codex's review said 261,801). Its `## Design principles` section, lines 20 to 70, is 8,245 bytes, about 3% of the file. Its `## Main flows` section, lines 184 to 717, is 88,933 bytes. What a change would find in the file by number or by area, and what a mandatory read should hold, is not measured.
+
+**Settled by** item 19, after the Contract exists: the Contract is where the part of the narration that says what each component must do goes. Item 19 trims and rewrites; this document only says it is to. It also changes `CLAUDE.md`'s "Read `ARCHITECTURE.md` before any structural change"; see [What changes a stated rule](#what-changes-a-stated-rule).
+
+## Addition: the implementer loads every procedure at start
+
+Not one of the twelve findings: Codex raised it on 2026-11-27, and the user took it up the same day. The five reviewers and their reports don't mention it.
+
+**What is wrong.** A crew worker's profile, `agents/implementer.md`, is its system prompt. It holds every procedure the worker might need, whichever phase the task is in, so a worker fixing a small bug carries the restack procedure when it makes its first edit.
+
+**Where.** `agents/implementer.md` is 47,543 bytes at `f7ab9b4`. By `##` section, in bytes:
+
+| Section | Bytes |
+|---------|------:|
+| Frontmatter and intro | 2,226 |
+| Your voice | 492 |
+| On GitHub, you may do exactly this | 2,861 |
+| Ground rules | 4,635 |
+| Workflow: first run | 11,752 |
+| Workflow: spike | 1,576 |
+| Workflow: automated review | 9,194 |
+| Workflow: split proposal | 2,364 |
+| Workflow: review rounds | 7,127 |
+| Stacked tasks | 1,507 |
+| Workflow: restack | 2,372 |
+| When you're blocked | 1,437 |
+
+Five sections are procedures that apply only once a task reaches their phase, and most tasks reach some of them late or never: spike, automated review, split proposal, review rounds and restack. Together they are 22,633 bytes, 48% of the profile. (Which of the others could also wait is part of the work.)
+
+**What it costs.** Codex's estimate is "several thousand tokens" for each worker. Not measured: tokens (these are bytes), and what loading less does to cost. A worker's system prompt is cached after its first call, so the saving would be in cache reads on each call and in what the model has to attend to, and neither has been measured.
+
+**The rule.** The profile every worker starts with holds what applies to every task: permissions, stop conditions and requirements that affect the design. Each procedure is loaded when its phase begins. No rule the implementer follows is dropped: a rule moves to where it is loaded, it doesn't go. Codex's wording: "Loading procedures when their phase begins could recover several thousand tokens without asking the model to follow fewer rules."
+
+**Things the work has to keep true.**
+
+- `CLAUDE.md`'s Stacks rule says the restack note and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md` are one contract, and `tests/guard.sh` checks they agree. Item 5 rewrites them first.
+- `lead.md` quotes the implementer's step numbers (finding 9), and `tests/guard.sh` greps its sentences. Moving text moves what they find.
+- `ARCHITECTURE.md`'s Assumptions section assumes a resumed worker keeps the system prompt it started with. A procedure loaded later is part of the conversation instead, and whether it survives a compaction is not measured. If it doesn't, a resumed worker may no longer have the procedure it was told to follow.
+
+**Settled by** item 20. How the procedures are loaded is open: a file the worker reads, or a skill, say. Item 20 changes no rule in `CLAUDE.md` or `ARCHITECTURE.md` (item 19 is the one that changes a rule), but it moves the text two of their contracts are about.
 
 ## What changes a stated rule
 
@@ -311,6 +356,7 @@ The items below are against a rule that `CLAUDE.md` or `ARCHITECTURE.md` states 
 | 16 (finding 7) | `CLAUDE.md`, Conventions: "`crew tick` only runs other `crew` commands, each as a process of its own (`step`)". | The tick calls its steps in-process. |
 | 12 (finding 5) | `ARCHITECTURE.md`, design principle 8: "One machine runs the crew at a time. The home's `host` file names it, and a git push claims it, so two machines can't both believe they hold it." `CLAUDE.md` lists it among the principles the README's pitch rests on. | Some tasks or steps run on one machine and some on another. The user asked for this, in their own words: "we need a multi-machine set-up". |
 | 9 (finding 5) | `README.md`: "You talk to a **lead**, at a terminal or from the Claude app on your phone." | The phone lead (`crew serve`, `cmd_host.go`) goes, and the README, SETUP.md and the Contracts rows for it change. |
+| 19 (finding 12) | `CLAUDE.md`: "Read `ARCHITECTURE.md` before any structural change." This file's opening says the same. | A change reads a short part, the design principles, and finds the flows and contracts it touches without reading the rest. |
 | 15 (finding 4) | `LEDGER.md` and `ARCHITECTURE.md`: "`crew` can't tell a lead from a worker". | crew knows the caller's role. |
 
 The seam (item 11) and the status table (item 14) have to fit "Don't add other Go modules" and "Front matter stays flat `key: value`". They don't need to change them.
