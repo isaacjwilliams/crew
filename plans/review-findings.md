@@ -22,7 +22,7 @@ These are small, and they touch little of what the records migration (moving cre
 |---|------|---------|----------|-------|
 | 1 | This document | none | nothing | done (#125) |
 | 2 | The Contract convention, settled by drafting the guard's Contract (a spike) **(needs intake)** | none | nothing | to do |
-| 3 | CI runs the suites on every PR | none | nothing | to do |
+| 3 | CI runs the suites on every PR | none | nothing | done (#124) |
 | 4 | CI fails a PR that breaks the Contract | none | 2, 3 | to do |
 | 6 | A failed lookup is never read as "nothing there" | 1 | nothing | to do |
 | 7 | Every call to an outside tool has a time limit, no lock is held across the network, and a tick that didn't run shows in `crew status` | 3 | nothing | to do |
@@ -71,7 +71,7 @@ Item 19 waits on the Contract because the Contract is what takes over the part o
 - **Items 16 and 17 also wait on the seam (11).** The tick can only call its steps directly if a step can run without starting real `git`, `gh` and `claude`; the e2e suite can only be split into cases a Go test can run if there is a way to stand in for them.
 - **Items 4, 17, 18 and 19 wait on the Contract.** Item 4 enforces it, 17 ties each test to an obligation in it, 18 checks the prompt rules it names, and 19 trims `ARCHITECTURE.md` once the Contract holds what it said.
 - **Item 20 waits on the migration and on item 5.** Item 5 rewrites the implementer's "Stacked tasks" and "Workflow: restack" sections. The migration is still rewriting its instructions for questions, evidence and review records (tasks `161-ask-through-crew`, `144-evidence-records` and `163-record-reviews-through-crew`). Splitting the profile first would mean moving text that both are about to change. The user agreed to this order on 2026-11-27.
-- **Item 4 also waits on CI (3):** there is nothing to enforce in until CI runs on a PR. Items 2 and 3 are both urgent for that reason, and independent of each other.
+- **Item 4 also waits on CI (3):** there is nothing to enforce in until CI runs on a PR. Item 3 is done (#124), so item 4 now waits on item 2 alone. Items 2 and 3 were both urgent for that reason, and independent of each other.
 - **Item 9 has no reason to wait for item 12:** the phone lead is going whatever the multi-machine design turns out to be.
 
 ### Keeping the list true
