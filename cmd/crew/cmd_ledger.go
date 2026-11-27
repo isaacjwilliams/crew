@@ -198,6 +198,31 @@ func cmdShow(c *Crew, args []string) error {
 	return err
 }
 
+// shownTask is a task as crew show prints it: its file, with what its records
+// say put in the sections they belong to.
+func shownTask(path string) (string, error) {
+	t := Task{Doc{path}}
+	ls, err := t.read()
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(withRoundReports(t, withLearning(t, ls)), "\n") + "\n", nil
+}
+
+// withSection is ls with heading, and the index of the heading in it: where
+// the file has it, or added before ## Log, or at the end without a Log. An
+// added heading has no blank line after it: the caller writes the section.
+func withSection(ls []string, heading string) ([]string, int) {
+	if i := slices.Index(ls, heading); i >= 0 {
+		return ls, i
+	}
+	i := slices.Index(ls, "## Log")
+	if i < 0 {
+		i = len(ls)
+	}
+	return slices.Insert(ls, i, heading), i
+}
+
 // crew path [TYPE] ARG: the path of the file crew show prints.
 func cmdPath(c *Crew, args []string) error {
 	_, path, err := c.ledgerFile("path", args)

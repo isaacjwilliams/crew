@@ -370,8 +370,6 @@ func TestRoundAddedBeforeItsRecord(t *testing.T) {
 	}
 }
 
-// A crew migrate stopped after writing a task's records, and before taking the
-// checkboxes out of its file, leaves both. Run again, it only takes them out.
 func TestShownTaskRoundReports(t *testing.T) {
 	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
 	task := learnTask(t, "# A\n\n## Review rounds\n<!-- Appended by crew. -->\n\n### Round 1 — 2026-11-25 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test (the branch didn't cause it)\n\n## Log\n")
@@ -500,6 +498,8 @@ func TestMigrateRoundReports(t *testing.T) {
 	}
 }
 
+// A crew migrate stopped after writing a task's records, and before taking the
+// checkboxes out of its file, leaves both. Run again, it only takes them out.
 func TestMigrateStillToLearnAfterARunCutShort(t *testing.T) {
 	file := `---
 status: draft

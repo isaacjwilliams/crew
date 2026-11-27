@@ -87,17 +87,6 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with what its records
-// say put in the sections they belong to.
-func shownTask(path string) (string, error) {
-	t := Task{Doc{path}}
-	ls, err := t.read()
-	if err != nil {
-		return "", err
-	}
-	return strings.Join(withRoundReports(t, withLearning(t, ls)), "\n") + "\n", nil
-}
-
 // withLearning is the task file's lines with its still-to-learn items from its
 // records under Still to learn. Anything typed into the file's section stays
 // below them, marked as not being items crew counts. When crew can't read the
@@ -134,20 +123,6 @@ func withLearning(t Task, ls []string) []string {
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
 	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-}
-
-// withSection is ls with heading, and the index of the heading in it: where
-// the file has it, or added before ## Log, or at the end without a Log. An
-// added heading has no blank line after it: the caller writes the section.
-func withSection(ls []string, heading string) ([]string, int) {
-	if i := slices.Index(ls, heading); i >= 0 {
-		return ls, i
-	}
-	i := slices.Index(ls, "## Log")
-	if i < 0 {
-		i = len(ls)
-	}
-	return slices.Insert(ls, i, heading), i
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is
