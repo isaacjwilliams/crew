@@ -2846,7 +2846,11 @@ if command -v fish >/dev/null; then
   S3=$(crew remember "Fish completes it" --why "A test.")
   check "fish completes only the open memory suggestions' IDs after keep and decline, and --why after decline" \
     '[[ $(completes "crew keep ") == "$S3" && $(completes "crew decline ") == "$S3" && $(completes "crew decline $S3 -") == "$(printf "%s\n" --project --why)" ]]'
+  S4=$(crew remember "Fish completes it here too" --why "A test." --project "$P2")
+  check "fish completes the open suggestions of the project --project names after keep and decline" \
+    '[[ $(completes "crew keep --project $P2 ") == "$S4" && $(completes "crew decline --project $P2 ") == "$S4" && $(completes "crew keep ") == "$S3" ]]'
   crew decline "$S3" --why "Only a test." >/dev/null
+  crew decline "$S4" --why "Only a test." --project "$P2" >/dev/null
   check "fish completes nothing but file names and --project after file" \
     '[[ $(completes "crew show file ") == "$(cd "$L" && find reports logs news/*.log projects/*/review-eval -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | sort -u)" && $(completes "crew show file -") == --project ]]'
   check "fish still completes crew goal and crew memory as it did" \

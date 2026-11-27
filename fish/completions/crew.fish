@@ -43,9 +43,15 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
-# The open memory suggestions, from crew show, up to the lines typed into the file.
+# The open memory suggestions, from crew show, up to the lines typed into the file:
+# those of the project --project names, if it's typed.
 function __crew_open_suggestions
-    for l in (crew show memory-suggestions 2>/dev/null)
+    set -l words (commandline -opc)
+    set -l project
+    if set -l i (contains -i -- --project $words)
+        set project --project $words[(math $i + 1)]
+    end
+    for l in (crew show memory-suggestions $project 2>/dev/null)
         string match -q 'Typed into the file*' -- $l; and return
         string replace -rf '^- \[ \] (\S+) \*\*(.*?)\*\*.*' '$1\t$2' -- $l
     end
