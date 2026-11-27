@@ -526,11 +526,11 @@ check "the rule for weighing project memory is written once, in crew, and in no 
 for f in implementer:'--source worker:<task>' gardener:'--source gardener' goal-lead:'crew remember "<fact>" --why "<reason>"`' lead:'--source user'; do
   a=${f%%:*} src=${f#*:}
   check "$a suggests project memory with crew remember ($src), and checks the suggestions first" \
-    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'memory-suggestions.md' $A/$a.md"
+    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'crew show memory-suggestions' $A/$a.md"
 done
 check "the brief reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/brief-reviewer.md"
 check "the casual observer knows nothing of project memory" "! grep -qi 'memory' $A/casual-observer.md"
-check "the lead copies an approved suggestion into memory.md unchanged and ticks it with the outcome" \
-  "grep -q 'copy the text after the checkbox into .memory.md. unchanged' $A/lead.md && grep -q '→ kept' $A/lead.md && grep -q '→ declined: <reason>' $A/lead.md"
+check "the lead copies an approved suggestion into memory.md unchanged and settles each with crew keep or crew decline" \
+  "grep -q 'copy the suggestion.s text after its ID into .memory.md. unchanged' $A/lead.md && grep -q 'crew keep <id>' $A/lead.md && grep -q 'crew decline <id> --why' $A/lead.md"
 
 summary guard
