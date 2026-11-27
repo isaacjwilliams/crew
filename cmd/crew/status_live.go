@@ -585,8 +585,8 @@ func (m *liveStatus) nearestWhole(n int) int {
 // opens or closes it when x is on its marker. Anything else on the screen,
 // the headings, the strip, the bar and the room below the last line, is not
 // a line, and does nothing. The screen stays where it is, unless the new
-// line's strip leaves less room and cuts off a line that was whole, or hides
-// the line.
+// line's strip leaves less room and cuts off a line that was whole or hides
+// the line, or leaves more and the report ends higher.
 func (m *liveStatus) click(x, y int) {
 	n := m.top + y - len(m.headings) // the screen line y, counted from the first shown line
 	if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() || n >= m.drawnHeight(0, len(m.shown)) {
@@ -597,11 +597,13 @@ func (m *liveStatus) click(x, y int) {
 	end := start + len(m.shown[i].drawn)
 	wasWhole := m.wholly(start, end)
 	m.setCursor(i)
-	// A line cut off by the screen's edge stays as it is. A whole one that the
-	// new strip cuts off, and one it leaves no room for, come into view.
-	if !m.wholly(start, end) && (wasWhole || end <= m.top || start >= m.top+m.bodyHeight()) {
+	// A line cut off by the screen's edge stays as it is. A whole one stays
+	// whole, and one the new strip leaves no room for comes into view. Either
+	// way, a shorter strip never leaves empty room under the last line.
+	if wasWhole || end <= m.top || start >= m.top+m.bodyHeight() {
 		m.scroll()
 	}
+	m.top = min(m.top, max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
 	// Only a line's first row has its marker.
 	if n == start && x == m.markerColumn() {
 		m.setOpen(!m.shown[i].open)

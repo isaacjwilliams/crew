@@ -1208,14 +1208,13 @@ func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
 				i := m.lineAt(m.top + y - len(m.headings))
 				start := startOf(m, i)
 				whole := m.wholly(start, start+len(m.shown[i].drawn))
-				top := m.top
 				clicked(m, 0, y)
 				wholeAfter := m.wholly(start, start+len(m.shown[i].drawn))
 				if whole && !wholeAfter {
 					t.Fatalf("at height %d after %d turns, a click at screen line %d cuts off the whole line it highlights", height, turns, y)
 				}
-				if whole && m.top != top && m.wholly(start, start+len(m.shown[i].drawn)) && startOf(m, i) >= top && start+len(m.shown[i].drawn) <= top+m.bodyHeight() {
-					t.Fatalf("at height %d after %d turns, a click at screen line %d moves a line that stays whole", height, turns, y)
+				if room := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top > max(room, 0) {
+					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves the screen at %d, past the last screenful at %d", height, turns, y, m.top, room)
 				}
 			}
 			wheeled(m, tea.MouseWheelDown, 1)
@@ -1769,6 +1768,28 @@ func TestLiveStatusSaysWhenTheWorkersCouldntBeListed(t *testing.T) {
 		}
 		if !failed && !strings.Contains(got, "merge now") {
 			t.Errorf("at %v, after a listing succeeded, 024-ready shows %q", run.open(), got)
+		}
+	}
+}
+
+// A click on a line with shorter notes than the line it leaves makes room on
+// the screen. At the end of the report the screen then moves up to use it.
+func TestLiveStatusClickAtTheEndLeavesNoEmptyRoom(t *testing.T) {
+	for _, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		last := len(m.shown) - 1
+		for !m.shown[last].hasFields() {
+			last--
+		}
+		m.shown = m.shown[:last+1]
+		m.shown[last].fields[notesField].text = strings.Repeat("a long note ", 12)
+		m.moveTo(last)
+		for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
+			m.moveTo(last)
+			clicked(m, 0, y)
+			if room := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top > room {
+				t.Errorf("at %dx%d, a click at screen line %d leaves the screen at %d, past the last screenful at %d", size.Width, size.Height, y, m.top, room)
+			}
 		}
 	}
 }
