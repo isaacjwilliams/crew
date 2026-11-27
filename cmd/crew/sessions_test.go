@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,23 +37,29 @@ func TestTurnEndedReadsTheSessionTranscript(t *testing.T) {
 	}
 }
 
-// claude agents can list a job as working after its turn has ended: a shell it
-// started keeps it working, and the state can stay working once its process has
-// exited.
-func TestAWorkingJobWhoseTurnEnded(t *testing.T) {
+// claudeListing puts a claude on PATH whose `claude agents` lists jobs (JSON
+// entries), and writes each session's transcript under CLAUDE_CONFIG_DIR.
+func claudeListing(t *testing.T, jobs string, transcripts map[string]string) {
+	t.Helper()
 	bin, config := t.TempDir(), t.TempDir()
-	os.WriteFile(filepath.Join(bin, "claude"), []byte(`#!/bin/sh
-echo '[{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"live-s"},
-{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"}]'
-`), 0o755)
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho '["+jobs+"]'\n"), 0o755)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	dir := filepath.Join(config, "projects", "-home-me-work")
 	os.MkdirAll(dir, 0o755)
-	for _, s := range []string{"live-s", "gone-s"} {
-		os.WriteFile(filepath.Join(dir, s+".jsonl"), []byte(`{"type":"system","subtype":"turn_duration"}`+"\n"), 0o644)
+	for session, content := range transcripts {
+		os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(content), 0o644)
 	}
+}
+
+// claude agents can list a job as working after its turn has ended: a shell it
+// started keeps it working, and the state can stay working once its process has
+// exited.
+func TestAWorkingJobWhoseTurnEnded(t *testing.T) {
+	ended := `{"type":"system","subtype":"turn_duration"}` + "\n"
+	claudeListing(t, `{"id":"live","state":"working","pid":4242,"status":"busy","sessionId":"live-s"},
+{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"}`, map[string]string{"live-s": ended, "gone-s": ended})
 	as := (&Crew{Home: t.TempDir()}).agents()
 	if as.jobBusy("live") || as.jobState("live") != "idle, background task running" {
 		t.Errorf("with its process running: busy %v, state %q", as.jobBusy("live"), as.jobState("live"))
@@ -171,6 +178,135 @@ func TestLastRequestIsTheSessionsOwnLastReply(t *testing.T) {
 		writeTranscript(t, dir, "s1.jsonl", own+cut+"\n")
 		if _, _, ok := lastRequest(path); ok {
 			t.Errorf("lastRequest gave the last reply it could read, though a line after it doesn't read: %s", cut)
+		}
+	}
+}
+
+// bashCall is a Bash call and its result as a transcript holds them: one run in
+// the background (more is `"run_in_background":true,`) or moved there at its
+// timeout, with the background task ID id.
+func bashCall(id, input, more string) string {
+	return fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_%s","name":"Bash","input":{%s%s}}]}}
+{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_%s","type":"tool_result","content":"Command running in background with ID: %s."}]},"toolUseResult":{"stdout":"","backgroundTaskId":%q}}
+`, id, more, input, id, id, id)
+}
+
+// background is a Bash call run in the background, described.
+func background(id, description string) string {
+	return bashCall(id, fmt.Sprintf(`"command":"bin/%s","description":%q`, id, description), `"run_in_background":true,`)
+}
+
+// notice is the task notification Claude Code queues when background task id
+// finishes with status.
+func notice(id, status string) string {
+	return queued(fmt.Sprintf(`<task-id>%s</task-id>\n<status>%s</status>`, id, status))
+}
+
+// queued is a task notification with body, as Claude Code queues it.
+func queued(body string) string {
+	return `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n` + body + `\n</task-notification>"}` + "\n"
+}
+
+// taskStop is a TaskStop call that stopped background task id, and its result.
+func taskStop(id string) string {
+	return fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stop_%s","name":"TaskStop","input":{"task_id":%q}}]}}
+{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_stop_%s","type":"tool_result","content":"stopped"}]},"toolUseResult":{"message":"Successfully stopped task: %s","task_id":%q,"task_type":"local_bash"}}
+`, id, id, id, id, id)
+}
+
+const turnEnd = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Waiting."}]}}
+{"type":"system","subtype":"turn_duration"}
+`
+
+// A transcript names each background command still running, by its
+// description, or its command without one; a finished or stopped one isn't
+// named. When a line doesn't read, a start can't be named, or a notice has no
+// task ID or gives one of its commands a status crew doesn't know, it names none.
+func TestBackgroundCommandsNamesTheOnesStillRunning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s1.jsonl")
+	server, checks := background("b1", "bin/rails server"), background("b2", "Run the clone checks")
+	for _, c := range []struct {
+		name, transcript string
+		want             []string
+	}{
+		{"one running", server + turnEnd, []string{"bin/rails server"}},
+		{"two running, in the order they started", server + checks + turnEnd, []string{"bin/rails server", "Run the clone checks"}},
+		{"one started and finished", checks + turnEnd + notice("b2", "completed") + turnEnd, nil},
+		{"one of two finished", server + checks + notice("b2", "failed") + turnEnd, []string{"bin/rails server"}},
+		{"one killed", checks + notice("b2", "killed") + turnEnd, nil},
+		{"one that finished before its start was written", server + notice("b2", "failed") + checks + turnEnd, []string{"bin/rails server"}},
+		{"one stopped with TaskStop, which sends no notice", server + taskStop("b1") + turnEnd, nil},
+		{"one moved to the background at its timeout", bashCall("b3", `"command":"bin/rake db:restore","description":"Restore the backup"`, "") + turnEnd, []string{"Restore the backup"}},
+		{"one with no description", bashCall("b4", `"command":"npm run dev"`, `"run_in_background":true,`) + turnEnd, []string{"npm run dev"}},
+		{"a subagent's notice and a monitor's event", checks + notice("a17", "completed") +
+			queued(`<task-id>m1</task-id>\n<event>ready</event>`) + turnEnd, []string{"Run the clone checks"}},
+		{"nothing in the background", turnEnd, nil},
+		{"a subagent's own background command", strings.ReplaceAll(server, `{"type":`, `{"isSidechain":true,"type":`) + turnEnd, nil},
+		{"a line that doesn't read", server + `{"type":"assistant","mess` + "\n" + turnEnd, nil},
+		{"a start whose call isn't in the transcript", checks + strings.SplitAfter(server, "\n")[1] + turnEnd, nil},
+		{"a start with neither a description nor a command", checks + bashCall("b5", `"timeout":600000`, `"run_in_background":true,`) + turnEnd, nil},
+		{"a notice with no task ID", server + queued(`<status>completed</status>`) + turnEnd, nil},
+		{"a notice of its own with a status crew doesn't know", server + checks + notice("b1", "paused") + turnEnd, nil},
+		{"a notice of its own, before its start, with a status crew doesn't know", notice("b1", "paused") + server + checks + turnEnd, nil},
+		{"a notice of its own with no status", server + checks + queued(`<task-id>b1</task-id>`) + turnEnd, nil},
+	} {
+		os.WriteFile(path, []byte(c.transcript), 0o644)
+		if got := backgroundCommands(path); !slices.Equal(got, c.want) {
+			t.Errorf("%s: backgroundCommands = %q; want %q", c.name, got, c.want)
+		}
+	}
+	if got := backgroundCommands(filepath.Join(dir, "none.jsonl")); got != nil {
+		t.Errorf("with no transcript: backgroundCommands = %q; want none", got)
+	}
+}
+
+// A job whose turn ended while a background command it started still runs
+// shows as idle with what's running, on a task's row or a goal's, and isn't
+// busy: it isn't counted against MAX_WORKERS. One that can't be read so
+// shows as it did before: with no process, listed as anything but working, or
+// with no transcript.
+func TestAJobWaitingOnItsBackgroundCommand(t *testing.T) {
+	waiting := background("b1", "bin/rails server") + turnEnd
+	claudeListing(t, `{"id":"waits","state":"working","pid":4242,"status":"busy","sessionId":"waits-s"},
+{"id":"two","state":"working","pid":4242,"status":"busy","sessionId":"two-s"},
+{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"},
+{"id":"done","state":"done","pid":4242,"status":"idle","sessionId":"done-s"},
+{"id":"asks","state":"blocked","pid":4242,"status":"busy","sessionId":"asks-s"},
+{"id":"mid","state":"working","pid":4242,"status":"busy","sessionId":"mid-s"},
+{"id":"shell","state":"working","pid":4242,"status":"busy","sessionId":"shell-s"},
+{"id":"none","state":"working","pid":4242,"status":"busy","sessionId":"none-s"}`, map[string]string{
+		"waits-s": waiting, "two-s": background("b1", "bin/rails server") + background("b2", "npm run dev") + turnEnd,
+		"gone-s": waiting, "done-s": waiting, "asks-s": waiting,
+		"mid-s":   waiting + `{"type":"user","message":{"role":"user","content":"New input"}}` + "\n",
+		"shell-s": `{"type":"system","subtype":"turn_duration"}` + "\n",
+	})
+	c := &Crew{Home: t.TempDir()}
+	for _, job := range []string{"waits", "mid"} {
+		writeFile(t, c, "", "projects", "p", "project.env")
+		reportTask(t, c, "p", "001-"+job, false, "status: working", "worker_job: "+job)
+	}
+	as := c.agents()
+	if n := c.runningWorkers(as); n != 1 {
+		t.Errorf("runningWorkers = %d; want 1, the worker mid-turn and not the one waiting", n)
+	}
+	for job, want := range map[string]string{
+		"waits": "idle (bin/rails server)", "two": "idle (bin/rails server, npm run dev)",
+		"gone": "idle", "done": "done", "asks": "blocked", "mid": "working", "shell": "idle, background task running", "none": "working",
+	} {
+		if got := as.jobState(job); got != want {
+			t.Errorf("%s: state %q; want %q", job, got, want)
+		}
+	}
+	if as.jobBusy("waits") || !as.jobBusy("mid") || !as.jobBusy("none") {
+		t.Errorf("busy: waiting %v, mid-turn %v, with no transcript %v; want false, true, true", as.jobBusy("waits"), as.jobBusy("mid"), as.jobBusy("none"))
+	}
+	if got := goalFields(goalReport{Goal: Goal{docWith(t, "---\nstatus: running\n---\n")}, Lead: *as.find("waits")})[workerField]; got != "idle (bin/rails server)" {
+		t.Errorf("a goal lead waiting on its background command shows as %q", got)
+	}
+	for _, job := range []string{"gone", "done", "asks", "shell"} {
+		if b := as.find(job).Background; b != nil {
+			t.Errorf("%s: Background = %q; want none", job, b)
 		}
 	}
 }

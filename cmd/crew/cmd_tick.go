@@ -350,8 +350,10 @@ func (c *Crew) dispatchReady(news *tickNews) {
 		}
 		project := taskProjectDir(t)
 		// A dependency that doesn't name exactly one task is crew dispatch's to report.
+		// Read afresh for each task: a dependency may have merged while tick
+		// dispatched the one before.
 		if deps, err := c.pendingDeps(idx, t); err == nil && len(deps) > 0 {
-			news.heldBack(project, "%s: dispatch waits: it comes %s", t.ID(), after(deps))
+			news.heldBack(project, "%s: dispatch waits: %s", t.ID(), waitsFor(newDependencies(c, idx), t))
 			continue
 		}
 		// Dispatching ends the go-ahead, so say what it was first. tickDispatches
@@ -371,6 +373,17 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			warn("%s: dispatch failed: %s", t.ID(), strings.TrimRight(errs.String(), "\n"))
 		}
 	}
+}
+
+// waitsFor says what a task with dependencies left waits for next. next names
+// at least one of them, unless its stack parent waits for them all; then it
+// waits for the parent's dispatch.
+func waitsFor(deps *dependencies, t Task) string {
+	if next, _ := deps.next(t); len(next) > 0 {
+		return "it comes " + after(next)
+	}
+	p, _ := deps.branches.liveParent(t)
+	return "it's stacked on " + p.ID() + ", which hasn't been dispatched yet"
 }
 
 // sortForDispatch puts tasks in the order crew tick tries them: highest priority

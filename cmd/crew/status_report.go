@@ -126,6 +126,15 @@ type taskRow struct {
 	Folded bool
 }
 
+// stack is the row's task and every task stacked on it.
+func (r taskRow) stack() []Task {
+	tasks := []Task{r.Task}
+	for _, k := range r.Kids {
+		tasks = append(tasks, k.stack()...)
+	}
+	return tasks
+}
+
 // stackAsks: the task, or one stacked on it, has open questions.
 func (r taskRow) stackAsks() bool {
 	if r.Task.OpenQuestions() > 0 {
@@ -263,18 +272,13 @@ type statusView struct {
 	settings Settings          // the project's, or the crew's when they can't be read (settingsOf)
 	kids     map[string][]Task // a task's file → the tasks stacked on it
 	spikes   map[string][]Task // a task's ID → the spikes that inform it
-	deps     map[string]depsOf // a task's file → the tasks it waits on
+	deps     *dependencies     // what the project's tasks wait on
 	caps     map[string]capOf  // a goal's ID → its tasks in flight against its max_in_flight
 	prs      map[string]prRead // the project's PRs as its tasks name them → what GitHub answered when crew last asked; a PR missing wasn't asked for
 }
 
-// depsOf and capOf keep what status has worked out for a task or a goal, error
-// and all, so it's worked out once.
-type depsOf struct {
-	tasks []Task
-	err   error
-}
-
+// capOf keeps what status has worked out for a goal's cap, error and all, so
+// it's worked out once.
 type capOf struct {
 	slots
 	err error
@@ -326,7 +330,8 @@ func (s *statusView) project(name string) projectReport {
 	}
 	// A project's own MAX_WORKERS may not be the crew's.
 	r.Workers, r.WorkersErr = workerSlots(s.settings, s.running)
-	s.kids, s.deps, s.caps = map[string][]Task{}, map[string]depsOf{}, map[string]capOf{}
+	s.kids, s.caps = map[string][]Task{}, map[string]capOf{}
+	s.deps = newDependencies(s.Crew, s.branches)
 	s.spikes = map[string][]Task{}
 	for _, t := range tasks {
 		if d := t.Get("informs"); d != "" {
@@ -466,9 +471,81 @@ func (s *statusView) goalGroups(g Goal, tasks []Task) []taskGroup {
 			}
 			group.Rows = append(group.Rows, row)
 		}
+		if k == groupWaiting {
+			group.Rows = s.inRunOrder(group.Rows)
+		}
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+// inRunOrder puts rows in the order their tasks can run: each after every row
+// holding a task that one of its own waits for, directly or through other rows,
+// and otherwise in the order given. When two rows wait for each other, the one
+// whose top task waits for the other's goes second. Rows whose top tasks wait
+// for each other too keep the order given among themselves.
+func (s *statusView) inRunOrder(rows []taskRow) []taskRow {
+	rowOf := map[string]int{} // a task's file → the row holding it
+	for i, r := range rows {
+		for _, t := range r.stack() {
+			rowOf[t.Path] = i
+		}
+	}
+	waits := s.rowWaits(rows, rowOf, taskRow.stack)
+	tops := s.rowWaits(rows, rowOf, func(r taskRow) []Task { return []Task{r.Task} })
+	// goesAfter: row i goes after row j.
+	goesAfter := func(i, j int) bool {
+		if waits[i][j] != waits[j][i] {
+			return waits[i][j]
+		}
+		return waits[i][j] && tops[i][j] && !tops[j][i]
+	}
+	listed := make([]bool, len(rows))
+	free := func(i int) bool {
+		for j := range rows {
+			if !listed[j] && goesAfter(i, j) {
+				return false
+			}
+		}
+		return !listed[i]
+	}
+	ordered := make([]taskRow, 0, len(rows))
+	for range rows {
+		// Some row is always free, since going after never comes back round:
+		// through the closure, rows in a loop all wait for each other, so none
+		// of them waits one way, and the same holds for their top tasks.
+		i := 0
+		for !free(i) {
+			i++
+		}
+		listed[i] = true
+		ordered = append(ordered, rows[i])
+	}
+	return ordered
+}
+
+// rowWaits[i][j] says row i waits for row j, directly or through other rows:
+// that a task of row i's tasks waits for one that row j holds.
+func (s *statusView) rowWaits(rows []taskRow, rowOf map[string]int, tasks func(taskRow) []Task) [][]bool {
+	waits := make([][]bool, len(rows))
+	for i, r := range rows {
+		waits[i] = make([]bool, len(rows))
+		for _, t := range tasks(r) {
+			for dep := range s.deps.deliveredBefore(t) {
+				if j, ok := rowOf[dep]; ok && j != i {
+					waits[i][j] = true
+				}
+			}
+		}
+	}
+	for k := range rows {
+		for i := range rows {
+			for j := range rows {
+				waits[i][j] = waits[i][j] || waits[i][k] && waits[k][j]
+			}
+		}
+	}
+	return waits
 }
 
 // row works out one task's row, then the rows of the tasks stacked on it.
@@ -500,10 +577,16 @@ func leavesStack(t, parent Task) bool {
 }
 
 // folds: a draft outside a goal, and every draft stacked on it, has no open
-// question and nothing still to learn, so the plain text counts the stack in one
-// line rather than listing it.
+// question and nothing still to learn (no open item, and every spike finished),
+// so the plain text counts the stack in one line rather than listing it. A draft
+// whose items can't be read doesn't fold, so its row can say why. It doesn't ask
+// learning: that names finished spikes too, which a row still shows but which
+// have nothing left to tell the draft.
 func (s *statusView) folds(t Task) bool {
-	if t.Status() != Draft || t.OpenQuestions() > 0 || s.learning(t) != "" {
+	if t.Status() != Draft || t.OpenQuestions() > 0 || s.hasUnfinishedSpike(t) {
+		return false
+	}
+	if items, err := t.StillToLearn(); err != nil || openItems(items) > 0 {
 		return false
 	}
 	for _, k := range s.kids[t.Path] {
@@ -514,20 +597,20 @@ func (s *statusView) folds(t Task) bool {
 	return true
 }
 
-// waitsOn are the tasks this one waits on, as crew dispatch sees them. A task's
-// row and its group both ask, so the answer is kept.
-func (s *statusView) waitsOn(t Task) ([]Task, error) {
-	if d, ok := s.deps[t.Path]; ok {
-		return d.tasks, d.err
+// hasUnfinishedSpike: a spike that informs the draft isn't done or abandoned, so
+// it may still have something to tell the draft.
+func (s *statusView) hasUnfinishedSpike(t Task) bool {
+	for _, sp := range s.spikes[t.ID()] {
+		if !sp.Status().Finished() {
+			return true
+		}
 	}
-	deps, err := s.pendingDeps(s.branches, t)
-	s.deps[t.Path] = depsOf{deps, err}
-	return deps, err
+	return false
 }
 
 // waits: the task waits on other tasks, or on a dependency it can't name.
 func (s *statusView) waits(t Task) bool {
-	deps, err := s.waitsOn(t)
+	deps, err := s.deps.waitsOn(t)
 	return err != nil || len(deps) > 0
 }
 
@@ -586,10 +669,10 @@ func (s *statusView) notes(t Task) []string {
 		notes = append(notes, "on "+taskNumber(p))
 	}
 	if !st.InFlight() && !st.Finished() {
-		if deps, err := s.waitsOn(t); err != nil {
+		if next, err := s.deps.next(t); err != nil {
 			notes = append(notes, err.Error())
-		} else if len(deps) > 0 {
-			notes = append(notes, after(deps))
+		} else if len(next) > 0 {
+			notes = append(notes, after(next))
 		}
 	}
 	// crew tick dispatches a goal's ready tasks, and others on a go-ahead, so
@@ -690,6 +773,93 @@ func (s *statusView) learning(t Task) string {
 		parts = append(parts, strings.Join(spikes, ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// dependencies are what tasks wait on, as crew dispatch sees them (pendingDeps).
+// A task's row, its group and the tasks that wait on it all ask, so each answer
+// is kept.
+type dependencies struct {
+	*Crew             // for pendingDeps
+	branches Branches // the index pendingDeps reads
+	pending  map[string]depsOf
+	before   map[string]map[string]bool // a task's file → deliveredBefore
+}
+
+// depsOf is what a task waits on, error and all.
+type depsOf struct {
+	tasks []Task
+	err   error
+}
+
+func newDependencies(c *Crew, idx Branches) *dependencies {
+	return &dependencies{Crew: c, branches: idx, pending: map[string]depsOf{}, before: map[string]map[string]bool{}}
+}
+
+// waitsOn are the tasks t waits on.
+func (d *dependencies) waitsOn(t Task) ([]Task, error) {
+	if p, ok := d.pending[t.Path]; ok {
+		return p.tasks, p.err
+	}
+	deps, err := d.pendingDeps(d.branches, t)
+	d.pending[t.Path] = depsOf{deps, err}
+	return deps, err
+}
+
+// next are the tasks t waits on next. It leaves out one that another of them,
+// or t's stack parent, waits for too, since that one has to go first. An
+// abandoned task is always named, since it will never be delivered, and so are
+// tasks that wait for each other in a loop, since none of them goes first.
+// The error is waitsOn's, returned with what it found.
+func (d *dependencies) next(t Task) ([]Task, error) {
+	deps, err := d.waitsOn(t)
+	var parentWaits map[string]bool
+	if p, ok := d.branches.liveParent(t); ok {
+		parentWaits = d.deliveredBefore(p)
+	}
+	waits := map[string]map[string]bool{} // a dependency's file → what it waits for
+	for _, dep := range deps {
+		waits[dep.Path] = d.deliveredBefore(dep)
+	}
+	var next []Task
+	for _, e := range deps {
+		waitedFor := parentWaits[e.Path] || slices.ContainsFunc(deps, func(f Task) bool {
+			return waits[f.Path][e.Path] && !waits[e.Path][f.Path] // and not in a loop
+		})
+		if e.Status() == Abandoned || !waitedFor {
+			next = append(next, e)
+		}
+	}
+	return next, err
+}
+
+// deliveredBefore are the tasks that must be delivered before t can be
+// dispatched, by file: those it waits on, and theirs in turn, and those its
+// stack parent's dispatch waits for. It's empty for a task that's been
+// dispatched already, or never will be.
+func (d *dependencies) deliveredBefore(t Task) map[string]bool {
+	if b, ok := d.before[t.Path]; ok {
+		return b
+	}
+	delivered, seen := map[string]bool{}, map[string]bool{}
+	var visit func(t Task)
+	visit = func(t Task) {
+		// A task that's been dispatched, or never will be, holds nothing up.
+		if st := t.Status(); seen[t.Path] || st.InFlight() || st.Finished() {
+			return
+		}
+		seen[t.Path] = true
+		deps, _ := d.waitsOn(t)
+		for _, dep := range deps {
+			delivered[dep.Path] = true
+			visit(dep)
+		}
+		if p, ok := d.branches.liveParent(t); ok {
+			visit(p)
+		}
+	}
+	visit(t)
+	d.before[t.Path] = delivered
+	return delivered
 }
 
 const afterNamed = 4 // how many tasks "after" names before it only counts them

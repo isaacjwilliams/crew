@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // followupCrew is a home that runs the crew, with a git repo of its own, and
@@ -452,5 +453,45 @@ func TestFollowupWhenTheWorktreeCantBeMade(t *testing.T) {
 				t.Errorf("worker_job is %q and the worktree made: %v; want w1 and none", task.WorkerJob(), isDir(f.worktree()))
 			}
 		})
+	}
+}
+
+// A worker waiting on a background command it started isn't stalled, however
+// long the command runs. Any other worker whose turn ended with the task in its
+// hands is, once its transcript has been quiet for stallAfter: one crew can't
+// read so as before, one with nothing in the background, and one whose
+// background command finished before its last turn.
+func TestStalledLeavesAWorkerWaitingOnItsBackgroundCommand(t *testing.T) {
+	waiting := background("b1", "Run the clone checks") + turnEnd
+	finished := waiting + notice("b1", "completed") + turnEnd
+	claudeListing(t, `{"id":"waits","state":"working","pid":4242,"status":"busy","sessionId":"waits-s"},
+{"id":"gone","state":"working","pid":null,"sessionId":"gone-s"},
+{"id":"done","state":"done","pid":4242,"status":"idle","sessionId":"done-s"},
+{"id":"unread","state":"working","pid":4242,"status":"busy","sessionId":"unread-s"},
+{"id":"unknown","state":"working","pid":4242,"status":"busy","sessionId":"unknown-s"},
+{"id":"shell","state":"working","pid":4242,"status":"busy","sessionId":"shell-s"},
+{"id":"idle","state":"done","pid":4242,"status":"idle","sessionId":"idle-s"},
+{"id":"finished","state":"done","pid":4242,"status":"idle","sessionId":"finished-s"},
+{"id":"lags","state":"working","pid":4242,"status":"busy","sessionId":"lags-s"}`, map[string]string{
+		"waits-s": waiting, "gone-s": waiting, "done-s": waiting,
+		"unread-s":  `{"type":"assistant","mess` + "\n" + waiting,
+		"unknown-s": waiting + queued(`<status>completed</status>`),
+		"shell-s":   turnEnd, "idle-s": turnEnd, "finished-s": finished, "lags-s": finished,
+	})
+	task := Task{docWith(t, "---\nid: 001-a\nstatus: working\n---\n# a\n\n## Open questions\n\n## Log\n")}
+	as := (&Crew{Home: t.TempDir()}).agents()
+	for _, quiet := range []time.Duration{9 * time.Minute, 3 * time.Hour} {
+		for job, want := range map[string]bool{
+			"waits": false,
+			"gone":  true, "done": true, "unread": true, "unknown": true, "shell": true,
+			"idle": true, "finished": true, "lags": true,
+		} {
+			a := as.find(job)
+			at := time.Now().Add(-quiet)
+			os.Chtimes(transcript(a.SessionID), at, at)
+			if got := stalled(task, a); got != want {
+				t.Errorf("%s, quiet for %v: stalled = %v; want %v", job, quiet, got, want)
+			}
+		}
 	}
 }

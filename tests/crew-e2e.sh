@@ -43,6 +43,23 @@ transcript() {  # session ended|running: the end of the session's transcript, a 
   echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}' >>"$f"
   if [[ $2 == ended ]]; then echo '{"type":"system","subtype":"turn_duration"}' >>"$f"; fi
 }
+background() {  # session description [finished]: the session's last turn started a background command and ended; with finished, the command's notice started a turn that ended too
+  mkdir -p "$HOME/.claude/projects/stub"
+  local f="$HOME/.claude/projects/stub/$1.jsonl"
+  {
+    echo '{"type":"user","message":{"role":"user","content":"New input"}}'
+    jq -nc --arg d "$2" '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: "toolu_bg1", name: "Bash", input: {command: "bin/check", description: $d, run_in_background: true}}]}}'
+    echo '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bg1","type":"tool_result","content":"Command running in background with ID: bg1."}]},"toolUseResult":{"backgroundTaskId":"bg1"}}'
+    echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}'
+    echo '{"type":"system","subtype":"turn_duration"}'
+    if [[ ${3:-} == finished ]]; then
+      echo '{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}'
+      echo '{"type":"user","message":{"role":"user","content":"<task-notification>"},"origin":{"kind":"task-notification"}}'
+      echo '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}'
+      echo '{"type":"system","subtype":"turn_duration"}'
+    fi
+  } >"$f"
+}
 request() {  # session minutes tokens: the session's transcript ends with a turn whose last request was minutes ago and sent tokens of context
   mkdir -p "$HOME/.claude/projects/stub"
   printf '{"type":"assistant","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":500}}}\n{"type":"system","subtype":"turn_duration"}\n' \
@@ -1485,6 +1502,20 @@ n=$(resumes); work "$WT13" nudge6.txt  # a new commit, so the nudge above no lon
 stall13 working 4242 busy; transcript "$(crew get 13 worker_session)" running; quiet 13
 out=$(crew tick 2>/dev/null)
 check "or while its turn is still running" '[[ -z $out && $(resumes) == "$n" ]]'
+s13=$(crew get 13 worker_session); setstate working 4242 busy; background "$s13" "Run the clone checks"
+for quiet in "9 minutes" "3 hours"; do
+  touch -d "$quiet ago" "$STUB/$s13.jsonl"
+  out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1)
+  check "a worker waiting on its own background command, quiet for $quiet, isn't nudged by tick or by hand, and no one is asked" \
+    '[[ -z $out && $byhand == "nothing to do: 013-tick-routing hasn'"'"'t stalled" && $(resumes) == "$n" && -z $(asked13) ]]'
+done
+check "status names the background command a worker waits on" '[[ $(crew status | grep "^  013-tick-routing ") == *"  idle (Run the clone checks)  "* ]]'
+r=$(crew get 13 review_rounds); crew set 13 feedback_since 1970-01-01T00:00:00Z; out=$(crew tick 2>/dev/null)
+check "a worker waiting on its own background command takes a review round" \
+  '[[ $out == *"013-tick-routing: round $((r + 1)) sent to its worker"* && $(crew get 13 last_round_sent) == $((r + 1)) && $(resumes) == $((n + 1)) ]]'
+background "$s13" "Run the clone checks"; setstate working 4242 busy; crew followup 13 --note "Let the checks run on." >/dev/null 2>&1
+check "and a followup" '[[ $(resumes) == $((n + 2)) && $(last_prompt) == *"Let the checks run on."* ]]'
+answer13; crew set 13 status working; n=$(resumes)
 for state in stopped gone; do
   stall13 "done" null
   if [[ $state == stopped ]]; then setstate stopped null; else cp "$HOME/agents.json" "$HOME/agents.kept"; jq --arg j "$(crew get 13 worker_job)" 'map(select(.id != $j))' "$HOME/agents.kept" >"$HOME/agents.json"; fi
@@ -2078,8 +2109,23 @@ setstate "done" null
 out=$(crew tick 2>&1)
 check "a goal abandoned while tick sets up its task's worktree starts no worker for it, and says why" \
   '[[ $out == *"$TS: dispatch held back: goal $G4 is abandoned now; leaving $TS ready"* && $(gget "$GF4" status) == abandoned && $(crew get "$PS" status) == ready ]]'
+# A dependency that merges while tick dispatches an earlier task no longer holds
+# back a later one, though the note of a task tried before them both named it.
+GF6=$(crew goal new "Season sides" --max-in-flight 3); G6=$(basename "$GF6" .md)
+sed -i '/^## Goal$/a "Ship the sides."' "$GF6"; crew goal start "$GF6" >/dev/null
+PDS=$(goal_task "$GF6" "Sides spike"); crew set "$PDS" status working
+PDB=$(goal_task "$GF6" "Sides after spike"); crew set "$PDB" priority 3; crew set "$PDB" depends_on "$(basename "$PDS" .md)"
+PDA=$(goal_task "$GF6" "Sides last"); crew set "$PDA" priority 5; crew set "$PDA" depends_on "$(basename "$PDB" .md)"
+PDX=$(goal_task "$GF6" "Sides free"); crew set "$PDX" priority 4
+printf 'crew set %s status merged >/dev/null 2>&1; rm -f "$HOME/wt-hook-cmd"\n' "$PDS" >"$HOME/wt-hook-cmd"
+echo "MAX_WORKERS=20" >>"$PE"; setstate "done" null
+out=$(crew tick 2>&1)
+check "a dependency merged while tick dispatches an earlier task lets a later one go in the same tick" \
+  '[[ $out == *"$(basename "$PDA" .md): dispatch waits: it comes after $(basename "$PDB" .md | cut -d- -f1)"* && $out == *"$(basename "$PDX" .md): dispatched for goal $G6"* && $out == *"$(basename "$PDB" .md): dispatched for goal $G6"* ]]'
+sed -i '/^MAX_WORKERS=20$/d' "$PE"
 sed -i '/^WORKTREE_TOOL=/d' "$PE"; rm -f "$HOME/wt-hook-cmd"
-for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$PS" "$NG"; do crew set "$f" status abandoned; done
+for f in "$PA" "$PB" "$PC" "$PH" "$PQ" "$PR" "$PS" "$NG" "$PDA" "$PDB" "$PDX"; do crew set "$f" status abandoned; done
+crew goal abandon "$G6" >/dev/null
 # crew status groups a goal's tasks by where they stand, in the order crew tick
 # dispatches them, and says what each one not yet dispatched waits for.
 num() { basename "$1" .md | cut -d- -f1; }
@@ -2119,7 +2165,8 @@ crew set "$SR" status abandoned
 st=$(crew status)
 check "status lists a task stacked through its base on an abandoned one as waiting, after it" '[[ $(heading "$st" "waiting on other tasks") == *"$(num "$SY")-"*"after $(num "$SR") (abandoned)"* ]]'
 crew set "$SY" status abandoned
-SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK")"
+# SH waits for SI, so the note leaves SI out and counts the other five.
+SZ=$(goal_task "$GF5" "Groups after many"); crew set "$SZ" depends_on "$(num "$SI") $(num "$SH") $(num "$SA") $(num "$SL") $(num "$SK") $(num "$SN")"
 st=$(crew status)
 check "status names an abandoned dependency even where it only counts the rest" '[[ $(row "$(num "$SZ")-") == *"after 5 tasks, $(num "$SA") abandoned" ]]'
 crew set "$SZ" status abandoned
@@ -2337,6 +2384,12 @@ st=$(crew status)
 check "a done spike doesn't hold its goal's slot, and is listed only with --done" \
   '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
 check "a task that depends on a done spike no longer waits for it" '[[ $(row "$KAI") != *after* ]]'
+# crew set drops the merged and done from depends_on; TestWithoutDelivered covers the forms and edge cases.
+DM=$(crew new "Dep merged"); crew set "$DM" status merged
+DW=$(crew new "Dep working"); crew set "$DW" status working
+check "set drops merged and done dependencies, keeping the rest in order" \
+  '[[ $(crew set "$DW" depends_on "$(basename "$DM" .md) $KSI $(num "$KA")" && crew get "$DW" depends_on) == "$(num "$KA")" ]]'
+crew set "$DW" status abandoned
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "tick cleans up a done spike's worktree and local branch" \
@@ -2348,6 +2401,29 @@ out=$(crew tick 2>&1)
 check "a report the goal lead has been sent isn't sent again" '[[ $out != *"goal $G8"* && $(resumes) == $((n + 1)) ]]'
 KO=$(crew new "Outside learning"); crew to-learn "$KO" "Will it fit?" >/dev/null
 check "status lists a draft outside a goal that has something to learn, rather than fold it into the count" '[[ $(crew status | grep "$(basename "$KO" .md)") == *"draft"*"1 to learn" ]]'
+# A stack of three drafts outside a goal, the middle one informed by spikes: it folds
+# when every spike is finished, and is listed, with its stack, when anything is open.
+stack3() { # <name>: sets ${1}_TOP, ${1}_MID, ${1}_END to the three drafts, top first
+  local t m e
+  t=$(crew new "$1 top"); m=$(crew new "$1 middle" --on "$(num "$t")"); e=$(crew new "$1 end" --on "$(num "$m")")
+  printf -v "${1}_TOP" %s "$t"; printf -v "${1}_MID" %s "$m"; printf -v "${1}_END" %s "$e"
+}
+# FS: every spike finished; FU: a spike unfinished; FI: an open item; FQ: an open question.
+stack3 FS; FSD=$(crew new "FS done spike" --kind spike --informs "$(num "$FS_MID")"); FSA=$(crew new "FS abandoned spike" --kind spike --informs "$(num "$FS_MID")")
+sed -i "s/^status: .*/status: done/" "$FSD"; crew set "$FSA" status abandoned   # crew set refuses done
+st=$(crew status)
+check "status folds a stack whose middle draft has a done and an abandoned spike into the draft count" \
+  '[[ $st == *"  3 draft(s)"* &&  $st != *"$(basename "$FS_TOP" .md)"* && $st != *"$(basename "$FS_MID" .md)"* && $st != *"$(basename "$FS_END" .md)"* ]]'
+stack3 FU; FUS=$(crew new "FU spike" --kind spike --informs "$(num "$FU_MID")"); crew set "$FUS" status working
+stack3 FI; crew to-learn "$FI_MID" "Will it fit?" >/dev/null
+stack3 FQ; sed -i '/^## Open questions$/a - [ ] Which way?' "$FQ_MID"
+FQS=$(crew new "FQ spike" --kind spike --informs "$(num "$FQ_MID")"); sed -i "s/^status: .*/status: done/" "$FQS"
+st=$(crew status)
+check "status lists a stack in full when its middle draft has an unfinished spike, an open item or an open question" \
+  '[[ -n $(row "$(basename "$FU_TOP" .md)") && -n $(row "$(basename "$FU_MID" .md)") && -n $(row "$(basename "$FU_END" .md)") && -n $(row "$(basename "$FI_TOP" .md)") && -n $(row "$(basename "$FI_MID" .md)") && -n $(row "$(basename "$FI_END" .md)") && -n $(row "$(basename "$FQ_TOP" .md)") && -n $(row "$(basename "$FQ_MID" .md)") && -n $(row "$(basename "$FQ_END" .md)") ]]'
+check "status still names the spikes, finished ones included, in the row of a listed draft" \
+  '[[ $(row "$(basename "$FQ_MID" .md)") == *"$(num "$FQS") done"* && $(row "$(basename "$FU_MID" .md)") == *"$(num "$FUS") working"* ]]'
+for f in "$FS_TOP" "$FS_MID" "$FS_END" "$FU_TOP" "$FU_MID" "$FU_END" "$FI_TOP" "$FI_MID" "$FI_END" "$FQ_TOP" "$FQ_MID" "$FQ_END" "$FUS"; do crew set "$f" status abandoned; done
 crew goal abandon "$GF8" >/dev/null 2>&1
 for f in "$KC" "$KD" "$KT" "$KO" "$KA"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
@@ -3271,5 +3347,14 @@ out=$(ci_round 0000dddffff0)
 check "branch caused, handed back, branch caused: a new red head is a question, after 2 CI rounds" '[[ $out == *"$TCM: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CM" status) == needs-input && $(crew get "$CM" review_rounds) == 3 ]] && [[ $(section "$CM" "## Open questions") == *"- [ ] CI is still red on 0000ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
 crew set "$CM" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
+
+# End to end: dispatch still waits on exactly what it did, with a merged entry written beside an unmerged one.
+DM=$(crew new "Dep merged"); crew set "$DM" status merged
+DW=$(crew new "Dep working"); crew set "$DW" status working
+DT=$(crew new "Dep waiting"); fill "$DT"; crew set "$DT" depends_on "$(basename "$DM" .md) $(basename "$DW" .md)"; crew ready "$DT" >/dev/null
+check "dispatch waits for the unmerged dependency a merged one was written beside" \
+  '[[ $(crew dispatch "$DT" 2>&1) == *"depends on $(basename "$DW" .md), which is '"'"'working'"'"'"* && $(crew get "$DT" status) == ready ]]'
+crew set "$DW" status merged
+check "dispatch goes ahead once that dependency merges" 'crew dispatch "$DT" >/dev/null && [[ $(crew get "$DT" status) == working ]]'
 
 summary crew-e2e

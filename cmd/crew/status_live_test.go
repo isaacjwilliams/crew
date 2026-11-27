@@ -193,6 +193,34 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	}
 }
 
+func TestLiveStatusListsAGoalsTasksInTheTextsOrder(t *testing.T) {
+	r := buildReport(goalLedger(t, boardsGoal...), []string{"p"}, false, statusReads{})
+	m := liveOn(r)
+	m.Update(tea.WindowSizeMsg{Width: 400, Height: 200})
+	openAll(m)
+	goalTasks := map[string]bool{}
+	for _, task := range boardsGoal {
+		goalTasks[strings.Fields(task)[0]] = true
+	}
+	// The goal's tasks a listing names, in its order.
+	tasks := func(lines []string) []string {
+		var ids []string
+		for _, l := range lines {
+			if f := strings.Fields(strings.ReplaceAll(words(l), "└", "")); len(f) > 0 && goalTasks[f[0]] {
+				ids = append(ids, f[0])
+			}
+		}
+		return ids
+	}
+	want := []string{"160", "259", "195", "235", "165", "236", "170", "242", "166", "148", "243", "244"}
+	if text := tasks(strings.Split(plainText(r), "\n")); !slices.Equal(text, want) {
+		t.Errorf("the text lists the goal's tasks as %v, want %v", text, want)
+	}
+	if view := tasks(screen(m)); !slices.Equal(view, want) {
+		t.Errorf("the view lists the goal's tasks as %v, want %v", view, want)
+	}
+}
+
 func TestLiveStatusFoldsGoalsStacksAndWhatTheTextCounts(t *testing.T) {
 	m := liveOn(readReport(statusLedger(t), "p"))
 	for _, folded := range []string{"007-next", "008-next", "012-idea"} {
@@ -435,8 +463,8 @@ func onScreen(m *liveStatus) bool {
 }
 
 // variedReport is fullStatusLedger's report with values of every length a
-// column meets: a status longer than its column, a worker idle with a
-// background task running, and a goal whose lead is idle and whose slots are
+// column meets: a status longer than its column, a worker idle while a
+// background command it started runs, and a goal whose lead is idle and whose slots are
 // full. Its rows also have a long merge check, a stack and a goal's group.
 func variedReport(t *testing.T) statusReport {
 	c := fullStatusLedger(t)
@@ -449,7 +477,7 @@ func variedReport(t *testing.T) statusReport {
 	if inFlight.Task.ID() != "001-in-flight" {
 		t.Fatalf("the goal's first row is %s, want 001-in-flight", inFlight.Task.ID())
 	}
-	inFlight.Worker = Agent{ID: "w1", State: "working", PID: true, TurnEnded: true}
+	inFlight.Worker = Agent{ID: "w1", State: "working", PID: true, TurnEnded: true, Background: []string{"bin/rails server"}}
 	return r
 }
 
@@ -516,7 +544,7 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 				}
 			}
 		}
-		for id, field := range map[string]string{"016-feedback": "addressing-feedback", "001-in-flight": "idle, background task running"} {
+		for id, field := range map[string]string{"016-feedback": "addressing-feedback", "001-in-flight": "idle (bin/rails server)"} {
 			if l := m.shown[lineOf(m, id)]; len(l.drawn) < 2 {
 				t.Errorf("at width %d, %s shows %q on one line: %q", width, id, field, l.drawn)
 			}
@@ -565,7 +593,7 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 	if got := m.shown[lineOf(m, "001-in-flight")].drawn; !slices.Equal(got, []string{
 		"        001-in-flight",
 		"          status: working",
-		"          worker: idle, background task running",
+		"          worker: idle (bin/rails server)",
 	}) {
 		t.Errorf("at width 60, 001-in-flight's card is %q", got)
 	}
