@@ -785,6 +785,62 @@ func openItems(items []LearnItem) int {
 	return n
 }
 
+// A QuestionItem is a question asked on a task: a question record, the
+// handed_on record that left it for the user, if one did, and the answer
+// records that settle it, oldest first. It's open until it has an answer.
+type QuestionItem struct {
+	Record
+	HandedOn *Record
+	Answers  []Record
+}
+
+func (q QuestionItem) Open() bool { return len(q.Answers) == 0 }
+
+// WaitsOn is who the question waits on: whoever it was asked of, or the user
+// once someone handed it on.
+func (q QuestionItem) WaitsOn() string {
+	if q.HandedOn != nil {
+		return "user"
+	}
+	return q.Question.For
+}
+
+// Questions are the questions asked on the task, from its records alone, in
+// the order they were asked.
+func (t Task) Questions() ([]QuestionItem, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
+	}
+	return questionItems(records), nil
+}
+
+// questionItems are the questions records ask, each with what came of it.
+// Records from readRecords name only questions they ask, which it checks.
+func questionItems(records []Record) []QuestionItem {
+	var items []QuestionItem
+	for _, r := range records {
+		if r.Question != nil {
+			items = append(items, QuestionItem{Record: r})
+		}
+	}
+	at := func(id string) *QuestionItem {
+		return &items[slices.IndexFunc(items, func(q QuestionItem) bool { return q.ID == id })]
+	}
+	for _, r := range records {
+		switch {
+		case r.HandedOn != nil:
+			if q := at(r.HandedOn.Question); q.HandedOn == nil {
+				q.HandedOn = &r
+			}
+		case r.Answer != nil:
+			q := at(r.Answer.Question)
+			q.Answers = append(q.Answers, r)
+		}
+	}
+	return items
+}
+
 // DesignInBrief is an error when the brief says how to meet its objective, in
 // a section its kind leaves empty. crew ready and crew dispatch both refuse it.
 func (t Task) DesignInBrief() error {
@@ -1655,7 +1711,9 @@ func (t Task) SettleNudgeQuestions(by string) error {
 			in = l == "## Open questions"
 		}
 		if in && isOpenNudgeQuestion(l) {
-			ls[i] = "- [x]" + strings.TrimPrefix(l, "- [ ]") + " Settled: " + by + "."
+			// The question's marker stays last, for crew show to find it by.
+			item, marker := cutQuestionMarker(strings.TrimPrefix(l, "- [ ]"))
+			ls[i] = "- [x]" + item + " Settled: " + by + "." + marker
 		}
 	}
 	return t.writeLines(ls)

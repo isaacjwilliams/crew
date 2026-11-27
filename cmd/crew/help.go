@@ -81,6 +81,15 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    on that nobody has checked yet; prints its ID
   crew learned TASK ITEM "<answer>"
                                    Settle an item still to learn with its answer
+  crew ask TASK [--split] "<question>"
+                                   Ask a question that waits on someone; prints its
+                                   ID. On a draft, a lead parks it for you; on any
+                                   other task, the worker asks its goal lead, or you
+                                   outside a goal. --split proposes smaller pieces
+  crew hand-on TASK QUESTION "<why>"
+                                   Leave a question for you, saying why
+  crew answer TASK QUESTION "<answer>"
+                                   Settle a question with its answer
   crew dispatch TASK [--force|--tick]
                                    Create worktree + branch and start an implementer.
                                    --force dispatches a task that isn't ready; a
@@ -102,7 +111,7 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    --again resends a restack the worker already has
   crew nudge TASK                  Resume, once, a worker whose turn ended mid-task;
                                    ask the lead if it stalls again (run by crew tick)
-  crew settle TASK                 Check off the questions crew nudge asked the lead
+  crew settle TASK                 Settle the questions crew nudge asked the lead
                                    once the task's worker has moved on (run by crew tick)
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent

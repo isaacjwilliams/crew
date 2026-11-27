@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,12 +28,12 @@ func learnTask(t *testing.T, content string) Task {
 	return Task{Doc{p}}
 }
 
-// add appends a record, as crew to-learn or crew learned does, and returns it.
+// add appends a record, as the crew command that writes it does, and returns it.
 func add(t *testing.T, task Task, r Record) Record {
 	t.Helper()
 	records, _ := task.Records()
 	n := newRecord("test", records)
-	n.ToLearn, n.Learned = r.ToLearn, r.Learned
+	n.ToLearn, n.Learned, n.Question, n.HandedOn, n.Answer = r.ToLearn, r.Learned, r.Question, r.HandedOn, r.Answer
 	if err := task.AddRecords(n); err != nil {
 		t.Fatal(err)
 	}
@@ -61,16 +62,27 @@ func TestStillToLearnReadsRecordsAlone(t *testing.T) {
 func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 	good := `{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"Q?"}}`
 	for line, want := range map[string]string{
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?"},"extra":1}`:                                 `unknown field "extra"`,
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?","why":"newer"}}`:                             `unknown field "why"`,
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x"}`:                                                                    "not 0",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"},"learned":{"item":"aaaaaaaa","answer":"A"}}`: "not 2",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":" "}}`:                                            "needs its text",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                          "needs its item and its answer",
-		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                        "needs an id, an at and a by",
-		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                            "already taken",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "settles cccccccc, which no line adds",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}} {}`:                                         "more than one value",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?"},"extra":1}`:                                                  `unknown field "extra"`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q?","why":"newer"}}`:                                              `unknown field "why"`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x"}`:                                                                                     "not 0",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"},"learned":{"item":"aaaaaaaa","answer":"A"}}`:                  "not 2",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":" "}}`:                                                             "needs its text",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                                           "needs its item and its answer",
+		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                                         "needs an id, an at and a by",
+		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                                             "already taken",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                                          "settles cccccccc, which no line adds",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}} {}`:                                                          "more than one value",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"worry","asker":"worker","for":"user","text":"Q?"}}`:               `kind is one of`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"collaborator","asker":"alice","for":"user","text":"Q?"}}`:         `asked by an @login, not "alice"`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"worker","asker":"@alice","for":"user","text":"Q?"}}`:              `a worker question is asked by one of`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"worker","asker":"worker","for":"worker","text":"Q?"}}`:            `is for one of`,
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"worker","asker":"worker","for":"user","text":" "}}`:               "a question needs its text",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"red-ci","asker":"crew","for":"user","text":"Q?"}}`:                "the head it's about",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","question":{"kind":"worker","asker":"worker","for":"user","text":"Q?","head":"abc"}}`: "the head it's about",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","handed_on":{"question":"aaaaaaaa","why":"W"}}`:                                       "hands on aaaaaaaa, which no line asks",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","answer":{"question":"cccccccc","text":"A"}}`:                                         "answers cccccccc, which no line asks",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","answer":{"question":"aaaaaaaa","text":""}}`:                                          "needs its question and its text",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","handed_on":{"question":"aaaaaaaa","why":""}}`:                                        "needs its question and why",
 		`- [ ] typed by hand`: "not a record crew can read",
 		``:                    "not a record crew can read",
 	} {
@@ -83,6 +95,100 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 			t.Errorf("StillToLearn with %s = %v; want an error at line 2 saying %q", line, err, want)
 		}
 	}
+}
+
+func TestQuestionsReadRecordsAlone(t *testing.T) {
+	// An item typed by hand is no question record.
+	task := learnTask(t, "## Open questions\n- [ ] typed by hand\n\n## Log\n")
+	if items, err := task.Questions(); err != nil || len(items) != 0 {
+		t.Fatalf("Questions with only typed lines = %v, %v; want none", items, err)
+	}
+	rs, err := task.ask("test",
+		Question{Kind: QuestionWorker, Asker: "worker", For: "goal-lead", Text: "Which index?"},
+		Question{Kind: QuestionCollaborator, Asker: "@alice", For: "user", Text: "@alice commented on PR #7\n> Why not a scan?\n>\n> Just asking."},
+		Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Its worker's turn ended mid-task again."},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := rs[0], rs[1], rs[2]
+	add(t, task, Record{HandedOn: &HandedOn{Question: a.ID, Why: "a gate the worker can't run"}})
+	add(t, task, Record{Answer: &Answer{Question: c.ID, Text: "Moved on."}})
+	items, err := task.Questions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range items {
+		got = append(got, fmt.Sprintf("%s open=%v waits=%s", q.ID, q.Open(), q.WaitsOn()))
+	}
+	want := []string{a.ID + " open=true waits=user", b.ID + " open=true waits=user", c.ID + " open=false waits=lead"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Questions = %v; want %v", got, want)
+	}
+
+	// Until crew decides from the records, each question is an item under Open
+	// questions too, which crew counts.
+	if err := task.tickQuestions(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := task.OpenQuestions(); n != 3 {
+		t.Errorf("OpenQuestions = %d; want the typed item and two crew asked", n)
+	}
+	wantSection := "- [ ] typed by hand\n\n" +
+		"- [ ] Which index? (question " + a.ID + ")\n" +
+		"- [ ] @alice commented on PR #7 (question " + b.ID + ")\n  > Why not a scan?\n  >\n  > Just asking.\n" +
+		"- [x] Its worker's turn ended mid-task again. (question " + c.ID + ")"
+	if got := strings.Join(sectionLines(mustRead(t, task), "## Open questions"), "\n"); strings.TrimSpace(got) != wantSection {
+		t.Errorf("Open questions =\n%s\nwant\n%s", got, wantSection)
+	}
+}
+
+func TestShownTaskQuestions(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	task := learnTask(t, "# A\n\n## Open questions\n<!-- Questions. -->\n- [ ] typed by hand\n"+
+		"- [ ] Which index? (question aaaaaaaa)\n"+
+		"- [x] @alice commented on PR #7 (question bbbbbbbb)\n  > Why?\n\n## Log\n- x\n")
+	for _, r := range []Record{
+		{ID: "aaaaaaaa", At: at, By: "crew ask", Question: &Question{Kind: QuestionWorker, Asker: "worker", For: "goal-lead", Text: "Which index?"}},
+		{ID: "bbbbbbbb", At: at, By: "crew feedback", Question: &Question{Kind: QuestionCollaborator, Asker: "@alice", For: "user", Text: "@alice commented on PR #7\n> Why?"}},
+		{ID: "cccccccc", At: at, By: "crew ci-fix", Question: &Question{Kind: QuestionRedCI, Asker: "crew", For: "user", Text: "CI is still red on abc1234.", Head: "abc1234"}},
+		{ID: "dddddddd", At: at.Add(time.Hour), By: "crew hand-on", HandedOn: &HandedOn{Question: "aaaaaaaa", Why: "a gate it can't run"}},
+		{ID: "eeeeeeee", At: at.Add(2 * time.Hour), By: "crew answer", Answer: &Answer{Question: "bbbbbbbb", Text: "Because:\n- it's faster"}},
+	} {
+		if err := task.AddRecords(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Open questions\n<!-- Questions. -->\n- [ ] typed by hand\n" +
+		"- [ ] Which index? (question aaaaaaaa)\n" +
+		"  - worker's question: asked by the worker, 2026-11-25 10:00 by crew ask\n" +
+		"  - handed on to the user 2026-11-25 11:00 by crew hand-on: a gate it can't run\n" +
+		"  - waits on the user\n" +
+		"- [x] @alice commented on PR #7 (question bbbbbbbb)\n  > Why?\n" +
+		"  - PR comment: asked by @alice, 2026-11-25 10:00 by crew feedback\n" +
+		"  - settled 2026-11-25 12:00 by crew answer:\n    Because:\n    - it's faster\n" +
+		"- [ ] CI is still red on abc1234. (question cccccccc)\n" +
+		"  - red CI past MAX_CI_FIXES: asked by crew, 2026-11-25 10:00 by crew ci-fix\n" +
+		"  - waits on the user\n" +
+		"\n## Log\n- x\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// mustRead is a task file's lines.
+func mustRead(t *testing.T, task Task) []string {
+	t.Helper()
+	ls, err := task.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ls
 }
 
 // crew migrate writes a task's records, then its file, then the project's

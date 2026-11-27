@@ -34,8 +34,11 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn *ToLearn `json:"to_learn,omitempty"`
-	Learned *Learned `json:"learned,omitempty"`
+	ToLearn  *ToLearn  `json:"to_learn,omitempty"`
+	Learned  *Learned  `json:"learned,omitempty"`
+	Question *Question `json:"question,omitempty"`
+	HandedOn *HandedOn `json:"handed_on,omitempty"`
+	Answer   *Answer   `json:"answer,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -48,6 +51,48 @@ type ToLearn struct {
 type Learned struct {
 	Item   string `json:"item"` // the ToLearn record's ID
 	Answer string `json:"answer"`
+}
+
+// A Question waits on someone's answer: the asker's, of its kind, for the one
+// it waits on.
+type Question struct {
+	Kind  QuestionKind `json:"kind"`
+	Asker string       `json:"asker"` // a role (worker, lead, goal-lead or crew), or a collaborator's @login
+	For   string       `json:"for"`   // who answers it: user, lead or goal-lead
+	Text  string       `json:"text"`
+	Head  string       `json:"head,omitempty"` // red CI's only: the commit CI was red on
+}
+
+// QuestionKind says what made a question.
+type QuestionKind string
+
+const (
+	QuestionWorker       QuestionKind = "worker"       // a worker needs a decision
+	QuestionSplit        QuestionKind = "split"        // a worker proposes smaller pieces for its branch
+	QuestionParked       QuestionKind = "parked"       // a lead left a draft for the user
+	QuestionCollaborator QuestionKind = "collaborator" // a collaborator commented on the PR
+	QuestionNudge        QuestionKind = "nudge"        // a worker stalled again, or its worktree is gone
+	QuestionRedCI        QuestionKind = "red-ci"       // CI is still red past MAX_CI_FIXES
+)
+
+var (
+	questionKinds = []QuestionKind{QuestionWorker, QuestionSplit, QuestionParked, QuestionCollaborator, QuestionNudge, QuestionRedCI}
+	askers        = []string{"worker", "lead", "goal-lead", "crew"}
+	answerers     = []string{"user", "lead", "goal-lead"}
+)
+
+// HandedOn leaves a question for the user: a goal lead hands on a question it
+// won't answer itself.
+type HandedOn struct {
+	Question string `json:"question"` // the Question record's ID
+	Why      string `json:"why"`
+}
+
+// Answer settles a question: with the answer someone gave, or, for crew
+// settle's, with what showed the worker moved on.
+type Answer struct {
+	Question string `json:"question"` // the Question record's ID
+	Text     string `json:"text"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -89,22 +134,31 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	toLearn := map[string]bool{} // whether the record with each ID adds an item
+	byID := map[string]Record{}
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if _, taken := toLearn[r.ID]; err == nil && taken {
+		if _, taken := byID[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		toLearn[r.ID] = r.ToLearn != nil
+		byID[r.ID] = r
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !toLearn[r.Learned.Item] {
-			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
+		var err error
+		switch {
+		case r.Learned != nil && byID[r.Learned.Item].ToLearn == nil:
+			err = fmt.Errorf("it settles %s, which no line adds as an item to learn", r.Learned.Item)
+		case r.HandedOn != nil && byID[r.HandedOn.Question].Question == nil:
+			err = fmt.Errorf("it hands on %s, which no line asks as a question", r.HandedOn.Question)
+		case r.Answer != nil && byID[r.Answer.Question].Question == nil:
+			err = fmt.Errorf("it answers %s, which no line asks as a question", r.Answer.Question)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
 	}
 	return records, nil
@@ -131,7 +185,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Question != nil, r.HandedOn != nil, r.Answer != nil} {
 		if set {
 			payloads++
 		}
@@ -144,6 +198,33 @@ func (r Record) check() error {
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.Question != nil:
+		return r.Question.check()
+	case r.HandedOn != nil && (r.HandedOn.Question == "" || strings.TrimSpace(r.HandedOn.Why) == ""):
+		return errors.New("a handed_on record needs its question and why")
+	case r.Answer != nil && (r.Answer.Question == "" || strings.TrimSpace(r.Answer.Text) == ""):
+		return errors.New("an answer record needs its question and its text")
+	}
+	return nil
+}
+
+// check says what's missing from a question or wrong with it. Only a
+// collaborator's comment is asked by someone outside the crew, so only it names
+// an @login; only red CI names the commit it was red on.
+func (q Question) check() error {
+	switch {
+	case !slices.Contains(questionKinds, q.Kind):
+		return fmt.Errorf("a question's kind is one of %v, not %q", questionKinds, q.Kind)
+	case q.Kind == QuestionCollaborator && (len(q.Asker) < 2 || q.Asker[0] != '@'):
+		return fmt.Errorf("a collaborator's question is asked by an @login, not %q", q.Asker)
+	case q.Kind != QuestionCollaborator && !slices.Contains(askers, q.Asker):
+		return fmt.Errorf("a %s question is asked by one of %v, not %q", q.Kind, askers, q.Asker)
+	case !slices.Contains(answerers, q.For):
+		return fmt.Errorf("a question is for one of %v, not %q", answerers, q.For)
+	case strings.TrimSpace(q.Text) == "":
+		return errors.New("a question needs its text")
+	case (q.Kind == QuestionRedCI) != (q.Head != ""):
+		return errors.New("a question names the head it's about if, and only if, it's about red CI")
 	}
 	return nil
 }

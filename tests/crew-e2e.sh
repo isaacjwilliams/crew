@@ -2720,10 +2720,15 @@ shows() {  # file arg...: crew show arg... prints file, and crew path arg... its
   local f=$1; shift
   [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
 }
-shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
+shows_task() {  # file arg: crew path and crew show find the same task with its type word or without
+  local w
+  for w in "" task; do
+    [[ $(crew path ${w:+"$w"} "$2") == "$1" ]] && cmp -s <(crew show ${w:+"$w"} "$2") <(crew show "$1") || return 1
+  done
+}
 TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
 check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
-  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows "$TM" "$TM" && shows "$TM" task "$TM"'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
 check "show memory and memory-suggestions print the project's files as they are on disk, in the default project or --project's" \
@@ -2738,7 +2743,7 @@ check "show proposal finds a proposal by ID, unique substring or path, from any 
   '(cd "$HOME" && shows "$SP" proposal "$(basename "$SP" .md)" && shows "$SP" proposal jurisdiction-a-pricing && shows "$PP" proposal ship-to-canada && shows "$SP" proposal "$SP")'
 check "show goal finds a goal from anything goal path takes, though a task shares its number" \
   'shows "$(crew goal path 1)" goal 1 && shows "$(crew goal path "$G")" goal "$G" && shows "$(crew goal path season-page)" goal season-page &&
-   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows "$F1" 1'
+   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows_task "$F1" 1'
 out=$(crew show proposal "$(date +%F)" 2>&1 >/dev/null); st=$?
 check "an argument that matches more than one of its kind lists them, shows none and fails" \
   '((st == 1)) && [[ $out == *"ambiguous:"*"$(basename "$SP") ($PJ)"* && -z $(crew show proposal "$(date +%F)" 2>/dev/null) ]]'

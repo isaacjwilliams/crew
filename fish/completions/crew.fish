@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade migrate install project checkout host lead serve doctor config new ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade migrate install project checkout host lead serve doctor config new ready to-learn learned ask hand-on answer hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -23,7 +23,7 @@ function __crew_free_files
 end
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
-complete -c crew -n "__fish_seen_subcommand_from ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review ci-fix catch-up evidence find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
+complete -c crew -n "__fish_seen_subcommand_from ready to-learn learned ask hand-on answer hand-over check-base dispatch feedback followup attach restack nudge settle review ci-fix catch-up evidence find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__crew_showing ''" -a "$show_types"
 complete -c crew -n "__crew_showing '' task" -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -57,6 +57,7 @@ complete -c crew -n "__fish_seen_subcommand_from feedback" -l since -r
 complete -c crew -n "__fish_seen_subcommand_from ci-summary" -l not-the-branch -d 'The branch didn\'t cause it: the round doesn\'t count toward MAX_CI_FIXES'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l fresh -d 'Start a new worker instead of resuming'
 complete -c crew -n "__fish_seen_subcommand_from followup" -l note -r
+complete -c crew -n "__fish_seen_subcommand_from ask" -l split -d 'Propose smaller pieces for the branch'
 complete -c crew -n "__fish_seen_subcommand_from restack" -l again -d 'Send a restack the worker already has'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l merged -d 'All merged tasks and done spikes with worktrees'
 complete -c crew -n "__fish_seen_subcommand_from cleanup" -l force
