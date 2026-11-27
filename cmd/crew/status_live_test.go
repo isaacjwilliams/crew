@@ -1130,18 +1130,17 @@ func TestLiveStatusWheelShowsEveryRowOfATallLine(t *testing.T) {
 			if tall < 0 {
 				t.Fatalf("at %dx%d no line is taller than the screen", size.Width, size.Height)
 			}
-			m.moveTo(tall)
 			if button == tea.MouseWheelUp {
-				m.top = startOf(m, tall) + len(m.shown[tall].drawn) - m.bodyHeight()
+				m.top = m.lastTop()
 			}
 			seen := map[int]bool{}
-			for m.cursor == tall {
+			for {
 				for n := m.top; n < m.top+m.bodyHeight(); n++ {
 					seen[n] = true
 				}
 				before := m.top
 				wheeled(m, button, 1)
-				if m.top == before && m.cursor == tall {
+				if m.top == before {
 					break
 				}
 			}
@@ -1385,6 +1384,39 @@ func TestLiveStatusReportNeverMovesTheScreen(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A click that leaves a shorter strip leaves empty room under the last line.
+// It stays through a refresh and a turn of the wheel down, until the user
+// scrolls up.
+func TestLiveStatusKeepsEmptyRoomUnderTheLastLine(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		m.top = m.lastTop() + 2
+		top := m.top
+		if m.emptyRoom() != 2 {
+			t.Fatalf("%s: the screen at top %d has %d lines of empty room, want 2", name, top, m.emptyRoom())
+		}
+		m.showLines(m.lines, time.Now())
+		if m.top != top {
+			t.Errorf("%s: a refresh moves the screen from top %d to %d", name, top, m.top)
+		}
+		wheeled(m, tea.MouseWheelDown, 1)
+		if m.top != top {
+			t.Errorf("%s: a turn down moves the screen from top %d to %d", name, top, m.top)
+		}
+	}
+}
+
+// A report that ends up shorter than the empty room a click left still shows
+// its lines.
+func TestLiveStatusShowsALineWhenTheReportShrinksPastTheEmptyRoom(t *testing.T) {
+	m := mouseOn(t, mouseLayouts["table"])
+	m.top = m.lastTop() + 4
+	m.showLines([]statusLine{{key: "only", head: "only line"}}, time.Now())
+	if m.top != 0 {
+		t.Errorf("a report of one line shows from top %d, want 0", m.top)
 	}
 }
 

@@ -289,7 +289,7 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 			break
 		}
 	}
-	m.top = max(0, min(m.top, m.lastTop()+emptyRoom))
+	m.top = max(0, min(m.top, m.lastTop()+emptyRoom, m.drawnHeight(0, len(m.shown))-1))
 }
 
 // screenRow is a line on the screen, with the screen line it starts on,
