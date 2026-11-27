@@ -356,7 +356,7 @@ func (m *liveStatus) layOut() {
 		}
 	}
 	add(m.lines, 0)
-	m.table, m.inColumns = measure(m.lines, indentWidth).fit(m.width)
+	m.table, m.inColumns = measure(m.lines, indentWidth, true).fit(m.width)
 	m.headings = nil
 	if m.inColumns && slices.ContainsFunc(m.lines, statusLine.hasRows) {
 		m.headings = m.table.row(strings.Repeat(" ", indentWidth(1)), headings())

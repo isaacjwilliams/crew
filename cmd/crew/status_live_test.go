@@ -16,7 +16,16 @@ import (
 
 // says is a line's fields, as the plain text has them, for a test that looks
 // for a value in any of them.
-func says(l statusLine) string { return strings.Join(l.fields, "  ") }
+func says(l statusLine) string { return strings.Join(texts(l.fields), "  ") }
+
+// texts are the fields as the plain text words them.
+func texts(fields []wording) []string {
+	var out []string
+	for _, f := range fields {
+		out = append(out, f.text)
+	}
+	return out
+}
 
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
@@ -385,7 +394,7 @@ func TestLiveStatusKeepsBuildingWhileItsReadsHang(t *testing.T) {
 			m.Update(next(t, msgs))
 		}
 	}
-	if i := lineOf(m, "010-parent"); i < 0 || m.shown[i].fields[statusField] != "needs-input" {
+	if i := lineOf(m, "010-parent"); i < 0 || m.shown[i].fields[statusField].text != "needs-input" {
 		t.Error("5 seconds after a task changed, while the reads and the pull hang, the view doesn't show it")
 	}
 }
@@ -524,7 +533,7 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 		if !m.inColumns {
 			t.Fatalf("at width %d, the rows are cards", width)
 		}
-		want := append([]string{idHeading}, headings().fields...)
+		want := append([]string{idHeading}, texts(headings().fields)...)
 		if got := cellsOf(m.table, m.headings); !slices.Equal(got, want) {
 			t.Errorf("at width %d, the headings read %q, want %q", width, got, want)
 		}
@@ -539,8 +548,8 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 				t.Errorf("at width %d, the ID column reads %q, want %q", width, got[0], l.head)
 			}
 			for i, f := range l.fields {
-				if squeezed(got[i+1]) != squeezed(f) {
-					t.Errorf("at width %d, %s's %s column reads %q, want %q:\n%s", width, l.head, columns[i].heading, got[i+1], f, strings.Join(l.drawn, "\n"))
+				if squeezed(got[i+1]) != squeezed(f.live) {
+					t.Errorf("at width %d, %s's %s column reads %q, want %q:\n%s", width, l.head, columns[i].heading, got[i+1], f.live, strings.Join(l.drawn, "\n"))
 				}
 			}
 		}
@@ -577,11 +586,11 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 			for i, f := range l.fields {
 				switch {
 				case m.inColumns:
-					if got := cellsOf(m.table, l.drawn)[i+1]; squeezed(got) != squeezed(f) {
-						t.Errorf("at width %d, %s shows %q, want %q", width, l.head, got, f)
+					if got := cellsOf(m.table, l.drawn)[i+1]; squeezed(got) != squeezed(f.live) {
+						t.Errorf("at width %d, %s shows %q, want %q", width, l.head, got, f.live)
 					}
-				case f != "" && !strings.Contains(drawn, squeezed(columns[i].heading+": "+f)):
-					t.Errorf("at width %d, %s doesn't show %s %q: %q", width, l.head, columns[i].heading, f, l.drawn)
+				case f.live != "" && !strings.Contains(drawn, squeezed(columns[i].heading+": "+f.live)):
+					t.Errorf("at width %d, %s doesn't show %s %q: %q", width, l.head, columns[i].heading, f.live, l.drawn)
 				}
 			}
 		}
@@ -627,7 +636,7 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 	m := liveOn(variedReport(t))
 	openAll(m)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
-	want := words(strings.Join(append([]string{idHeading}, headings().fields...), " "))
+	want := words(strings.Join(append([]string{idHeading}, texts(headings().fields)...), " "))
 	scrolled := false
 	for range m.shown {
 		if m.shown[m.cursor].hasFields() {
@@ -1027,11 +1036,12 @@ func (r *liveRun) second() {
 // open is how long the view has been open.
 func (r *liveRun) open() time.Duration { return r.clock.Sub(tenOClock) }
 
-// fields are what the view shows of a task after its ID: its status, worker,
-// PR, model, effort and notes; none when it isn't on show.
+// fields are what the view has of a task after its ID, as the plain text
+// words them: its status, worker, PR, model, effort and notes; none when it
+// isn't on show.
 func (r *liveRun) fields(id string) []string {
 	if i := lineOf(r.m, id); i >= 0 {
-		return r.m.shown[i].fields
+		return texts(r.m.shown[i].fields)
 	}
 	return make([]string, len(columns))
 }
@@ -1129,7 +1139,7 @@ func TestLiveStatusClaimsNothingBeforeTheFirstReads(t *testing.T) {
 		t.Errorf("before the first listing, the workers line is %q", got)
 	}
 	for _, id := range []string{"001-in-flight", "020-lower", "024-ready"} {
-		if got := lineOf(m, id); got < 0 || m.shown[got].fields[workerField] != "not listed yet" {
+		if got := lineOf(m, id); got < 0 || m.shown[got].fields[workerField].text != "not listed yet" {
 			t.Errorf("before the first listing, %s's worker isn't said to be not listed yet", id)
 		}
 	}
