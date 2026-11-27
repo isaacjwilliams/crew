@@ -6,6 +6,9 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A crew home pushes its ledger (statePaths in cmd/crew/home.go) to its own
+    # main; those pushes shouldn't start a run at all.
+    paths-ignore: [projects/**, reports/**]
   workflow_call:
 
 permissions:
