@@ -19,8 +19,7 @@ import (
 // crew catch-up TASK: when the open PR of a task its worker handed over
 // conflicts with the task's base, and the task isn't stacked, sends the worker
 // the conflict as a review round, once for each commit of the base, and
-// records it. Exits 3
-// when there's nothing to do.
+// records it. Exits 3 when there's nothing to do.
 func cmdCatchUp(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err

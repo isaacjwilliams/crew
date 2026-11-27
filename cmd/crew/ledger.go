@@ -1492,6 +1492,11 @@ func (r CIReport) BranchCaused() bool {
 	return len(r.Causes) == 0 || r.Causes[len(r.Causes)-1].CICause.BranchCaused
 }
 
+// WorkerSaid: the worker's latest word on the red CI is branchCaused.
+func (r CIReport) WorkerSaid(branchCaused bool) bool {
+	return len(r.Causes) > 0 && r.BranchCaused() == branchCaused
+}
+
 // RoundReports reads the task's round reports from its records.
 func (t Task) RoundReports() (RoundReports, error) {
 	records, err := t.Records()

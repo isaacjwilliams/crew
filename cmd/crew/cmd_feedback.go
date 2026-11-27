@@ -440,14 +440,7 @@ func withRoundReports(t Task, ls []string) []string {
 	default:
 		shown = append([]string{"Recorded by crew:"}, reports.lines()...)
 	}
-	start := slices.Index(ls, "## Review rounds")
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, "## Review rounds")
-	}
+	ls, start := withSection(ls, "## Review rounds")
 	// After the section's own comment, if it has one.
 	at := start + 1
 	for _, l := range uncommented(ls[at:]) {

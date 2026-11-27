@@ -104,8 +104,8 @@ func shortSHA(sha string) string { return sha[:min(len(sha), 7)] }
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
 // once for each head commit, and records it. After MAX_CI_FIXES rounds the
-// branch caused (RoundReports.CIFixes), it asks the user under Open questions instead. Exits 3 when
-// there's nothing to do.
+// branch caused (RoundReports.CIFixes), it asks the user under Open questions
+// instead. Exits 3 when there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -276,18 +276,18 @@ func cmdCISummary(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
-	var causes []Record
+	had := len(records)
 	for _, r := range roundReports(records).CIOn(head) {
-		if len(r.Causes) == 0 || r.BranchCaused() != branchCaused {
-			cause := newRecord("crew ci-summary", append(records, causes...))
+		if !r.WorkerSaid(branchCaused) {
+			cause := newRecord("crew ci-summary", records)
 			cause.CICause = &CICause{RedCI: r.ID, BranchCaused: branchCaused}
-			causes = append(causes, cause)
+			records = append(records, cause)
 		}
 	}
-	if len(causes) == 0 {
+	if len(records) == had {
 		return nil
 	}
-	if err := t.AddRecords(causes...); err != nil {
+	if err := t.AddRecords(records[had:]...); err != nil {
 		return err
 	}
 	t.Touch()

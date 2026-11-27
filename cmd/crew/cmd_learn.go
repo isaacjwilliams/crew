@@ -111,17 +111,10 @@ func withLearning(t Task, ls []string) []string {
 	} else {
 		items = learnLines(learning)
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
+	if len(items) == 0 && !slices.Contains(ls, learnHeading) {
 		return ls
 	}
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, learnHeading, "")
-	}
+	ls, start := withSection(ls, learnHeading)
 	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
@@ -141,6 +134,19 @@ func withLearning(t Task, ls []string) []string {
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
 	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
+}
+
+// withSection is ls with heading, and the index of the heading in it: where
+// the file has it, or added before ## Log, or at the end without a Log.
+func withSection(ls []string, heading string) ([]string, int) {
+	if i := slices.Index(ls, heading); i >= 0 {
+		return ls, i
+	}
+	i := slices.Index(ls, "## Log")
+	if i < 0 {
+		i = len(ls)
+	}
+	return slices.Insert(ls, i, heading), i
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is

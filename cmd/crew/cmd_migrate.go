@@ -229,14 +229,15 @@ func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
 	if slices.ContainsFunc(records, func(r Record) bool { return r.RedCI != nil || r.BaseConflict != nil }) {
 		return 0, 0, nil
 	}
-	var moved []Record
-	record := func(at time.Time, fill func(*Record)) {
+	had := len(records)
+	record := func(at time.Time, fill func(*Record)) Record {
 		r := newRecord("crew migrate", records)
 		if !at.IsZero() {
 			r.At = at
 		}
 		fill(&r)
-		records, moved = append(records, r), append(moved, r)
+		records = append(records, r)
+		return r
 	}
 	var roundAt time.Time
 	for _, l := range strings.Split(rounds, "\n") {
@@ -251,11 +252,10 @@ func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
 			if checks != "" {
 				report.Checks = strings.Split(checks, ", ")
 			}
-			record(roundAt, func(r *Record) { r.RedCI = report })
+			sent := record(roundAt, func(r *Record) { r.RedCI = report })
 			redCI++
 			if strings.HasSuffix(l, ciNotTheBranch) {
-				id := moved[len(moved)-1].ID
-				record(roundAt, func(r *Record) { r.CICause = &CICause{RedCI: id, BranchCaused: false} })
+				record(roundAt, func(r *Record) { r.CICause = &CICause{RedCI: sent.ID, BranchCaused: false} })
 			}
 		}
 		if rest, ok := strings.CutPrefix(item, conflictsWith); ok {
@@ -265,8 +265,8 @@ func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
 			}
 		}
 	}
-	if len(moved) == 0 {
+	if len(records) == had {
 		return 0, 0, nil
 	}
-	return redCI, conflicts, t.AddRecords(moved...)
+	return redCI, conflicts, t.AddRecords(records[had:]...)
 }
