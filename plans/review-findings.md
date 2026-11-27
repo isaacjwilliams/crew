@@ -320,17 +320,17 @@ Not one of the twelve findings: Codex raised it on 2026-11-27, and the user took
 | Frontmatter and intro | 2,226 |
 | Your voice | 492 |
 | On GitHub, you may do exactly this | 2,861 |
-| Ground rules | 4,633 |
-| Workflow: first run | 11,748 |
-| Workflow: spike | 1,574 |
-| Workflow: automated review | 9,192 |
+| Ground rules | 4,635 |
+| Workflow: first run | 11,752 |
+| Workflow: spike | 1,576 |
+| Workflow: automated review | 9,194 |
 | Workflow: split proposal | 2,364 |
-| Workflow: review rounds | 7,105 |
+| Workflow: review rounds | 7,127 |
 | Stacked tasks | 1,507 |
-| Workflow: restack | 2,366 |
-| When you're blocked | 1,433 |
+| Workflow: restack | 2,372 |
+| When you're blocked | 1,437 |
 
-Five sections are procedures that apply only once a task reaches their phase, and most tasks reach some of them late or never: spike, automated review, split proposal, review rounds and restack. Together they are 22,601 bytes, 48% of the profile. (Which of the others could also wait is part of the work.)
+Five sections are procedures that apply only once a task reaches their phase, and most tasks reach some of them late or never: spike, automated review, split proposal, review rounds and restack. Together they are 22,633 bytes, 48% of the profile. (Which of the others could also wait is part of the work.)
 
 **What it costs.** Codex's estimate is "several thousand tokens" for each worker. Not measured: tokens (these are bytes), and what loading less does to cost. A worker's system prompt is cached after its first call, so the saving would be in cache reads on each call and in what the model has to attend to, and neither has been measured.
 
