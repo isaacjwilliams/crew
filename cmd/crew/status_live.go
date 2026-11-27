@@ -3,7 +3,9 @@ package main
 // crew status's live view: the lines the plain text prints (reportLines), in a
 // terminal, built again every few seconds, with folds the user opens and closes.
 // Task and goal lines are a table with its headings pinned at the top, or cards
-// on a screen too narrow for it (status_table.go).
+// on a screen too narrow for it (status_table.go). Their notes are short there
+// (status_wording.go), so a strip at the bottom words the cursor's line's notes
+// in full.
 
 import (
 	"slices"
@@ -133,6 +135,11 @@ type liveStatus struct {
 	shown  []shownLine // every line not under a closed one, in order
 	cursor int         // the line it's on, in shown
 	top    int         // how many screen lines of shown are above the screen
+	// stripTop is how many lines of the cursor's notes the user scrolled
+	// above the strip, on notes too long for it; stripOf is the key of the
+	// line they're the notes of.
+	stripTop int
+	stripOf  string
 	// table is the report's columns fitted to the screen, and inColumns whether
 	// they fit; when they don't, each task and goal is a card. headings are
 	// the table's, pinned at the top of the screen: none for cards.
@@ -301,8 +308,18 @@ func (m *liveStatus) current() (shownLine, bool) {
 }
 
 func (m *liveStatus) moveTo(i int) {
-	m.cursor = max(0, min(i, len(m.shown)-1))
+	m.setCursor(i)
 	m.scroll()
+}
+
+// setCursor puts the cursor on line i. The strip starts at the top of another
+// line's notes, and keeps its place in the same line's from one report to the
+// next.
+func (m *liveStatus) setCursor(i int) {
+	m.cursor = max(0, min(i, len(m.shown)-1))
+	if l, _ := m.current(); l.key != m.stripOf {
+		m.stripTop, m.stripOf = 0, l.key
+	}
 }
 
 // setOpen opens or closes the line the cursor is on, if it has lines under it.
@@ -356,7 +373,7 @@ func (m *liveStatus) layOut() {
 		}
 	}
 	add(m.lines, 0)
-	m.table, m.inColumns = measure(m.lines, indentWidth).fit(m.width)
+	m.table, m.inColumns = measure(m.lines, indentWidth, true).fit(m.width)
 	m.headings = nil
 	if m.inColumns && slices.ContainsFunc(m.lines, statusLine.hasRows) {
 		m.headings = m.table.row(strings.Repeat(" ", indentWidth(1)), headings())
@@ -388,9 +405,51 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 	return open && len(l.kids) > 0
 }
 
-// bodyHeight is how many screen lines the report's lines get, between the
-// headings and the bar.
-func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)) }
+// bodyHeight is how many screen lines the report's lines get: the screen less
+// the headings, the strip and the bar under it. It's at least 1, so a short
+// screen still shows the cursor's line.
+func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)-len(m.strip())) }
+
+// strip is the cursor's line's notes, between the report's lines and the bar.
+// It leaves the report's lines at least one screen line. Notes too long for it
+// show from notesTop, the last line cut short with … while more follow.
+func (m *liveStatus) strip() []string {
+	room := m.stripRoom()
+	if room <= 0 {
+		return nil
+	}
+	lines := m.notes()[m.notesTop():]
+	if len(lines) > room {
+		lines = lines[:room]
+		lines[room-1] += "…"
+	}
+	return lines
+}
+
+// stripRoom is how many screen lines the strip may take: all but the
+// headings, the bar and a line of the report.
+func (m *liveStatus) stripRoom() int { return m.height - len(m.headings) - 2 }
+
+// notes are the cursor's line's notes as the plain text words them, wrapped a
+// cell short of the screen, so … fits after any line: one empty line for a
+// line without notes.
+func (m *liveStatus) notes() []string {
+	notes := ""
+	if m.cursor < len(m.shown) && m.shown[m.cursor].hasFields() {
+		notes = m.shown[m.cursor].fields[notesField].text
+	}
+	return strings.Split(lipgloss.Wrap(notes, max(1, m.width-1), ""), "\n")
+}
+
+// notesTop is how many lines of the cursor's notes are above the strip: as
+// many as the user scrolled, but no more than the strip needs to show the
+// rest, and none when there's no strip.
+func (m *liveStatus) notesTop() int {
+	if m.stripRoom() <= 0 {
+		return 0
+	}
+	return max(0, min(m.stripTop, len(m.notes())-m.stripRoom()))
+}
 
 // drawnHeight is how many screen lines the shown lines from i to j take.
 func (m *liveStatus) drawnHeight(i, j int) int {
@@ -423,13 +482,18 @@ func (m *liveStatus) lineAt(n int) int {
 	return len(m.shown) - 1
 }
 
-// step moves the cursor one line up or down. On a line taller than the
-// screen, it scrolls through that line first.
+// step moves the cursor one line up or down. Going down, it first scrolls
+// through a line taller than the screen, then through notes too long for the
+// strip; going up, it scrolls back through them the other way round.
 func (m *liveStatus) step(by int) {
 	start, end := m.cursorSpan()
 	switch {
 	case by > 0 && end > m.top+m.bodyHeight():
 		m.top++
+	case by > 0 && m.stripRoom() > 0 && m.notesTop()+m.stripRoom() < len(m.notes()):
+		m.stripTop = m.notesTop() + 1
+	case by < 0 && m.notesTop() > 0:
+		m.stripTop = m.notesTop() - 1
 	case by < 0 && start < m.top:
 		m.top--
 	default:
@@ -441,15 +505,20 @@ func (m *liveStatus) step(by int) {
 
 // page moves the screen a screenful up or down, and the cursor to the line on
 // the screen line just past the old screen's edge, so every line shows on one
-// screen or the next.
+// screen or the next. The new screen starts or ends at that edge, as tall as
+// the strip of the cursor's new line leaves it, so the cursor moves first.
 func (m *liveStatus) page(by int) {
-	body := m.bodyHeight()
-	edge := m.top + body
+	edge := m.top + m.bodyHeight()
 	if by < 0 {
 		edge = m.top - 1
 	}
-	m.top += by * body
-	m.moveTo(m.lineAt(edge))
+	m.setCursor(m.lineAt(edge))
+	if by < 0 {
+		m.top = edge + 1 - m.bodyHeight()
+	} else {
+		m.top = edge
+	}
+	m.scroll()
 }
 
 // scroll moves the screen as little as keeps the cursor's line on it: all of
@@ -466,10 +535,16 @@ func (m *liveStatus) scroll() {
 	m.top = min(max(m.top, low), high)
 }
 
-var cursorStyle = lipgloss.NewStyle().Reverse(true)
+// highlight shows the cursor's line reversed across the screen. A colored part
+// of the line ends by resetting every style (lipgloss writes \x1b[m), which ends
+// the reverse too, so it turns the reverse back on after each.
+func highlight(line string, width int) string {
+	const reset, reverse = "\x1b[m", "\x1b[7m"
+	return lipgloss.NewStyle().Reverse(true).Width(width).Render(strings.ReplaceAll(line, reset, reset+reverse))
+}
 
-// View is the headings, the lines on show from the top, and the bar. The
-// cursor's line is highlighted across the screen, all of it when it wraps.
+// View is the headings, the lines on show from the top, the strip and the bar.
+// The cursor's line is highlighted across the screen, all of it when it wraps.
 func (m *liveStatus) View() tea.View {
 	body := m.bodyHeight()
 	var screen []string
@@ -482,7 +557,7 @@ func (m *liveStatus) View() tea.View {
 			if n >= m.top && n < m.top+body {
 				line = fit(line, m.width)
 				if i == m.cursor {
-					line = cursorStyle.Width(m.width).Render(line)
+					line = highlight(line, m.width)
 				}
 				screen = append(screen, line)
 			}
@@ -492,6 +567,7 @@ func (m *liveStatus) View() tea.View {
 	for len(screen) < len(m.headings)+body {
 		screen = append(screen, "")
 	}
+	screen = append(screen, m.strip()...)
 	v := tea.NewView(strings.Join(append(screen, fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
 	return v

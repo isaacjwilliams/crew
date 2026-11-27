@@ -16,7 +16,16 @@ import (
 
 // says is a line's fields, as the plain text has them, for a test that looks
 // for a value in any of them.
-func says(l statusLine) string { return strings.Join(l.fields, "  ") }
+func says(l statusLine) string { return strings.Join(texts(l.fields), "  ") }
+
+// showsLive is a line's fields as the live view shows them without color.
+func showsLive(l statusLine) string {
+	var lives []string
+	for _, f := range l.fields {
+		lives = append(lives, uncolored(f.live))
+	}
+	return strings.Join(lives, "  ")
+}
 
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
@@ -72,12 +81,38 @@ func screen(m *liveStatus) []string {
 	return strings.Split(m.View().Content, "\n")
 }
 
-// ansiCodes are the escapes that style the cursor's line.
+// body is the screen lines that show the report's lines, between the headings
+// and the strip.
+func body(m *liveStatus) []string {
+	lines := screen(m)
+	return lines[len(m.headings) : len(lines)-1-len(m.strip())]
+}
+
+// stripOn is the screen lines the strip takes, above the bar.
+func stripOn(m *liveStatus) []string {
+	lines := screen(m)
+	return lines[len(lines)-1-len(m.strip()) : len(lines)-1]
+}
+
+// ansiCodes are the escapes that style the view: its colors and the cursor's
+// line.
 var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// uncolored is s as a screen without color shows it.
+func uncolored(s string) string { return ansiCodes.ReplaceAllString(s, "") }
+
+// uncoloredLines are lines as a screen without color shows them.
+func uncoloredLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		out = append(out, uncolored(l))
+	}
+	return out
+}
 
 // words is a line's words, without the tree's markers or the cursor's style.
 func words(line string) string {
-	line = ansiCodes.ReplaceAllString(line, "")
+	line = uncolored(line)
 	return strings.Join(strings.FieldsFunc(line, func(r rune) bool {
 		return r == ' ' || r == '▸' || r == '▾'
 	}), " ")
@@ -163,22 +198,37 @@ func TestLiveStatusShowsWhatTheTextShows(t *testing.T) {
 	for _, l := range screen(m) {
 		view = append(view, words(l))
 	}
-	// Every line the text prints, with its fields: the headings, each project's
-	// and goal's line, every task with its status, worker, PR, model, effort and
-	// notes, the counts and what waits in the other projects.
+	// Every line the text prints is a line of the view, as the text words it:
+	// the headings, each project's and goal's line, every task with its status,
+	// worker, PR, model, effort and notes, the counts and what waits in the
+	// other projects.
+	headings := len(m.headings)
+	lines := slices.Clone(view[:headings])
+	for _, l := range m.shown {
+		lines = append(lines, words(l.head+" "+says(l.statusLine)))
+	}
 	for _, l := range strings.Split(plainText(r), "\n") {
-		if l != "" && !slices.Contains(view, words(l)) {
+		if l != "" && !slices.Contains(lines, words(l)) {
 			t.Errorf("the text's line %q isn't in the view:\n%s", l, strings.Join(screen(m), "\n"))
 		}
 	}
 	// Every line of the tree, the ones the text only counts too, with its
-	// fields, under the line it's under in the tree. At this width, each takes
-	// one line, under the headings.
+	// fields as the live view words them, under the line it's under in the
+	// tree. At this width, each takes one line, under the headings. A task's
+	// status, worker, model and effort read as the text has them, and its PR
+	// starts with the text's number.
 	parents, _ := treeOf(reportLines(r))
-	headings := len(m.headings)
 	for i, l := range m.shown {
-		if want := words(l.head + " " + says(l.statusLine)); view[headings+i] != want {
+		if want := words(l.head + " " + showsLive(l.statusLine)); view[headings+i] != want {
 			t.Errorf("the view shows %q where the tree has %q", view[headings+i], want)
+		}
+		for _, f := range []int{statusField, workerField, modelField, effortField} {
+			if l.hasFields() && l.fields[f].live != l.fields[f].text {
+				t.Errorf("the view shows %s's %s as %q, where the text has %q", l.head, columns[f].heading, l.fields[f].live, l.fields[f].text)
+			}
+		}
+		if l.hasFields() && !strings.HasPrefix(l.fields[prField].live, l.fields[prField].text) {
+			t.Errorf("the view shows %s's PR as %q, where the text has %q", l.head, l.fields[prField].live, l.fields[prField].text)
 		}
 		parent := ""
 		if j := m.above(i); j >= 0 {
@@ -385,7 +435,7 @@ func TestLiveStatusKeepsBuildingWhileItsReadsHang(t *testing.T) {
 			m.Update(next(t, msgs))
 		}
 	}
-	if i := lineOf(m, "010-parent"); i < 0 || m.shown[i].fields[statusField] != "needs-input" {
+	if i := lineOf(m, "010-parent"); i < 0 || m.shown[i].fields[statusField].text != "needs-input" {
 		t.Error("5 seconds after a task changed, while the reads and the pull hang, the view doesn't show it")
 	}
 }
@@ -450,16 +500,15 @@ func TestLiveStatusFitsTheScreen(t *testing.T) {
 }
 
 // onScreen: every line the cursor's line is drawn on is on the screen, between
-// the headings and the bar.
+// the headings and the strip.
 func onScreen(m *liveStatus) bool {
-	body := screen(m)[len(m.headings) : len(screen(m))-1]
 	var cursor []string
-	for _, l := range body {
+	for _, l := range body(m) {
 		if strings.Contains(l, "\x1b[7m") { // the cursor's style: reversed
-			cursor = append(cursor, strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " "))
+			cursor = append(cursor, strings.TrimRight(uncolored(l), " "))
 		}
 	}
-	return slices.Equal(cursor, m.shown[m.cursor].drawn)
+	return slices.Equal(cursor, uncoloredLines(m.shown[m.cursor].drawn))
 }
 
 // variedReport is fullStatusLedger's report with values of every length a
@@ -486,12 +535,12 @@ func variedReport(t *testing.T) statusReport {
 func squeezed(s string) string { return strings.ReplaceAll(s, " ", "") }
 
 // cellsOf reads a row of the table back from the lines it's drawn on: the
-// text in each column, with its lines joined, the ID's first.
+// text in each column, uncolored, with its lines joined, the ID's first.
 func cellsOf(tb table, drawn []string) []string {
 	widths := append([]int{tb.id}, tb.fields[:]...)
 	cells := make([]string, len(widths))
 	for _, line := range drawn {
-		runes := []rune(line)
+		runes := []rune(uncolored(line))
 		start := 0
 		for i, w := range widths {
 			if end := min(len(runes), start+w); start < end {
@@ -524,7 +573,7 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 		if !m.inColumns {
 			t.Fatalf("at width %d, the rows are cards", width)
 		}
-		want := append([]string{idHeading}, headings().fields...)
+		want := append([]string{idHeading}, texts(headings().fields)...)
 		if got := cellsOf(m.table, m.headings); !slices.Equal(got, want) {
 			t.Errorf("at width %d, the headings read %q, want %q", width, got, want)
 		}
@@ -539,8 +588,8 @@ func TestLiveStatusLinesUpItsColumns(t *testing.T) {
 				t.Errorf("at width %d, the ID column reads %q, want %q", width, got[0], l.head)
 			}
 			for i, f := range l.fields {
-				if squeezed(got[i+1]) != squeezed(f) {
-					t.Errorf("at width %d, %s's %s column reads %q, want %q:\n%s", width, l.head, columns[i].heading, got[i+1], f, strings.Join(l.drawn, "\n"))
+				if squeezed(got[i+1]) != squeezed(uncolored(f.live)) {
+					t.Errorf("at width %d, %s's %s column reads %q, want %q:\n%s", width, l.head, columns[i].heading, got[i+1], f.live, strings.Join(l.drawn, "\n"))
 				}
 			}
 		}
@@ -577,11 +626,11 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 			for i, f := range l.fields {
 				switch {
 				case m.inColumns:
-					if got := cellsOf(m.table, l.drawn)[i+1]; squeezed(got) != squeezed(f) {
-						t.Errorf("at width %d, %s shows %q, want %q", width, l.head, got, f)
+					if got := cellsOf(m.table, l.drawn)[i+1]; squeezed(got) != squeezed(uncolored(f.live)) {
+						t.Errorf("at width %d, %s shows %q, want %q", width, l.head, got, f.live)
 					}
-				case f != "" && !strings.Contains(drawn, squeezed(columns[i].heading+": "+f)):
-					t.Errorf("at width %d, %s doesn't show %s %q: %q", width, l.head, columns[i].heading, f, l.drawn)
+				case f.live != "" && !strings.Contains(drawn, squeezed(columns[i].heading+": "+f.live)):
+					t.Errorf("at width %d, %s doesn't show %s %q: %q", width, l.head, columns[i].heading, f.live, l.drawn)
 				}
 			}
 		}
@@ -608,6 +657,29 @@ func TestLiveStatusShowsEveryFieldAtAnyWidth(t *testing.T) {
 	}
 }
 
+// A card wraps a field whose words are styled, as the user's are, showing each
+// word once.
+func TestACardWrapsStyledWordsOnce(t *testing.T) {
+	l := statusLine{head: "101-merge-now", fields: make([]wording, len(columns))}
+	l.fields[notesField] = joinNotes([]wording{
+		forUser("merge now", "merge"),
+		forUser("2 finding(s) left for you", "2 findings"),
+		forUser("no risk tier: read the diff", "no risk tier"),
+	})
+	want := "notes: merge 2 findings no risk tier"
+	for width := 12; width <= len(want)+2; width++ {
+		got := card("", l, width)
+		if under := uncolored(strings.Join(got[1:], " ")); squeezed(under) != squeezed(want) {
+			t.Errorf("at width %d, the card says %q, want %q", width, under, want)
+		}
+		for _, line := range got {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at width %d, a line of the card is %d wide: %q", width, w, line)
+			}
+		}
+	}
+}
+
 func TestLiveStatusPinsTheHeadingsOverRowsUnderAFold(t *testing.T) {
 	c := statusLedger(t)
 	writeFile(t, c, "", "projects", "s", "project.env")
@@ -627,7 +699,7 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 	m := liveOn(variedReport(t))
 	openAll(m)
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
-	want := words(strings.Join(append([]string{idHeading}, headings().fields...), " "))
+	want := words(strings.Join(append([]string{idHeading}, texts(headings().fields)...), " "))
 	scrolled := false
 	for range m.shown {
 		if m.shown[m.cursor].hasFields() {
@@ -650,13 +722,13 @@ func TestLiveStatusKeepsTheHeadingsOnScreen(t *testing.T) {
 func unseen(m *liveStatus, keys ...string) []string {
 	var report []string // every shown line's drawn lines, top to bottom
 	for _, l := range m.shown {
-		report = append(report, l.drawn...)
+		report = append(report, uncoloredLines(l.drawn)...)
 	}
 	seen := make([]bool, len(report))
 	for last := ""; ; {
 		lines := screen(m)
-		for i, l := range lines[len(m.headings) : len(lines)-1] {
-			if n := m.top + i; n < len(report) && strings.TrimRight(ansiCodes.ReplaceAllString(l, ""), " ") == report[n] {
+		for i, l := range body(m) {
+			if n := m.top + i; n < len(report) && strings.TrimRight(uncolored(l), " ") == report[n] {
 				seen[n] = true
 			}
 		}
@@ -674,6 +746,207 @@ func unseen(m *liveStatus, keys ...string) []string {
 		}
 	}
 	return missed
+}
+
+// reversedCells counts a screen line's cells, and how many of them show
+// reversed, following the styles its escapes turn on and off.
+func reversedCells(line string) (reversed, cells int) {
+	on, at := false, 0
+	count := func(text string) {
+		w := lipgloss.Width(text)
+		cells += w
+		if on {
+			reversed += w
+		}
+	}
+	for _, code := range ansiCodes.FindAllStringIndex(line, -1) {
+		count(line[at:code[0]])
+		params := strings.Split(line[code[0]+2:code[1]-1], ";")
+		switch {
+		case slices.Equal(params, []string{""}) || slices.Contains(params, "0") || slices.Contains(params, "27"):
+			on = false
+		case slices.Contains(params, "7"):
+			on = true
+		}
+		at = code[1]
+	}
+	count(line[at:])
+	return reversed, cells
+}
+
+// The cursor's row shows reversed across the screen, on every line it takes:
+// its colored marks, and what comes after them.
+func TestLiveStatusHighlightsTheCursorsRowAcrossTheScreen(t *testing.T) {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 60})
+	m.moveTo(lineOf(m, "013-risky"))
+	drawn := m.shown[m.cursor].drawn
+	if !ansiCodes.MatchString(strings.Join(drawn, "")) {
+		t.Fatalf("013-risky's row has nothing colored: %q", drawn)
+	}
+	highlighted := 0
+	for _, line := range screen(m) {
+		if !strings.Contains(line, "\x1b[7m") {
+			continue
+		}
+		highlighted++
+		if reversed, cells := reversedCells(line); reversed != m.width || cells != m.width {
+			t.Errorf("%d of the line's %d cells are reversed, want all %d: %q", reversed, cells, m.width, line)
+		}
+	}
+	if highlighted != len(drawn) {
+		t.Errorf("%d lines are highlighted, want 013-risky's %d", highlighted, len(drawn))
+	}
+}
+
+// stripSays is what the strip says, its lines joined.
+func stripSays(m *liveStatus) string { return words(strings.Join(stripOn(m), " ")) }
+
+// notesOf is what the cursor's line's notes say in the plain text, or nothing
+// for a line without notes.
+func notesOf(m *liveStatus) string {
+	if l := m.shown[m.cursor]; l.hasFields() {
+		return words(l.fields[notesField].text)
+	}
+	return ""
+}
+
+// The strip words the cursor's line's notes as the plain text does, wrapped
+// to the screen: on every line, in columns and on cards.
+func TestLiveStatusStripWordsTheCursorsNotesAsTheTextDoes(t *testing.T) {
+	r := variedReport(t)
+	text := strings.Split(plainText(r), "\n")
+	for _, width := range []int{120, 60} {
+		m := liveOn(r)
+		openAll(m)
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 60})
+		wrapped := false
+		for i := range m.shown {
+			m.moveTo(i)
+			got := stripOn(m)
+			if strip := stripSays(m); strip != notesOf(m) {
+				t.Errorf("at width %d, on %s the strip says %q, want %q", width, m.shown[i].head, strip, notesOf(m))
+			}
+			// A row the text prints ends with the same notes.
+			at := slices.IndexFunc(text, func(l string) bool { return strings.HasPrefix(words(l), words(m.shown[i].head)+" ") })
+			if m.shown[i].hasFields() && at >= 0 && !strings.HasSuffix(words(text[at]), stripSays(m)) {
+				t.Errorf("at width %d, the text's line %q doesn't end with the strip's %q", width, text[at], stripSays(m))
+			}
+			for _, line := range got {
+				if lipgloss.Width(line) > width {
+					t.Errorf("at width %d, a line of the strip is %d wide: %q", width, lipgloss.Width(line), line)
+				}
+			}
+			wrapped = wrapped || len(got) > 1
+		}
+		if !wrapped && width == 60 {
+			t.Errorf("at width %d, no line's notes wrap in the strip", width)
+		}
+		if inColumns := width == 120; m.inColumns != inColumns {
+			t.Errorf("at width %d, rows in columns: %v, want %v", width, m.inColumns, inColumns)
+		}
+	}
+}
+
+// The strip follows the cursor as it moves, and words the notes of the next
+// report once it's built.
+func TestLiveStatusStripFollowsTheCursorAndTheReport(t *testing.T) {
+	c := statusLedger(t)
+	m := liveOn(readReport(c, "p"))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	goTo(t, m, "014-later")
+	if got, want := stripSays(m), notesOf(m); got != want || want == "" {
+		t.Fatalf("on 014-later, the strip says %q, want %q", got, want)
+	}
+	for _, key := range []string{"j", "k"} {
+		press(m, key)
+		if got := stripSays(m); got != notesOf(m) {
+			t.Errorf("after %s onto %s, the strip says %q, want %q", key, m.shown[m.cursor].head, got, notesOf(m))
+		}
+	}
+	reportTask(t, c, "p", "014-later", true, "status: working", "base: main")
+	m.Update(reportBuilt{report: readReport(c, "p")})
+	if got := stripSays(m); got != "1 open question(s)" {
+		t.Errorf("once 014-later asks, the strip says %q, want its question", got)
+	}
+}
+
+// However tall the strip grows on a short screen, the cursor's line stays on
+// screen, as much of it as fits, and every line is reachable, a line at a time
+// or a page at a time.
+func TestLiveStatusReachesEveryLineAsTheStripGrows(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 5}, {Width: 120, Height: 7}, {Width: 60, Height: 5}, {Width: 60, Height: 9}} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(size)
+		grew := false
+		for _, keys := range [][]string{{"j"}, {"k"}, {"pgdown"}, {"pgup"}} {
+			if missed := unseen(m, keys...); len(missed) > 0 {
+				t.Errorf("at %dx%d, %s never shows %q", size.Width, size.Height, keys[0], missed)
+			}
+		}
+		for i := range m.shown {
+			m.moveTo(i)
+			grew = grew || len(m.strip()) > 1
+			if len(m.shown[i].drawn) <= m.bodyHeight() && !onScreen(m) {
+				t.Errorf("at %dx%d, %s isn't all on screen:\n%s", size.Width, size.Height, m.shown[i].head, strings.Join(screen(m), "\n"))
+			}
+			if got := len(screen(m)); got != size.Height {
+				t.Errorf("at %dx%d, the screen is %d lines", size.Width, size.Height, got)
+			}
+		}
+		if !grew && size.Width == 60 {
+			t.Errorf("at %dx%d, the strip never takes more than a line", size.Width, size.Height)
+		}
+	}
+}
+
+// On a screen too short for a line's notes, ↓ scrolls through them in the
+// strip before it moves on, and ↑ scrolls back, so every word can be read.
+func TestLiveStatusScrollsThroughNotesTooLongForTheStrip(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 3}, {Width: 40, Height: 4}} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(size)
+		overflowed := false
+		for i := range m.shown {
+			m.moveTo(i)
+			want := m.notes()
+			overflowed = overflowed || len(want) > len(m.strip())
+			// readAll presses key until the cursor leaves line i, and says
+			// whether the strip showed every line of its notes on the way.
+			readAll := func(key string) bool {
+				seen := map[string]bool{}
+				for m.cursor == i {
+					for _, l := range stripOn(m) {
+						seen[strings.TrimRight(strings.TrimSuffix(strings.TrimRight(uncolored(l), " "), "…"), " ")] = true
+					}
+					press(m, key)
+				}
+				for _, l := range want {
+					if !seen[strings.TrimRight(l, " ")] {
+						return false
+					}
+				}
+				return true
+			}
+			if i+1 < len(m.shown) && !readAll("j") {
+				t.Errorf("at %dx%d, j leaves %s before the strip shows all of %q", size.Width, size.Height, m.shown[i].head, want)
+			}
+			if i > 0 {
+				m.moveTo(i)
+				m.stripTop = len(want) // as if scrolled down to the notes' end
+				if !readAll("k") {
+					t.Errorf("at %dx%d, k leaves %s before the strip shows all of %q", size.Width, size.Height, m.shown[i].head, want)
+				}
+			}
+		}
+		if !overflowed {
+			t.Errorf("at %dx%d, no line's notes are too long for the strip", size.Width, size.Height)
+		}
+	}
 }
 
 func TestLiveStatusScrollsThroughARowTallerThanTheScreen(t *testing.T) {
@@ -1027,11 +1300,12 @@ func (r *liveRun) second() {
 // open is how long the view has been open.
 func (r *liveRun) open() time.Duration { return r.clock.Sub(tenOClock) }
 
-// fields are what the view shows of a task after its ID: its status, worker,
-// PR, model, effort and notes; none when it isn't on show.
+// fields are what the view has of a task after its ID, as the plain text
+// words them: its status, worker, PR, model, effort and notes; none when it
+// isn't on show.
 func (r *liveRun) fields(id string) []string {
 	if i := lineOf(r.m, id); i >= 0 {
-		return r.m.shown[i].fields
+		return texts(r.m.shown[i].fields)
 	}
 	return make([]string, len(columns))
 }
@@ -1129,7 +1403,7 @@ func TestLiveStatusClaimsNothingBeforeTheFirstReads(t *testing.T) {
 		t.Errorf("before the first listing, the workers line is %q", got)
 	}
 	for _, id := range []string{"001-in-flight", "020-lower", "024-ready"} {
-		if got := lineOf(m, id); got < 0 || m.shown[got].fields[workerField] != "not listed yet" {
+		if got := lineOf(m, id); got < 0 || m.shown[got].fields[workerField].text != "not listed yet" {
 			t.Errorf("before the first listing, %s's worker isn't said to be not listed yet", id)
 		}
 	}
