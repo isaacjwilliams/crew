@@ -446,11 +446,12 @@ func TestMigrateMemorySuggestionsAfterARunCutShort(t *testing.T) {
 
 // A suggestion's text may hold "<!--", which crew remember wrote as given: the
 // migration keeps it, and doesn't take it for a comment that hides the lines
-// after it.
+// after it, suggestions or typed.
 func TestMigrateMemorySuggestionsKeepsCommentMarkersInTheirText(t *testing.T) {
 	d := oldSuggestionsDoc(t, "# Memory suggestions: p\n\n"+
 		"- [x] **Imports keep `<!--private-->` markers** As `<!-- x -->` in the why. (lead, 2026-11-09) → declined: Only `<!--this-->` one.\n"+
 		"- [ ] **An open `<!--` marker** Never closed. (lead, 2026-11-10)\n"+
+		"A note someone typed.\n"+
 		"- [ ] **The next one** Still read. (lead, 2026-11-11)\n")
 	if n, err := migrateMemorySuggestions(d, "p"); err != nil || n != 3 {
 		t.Fatalf("migrateMemorySuggestions = %d, %v; want 3 suggestions", n, err)
@@ -464,6 +465,10 @@ func TestMigrateMemorySuggestionsKeepsCommentMarkersInTheirText(t *testing.T) {
 	want := []string{"Imports keep `<!--private-->` markers", "As `<!-- x -->` in the why", "Only `<!--this-->` one.", "An open `<!--` marker", "The next one"}
 	if !slices.Equal(got, want) {
 		t.Errorf("migrated %q, want %q", got, want)
+	}
+	b, _ := os.ReadFile(d.Path)
+	if want := suggestionsHead("p") + "\nA note someone typed.\n"; string(b) != want {
+		t.Errorf("file =\n%s\nwant\n%s", b, want)
 	}
 }
 

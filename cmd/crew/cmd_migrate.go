@@ -221,19 +221,24 @@ func migrateMemorySuggestions(d Doc, project string) (int, error) {
 	}
 	// Every checkbox line is a suggestion, as crew counted them before records,
 	// read as it stands: crew remember wrote its text as given, "<!--" and all.
-	// Comments only decide which other lines are worth keeping.
-	plain := uncommented(ls)
 	var found []oldSuggestion
-	var rest []string
+	others := slices.Clone(ls) // the file with its suggestions blanked out
 	for i, l := range ls {
 		l = strings.TrimRight(l, " \t")
-		if _, ok := checklistItem(l); ok {
-			o, err := readOldSuggestion(l)
-			if err != nil {
-				return 0, fmt.Errorf("%s:%d: %v", suggestionsFile, i+1, err)
-			}
-			found = append(found, o)
-		} else if t := strings.TrimSpace(plain[i]); t != "" && t != "# Memory suggestions: "+project {
+		if _, ok := checklistItem(l); !ok {
+			continue
+		}
+		o, err := readOldSuggestion(l)
+		if err != nil {
+			return 0, fmt.Errorf("%s:%d: %v", suggestionsFile, i+1, err)
+		}
+		found, others[i] = append(found, o), ""
+	}
+	// The other lines are kept, except the heading and comments. A comment is
+	// looked for without the suggestions, so one's "<!--" can't hide a line.
+	var rest []string
+	for i, l := range uncommented(others) {
+		if t := strings.TrimSpace(l); t != "" && t != "# Memory suggestions: "+project {
 			rest = append(rest, ls[i])
 		}
 	}
