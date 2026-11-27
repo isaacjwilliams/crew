@@ -128,9 +128,11 @@ for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json"; do
     "jq -e >/dev/null '.hooks.SessionStart | length == 1 and (.[0] | has(\"matcher\") | not) and .[0].hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" memory --hook\"' $f"
 done
 check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '.hooks == null' $C/readonly-settings.json"
-check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
-check "the gardener's allow list is the read-only one, plus crew remember" \
-  "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
+GARDENER_CREW='["Bash(crew remember *)","Bash(crew show memory-suggestions)","Bash(crew show memory-suggestions *)"]'
+check "the gardener may suggest project memory, and read the suggestions" \
+  "jq -e >/dev/null --argjson g '$GARDENER_CREW' '.permissions.allow | contains(\$g)' $C/gardener-settings.json"
+check "the gardener's allow list is the read-only one, plus crew remember and crew show memory-suggestions" \
+  "[[ \$(jq -c --argjson g '$GARDENER_CREW' '.permissions.allow - \$g' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
 # --- the misses agent: the gardener's powers, its own job
 MS=$A/misses.md
 check "misses.md runs crew-guard as the gardener" "grep -q 'bin/crew-guard\" gardener.\$' $MS"

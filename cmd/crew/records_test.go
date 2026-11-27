@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -181,10 +183,11 @@ func TestLedgerFormat(t *testing.T) {
 	task := learnTask(t, "## Log\n")
 	marker := ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path)))
 	for content, want := range map[string]string{
-		"":    "p's ledger isn't migrated to this crew's records yet: run crew migrate",
-		"0\n": "run crew migrate",
-		"2\n": "p's ledger is from a newer crew: run crew upgrade",
-		"x\n": `holds "x", not a format number`,
+		"":                             "p's ledger isn't migrated to this crew's records yet: run crew migrate",
+		"0\n":                          "run crew migrate",
+		fmt.Sprintln(ledgerFormat - 1): "run crew migrate",
+		fmt.Sprintln(ledgerFormat + 1): "p's ledger is from a newer crew: run crew upgrade",
+		"x\n":                          `holds "x", not a format number`,
 	} {
 		if content == "" {
 			os.Remove(marker)
@@ -358,5 +361,115 @@ status: draft
 	}
 	if b, _ := os.ReadFile(task.Path); strings.Contains(string(b), "- [") {
 		t.Errorf("task file still has its checkboxes:\n%s", b)
+	}
+}
+
+// suggestionsBefore is a memory-suggestions.md from before records, with each
+// kind of line crew remember wrote and the lead ticked.
+const suggestionsBefore = `# Memory suggestions: p
+
+<!-- The old comment: tick each one. -->
+- [ ] **Columns are unlimited** The user chose it over a cap of 12. (lead, 2026-11-09)
+- [x] **Screenshots go in Dropbox** Collaborators can't see them. (worker:007-shots, 2026-11-10) → kept
+- [X] **Specs run in parallel** It's faster: twice. (gardener, 2026-11-11) → declined: Not on CI, where they share a database.
+
+A note someone typed.
+`
+
+// oldSuggestionsDoc is memory-suggestions.md in a project not yet in this crew's
+// format, holding content.
+func oldSuggestionsDoc(t *testing.T, content string) Doc {
+	t.Helper()
+	c := &Crew{Home: t.TempDir()}
+	writeFile(t, c, content, "projects", "p", suggestionsFile)
+	return c.suggestionsDoc("p")
+}
+
+func TestMigrateMemorySuggestions(t *testing.T) {
+	d := oldSuggestionsDoc(t, suggestionsBefore)
+	n, err := migrateMemorySuggestions(d, "p")
+	if err != nil || n != 3 {
+		t.Fatalf("migrateMemorySuggestions = %d, %v; want 3 suggestions", n, err)
+	}
+	records, err := d.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		if r.By != "crew migrate" {
+			t.Errorf("%s is by %q, want crew migrate", r.ID, r.By)
+		}
+	}
+	// As the lines read before, with the date each was made on.
+	id, settled := regexp.MustCompile(`^(- \[.\]) [0-9a-f]{8} `), regexp.MustCompile(`^  - (kept|declined) .* by crew migrate`)
+	got := suggestionLines(suggestions(records))
+	for i, l := range got {
+		got[i] = settled.ReplaceAllString(id.ReplaceAllString(l, "$1 "), "  $1")
+	}
+	want := []string{
+		"- [ ] **Columns are unlimited** The user chose it over a cap of 12. (lead, 2026-11-09)",
+		"- [x] **Screenshots go in Dropbox** Collaborators can't see them. (worker:007-shots, 2026-11-10)",
+		"  kept",
+		"- [x] **Specs run in parallel** It's faster: twice. (gardener, 2026-11-11)",
+		"  declined: Not on CI, where they share a database.",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("suggestions =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	b, _ := os.ReadFile(d.Path)
+	if want := suggestionsHead("p") + "\nA note someone typed.\n"; string(b) != want {
+		t.Errorf("file =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// A crew migrate stopped after writing the records, and before rewriting the
+// file, leaves both. Run again, it only rewrites the file.
+func TestMigrateMemorySuggestionsAfterARunCutShort(t *testing.T) {
+	d := oldSuggestionsDoc(t, suggestionsBefore)
+	if _, err := migrateMemorySuggestions(d, "p"); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(d.RecordsPath())
+	if err := os.WriteFile(d.Path, []byte(suggestionsBefore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := migrateMemorySuggestions(d, "p"); err != nil || n != 0 {
+		t.Fatalf("migrateMemorySuggestions run again = %d, %v; want 0", n, err)
+	}
+	if after, _ := os.ReadFile(d.RecordsPath()); string(after) != string(before) {
+		t.Errorf("records run again =\n%s\nwant them as the first run left them\n%s", after, before)
+	}
+	if b, _ := os.ReadFile(d.Path); strings.Contains(string(b), "- [") {
+		t.Errorf("file still has its checkboxes:\n%s", b)
+	}
+}
+
+// A suggestion line crew can't read stops the migration before it writes
+// anything, naming the line.
+func TestMigrateMemorySuggestionsRefusesWhatItCantRead(t *testing.T) {
+	for line, want := range map[string]string{
+		"- [ ] **A** a. (lead, 2026-11-09) → kept":   "only a ticked one",
+		"- [x] **A** a. (lead, 2026-11-09)":          "only a ticked one",
+		"- [x] **A** a. (lead, 2026-11-09) → sorted": "not a suggestion crew can read",
+		"- [ ] A fact typed without the shape":       "not a suggestion crew can read",
+		"- [ ] **A** a. (lead, 2026-13-40)":          "month out of range",
+	} {
+		content := "# Memory suggestions: p\n\n- [ ] **B** b. (lead, 2026-11-09)\n" + line + "\n"
+		d := oldSuggestionsDoc(t, content)
+		_, err := migrateMemorySuggestions(d, "p")
+		if err == nil || !strings.Contains(err.Error(), "memory-suggestions.md:4: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("migrating %q: %v; want memory-suggestions.md:4 and %q", line, err, want)
+		}
+		if b, _ := os.ReadFile(d.Path); string(b) != content || isFile(d.RecordsPath()) {
+			t.Errorf("migrating %q changed the ledger", line)
+		}
+	}
+}
+
+// A project with no suggestions file has nothing to migrate.
+func TestMigrateMemorySuggestionsWithoutAFile(t *testing.T) {
+	d := Doc{filepath.Join(t.TempDir(), "projects", "p", suggestionsFile)}
+	if n, err := migrateMemorySuggestions(d, "p"); err != nil || n != 0 || isFile(d.Path) {
+		t.Errorf("migrateMemorySuggestions = %d, %v, file made %v; want nothing done", n, err, isFile(d.Path))
 	}
 }

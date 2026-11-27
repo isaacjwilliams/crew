@@ -18,7 +18,7 @@ echo '[{"id":"w1","state":"working","pid":1},{"id":"g1","state":"idle","pid":2}]
 	writeFile(t, c, "---\nid: 001-launch\nstatus: running\nlead_job: g1\n---\n# launch\n\n## Log\n", "projects", "p", "goals", "001-launch.md")
 	reportTask(t, c, "p", "010-parent", false, "status: working", "base: main", "branch: agent/parent", "model: sonnet", "effort: high")
 	writeFile(t, c, "---\nstatus: open\n---\n# An idea\n", "projects", "p", "proposals", "an-idea.md")
-	writeFile(t, c, "# Memory suggestions: p\n\n- [ ] **B** b. (lead, 2026-11-09)\n", "projects", "p", "memory-suggestions.md")
+	suggestFact(t, c, "p", "B")
 	writeFile(t, c, "", "projects", "r", "project.env")
 	reportTask(t, c, "r", "001-asks", true, "status: ready")
 	return c
@@ -58,7 +58,7 @@ p
   015-earlier        pr-open           #5                   not yet: couldn't read the PR on GitHub, and crew sync hasn't recorded it yet  low: approve from the evidence
   1 draft(s)  (crew list --project p --status draft)
   open proposals: 1  (crew proposals --project p)
-  memory suggestions: 1  (projects/p/memory-suggestions.md)
+  memory suggestions: 1  (crew show memory-suggestions --project p)
   to review: #5 low, #12 low, #9 high (no security review yet)
 
 waiting on you in other projects  (crew status --all)

@@ -1,7 +1,8 @@
 package main
 
 // Records are typed facts about a ledger file, kept beside it in its records
-// file: tasks/<id>.records.jsonl beside tasks/<id>.md. crew decides from them,
+// file: tasks/<id>.records.jsonl beside tasks/<id>.md, and
+// memory-suggestions.records.jsonl beside a project's memory-suggestions.md. crew decides from them,
 // never from the file's prose. Only crew commands write records, one JSON line
 // each, appended under the ledger lock, and none is ever changed: a later fact
 // is a new record that names the one it follows. Two clones that each append
@@ -34,8 +35,11 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn *ToLearn `json:"to_learn,omitempty"`
-	Learned *Learned `json:"learned,omitempty"`
+	ToLearn   *ToLearn   `json:"to_learn,omitempty"`
+	Learned   *Learned   `json:"learned,omitempty"`
+	Suggested *Suggested `json:"suggested,omitempty"`
+	Kept      *Kept      `json:"kept,omitempty"`
+	Declined  *Declined  `json:"declined,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -48,6 +52,25 @@ type ToLearn struct {
 type Learned struct {
 	Item   string `json:"item"` // the ToLearn record's ID
 	Answer string `json:"answer"`
+}
+
+// Suggested adds a fact suggested for the project's memory.md, which waits on
+// the user until Kept or Declined settles it.
+type Suggested struct {
+	Fact   string `json:"fact"`
+	Why    string `json:"why"`
+	Source string `json:"source"` // who suggested it, as ledgerSource checks it
+}
+
+// Kept settles a suggestion the user kept for memory.md.
+type Kept struct {
+	Suggestion string `json:"suggestion"` // the Suggested record's ID
+}
+
+// Declined settles a suggestion the user turned down, with why.
+type Declined struct {
+	Suggestion string `json:"suggestion"` // the Suggested record's ID
+	Reason     string `json:"reason"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -70,10 +93,19 @@ func (d Doc) RecordsPath() string { return strings.TrimSuffix(d.Path, ".md") + "
 // file. It fails on any line it can't read, naming the line, and when the
 // project's ledger isn't in the format this crew reads (ledgerFormat).
 func (d Doc) Records() ([]Record, error) {
-	if err := checkLedgerFormat(filepath.Dir(filepath.Dir(d.Path))); err != nil {
+	if err := checkLedgerFormat(d.projectDir()); err != nil {
 		return nil, err
 	}
 	return d.readRecords()
+}
+
+// projectDir is the project the file belongs to: projects/<p>/, which holds
+// memory-suggestions.md and the folders of tasks, goals and proposals.
+func (d Doc) projectDir() string {
+	if filepath.Base(d.Path) == suggestionsFile {
+		return filepath.Dir(d.Path)
+	}
+	return filepath.Dir(filepath.Dir(d.Path))
 }
 
 // readRecords are the records in the file, whatever the project's format.
@@ -113,8 +145,11 @@ func (d Doc) readRecords() ([]Record, error) {
 // adds is what the record adds for a later record to settle, in words, or ""
 // when it adds nothing.
 func (r Record) adds() string {
-	if r.ToLearn != nil {
+	switch {
+	case r.ToLearn != nil:
 		return "an item to learn"
+	case r.Suggested != nil:
+		return "a memory suggestion"
 	}
 	return ""
 }
@@ -122,14 +157,19 @@ func (r Record) adds() string {
 // settles is the ID of the item the record settles, and what that item is, as
 // adds words it; what is "" for a record that settles nothing.
 func (r Record) settles() (item, what string) {
-	if r.Learned != nil {
+	switch {
+	case r.Learned != nil:
 		return r.Learned.Item, "an item to learn"
+	case r.Kept != nil:
+		return r.Kept.Suggestion, "a memory suggestion"
+	case r.Declined != nil:
+		return r.Declined.Suggestion, "a memory suggestion"
 	}
 	return "", ""
 }
 
-// An Item is something a record adds for later records to settle, such as an
-// item still to learn, and the records that settle it, oldest first. Two clones
+// An Item is something a record adds for later records to settle, an item
+// still to learn or a memory suggestion, and the records that settle it, oldest first. Two clones
 // may each settle it, so it can have more than one. It's open until one does.
 type Item struct {
 	Record
@@ -189,7 +229,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
 		if set {
 			payloads++
 		}
@@ -202,6 +242,12 @@ func (r Record) check() error {
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.Suggested != nil && (strings.TrimSpace(r.Suggested.Fact) == "" || strings.TrimSpace(r.Suggested.Why) == "" || r.Suggested.Source == ""):
+		return errors.New("a suggested record needs its fact, its why and its source")
+	case r.Kept != nil && r.Kept.Suggestion == "":
+		return errors.New("a kept record needs its suggestion")
+	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
+		return errors.New("a declined record needs its suggestion and its reason")
 	}
 	return nil
 }
@@ -229,9 +275,10 @@ func (d Doc) AddRecords(rs ...Record) error {
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
-// records; before it they were checkboxes in the task file, which crew migrate
-// moves into records. crew project add writes the file for a new project.
-const ledgerFormat = 1
+// records, and format 2 memory suggestions; before, they were checkboxes in the
+// task file and in memory-suggestions.md, which crew migrate moves into records.
+// crew project add writes the file for a new project.
+const ledgerFormat = 2
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

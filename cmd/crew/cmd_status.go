@@ -237,15 +237,17 @@ func draftsLine(folded []taskRow, project string) string {
 }
 
 // footer is what the project's listing ends with: its open proposals, memory
-// suggestions and PRs to review, each only when there are some. Their keys
-// follow the project's.
+// suggestions and PRs to review, each only when there are some. Memory
+// suggestions crew can't count say why instead. Their keys follow the project's.
 func (p projectReport) footer(key string) []statusLine {
 	var lines []statusLine
 	if p.OpenProposals > 0 {
 		lines = append(lines, leafLine(key+" proposals", fmt.Sprintf("open proposals: %d  (crew proposals --project %s)", p.OpenProposals, p.Name)))
 	}
-	if n := p.Waiting.MemorySuggestions; n > 0 {
-		lines = append(lines, leafLine(key+" memory", fmt.Sprintf("memory suggestions: %d  (projects/%s/memory-suggestions.md)", n, p.Name)))
+	if err := p.Waiting.MemoryUnread; err != nil {
+		lines = append(lines, leafLine(key+" memory", "memory suggestions: can't count them: "+err.Error()))
+	} else if n := p.Waiting.MemorySuggestions; n > 0 {
+		lines = append(lines, leafLine(key+" memory", fmt.Sprintf("memory suggestions: %d  (crew show memory-suggestions --project %s)", n, p.Name)))
 	}
 	if len(p.ToReview) > 0 {
 		lines = append(lines, leafLine(key+" to review", toReviewLine(p.ToReview)))

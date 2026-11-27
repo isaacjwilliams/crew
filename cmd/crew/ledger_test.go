@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -1247,29 +1248,42 @@ func TestProposalCheckSetKeepsAnAcceptedProposalOnItsTask(t *testing.T) {
 	}
 }
 
-func TestMemorySuggestion(t *testing.T) {
-	day := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
-	for why, want := range map[string]string{
-		"The user decided in 042":  "- [ ] **Columns are unlimited** The user decided in 042. (worker:042-columns, 2026-11-09)",
-		"The user decided in 042.": "- [ ] **Columns are unlimited** The user decided in 042. (worker:042-columns, 2026-11-09)",
-	} {
-		if got := memorySuggestion("Columns are unlimited", why, "worker:042-columns", day); got != want {
-			t.Errorf("suggestion with --why %q:\n%s\nwant:\n%s", why, got, want)
+func TestSuggestedEntry(t *testing.T) {
+	day := time.Date(2026, 11, 9, 12, 0, 0, 0, time.Local)
+	for _, why := range []string{"The user decided in 042", "The user decided in 042."} {
+		s := Suggested{Fact: "Columns are unlimited", Why: why, Source: "worker:042-columns"}
+		if got, want := s.entry(day), "**Columns are unlimited** The user decided in 042. (worker:042-columns, 2026-11-09)"; got != want {
+			t.Errorf("entry with why %q:\n%s\nwant:\n%s", why, got, want)
 		}
 	}
 }
 
-func TestMemorySuggestionsCountsOnlyUnsettledOnes(t *testing.T) {
+func TestMemorySuggestionsComeFromRecordsAlone(t *testing.T) {
 	c := &Crew{Home: t.TempDir()}
-	if n := c.memorySuggestions("p"); n != 0 {
-		t.Errorf("no suggestions file: %d unsettled", n)
+	writeFile(t, c, "# Memory suggestions: p\n\n- [ ] **Typed** by hand. (lead, 2026-11-09)\n- [x] **Ticked** by hand. (lead, 2026-11-09) → kept\n", "projects", "p", suggestionsFile)
+	if _, err := c.memorySuggestions("p"); !errors.Is(err, errNotMigrated) {
+		t.Errorf("before the migration: %v, want %v", err, errNotMigrated)
 	}
-	os.MkdirAll(c.path("projects", "p"), 0o755)
-	os.WriteFile(c.path("projects", "p", "memory-suggestions.md"), []byte("# Memory suggestions: p\n\n"+
-		"- [ ] **A** a. (lead, 2026-11-09)\n- [x] **B** b. (lead, 2026-11-09) → kept\n"+
-		"- [x] **C** c. (user, 2026-11-09) → declined: not settled\n- [ ] **D** d. (gardener, 2026-11-09)\n"), 0o644)
-	if n := c.memorySuggestions("p"); n != 2 {
-		t.Errorf("two unsettled suggestions: counted %d", n)
+	kept := suggestFact(t, c, "p", "Kept")
+	suggestFact(t, c, "p", "Open")
+	suggestFact(t, c, "p", "Declined")
+	settleFact(t, c, "p", Record{Kept: &Kept{Suggestion: kept}})
+	all, err := c.memorySuggestions("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open []string
+	for _, s := range all {
+		if s.Open() {
+			open = append(open, s.Suggested.Fact)
+		}
+	}
+	if len(all) != 3 || !slices.Equal(open, []string{"Open", "Declined"}) {
+		t.Errorf("suggestions = %+v; want three, Open and Declined open", all)
+	}
+	settleFact(t, c, "p", Record{Declined: &Declined{Suggestion: all[2].ID, Reason: "Not true."}})
+	if all, _ := c.memorySuggestions("p"); openItems(all) != 1 {
+		t.Errorf("after a decline, %d open; want 1", openItems(all))
 	}
 }
 

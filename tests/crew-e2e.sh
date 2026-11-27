@@ -2481,12 +2481,23 @@ sh=$(shown "$BT")
 check "show says the records can't be read, in place of the items" '[[ $sh == *"crew can'"'"'t read the items still to learn: $BTI.records.jsonl:3: not a record crew can read"* && $sh != *"- [x] Q?"* ]]'
 crew set "$BT" status abandoned
 # Until crew migrate, a project's records lack the items its task files still hold
-# as checkboxes, so crew refuses to read them rather than count none.
+# as checkboxes, and the memory suggestions its memory-suggestions.md holds, so
+# crew refuses to read them rather than count none.
 LP=$(basename "$PD"); UT=$(crew new "Before the migration"); UTI=$(basename "$UT" .md); fill "$UT"
+OMS=$PD/memory-suggestions.md
+printf '%s\n' "# Memory suggestions: $LP" "" "<!-- Tick each one. -->" \
+  "- [ ] **Deploys wait for CI** The user said so. (lead, 2026-11-09)" \
+  "- [x] **Specs run in parallel** It's faster. (gardener, 2026-11-10) → declined: Not on CI." \
+  "- [x] **Screenshots go in Dropbox** Collaborators can't see them. (worker:7, 2026-11-11) → kept" >"$OMS"
+crew commit "old memory suggestions" >/dev/null
 mv "$PD/ledger-format" "$HOME/ledger-format"
 out=$(crew ready "$UT" 2>&1); r1=$?; st=$(crew status)
 check "in a project not yet migrated, ready refuses a draft rather than count its items as none, and status says to migrate" \
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
+check "in a project not yet migrated, status says it can't count the memory suggestions, rather than show none" \
+  '[[ $st == *"memory suggestions: can'"'"'t count them: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate"* && $st != *"memory suggestions: 0"* ]]'
+check "in a project not yet migrated, show gives the suggestions file as it is, under why crew can't read it, and remember refuses" \
+  '[[ $(crew show memory-suggestions) == "$(cat "$OMS")$NL${NL}crew can'"'"'t read the memory suggestions: $LP'"'"'s ledger isn'"'"'t migrated"* ]] && ! crew remember "X" --why "Y" 2>/dev/null'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
 sh=$(shown "$UT")
@@ -2494,9 +2505,17 @@ check "before the migration, show gives the section as it is under why crew can'
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
+sh=$(crew show memory-suggestions)
+check "migrate moves the memory suggestions into records, each kept or declined as its line said, and leaves the file only its head" \
+  'has "^- \[ \] [0-9a-f]{8} \*\*Deploys wait for CI\*\* The user said so\. \(lead, 2026-11-09\)$" &&
+   has "^- \[x\] [0-9a-f]{8} \*\*Specs run in parallel\*\* It.s faster\. \(gardener, 2026-11-10\)$" && has "^  - declined .* by crew migrate: Not on CI\.$" &&
+   has "^- \[x\] [0-9a-f]{8} \*\*Screenshots go in Dropbox\*\* .* \(worker:7, 2026-11-11\)$" && has "^  - kept .* by crew migrate$" &&
+   ! grep -q "^- \[" "$OMS" && [[ $(crew status) == *"memory suggestions: 1  (crew show memory-suggestions --project $LP)"* ]]'
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
+# The memory suggestions below start from none.
+git -C "$L" rm -q "$OMS" "${OMS%.md}.records.jsonl" && git -C "$L" commit -qm "no memory suggestions"
 crew set "$UT" status abandoned
 
 # Two crew processes at once on one machine both get the ledger lock in turn, so
@@ -2678,24 +2697,75 @@ check "crew observe runs with the read-only settings and no project, so its obse
 check "gardener takes --project, not a bare project name" '! crew gardener "$P2" 2>/dev/null'
 
 # Project memory: agents suggest facts with crew remember; the lead moves the ones
-# the user approves into memory.md, which every agent of the project loads.
-MS=$L/projects/$PJ/memory-suggestions.md
-out=$(cd "$HOME" && crew remember "Dashboard columns are unlimited" --why "The user chose it over a cap of 12." --project "$PJ")
-check "remember creates the suggestions file and prints its path" '[[ $out == "$MS" && $(head -1 "$MS") == "# Memory suggestions: $PJ" ]]'
-check "remember suggests the fact as an unchecked item in the shape of an entry, from the lead by default" '[[ $(tail -1 "$MS") == "- [ ] **Dashboard columns are unlimited** The user chose it over a cap of 12. (lead, $(date +%F))" ]]'
-(cd "$HOME" && crew remember "PR screenshots go in Dropbox" --why "Collaborators can't see them" --source worker:7 --project "$PJ" >/dev/null)
-check "remember appends, and names a worker's task by full id" '[[ $(grep -c "^- \[ \]" "$MS") == 2 && $(tail -1 "$MS") == "- [ ] **PR screenshots go in Dropbox** Collaborators can'"'"'t see them. (worker:007-contestant-type-on-update, $(date +%F))" ]]'
-check "remember commits the suggestion" '[[ -z $(git -C "$L" status --porcelain -- "$MS") && $(git -C "$L" log -1 --format=%s) == "remember $PJ" ]]'
+# the user approves into memory.md, which every agent of the project loads, and
+# settles each suggestion with crew keep or crew decline.
+MS=$L/projects/$PJ/memory-suggestions.md; MSR=${MS%.md}.records.jsonl
+ms_ledger() { sha256sum "$MS" "$MSR" 2>/dev/null; git -C "$L" status --porcelain -- projects; git -C "$L" rev-parse HEAD; }   # what a refusal leaves as it was
+S1=$(cd "$HOME" && crew remember "Dashboard columns are unlimited" --why "The user chose it over a cap of 12." --project "$PJ")
+check "remember prints the suggestion's ID, and creates the suggestions file with a head that names the commands" \
+  '[[ $S1 =~ ^[0-9a-f]{8}$ && $(head -1 "$MS") == "# Memory suggestions: $PJ" && $(cat "$MS") == *"crew keep and crew decline settle it"* && $(grep -c "^- " "$MS") == 0 ]]'
+sh=$(crew show memory-suggestions)
+check "remember keeps the suggestion as a record, in the shape of an entry, from the lead by default" \
+  'has "^- \[ \] $S1 \*\*Dashboard columns are unlimited\*\* The user chose it over a cap of 12\. \(lead, $(date +%F)\)$" && [[ $(jq -r ".id + \" \" + .by" "$MSR") == "$S1 crew remember" ]]'
+S2=$(cd "$HOME" && crew remember "PR screenshots go in Dropbox" --why "Collaborators can't see them" --source worker:7 --project "$PJ")
+sh=$(crew show memory-suggestions)
+check "remember adds another, and names a worker's task by full id" \
+  'has "^- \[ \] $S2 \*\*PR screenshots go in Dropbox\*\* Collaborators can.t see them\. \(worker:007-contestant-type-on-update, $(date +%F)\)$" && [[ $(grep -c . "$MSR") == 2 ]]'
+check "remember commits the suggestion" '[[ -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "remember $PJ" ]]'
+before=$(ms_ledger)
 check "remember refuses a bad source, an empty fact and a missing --why" \
-  '! crew remember "X" --why "Y" --source bob --project "$PJ" 2>/dev/null && ! crew remember "" --why "Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
+  '! crew remember "X" --why "Y" --source bob --project "$PJ" 2>/dev/null && ! crew remember "" --why "Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" 2>/dev/null && [[ $(ms_ledger) == "$before" ]]'
 check "remember refuses an unknown flag and a flag with no value" \
-  '! crew remember "X" "--why Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" --why 2>/dev/null && [[ $(grep -c "^- " "$MS") == 2 ]]'
+  '! crew remember "X" "--why Y" --project "$PJ" 2>/dev/null && ! crew remember "X" --project "$PJ" --why 2>/dev/null && [[ $(ms_ledger) == "$before" ]]'
 out=$(crew status --project "$PJ")
-check "status counts a project's memory suggestions waiting on the user" '[[ $out == *"  memory suggestions: 2  (projects/$PJ/memory-suggestions.md)"* ]]'
+check "status counts a project's memory suggestions waiting on the user, and names the command that shows them" '[[ $out == *"  memory suggestions: 2  (crew show memory-suggestions --project $PJ)"* ]]'
 out=$(crew status --project "$P2")
 check "status counts memory suggestions among what waits on you in other projects" '[[ $out == *"waiting on you in other projects"*"$PJ: "*"2 memory suggestion(s)"* ]]'
-sed -i 's/^- \[ \] \(.*\)$/- [x] \1 → kept/' "$MS"
+# What's typed into the file is for people: a new line, a ticked one, and later
+# one ticked back change no count.
+printf '%s\n' "- [ ] **Typed by hand** Not through crew. (lead, $(date +%F))" "- [x] $S1 **Dashboard columns are unlimited** The user chose it over a cap of 12. (lead, $(date +%F)) → kept" >>"$MS"
+sh=$(crew show memory-suggestions)
+check "lines typed into the suggestions file, new or ticked, change no count, and show marks them as typed" \
+  '[[ $(crew status --project "$PJ") == *"  memory suggestions: 2  "* && $(crew status --project "$P2") == *"$PJ: "*"2 memory suggestion(s)"* && $sh == *"Typed into the file, so not suggestions crew counts"*"- [ ] **Typed by hand**"* ]] && has "^- \[ \] $S1 "'
+before=$(ms_ledger)
+out=$(crew keep deadbeef 2>&1); r1=$?
+check "keep refuses an ID that isn't a suggestion, saying where to find them, and leaves the ledger as it was" \
+  '((r1 == 1)) && [[ $out == "crew: $PJ has no memory suggestion deadbeef (crew show memory-suggestions --project $PJ lists them)" && $(ms_ledger) == "$before" ]]'
+out=$(crew decline deadbeef --why "No." 2>&1); r1=$?
+check "decline refuses an ID that isn't a suggestion, and leaves the ledger as it was" \
+  '((r1 == 1)) && [[ $out == "crew: $PJ has no memory suggestion deadbeef"* && $(ms_ledger) == "$before" ]]'
+out=$(crew decline "$S2" 2>&1); r1=$?; out2=$(crew decline "$S2" --why " " 2>&1); r2=$?
+check "decline refuses without a reason, and leaves the ledger as it was" \
+  '((r1 == 1 && r2 == 1)) && [[ $out == "crew: say why the user declined it: crew decline ID --why TEXT [--project P]" && $out2 == "$out" && $(ms_ledger) == "$before" ]]'
+check "keep and decline refuse no ID, or more than one" '! crew keep 2>/dev/null && ! crew keep "$S1 $S2" 2>/dev/null && ! crew decline --why "No." 2>/dev/null && [[ $(ms_ledger) == "$before" ]]'
+out=$(cd "$HOME" && crew keep "$S1" --project "$PJ")
+check "keep settles a suggestion, commits it, and says how many still wait" \
+  '[[ $out == "kept $S1; 1 suggestion(s) still wait on the user" && -z $(git -C "$L" status --porcelain -- projects) && $(git -C "$L" log -1 --format=%s) == "keep $PJ" ]]'
+check "status counts one suggestion fewer" '[[ $(crew status --project "$PJ") == *"  memory suggestions: 1  "* && $(crew status --project "$P2") == *"$PJ: "*"1 memory suggestion(s)"* ]]'
+sed -i "s/^- \[x\] $S1 /- [ ] $S1 /" "$MS"
+check "a kept suggestion ticked back by hand stays kept" '[[ $(crew status --project "$PJ") == *"  memory suggestions: 1  "* ]]'
+before=$(ms_ledger)
+out=$(crew keep "$S1" 2>&1); r1=$?; out2=$(crew decline "$S1" --why "No." 2>&1); r2=$?
+check "keep and decline refuse a suggestion already settled, saying how, and leave the ledger as it was" \
+  '((r1 == 1 && r2 == 1)) && [[ $out == "crew: $S1 is already settled: kept "*" by crew keep" && $out2 == "$out" && $(ms_ledger) == "$before" ]]'
+out=$(crew decline "$S2" --why "Screenshots go in the PR.")
+check "decline settles a suggestion with its reason" '[[ $out == "declined $S2; 0 suggestion(s) still wait on the user" && $(git -C "$L" log -1 --format=%s) == "decline $PJ" ]]'
 check "status leaves out settled suggestions" '[[ $(crew status --project "$PJ") != *"memory suggestions"* && $(crew status --project "$P2") != *"memory suggestion"* ]]'
+out=$(crew decline "$S2" --why "Again." 2>&1)
+check "a declined suggestion can't be settled again either" '[[ $out == "crew: $S2 is already settled: declined "*" by crew decline: Screenshots go in the PR." ]]'
+# Every reader can see each suggestion, whether it was kept or declined, and why.
+all_shown() {   # crew show memory-suggestions, run as given, lists both suggestions and how each was settled
+  local sh; sh=$("$@" 2>&1) || return 1
+  grep -qE "^- \[x\] $S1 \*\*Dashboard columns are unlimited\*\* .*\(lead, $(date +%F)\)$" <<<"$sh" && grep -qE "^  - kept .* by crew keep$" <<<"$sh" &&
+    grep -qE "^- \[x\] $S2 \*\*PR screenshots go in Dropbox\*\* " <<<"$sh" && grep -qE "^  - declined .* by crew decline: Screenshots go in the PR\.$" <<<"$sh"
+}
+check "the lead and a goal lead, on the project or on every project, read every suggestion and how it was settled, with a command their settings allow" \
+  'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew *)\")" "$L/lead/.claude/settings.json" && (cd "$HOME" && all_shown env CREW_PROJECT="$PJ" crew show memory-suggestions && all_shown env CREW_PROJECT=all crew show memory-suggestions --project "$PJ")'
+check "a worker, in its project's repo, reads them with a command its settings allow" \
+  'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew *)\")" "$L/config/worker-settings.json" && all_shown env -u CREW_PROJECT crew show memory-suggestions'
+check "the gardener reads them with a command its settings allow, in the session its project's CREW_PROJECT gives it" \
+  'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew show memory-suggestions)\")" "$L/config/gardener-settings.json" && (cd "$HOME" && all_shown env CREW_PROJECT="$PJ" crew show memory-suggestions)'
+check "the user reads them with the command crew status names" '(cd "$HOME" && all_shown crew show memory-suggestions --project "$PJ")'
 out=$(crew memory --project "$PJ" 2>&1)
 check "memory says so when the project has none yet" '[[ $out == "No project memory for $PJ yet." ]]'
 printf '# Project memory: %s\n\n- **Dashboard columns are unlimited** The user chose it over a cap of 12. (lead, %s)\n' "$PJ" "$(date +%F)" >"$L/projects/$PJ/memory.md"
@@ -2726,8 +2796,8 @@ check "show and path find a task by number, ID, unique substring, #<pr> and path
   'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
-check "show memory and memory-suggestions print the project's files as they are on disk, in the default project or --project's" \
-  'shows "$MM" memory && shows "$MS" memory-suggestions && (cd "$HOME" && shows "$MM" memory --project "$PJ" && shows "$MS" memory-suggestions --project "$PJ")'
+check "show memory prints the project's memory.md as it is on disk, and path finds it and memory-suggestions.md, in the default project or --project's" \
+  'shows "$MM" memory && [[ $(crew path memory-suggestions) == "$MS" ]] && (cd "$HOME" && shows "$MM" memory --project "$PJ" && [[ $(crew path memory-suggestions --project "$PJ") == "$MS" ]])'
 check "a type word wins over a task whose ID holds it, which its number, its ID or task still reach" \
   'shows "$MM" memory && shows_task "$TM" "${TMI%%-*}" && shows_task "$TM" "$TMI" && shows "$TM" task memory'
 out=$(crew show memory --project "$P2" 2>&1); st=$?
@@ -2773,6 +2843,10 @@ if command -v fish >/dev/null; then
     '[[ $(completes "crew show task ") == "$task_ids" && $(completes "crew path proposal ") == "$(crew proposals --any-status | grep -o "^[^ ]*" | sort -u)" && $(completes "crew show goal ") == "$goal_ids" ]]'
   check "fish completes nothing but --project after memory and memory-suggestions" \
     '[[ -z $(completes "crew show memory ") && $(completes "crew show memory -") == --project && -z $(completes "crew path memory-suggestions ") && $(completes "crew path memory-suggestions -") == --project ]]'
+  S3=$(crew remember "Fish completes it" --why "A test.")
+  check "fish completes only the open memory suggestions' IDs after keep and decline, and --why after decline" \
+    '[[ $(completes "crew keep ") == "$S3" && $(completes "crew decline ") == "$S3" && $(completes "crew decline $S3 -") == "$(printf "%s\n" --project --why)" ]]'
+  crew decline "$S3" --why "Only a test." >/dev/null
   check "fish completes nothing but file names and --project after file" \
     '[[ $(completes "crew show file ") == "$(cd "$L" && find reports logs news/*.log projects/*/review-eval -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | sort -u)" && $(completes "crew show file -") == --project ]]'
   check "fish still completes crew goal and crew memory as it did" \

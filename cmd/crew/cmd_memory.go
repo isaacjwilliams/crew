@@ -1,13 +1,17 @@
 package main
 
-// Project memory: crew remember, crew memory. A project's memory is the facts
-// about it that every crew agent should know, approved by the user, in
-// projects/<p>/memory.md. Agents suggest facts into memory-suggestions.md, and
-// the lead moves the ones the user approves into memory.md.
+// Project memory: crew remember, crew keep, crew decline, crew memory. A
+// project's memory is the facts about it that every crew agent should know,
+// approved by the user, in projects/<p>/memory.md. Agents suggest facts with
+// crew remember, as records beside memory-suggestions.md. The lead moves the
+// ones the user approves into memory.md and settles each with crew keep or crew
+// decline.
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,7 +28,9 @@ const memoryRule = "Where it disagrees with the code or the ledger, they win: su
 // short preview, and isn't told to read the file.
 const hookOutputCap = 10000
 
-// crew remember "<fact>" --why TEXT [--source S] [--project P]
+// crew remember "<fact>" --why TEXT [--source S] [--project P]: suggests a fact
+// for the project's memory.md, as a record, and prints the suggestion's ID. It
+// waits on the user until crew keep or crew decline settles it.
 func cmdRemember(c *Crew, args []string) error {
 	const use = `crew remember "<fact>" --why TEXT [--source S] [--project P]`
 	var proj, why string
@@ -46,27 +52,192 @@ func cmdRemember(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	f := c.path("projects", proj, "memory-suggestions.md")
-	if !isFile(f) {
-		head := "# Memory suggestions: " + proj + "\n\n" +
-			"<!-- Facts suggested for memory.md by crew remember. \"- [ ]\" waits on the user; the lead ticks each one \"→ kept\" or \"→ declined: <reason>\". -->\n\n"
-		if err := os.WriteFile(f, []byte(head), 0o644); err != nil {
+	d := c.suggestionsDoc(proj)
+	records, err := d.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	if !isFile(d.Path) {
+		if err := os.WriteFile(d.Path, []byte(suggestionsHead(proj)), 0o644); err != nil {
 			return err
 		}
 	}
-	if err := (Doc{f}).appendRaw(memorySuggestion(fact, why, source, time.Now()) + "\n"); err != nil {
+	r := newRecord("crew remember", records)
+	r.Suggested = &Suggested{Fact: fact, Why: why, Source: source}
+	if err := d.AddRecords(r); err != nil {
 		return err
 	}
 	c.commit("remember " + proj)
-	fmt.Println(f)
+	fmt.Println(r.ID)
 	return nil
 }
 
-// memorySuggestion is a suggestion's line: an unchecked item holding the entry,
-// source and date included, exactly as it goes into memory.md, so approving it
-// moves the text unchanged.
-func memorySuggestion(fact, why, source string, day time.Time) string {
-	return fmt.Sprintf("- [ ] **%s** %s. (%s, %s)", fact, strings.TrimSuffix(why, "."), source, day.Format("2006-01-02"))
+// crew keep ID [--project P]: settles a suggestion the user kept. The lead
+// writes it into memory.md itself, in the words the user approved.
+func cmdKeep(c *Crew, args []string) error {
+	var proj string
+	id, err := parseText(args, map[string]*string{"--project": &proj}, "crew keep ID [--project P]")
+	if err != nil {
+		return err
+	}
+	return c.settleSuggestion(proj, id, Record{Kept: &Kept{Suggestion: id}})
+}
+
+// crew decline ID --why TEXT [--project P]: settles a suggestion the user
+// turned down, with why, which stops it being suggested again.
+func cmdDecline(c *Crew, args []string) error {
+	const use = `crew decline ID --why TEXT [--project P]`
+	var proj, why string
+	id, err := parseText(args, map[string]*string{"--project": &proj, "--why": &why}, use)
+	if err != nil {
+		return err
+	}
+	if why = oneLine(why); why == "" {
+		return fail("say why the user declined it: %s", use)
+	}
+	return c.settleSuggestion(proj, id, Record{Declined: &Declined{Suggestion: id, Reason: why}})
+}
+
+// settleSuggestion adds a kept or declined record, settle, for the project's
+// open suggestion id, refusing an ID that isn't one.
+func (c *Crew) settleSuggestion(proj, id string, settle Record) error {
+	verb, done := "decline", "declined"
+	if settle.Kept != nil {
+		verb, done = "keep", "kept"
+	}
+	if id == "" || strings.Contains(id, " ") {
+		return fail("name one suggestion to %s by its ID (crew show memory-suggestions lists them)", verb)
+	}
+	proj, err := c.oneProject(proj)
+	if err != nil {
+		return err
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	d := c.suggestionsDoc(proj)
+	records, err := d.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	all := suggestions(records)
+	i := slices.IndexFunc(all, func(s Item) bool { return s.ID == id })
+	if i < 0 {
+		return fail("%s has no memory suggestion %s (crew show memory-suggestions --project %s lists them)", proj, id, proj)
+	}
+	if !all[i].Open() {
+		return fail("%s is already settled: %s", id, settledLine(all[i].Settled[0]))
+	}
+	r := newRecord("crew "+verb, records)
+	r.Kept, r.Declined = settle.Kept, settle.Declined
+	if err := d.AddRecords(r); err != nil {
+		return err
+	}
+	c.commit(verb + " " + proj)
+	fmt.Printf("%s %s; %d suggestion(s) still wait on the user\n", done, id, openItems(all)-1)
+	return nil
+}
+
+// suggestionsFile is a project's file of memory suggestions. Its records file
+// holds the suggestions; the file itself is lines for people that crew never
+// reads, and names the commands that do.
+const suggestionsFile = "memory-suggestions.md"
+
+func (c *Crew) suggestionsDoc(proj string) Doc {
+	return Doc{c.path("projects", proj, suggestionsFile)}
+}
+
+// suggestionsHead is memory-suggestions.md as crew writes it.
+func suggestionsHead(proj string) string {
+	return "# Memory suggestions: " + proj + "\n\n" +
+		"<!-- crew keeps this project's memory suggestions as records beside this file, and decides from them alone: " +
+		"crew remember suggests a fact, crew keep and crew decline settle it, and crew show memory-suggestions prints them all. " +
+		"Anything typed here is for people only. -->\n"
+}
+
+// suggestions are the memory suggestions records add, in the order they were
+// made, each with what settled it.
+func suggestions(records []Record) []Item {
+	return items(records, func(r Record) bool { return r.Suggested != nil })
+}
+
+// memorySuggestions are a project's memory suggestions, from its records alone.
+func (c *Crew) memorySuggestions(proj string) ([]Item, error) {
+	records, err := c.suggestionsDoc(proj).Records()
+	if err != nil {
+		return nil, err
+	}
+	return suggestions(records), nil
+}
+
+// entry is a suggestion in the shape of an entry in memory.md, source and date
+// included, so keeping it can move the text unchanged.
+func (s Suggested) entry(day time.Time) string {
+	return fmt.Sprintf("**%s** %s. (%s, %s)", s.Fact, strings.TrimSuffix(s.Why, "."), s.Source, day.Local().Format("2006-01-02"))
+}
+
+// settledLine says how a kept or declined record settled its suggestion, and
+// when: "kept 2026-11-27 13:42 by crew keep".
+func settledLine(r Record) string {
+	if r.Declined != nil {
+		return "declined " + stamp(r) + ": " + r.Declined.Reason
+	}
+	return "kept " + stamp(r)
+}
+
+// suggestionLines are the suggestions as Markdown: a checkbox, ticked once the
+// suggestion is settled, its ID and its entry, and under it each record that
+// settled it.
+func suggestionLines(all []Item) []string {
+	var out []string
+	for _, s := range all {
+		box := "[x]"
+		if s.Open() {
+			box = "[ ]"
+		}
+		out = append(out, fmt.Sprintf("- %s %s %s", box, s.ID, s.Suggested.entry(s.At)))
+		for _, r := range s.Settled {
+			out = append(out, "  - "+settledLine(r))
+		}
+	}
+	return out
+}
+
+// shownSuggestions is memory-suggestions.md as crew show prints it: its
+// heading and comments, the suggestions from its records, and anything typed
+// into it, marked as not being suggestions crew counts. When crew can't read the
+// records, it says why in their place. In a project not yet migrated, what's
+// typed in the file is the suggestions, so it's shown as it is.
+func shownSuggestions(path string) (string, error) {
+	d := Doc{path}
+	ls, err := d.read()
+	if err != nil {
+		return "", err
+	}
+	records, unread := d.Records()
+	if errors.Is(unread, errNotMigrated) {
+		return strings.Join(append(trimBlankEnd(ls), "", "crew can't read the memory suggestions: "+unread.Error()), "\n") + "\n", nil
+	}
+	// uncommented blanks out comment lines rather than dropping them, so its
+	// lines line up with the file's.
+	var kept, typed []string // the file's heading, comments and blank lines, and the rest
+	for i, l := range uncommented(ls) {
+		if l = strings.TrimSpace(l); l == "" || strings.HasPrefix(l, "# ") {
+			kept = append(kept, ls[i])
+		} else {
+			typed = append(typed, ls[i])
+		}
+	}
+	body := trimBlankEnd(kept)
+	if unread != nil {
+		body = append(body, "", "crew can't read the memory suggestions: "+unread.Error())
+	} else if all := suggestions(records); len(all) > 0 {
+		body = append(append(body, ""), suggestionLines(all)...)
+	}
+	if len(typed) > 0 {
+		body = append(append(body, "", "Typed into the file, so not suggestions crew counts (crew remember adds one):"), typed...)
+	}
+	return strings.Join(body, "\n") + "\n", nil
 }
 
 // oneLine is s with its runs of spaces and newlines made single spaces, so it
@@ -131,10 +302,4 @@ func (c *Crew) sessionMemory(crewProject string) string {
 	}
 	f := c.path("projects", crewProject, "memory.md")
 	return memoryHeader(crewProject, f) + "This memory is too long to load at session start. Read " + f + " in full now, before anything else.\n"
-}
-
-// memorySuggestions counts a project's suggestions still waiting on the user.
-func (c *Crew) memorySuggestions(proj string) int {
-	b, _ := os.ReadFile(c.path("projects", proj, "memory-suggestions.md"))
-	return unchecked(string(b))
 }
