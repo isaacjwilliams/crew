@@ -2849,8 +2849,11 @@ if command -v fish >/dev/null; then
   S4=$(crew remember "Fish completes it here too" --why "A test." --project "$P2")
   check "fish completes the open suggestions of the project --project names after keep and decline" \
     '[[ $(completes "crew keep --project $P2 ") == "$S4" && $(completes "crew decline --project $P2 ") == "$S4" && $(completes "crew keep ") == "$S3" ]]'
-  check "fish reads a variable typed after --project for the project it holds" \
-    '[[ $(fish --no-config -c "set project $P2; source $L/fish/completions/crew.fish; complete -C \"crew keep --project \\\$project \"" | cut -f1) == "$S4" ]]'
+  # Fish expands what's typed from 4.0 (commandline -x); before that, completion reads it as typed.
+  if [[ $(fish --no-config -c 'complete -c t -f -a "(commandline -xpc 2>/dev/null)"; complete -C "t "') == t ]]; then
+    check "fish reads a variable typed after --project for the project it holds" \
+      '[[ $(fish --no-config -c "set project $P2; source $L/fish/completions/crew.fish; complete -C \"crew keep --project \\\$project \"" | cut -f1) == "$S4" ]]'
+  fi
   crew decline "$S3" --why "Only a test." >/dev/null
   crew decline "$S4" --why "Only a test." --project "$P2" >/dev/null
   check "fish completes nothing but file names and --project after file" \
