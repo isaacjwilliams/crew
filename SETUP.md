@@ -830,7 +830,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 
 **Verified:**
 - The agent files pass `claude plugin validate`, and every CLI flag `crew` uses was checked against `claude --help` on 2.1.283. That check caught `--add-dir` being variadic, so it is never placed right before a prompt.
-- `crew` passes `go vet` for Linux and macOS and its Go unit tests (front matter, settings files, the guard's table, resolution, statuses against `LEDGER.md`, each launchd job against its systemd unit, and reading `ps` and `lsof` output), which the release workflow also runs on macOS; `bin/crew`, `bin/crew-guard` and the test suites pass shellcheck.
+- `crew` passes `go vet` for Linux and macOS and its Go unit tests (front matter, settings files, the guard's table, resolution, statuses against `LEDGER.md`, each launchd job against its systemd unit, and reading `ps` and `lsof` output), which CI also runs on macOS; `bin/crew`, `bin/crew-guard` and the test suites pass shellcheck.
 - A separate reviewer agent audited the bundle. The bugs it found were fixed and added to the regression suites below.
 - `crew guard`: the write-guard allow/block table for worker, lead and gardener paths, including through the hook in the lead and worker settings files. Checks that no settings file turns the sandbox on, that the lead and workers default to auto mode, that they have no tool allowlist hiding MCP servers, and that the worker's `allow`/`deny` rules match its instructions.
 - `crew`: end-to-end checks in a crew home made from a copy of the repo, against scratch git repos, with stub `claude`, `gh` and `wt` binaries. They cover:
