@@ -201,7 +201,7 @@ Without a word from crew, a lead, goal lead or worker would load everything your
 - your claude.ai connectors;
 - the Artifact tool, for goal leads and workers. Leads keep it.
 
-What a session gets from crew or from the repo stays: crew's own skills and agents, the repo's agents, skills, plugins and servers, and the project's `mcp.json` servers. Claude Code turns things off by name, so anything of yours that shares a name with one of these stays too. crew turns things off only in the settings it starts each session with, so nothing under `~/.claude` changes and your own sessions load what they always did. That includes a `claude` you start in `~/crew/lead` yourself, and the phone lead: they load all of your setup.
+What a session gets from crew or from the repo stays: crew's own skills and agents, the repo's agents, skills, plugins and servers, and the project's `mcp.json` servers. Claude Code turns things off by name, so anything of yours that shares a name with one of these stays too. crew turns things off only in the settings it starts each session with, so nothing under `~/.claude` changes and your own sessions load what they always did. That includes a `claude` you start in `~/crew/lead` yourself: it loads all of your setup.
 
 To keep something of yours for one project's sessions, name it in `KEEP_LOADED` in `~/crew/projects/<owner>-<repo>/project.env`: a plugin by its id or name, a skill or a server by its name, or `claude.ai` for all the connectors (crew can't turn them off one by one). For a project whose workers test payments in a browser:
 
