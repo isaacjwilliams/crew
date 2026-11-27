@@ -285,7 +285,7 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 			break
 		}
 	}
-	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-m.bodyHeight()+emptyRoom))
+	m.top = max(0, min(m.top, m.lastTop()+emptyRoom))
 }
 
 // screenRow is a line on the screen, with the screen line it starts on,
@@ -298,10 +298,10 @@ type screenRow struct {
 // rows are the lines on the screen, in order.
 func (m *liveStatus) rows() []screenRow {
 	var rows []screenRow
-	start := 0
+	start, bottom := 0, m.top+m.bodyHeight()
 	for _, l := range m.shown {
 		end := start + len(l.drawn)
-		if end > m.top && start < m.top+m.bodyHeight() {
+		if end > m.top && start < bottom {
 			rows = append(rows, screenRow{l.key, start - m.top})
 		}
 		start = end
@@ -312,7 +312,13 @@ func (m *liveStatus) rows() []screenRow {
 // emptyRoom is how many screen lines a click left empty under the last line,
 // which stay until the user scrolls.
 func (m *liveStatus) emptyRoom() int {
-	return max(0, m.top-(m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
+	return max(0, m.top-m.lastTop())
+}
+
+// lastTop is the top of the last screenful: the screen that ends with the
+// report's last line, or at 0 when the report fits.
+func (m *liveStatus) lastTop() int {
+	return max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
 }
 
 // indexOf is where the line with this key is in shown, or -1.
@@ -605,7 +611,7 @@ func (m *liveStatus) wheel(by int) {
 		m.top = max(0, m.top+n)
 		return
 	}
-	m.top = max(m.top, min(m.top+n, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
+	m.top = max(m.top, min(m.top+n, m.lastTop()))
 }
 
 // click puts the cursor on the line drawn at column x of screen line y, and
@@ -623,7 +629,7 @@ func (m *liveStatus) click(x, y int) {
 	m.setCursor(i)
 	// Only a line's first row has its marker.
 	if n == m.drawnHeight(0, i) && x == m.markerColumn() && m.fold(!m.shown[i].open) {
-		m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
+		m.top = min(m.top, m.lastTop())
 	}
 }
 
@@ -656,7 +662,7 @@ func (m *liveStatus) wholly(start, end int) bool {
 // The screen never leaves room empty at the bottom while lines are above it.
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
-	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-body))
+	m.top = max(0, min(m.top, m.lastTop()))
 	// A cursor's line that fits stays all on screen: the screen starts between
 	// end-body and start. One taller than the screen fills it: the screen
 	// starts between start and end-body.
