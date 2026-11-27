@@ -597,10 +597,10 @@ func (m *liveStatus) click(x, y int) {
 	end := start + len(m.shown[i].drawn)
 	wasWhole := m.wholly(start, end)
 	m.setCursor(i)
-	// A line cut off by the screen's edge stays as it is. A whole one stays
-	// whole, and one the new strip leaves no room for comes into view. Either
+	// A line cut off by the screen's edge stays as it is. A whole one that the
+	// new strip cuts off, and one it leaves no room for, come into view. Either
 	// way, a shorter strip never leaves empty room under the last line.
-	if wasWhole || end <= m.top || start >= m.top+m.bodyHeight() {
+	if !m.wholly(start, end) && (wasWhole || end <= m.top || start >= m.top+m.bodyHeight()) {
 		m.scroll()
 	}
 	m.top = min(m.top, max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))

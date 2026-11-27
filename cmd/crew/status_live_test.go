@@ -1156,7 +1156,7 @@ func TestLiveStatusWheelNeverMovesTheScreenAgainstItsTurn(t *testing.T) {
 				for _, button := range []tea.MouseButton{tea.MouseWheelUp, tea.MouseWheelDown} {
 					m := mouseOn(t, size)
 					wheeled(m, tea.MouseWheelDown, turns)
-					clicked(m, 0, y)
+					clicked(m, m.width-1, y)
 					top := m.top
 					wheeled(m, button, 1)
 					if moved := m.top - top; (button == tea.MouseWheelUp && moved > 0) || (button == tea.MouseWheelDown && moved < 0) {
@@ -1208,13 +1208,19 @@ func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
 				i := m.lineAt(m.top + y - len(m.headings))
 				start := startOf(m, i)
 				whole := m.wholly(start, start+len(m.shown[i].drawn))
-				clicked(m, 0, y)
+				top := m.top
+				clicked(m, m.width-1, y)
 				wholeAfter := m.wholly(start, start+len(m.shown[i].drawn))
 				if whole && !wholeAfter {
 					t.Fatalf("at height %d after %d turns, a click at screen line %d cuts off the whole line it highlights", height, turns, y)
 				}
-				if room := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top > max(room, 0) {
+				room := max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
+				if m.top > room {
 					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves the screen at %d, past the last screenful at %d", height, turns, y, m.top, room)
+				}
+				end := start + len(m.shown[i].drawn)
+				if stays := whole && start >= top && end <= top+m.bodyHeight(); stays && m.top != min(top, room) {
+					t.Fatalf("at height %d after %d turns, a click at screen line %d moves the screen from %d to %d for a line that stays whole", height, turns, y, top, m.top)
 				}
 			}
 			wheeled(m, tea.MouseWheelDown, 1)
@@ -1227,7 +1233,7 @@ func TestLiveStatusClickNeverHidesTheLineItHighlights(t *testing.T) {
 		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
 		for turns := 0; turns < 15; turns++ {
 			for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
-				clicked(m, 0, y)
+				clicked(m, m.width-1, y)
 				if !slices.ContainsFunc(body(m), func(l string) bool { return strings.Contains(l, "\x1b[7m") }) {
 					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves no highlighted line on screen", height, turns, y)
 				}
@@ -1786,7 +1792,7 @@ func TestLiveStatusClickAtTheEndLeavesNoEmptyRoom(t *testing.T) {
 		m.moveTo(last)
 		for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
 			m.moveTo(last)
-			clicked(m, 0, y)
+			clicked(m, m.width-1, y)
 			if room := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top > room {
 				t.Errorf("at %dx%d, a click at screen line %d leaves the screen at %d, past the last screenful at %d", size.Width, size.Height, y, m.top, room)
 			}
