@@ -48,9 +48,6 @@ Setup
                                    previous prompt, and say when the lead's
                                    instructions or settings changed since it
                                    started (always exits 0)
-  crew serve                       Serve the lead with Remote Control (what
-                                   crew-lead.service runs); exits 3 on a machine
-                                   that doesn't run the crew
   crew doctor                      Check dependencies, versions, trust and settings
   crew version                     Print crew's version
   crew config [KEY] [--project P|--task T]

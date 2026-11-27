@@ -1,8 +1,7 @@
 package main
 
-// Starting the lead: crew lead, which bin/lead runs, and execLead, which crew
-// lead and crew serve share. A lead runs in the home's lead/, whose settings make
-// the session the lead and give it the ledger and the project checkouts.
+// Starting the lead: crew lead, which bin/lead runs, and execLead. A lead runs in the home's lead/, whose settings
+// make the session the lead and give it the ledger and the project checkouts.
 
 import (
 	"encoding/json"
@@ -101,9 +100,8 @@ func (c *Crew) leadFingerprint(flags []string) string {
 // Code adds what it prints to the prompt. With each prompt, the session hears
 // the news since its previous one (leadNews). A lead runs on the instructions
 // and settings it started with, so once they've changed, crew lead's session
-// is also told to have the user start a new lead. The phone lead (crew serve)
-// hears the news too; a goal lead runs with the lead's settings, and hears
-// nothing (see inWorkerOrGoalLead).
+// is also told to have the user start a new lead. A goal lead runs with the
+// lead's settings, and hears nothing (see inWorkerOrGoalLead).
 func (c *Crew) leadHook(in io.Reader) error {
 	if inWorkerOrGoalLead() {
 		return nil
@@ -114,7 +112,7 @@ func (c *Crew) leadHook(in io.Reader) error {
 	}
 	// Without a session ID in the input, leadNews has no record to keep and says nothing.
 	json.NewDecoder(in).Decode(&input)
-	// The project crew lead or crew serve gave the session in CREW_PROJECT.
+	// The project crew lead gave the session in CREW_PROJECT.
 	proj, err := c.scope("", false)
 	if err != nil {
 		return err

@@ -167,7 +167,7 @@ sed -i '/^LEAD_PERMISSION_MODE=default$/d' "$PE"
 out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook </dev/null)
 check "and says nothing once everything a lead loads is as it was" '[[ -z $out ]]'
 # The lead's hook also tells each session what crew did since its previous prompt (news.go).
-prompt() {  # session [event]: what the lead's hook adds to a prompt from that session; by default the phone lead's, for every project
+prompt() {  # session [event]: what the lead's hook adds to a prompt from that session; by default one for every project, which isn't crew lead's own session
   jq -nc --arg s "$1" --arg e "${2:-UserPromptSubmit}" '{session_id: $s, hook_event_name: $e, prompt: "hello"}' 2>/dev/null |
     CREW_PROJECT=${CREW_PROJECT:-all} crew lead --hook
 }
@@ -3261,7 +3261,7 @@ check "and nothing twice" '[[ -z $(prompt turns-1) && -z $(prompt turns-2) ]]'
 out=$(CREW_PROJECT=$PJ prompt here); out2=$(CREW_PROJECT=$P2 prompt there)
 check "a lead for one project hears only that project, without its name before each line" '[[ $out == "$DID$NL- "????-??-??" "??:??" $TNA: status → draft" && $out2 == "$DID$NL- "????-??-??" "??:??" $TNB: status → draft" ]]'
 out=$(CREW_LEAD_FINGERPRINT=$fp prompt lead)
-check "crew lead's session hears every project, each line's name before it, as the phone lead does" '[[ $out == "$DID$NL- "*" $PJ: $TNA: status → draft$NL- "*" $P2: $TNB: status → draft" ]]'
+check "crew lead's session hears every project, each line's name before it" '[[ $out == "$DID$NL- "*" $PJ: $TNA: status → draft$NL- "*" $P2: $TNB: status → draft" ]]'
 check "a goal lead's session hears nothing, and keeps no record" '[[ -z $(CREW_LEAD_FINGERPRINT='' prompt goal-lead) && ! -e $L/news/sessions/goal-lead ]]'
 echo "# changed" >>"$L/agents/lead.md"; install_agents
 as_worker set "$NA" status needs-input; out=$(CREW_LEAD_FINGERPRINT=$fp prompt lead)

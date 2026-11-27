@@ -172,11 +172,6 @@ func cmdDoctor(c *Crew, args []string) error {
 	}
 	// The checks below are optional: they don't count towards required.
 	required := d.ok
-	// Running lead in a terminal asks for trust itself, so this check is optional.
-	// Only the lead service, which the phone talks to, needs it done beforehand,
-	// and it retries every 30 seconds until it is.
-	fmt.Println("The lead on your phone")
-	d.check(c.path("lead")+" trusted (optional)", trusted(home, c.path("lead")), "run lead once and accept the trust prompt")
 	// Optional because doctor sees only the PATH it was run with, which may not be
 	// your shell's: crew host up's, say, or a session's.
 	fmt.Println("Your shell")

@@ -94,8 +94,6 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if !c.pushNow(os.Stdout) {
 		warn("couldn't push the upgrade to origin; crew tick pushes it later")
 	}
-	// The lead's server runs the new lead from now on, for new phone sessions.
-	restartLeadService()
 	now := c.crewVersion()
 	old, _ := filepath.Glob(c.path("bin/release/crew-*"))
 	for _, f := range old {
