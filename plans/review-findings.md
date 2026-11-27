@@ -12,7 +12,7 @@ Read this file, then `CLAUDE.md` and `ARCHITECTURE.md`, before taking an item. K
 
 The twelve findings, described in full [below](#the-findings), and one addition, item 20: 1 a failed lookup reads as "nothing there"; 2 ledger writes aren't safe; 3 nothing times out; 4 crew has no notion of who is calling; 5 the host lease; 6 the status machine isn't written down; 7 the tick infers what its steps did; 8 no seam for git, gh and claude; 9 prompts have no behavioural test; 10 model sessions do deterministic work; 11 proposals have no triage; 12 `ARCHITECTURE.md` has drifted; the addition is that the implementer loads every procedure at start. Below, "the Contract" is the IMP-style list of numbered obligations for each component, each tied to the tests that prove it; "the seam" is item 11's way to stand in for `git`, `gh` and `claude` in a Go test.
 
-Items are in the order they are done. The one exception is an item added later: it takes the next number and sits in the group it waits on. Item 20 is numbered last but is done after the migration, with 13 to 17. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on, and item 20 settles the addition, not a finding.
+Items are in the order they are done. The one exception is an item added later: it takes the next number and sits in the group it waits on. Item 20 is numbered last but is done after the migration, with 13 to 17. Item 5 keeps its number and sits there too, because it waits on items 11 and 13. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on, and item 20 settles the addition, not a finding.
 
 ### Now, beside the records migration
 
@@ -24,7 +24,6 @@ These are small, and they touch little of what the records migration (moving cre
 | 2 | The Contract convention, settled by drafting the guard's Contract (a spike) **(needs intake)** | none | nothing | to do |
 | 3 | CI runs the suites on every PR | none | nothing | to do |
 | 4 | CI fails a PR that breaks the Contract | none | 2, 3 | to do |
-| 5 | A clean restack or retarget starts no model session | 10 | nothing | to do |
 | 6 | A failed lookup is never read as "nothing there" | 1 | nothing | to do |
 | 7 | Every call to an outside tool has a time limit, no lock is held across the network, and a tick that didn't run shows in `crew status` | 3 | nothing | to do |
 | 8 | The guard and the allow rules close the gaps the security review names: `project.env`, `worker-settings.json`, force-push to any ref, `crew evidence` taking any file | 4 (configuration half) | nothing | to do |
@@ -42,7 +41,7 @@ They change no code the migration touches, so they start now. Each ends in a rep
 
 ### After the records migration has merged
 
-Each of these rewrites code that every piece of the migration edits. Doing them first would mean rebasing each piece of the migration over them, or the reverse.
+Each of these rewrites code that every piece of the migration edits. Doing them first would mean rebasing each piece of the migration over them, or the reverse. Item 5 is the exception: it waits on items 11 and 13, not on the migration itself.
 
 | # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
@@ -51,6 +50,7 @@ Each of these rewrites code that every piece of the migration edits. Doing them 
 | 15 | crew knows which role is calling, and a role can't clear its own gates **(needs intake)** | 4 (authority half) | the migration | to do |
 | 16 | The tick calls its steps directly and hears from each what it did | 7 | the migration, 11 | to do |
 | 17 | The e2e suite is split into cases that run alone, each tied to the obligation it proves | 8 (second half) | the migration, 2, 11 | to do |
+| 5 | A clean restack or retarget starts no model session | 10 | 11, 13 | to do |
 | 20 | The implementer's profile holds what applies to every task, and loads each procedure when its phase begins | the addition (from Codex, not a finding) | the migration, 5 | to do |
 
 ### After the Contract exists
@@ -64,9 +64,10 @@ Item 19 waits on the Contract because the Contract is what takes over the part o
 
 ### Why this order
 
-- **Items 1 to 10 run beside the migration** because each is small and edits few of the files the migration edits: a document, CI, and changes to one command or one file's rules. The size of a change matters less than whether it overlaps: item 7 is not small, but it works on call sites, locks and a unit file, not on how a task is written.
+- **Items 1 to 4 and 6 to 10 run beside the migration** because each is small and edits few of the files the migration edits: a document, CI, and changes to one command or one file's rules. The size of a change matters less than whether it overlaps: item 7 is not small, but it works on call sites, locks and a unit file, not on how a task is written.
 - **Items 11 and 12 are spikes, started now,** because they only produce a design. No code the migration touches changes until the user has seen the answer.
 - **Items 13 to 17 wait for the migration** because each rewrites a layer the migration is still moving. Item 13 changes how every command writes a task, item 14 every `SetStatus` and status comparison, item 15 the checks in `checkTaskSet` and the guard, item 16 the tick, and item 17 the tests that exercise all of them. Doing them first would mean rewriting the migration's pieces, or the pieces rewriting them.
+- **Item 5 waits on the seam (11) and on whole-or-nothing transitions (13).** A restack session costs about 0.3% of spend (see finding 10), so the saving doesn't justify building item 5 first. The seam and whole-or-nothing writes would rewrite much of it, and with both in place a restack's failure cases are simpler. The open proposal's own revisit threshold was 3% of spend. The draft task `167-crew-does-clean-restacks` holds the brief and is parked until then.
 - **Items 16 and 17 also wait on the seam (11).** The tick can only call its steps directly if a step can run without starting real `git`, `gh` and `claude`; the e2e suite can only be split into cases a Go test can run if there is a way to stand in for them.
 - **Items 4, 17, 18 and 19 wait on the Contract.** Item 4 enforces it, 17 ties each test to an obligation in it, 18 checks the prompt rules it names, and 19 trims `ARCHITECTURE.md` once the Contract holds what it said.
 - **Item 20 waits on the migration and on item 5.** Item 5 rewrites the implementer's "Stacked tasks" and "Workflow: restack" sections. The migration is still rewriting its instructions for questions, evidence and review records (tasks `161-ask-through-crew`, `144-evidence-records` and `163-record-reviews-through-crew`). Splitting the profile first would mean moving text that both are about to change. The user agreed to this order on 2026-11-27.
@@ -258,15 +259,16 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 - A restack is `git rebase --onto <sha> <sha>`, a leased push, and when needed `gh pr edit --base` and `crew set base`. `rebaseFor` computes all of it, and `sendRebase` and `startRestack` then start a worker on `restackModel`, which is `"sonnet"` (`cmd_followup.go`), with the commands in a note. The session loads `implementer.md`.
 - crew already calls `gh` itself for replies, reactions and summaries.
 - A stack k deep restacks one level at a time, each level waiting for the one below to push and for the next 3-minute tick.
-- Not measured: the review's counts of restacks and nudges over six days, and the token cost of each.
+- Measured on this machine, 2026-11-27: the 29 restack sessions in its Claude Code transcripts (`~/.claude/projects/**/*.jsonl`), those whose first user message starts "You are restacking task". All fall between 2026-11-22 and 2026-11-27. Each assistant message's usage is priced at `crew costs`' Sonnet rates: $2 per million input tokens, $10 output, $0.10 cache read, and cache writes at 1.25 times the input rate for five minutes or 2 times for an hour. They cost $5.40 in all: a median of $0.17 and a maximum of $0.52 for one, with 4 to 29 model calls each. `crew costs` puts the week's total spend, 2026-11-21 to 2026-11-27, at $1,885, so restack sessions are about 0.3% of it.
+- Not measured: the cost of the fresh worker that a later review round starts after a restack session, the review's counts of nudges, and latency.
 
-**What it costs.** Tokens and latency for a step with no judgment in it when the rebase is clean. Each session is also another chance to stall or improvise. A model is needed only when the rebase conflicts or the checks fail afterwards.
+**What it costs.** About 0.3% of spend (see the figures above), and latency, for a step with no judgment in it when the rebase is clean. Each session is also another chance to stall or improvise. A model is needed only when the rebase conflicts or the checks fail afterwards.
 
 **The rule.** A clean restack or retarget is done by crew, and a model session is started only when the rebase conflicts or the checks fail afterwards.
 
 **Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session when the rebase conflicts or the checks fail afterwards, and `ARCHITECTURE.md`'s "Stacked tasks" flow and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
 
-**Settled by** item 5. An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work, except that item 5 also keeps a session for checks that fail after a clean rebase.
+**Settled by** item 5, which waits on the seam (item 11) and item 13; see "Why this order". An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work, except that item 5 also keeps a session for checks that fail after a clean rebase.
 
 ### 11. Proposals have no triage
 
