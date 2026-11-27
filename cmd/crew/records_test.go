@@ -426,6 +426,27 @@ func TestShownTaskRoundReports(t *testing.T) {
 // report red CI on aaa1111, which the branch didn't cause, and on bbb2222, and
 // conflicts at eee5555 and fff6666. Lines quoted in a comment, in the brief or
 // in an open question report nothing.
+// A task file crew migrate can't read stops it, rather than counting as one
+// with no rounds and leaving its reports behind once the project is format 2.
+func TestMigrateRoundReportsRefusesAnUnreadableTask(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of any mode")
+	}
+	task := learnTask(t, reportsTask)
+	if err := os.Chmod(task.Path, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := migrateRoundReports(task); err == nil {
+		t.Error("migrateRoundReports read an unreadable task file as one with no rounds")
+	}
+	if err := os.Chmod(task.Path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if redCI, conflicts, err := migrateRoundReports(task); err != nil || redCI != 2 || conflicts != 2 {
+		t.Errorf("once readable, migrateRoundReports = %d, %d, %v; want 2 red CI and 2 conflicts", redCI, conflicts, err)
+	}
+}
+
 func TestMigrateRoundReports(t *testing.T) {
 	task := learnTask(t, reportsTask)
 	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))

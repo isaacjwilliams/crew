@@ -221,7 +221,11 @@ const ciNotTheBranch = " (the branch didn't cause it)"
 // base_conflict records before format 2, so a task that has one has been
 // migrated already, by a run that stopped before the project's format.
 func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
-	rounds := t.Section("## Review rounds")
+	ls, err := t.read()
+	if err != nil {
+		return 0, 0, err
+	}
+	rounds := section(ls, "## Review rounds")
 	if rounds == "" {
 		return 0, 0, nil
 	}
