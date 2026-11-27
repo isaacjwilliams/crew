@@ -543,13 +543,15 @@ func (m *liveStatus) wheel(n int) {
 	if start, end := m.cursorSpan(); m.wholly(start, end) {
 		return
 	}
-	m.setCursor(m.nearestWhole())
+	m.setCursor(m.nearestWhole(n))
 	m.scroll()
 }
 
 // nearestWhole is the shown line nearest the cursor that's wholly on the
-// screen, or the first line drawn on it when every one is cut off.
-func (m *liveStatus) nearestWhole() int {
+// screen. When none is, none fits between the screen's edges, so it's the next
+// line in the direction of the wheel (n is its turn, up or down), and the
+// screen follows it there.
+func (m *liveStatus) nearestWhole(n int) int {
 	nearest, start := -1, 0
 	for i, l := range m.shown {
 		end := start + len(l.drawn)
@@ -558,10 +560,13 @@ func (m *liveStatus) nearestWhole() int {
 		}
 		start = end
 	}
-	if nearest < 0 {
-		return m.lineAt(m.top)
+	switch {
+	case nearest >= 0:
+		return nearest
+	case n > 0:
+		return min(m.lineAt(m.top)+1, len(m.shown)-1)
 	}
-	return nearest
+	return max(m.lineAt(m.top+m.bodyHeight()-1)-1, 0)
 }
 
 // click puts the cursor on the line drawn at column x of screen line y, and
@@ -576,12 +581,11 @@ func (m *liveStatus) click(x, y int) {
 	}
 	i := m.lineAt(n)
 	start := m.drawnHeight(0, i)
-	// A line clicked while it's partly cut off stays as it is, and isn't
-	// scrolled into view; only a whole one is kept on screen if its strip
-	// takes room from the body.
-	wasWhole := m.wholly(start, start+len(m.shown[i].drawn))
 	m.setCursor(i)
-	if wasWhole {
+	// A line cut off by the screen's edge stays as it is. Only when the new
+	// line's strip takes so much room that none of it is left on screen does
+	// the screen move.
+	if end := start + len(m.shown[i].drawn); end <= m.top || start >= m.top+m.bodyHeight() {
 		m.scroll()
 	}
 	// Only a line's first row has its marker.
@@ -702,7 +706,7 @@ func (m *liveStatus) bar() string {
 	if m.settingsErr != nil {
 		state += ", on the settings crew started with: " + m.settingsErr.Error()
 	}
-	return state + "   ↑↓ move  wheel scroll  ←→ fold  r refresh  q quit"
+	return state + "   ↑↓/wheel move  ←→ fold  r refresh  q quit"
 }
 
 // fit cuts a line to the screen's width: the bar, or a line indented past the

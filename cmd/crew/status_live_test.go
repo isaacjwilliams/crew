@@ -1108,6 +1108,39 @@ func TestLiveStatusWheelStopsAtTheEnds(t *testing.T) {
 	}
 }
 
+func TestLiveStatusWheelReachesTheEndsWhateverTheScreensHeight(t *testing.T) {
+	for height := 5; height <= 16; height++ {
+		for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
+			m := mouseOn(t, tea.WindowSizeMsg{Width: 60, Height: height})
+			want := 0
+			if button == tea.MouseWheelDown {
+				want = m.drawnHeight(0, len(m.shown)) - m.bodyHeight()
+			} else {
+				press(m, "end")
+			}
+			wheeled(m, button, 200)
+			if m.top != want {
+				t.Errorf("at height %d, the wheel (%v) stops at top %d, not the end at %d", height, button, m.top, want)
+			}
+		}
+	}
+}
+
+func TestLiveStatusClickNeverHidesTheLineItHighlights(t *testing.T) {
+	for height := 8; height <= 20; height++ {
+		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
+		for turns := 0; turns < 15; turns++ {
+			for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
+				clicked(m, 0, y)
+				if !slices.ContainsFunc(body(m), func(l string) bool { return strings.Contains(l, "\x1b[7m") }) {
+					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves no highlighted line on screen", height, turns, y)
+				}
+			}
+			wheeled(m, tea.MouseWheelDown, 1)
+		}
+	}
+}
+
 func TestLiveStatusKeepsTheWheelsPlaceAcrossReports(t *testing.T) {
 	for name, size := range mouseLayouts {
 		m := liveOn(variedReport(t))
