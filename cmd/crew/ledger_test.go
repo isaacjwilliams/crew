@@ -637,13 +637,6 @@ func TestDoneIsFinishedAndDelivered(t *testing.T) {
 	}
 }
 
-func TestStillToLearn(t *testing.T) {
-	task := Task{docWith(t, "## Context\n- [ ] not this one\n\n## Still to learn\n<!-- - [ ] a comment -->\n- [ ] does the API page?\n- [x] which store fits\n- [ ] is it fast enough?\n\n## Log\n")}
-	if n := task.StillToLearn(); n != 2 {
-		t.Errorf("StillToLearn = %d, want 2", n)
-	}
-}
-
 func TestAnswer(t *testing.T) {
 	for report, want := range map[string]string{
 		"## Report\nAnswer: yes, it pages by cursor\n\nTried: …\n":  "yes, it pages by cursor",

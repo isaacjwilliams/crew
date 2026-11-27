@@ -2322,9 +2322,10 @@ echo OPEN >"$HOME/gh-pr-state"; setstate "done" null
 GF8=$(crew goal new "Season search" --max-in-flight 1); G8=$(basename "$GF8" .md)
 sed -i '/^## Goal$/a "Add search to the season page."' "$GF8"; crew goal start "$GF8" >/dev/null
 KD=$(crew new "Season search box" --goal "$GF8"); KDI=$(basename "$KD" .md); fill "$KD"
-sed -i '/^## Still to learn$/a - [ ] Does the API page by cursor?\n- [x] Which index? Settled: the existing one.\n- [ ] Is a full scan fast enough?' "$KD"
-check "ready refuses a task with open items under Still to learn, counting them and naming the spike that can answer them" \
-  '[[ $(crew ready "$KD" 2>&1) == *"2 item(s) under Still to learn are open"*"crew new --kind spike --informs $KDI"* && $(crew get "$KD" status) == draft ]]'
+crew to-learn "$KD" "Does the API page by cursor?" >/dev/null; KDX=$(crew to-learn "$KD" "Which index?"); crew to-learn "$KD" "Is a full scan fast enough?" >/dev/null
+crew learned "$KD" "$KDX" "The existing one." >/dev/null
+check "ready refuses a task with open items still to learn, counting them and naming the spike that can answer them" \
+  '[[ $(crew ready "$KD" 2>&1) == *"2 item(s) still to learn are open"*"crew new --kind spike --informs $KDI"* && $(crew get "$KD" status) == draft ]]'
 n=$(ls "$PD/tasks" | wc -l)
 check "new refuses a kind crew doesn't know, and --informs on a kind that takes none" \
   '[[ $(crew new "Drill" --kind drill 2>&1) == *"--kind must be build, spike, fix or refine, not '"'"'drill'"'"'"* && $(crew new "Built" --informs "$KD" 2>&1) == *"a build task doesn'"'"'t take --informs"* && $(ls "$PD/tasks" | wc -l) == "$n" ]]'
@@ -2398,7 +2399,7 @@ check "tick sends a goal's done spike's report to its goal lead, with its answer
 setstate "done" null
 out=$(crew tick 2>&1)
 check "a report the goal lead has been sent isn't sent again" '[[ $out != *"goal $G8"* && $(resumes) == $((n + 1)) ]]'
-KO=$(crew new "Outside learning"); sed -i '/^## Still to learn$/a - [ ] Will it fit?' "$KO"
+KO=$(crew new "Outside learning"); crew to-learn "$KO" "Will it fit?" >/dev/null
 check "status lists a draft outside a goal that has something to learn, rather than fold it into the count" '[[ $(crew status | grep "$(basename "$KO" .md)") == *"draft"*"1 to learn" ]]'
 # A stack of three drafts outside a goal, the middle one informed by spikes: it folds
 # when every spike is finished, and is listed, with its stack, when anything is open.
@@ -2414,7 +2415,7 @@ st=$(crew status)
 check "status folds a stack whose middle draft has a done and an abandoned spike into the draft count" \
   '[[ $st == *"  3 draft(s)"* &&  $st != *"$(basename "$FS_TOP" .md)"* && $st != *"$(basename "$FS_MID" .md)"* && $st != *"$(basename "$FS_END" .md)"* ]]'
 stack3 FU; FUS=$(crew new "FU spike" --kind spike --informs "$(num "$FU_MID")"); crew set "$FUS" status working
-stack3 FI; sed -i '/^## Still to learn$/a - [ ] Will it fit?' "$FI_MID"
+stack3 FI; crew to-learn "$FI_MID" "Will it fit?" >/dev/null
 stack3 FQ; sed -i '/^## Open questions$/a - [ ] Which way?' "$FQ_MID"
 FQS=$(crew new "FQ spike" --kind spike --informs "$(num "$FQ_MID")"); sed -i "s/^status: .*/status: done/" "$FQS"
 st=$(crew status)
@@ -2426,6 +2427,114 @@ for f in "$FS_TOP" "$FS_MID" "$FS_END" "$FU_TOP" "$FU_MID" "$FU_END" "$FI_TOP" "
 crew goal abandon "$GF8" >/dev/null 2>&1
 for f in "$KC" "$KD" "$KT" "$KO" "$KA"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
+
+# Still to learn: a draft's items are records that crew commands write beside the
+# task file, and crew decides from them alone. crew show puts them in the task as
+# its readers see it.
+LT=$(crew new "Learning draft"); LTI=$(basename "$LT" .md); LR=${LT%.md}.records.jsonl; fill "$LT"
+shown() { crew show "$1" | awk '$0=="## Still to learn" {on=1; next} on && /^## / {exit} on'; }
+has() { grep -qE -- "$1" <<<"$sh"; }   # a line of $sh matches the regex
+L1=$(crew to-learn "$LT" "Does the API page by cursor?"); L2=$(crew to-learn "$LT" "Is a full scan fast enough?")
+check "to-learn adds an item as a record beside the task and prints its ID, committing the record and leaving the task file be" \
+  '[[ $L1 =~ ^[0-9a-f]{8}$ && $L2 =~ ^[0-9a-f]{8}$ && $L1 != "$L2" && $(wc -l <"$LR") == 2 && -z $(git -C "$L" status --porcelain -- "$LR") && $(git -C "$L" log -1 --format=%s) == "to-learn $LTI" && $(git -C "$L" log -1 --name-only --format=) == "${LR#"$L"/}" ]]'
+sh=$(shown "$LT"); st=$(crew status)
+check "with two items open, ready refuses the draft, status counts them, and show lists each with its ID and when it was added" \
+  '[[ $(crew ready "$LT" 2>&1) == *"2 item(s) still to learn are open"* && $(crew get "$LT" status) == draft && $(row "$LTI") == *"2 to learn"* ]] &&
+   has "^- \[ \] Does the API page by cursor\? \($L1, added $(date +%F) [0-9:]{5} by crew to-learn\)$" && has "^- \[ \] Is a full scan fast enough\? \($L2, added " && ! has "\[x\]"'
+out=$(crew learned "$LT" "$L1" "Yes, 100 rows a page."); sh=$(shown "$LT"); st=$(crew status)
+check "learned settles one item with its answer: ready still refuses, status counts 1, and show ticks only that one, with its answer and when" \
+  '[[ $out == "settled $L1; 1 item(s) still open" && $(crew ready "$LT" 2>&1) == *"1 item(s) still to learn are open"* && $(row "$LTI") == *"1 to learn"* ]] &&
+   has "^- \[x\] Does the API page by cursor\? \($L1, " && has "^  - settled $(date +%F) [0-9:]{5} by crew learned: Yes, 100 rows a page\.$" && has "^- \[ \] Is a full scan fast enough\? \($L2, "'
+head=$(git -C "$L" rev-parse HEAD); sum=$(cksum <"$LR")
+o1=$(crew learned "$LT" deadbeef "Maybe." 2>&1); r1=$?; o2=$(crew learned "$LT" "$L1" "Yes, again." 2>&1); r2=$?
+check "learned refuses an item the task doesn't have, and one already settled, saying why and changing nothing" \
+  '((r1 == 1 && r2 == 1)) && [[ $o1 == "crew: $LTI has no item deadbeef still to learn (crew show $LTI lists them)" && $o2 == "crew: $L1 is already settled, on $(date +%F) "* && $(git -C "$L" rev-parse HEAD) == "$head" && $(cksum <"$LR") == "$sum" ]]'
+o1=$(crew to-learn "$KS" "Too late?" 2>&1); r1=$?; o2=$(crew learned "$LT" "$L2" " " 2>&1); r2=$?
+check "to-learn refuses a task that isn't a draft, and learned an empty answer" \
+  '((r1 == 1 && r2 == 1)) && [[ $o1 == *"only a draft has things still to learn"* && $o2 == *"give the answer that settles $L2"* && ! -e ${KS%.md}.records.jsonl && $(cksum <"$LR") == "$sum" ]]'
+# Checkboxes typed into the task file aren't items: crew neither counts them nor
+# shows them as its own.
+sed -i '/^## Still to learn$/a - [ ] Typed by hand?\n- [x] Ticked by hand' "$LT"
+sh=$(shown "$LT"); st=$(crew status)
+check "typed checkboxes count for nothing in ready or status, and show sets them apart as typed, not items" \
+  '[[ $(crew ready "$LT" 2>&1) == *"1 item(s) still to learn are open"* && $(row "$LTI") == *"1 to learn"* && $(grep -c "^- \[[ x]\] " <<<"$sh") == 4 && $(sed -n "/^Typed into the file, so not items crew counts (crew to-learn adds one):$/,\$p" <<<"$sh") == *"- [ ] Typed by hand?"*"- [x] Ticked by hand"* && $(sed -n "/^Typed into the file/q;p" <<<"$sh") != *"by hand"* ]]'
+crew learned "$LT" "$L2" $'Yes, under 50 ms\nfor 10,000 rows.' >/dev/null; sh=$(shown "$LT")
+check "once every item is settled, ready accepts the draft, typed checkboxes or not, and show gives a long answer under its item" \
+  'crew ready "$LT" >/dev/null && [[ $(crew get "$LT" status) == ready ]] && has "^- \[x\] Is a full scan fast enough\? \($L2, " && has "^  - settled .* by crew learned:$" && has "^    Yes, under 50 ms$" && has "^    for 10,000 rows\.$"'
+# A ready waiting for the ledger lock counts the items as they are once it has
+# it: the line appended meanwhile is what a crew to-learn holding the lock writes
+# (-o: crew ready mustn't inherit the lock flock holds).
+WT=$(crew new "Learning meanwhile"); fill "$WT"
+flock -o "$L/.crew.lock" bash -c 'crew ready "$1" >"$HOME/ready.out" 2>&1 & sleep 0.5; echo "{\"id\":\"0a0b0c0d\",\"at\":\"2026-11-25T10:00:00Z\",\"by\":\"crew to-learn\",\"to_learn\":{\"text\":\"Added meanwhile?\"}}" >>"${1%.md}.records.jsonl"' _ "$WT"
+check "a ready waiting on the lock refuses a draft that gained an item meanwhile" \
+  'wait_for "grep -q \"1 item(s) still to learn are open\" \"\$HOME/ready.out\"" && [[ $(crew get "$WT" status) == draft ]]'
+crew set "$WT" status abandoned
+# A records file with a line crew can't read never reads as fewer items.
+BT=$(crew new "Unreadable records"); BTI=$(basename "$BT" .md); fill "$BT"; B1=$(crew to-learn "$BT" "Q?"); crew learned "$BT" "$B1" "A." >/dev/null
+echo '{"id":"0badf00d","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"From a newer crew?","why":"newer"}}' >>"${BT%.md}.records.jsonl"
+out=$(crew ready "$BT" 2>&1); r1=$?; st=$(crew status); r2=$?
+check "ready refuses a draft whose records have a line crew can't read, naming the file and line" \
+  '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $BTI still has to learn: $BTI.records.jsonl:3: not a record crew can read: json: unknown field \"why\"" && $(crew get "$BT" status) == draft ]]'
+check "status shows the problem on that draft's row and still lists every other task" \
+  '((r2 == 0)) && [[ $(row "$BTI") == *"to learn: $BTI.records.jsonl:3: not a record crew can read"* && $(row "$LTI") == *ready* ]]'
+sh=$(shown "$BT")
+check "show says the records can't be read, in place of the items" '[[ $sh == *"crew can'"'"'t read the items still to learn: $BTI.records.jsonl:3: not a record crew can read"* && $sh != *"- [x] Q?"* ]]'
+crew set "$BT" status abandoned
+# Until crew migrate, a project's records lack the items its task files still hold
+# as checkboxes, so crew refuses to read them rather than count none.
+LP=$(basename "$PD"); UT=$(crew new "Before the migration"); UTI=$(basename "$UT" .md); fill "$UT"
+mv "$PD/ledger-format" "$HOME/ledger-format"
+out=$(crew ready "$UT" 2>&1); r1=$?; st=$(crew status)
+check "in a project not yet migrated, ready refuses a draft rather than count its items as none, and status says to migrate" \
+  '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
+rm "$HOME/ledger-format"
+sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+sh=$(shown "$UT")
+check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
+  '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
+out=$(crew migrate); sh=$(shown "$UT")
+check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
+check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
+crew set "$UT" status abandoned
+
+# Two crew processes at once on one machine both get the ledger lock in turn, so
+# neither loses a record.
+CT=$(crew new "Busy draft"); CTI=$(basename "$CT" .md); CR=${CT%.md}.records.jsonl
+for i in 1 2 3 4 5 6; do crew to-learn "$CT" "Item $i?" >/dev/null & done; wait
+for id in $(crew show "$CT" | sed -n -E 's/^- \[ \] Item [1-3]\? \(([0-9a-f]{8}), .*/\1/p'); do crew learned "$CT" "$id" "Done." >/dev/null & done; wait
+check "two crew processes adding and settling items on one task at once keep every record, and commit each" \
+  '[[ $(wc -l <"$CR") == 9 && $(crew show "$CT" | grep -c "^- \[ \] Item") == 3 && $(crew show "$CT" | grep -c "^- \[x\] Item") == 3 && -z $(git -C "$L" status --porcelain -- "$CR") ]]'
+crew push >/dev/null 2>&1; pushed
+# A second clone of the home: another place the same ledger is written, which
+# syncs the way crew does, through origin.
+C2=$SB/learning-clone; git clone -q "$SB/home.git" "$C2"; mkdir -p "$C2/bin/release"; cp "$L"/bin/release/crew-* "$C2/bin/release/"
+c2() { CREW_HOME=$C2 "$C2/bin/crew" "$@"; }
+X0=$(c2 show "$CTI" | sed -n -E 's/^- \[ \] Item 4\? \(([0-9a-f]{8}), .*/\1/p'); XB=$(c2 show "$CTI" | sed -n -E 's/^- \[ \] Item 5\? \(([0-9a-f]{8}), .*/\1/p')
+# Each clone adds and settles items and pushes. crew takes in origin's commits
+# when origin rejects its push, so each push here rebases onto the other's.
+A1=$(crew to-learn "$CT" "From here, settled?"); crew to-learn "$CT" "From here, open?" >/dev/null; crew learned "$CT" "$A1" "Here." >/dev/null
+crew push >/dev/null 2>&1; r1=$?
+B1=$(c2 to-learn "$CTI" "From the clone, settled?"); c2 to-learn "$CTI" "From the clone, open?" >/dev/null; c2 learned "$CTI" "$B1" "There." >/dev/null
+c2 learned "$CTI" "$X0" "Settled in the clone." >/dev/null; c2 learned "$CTI" "$XB" "Settled in the clone too." >/dev/null
+c2 push >/dev/null 2>&1; r2=$?
+crew learned "$CT" "$XB" "Settled here." >/dev/null; crew push >/dev/null 2>&1; r3=$?; git -C "$C2" pull -q --rebase
+# 6 items before the clone, 4 after, 10 in all; settled: 3 before it, then A1, B1, X0 and XB.
+check "two clones that add and settle items on one task sync through origin with no conflict, keeping every record from both" \
+  '((r1 == 0 && r2 == 0 && r3 == 0)) && [[ $(wc -l <"$CR") == 18 && $(cat "$CR") == "$(cat "$C2/${CR#"$L"/}")" && -z $(git -C "$L" status --porcelain -- projects) && -z $(git -C "$C2" status --porcelain -- projects) && $(git -C "$L" rev-parse HEAD) == "$(git -C "$C2" rev-parse HEAD)" ]] && ! grep -q "^[<=>]\{7\}" "$CR"'
+sh=$(shown "$CT")
+check "after the sync, settling an item in either clone settled only it: open is added minus settled across both" \
+  '[[ $(grep -c "^- \[ \] " <<<"$sh") == 3 && $(grep -c "^- \[x\] " <<<"$sh") == 7 ]] && has "^- \[ \] Item 6\? " && has "^- \[ \] From here, open\? " && has "^- \[ \] From the clone, open\? "'
+check "when both clones settle the same item, show keeps both answers under it" \
+  '[[ $(sed -n "/^- \[x\] Item 5? /,/^- /p" <<<"$sh") == *"  - settled "*": Settled here."*"  - settled "*": Settled in the clone too."* || $(sed -n "/^- \[x\] Item 5? /,/^- /p" <<<"$sh") == *"  - settled "*": Settled in the clone too."*"  - settled "*": Settled here."* ]]'
+# A clone adds items while this machine takes in origin's commits: the rebase
+# and the commands take turns at the ledger lock, and no record is lost.
+c2 to-learn "$CTI" "Pushed from the clone?" >/dev/null; c2 push >/dev/null 2>&1
+for i in 1 2 3 4; do crew to-learn "$CT" "During the rebase $i?" >/dev/null; done & crew push >/dev/null 2>&1; wait; crew push >/dev/null 2>&1
+check "items added while crew takes in origin's commits are all kept, beside the clone's" \
+  '[[ $(wc -l <"$CR") == 23 && $(crew show "$CT" | grep -c "^- \[ \] During the rebase") == 4 && $(crew show "$CT" | grep -c "^- \[ \] Pushed from the clone") == 1 && -z $(git -C "$L" status --porcelain -- projects) ]] && git -C "$L" merge-base --is-ancestor "$(git --git-dir="$SB/home.git" rev-parse main)" HEAD'
+crew set "$CT" status abandoned; crew push >/dev/null 2>&1; rm -rf "$C2"
 
 # Fixes: a fix mends a defect live in production, and names the merged task that
 # introduced it and the check that missed it.

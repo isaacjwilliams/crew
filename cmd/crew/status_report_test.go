@@ -24,6 +24,9 @@ func reportTask(t *testing.T, c *Crew, project, name string, asks bool, fields .
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeLedgerFormat(c.path("projects", project)); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

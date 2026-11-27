@@ -105,8 +105,8 @@ func cmdDispatch(c *Crew, args []string) error {
 
 	name := cut("crew-"+p.Name+"-"+t.ID(), 80)
 	t.Set("worker_name", name)
-	prompt := fmt.Sprintf("You are the implementer for task %s in project %s.\nTask file: %s\nWorktree (your working directory): %s\nBranch: %s, based on origin/%s.\nRead the task file completely, then follow your first-run workflow. Update the ledger with `crew log %s \"...\"` and `crew set %s <key> <value>`.",
-		t.ID(), p.Name, t.Path, wt, branch, base, t.ID(), t.ID())
+	prompt := fmt.Sprintf("You are the implementer for task %s in project %s.\nTask file: %s\nWorktree (your working directory): %s\nBranch: %s, based on origin/%s.\nRead the task file completely, with `crew show %s`, then follow your first-run workflow. Update the ledger with `crew log %s \"...\"` and `crew set %s <key> <value>`.",
+		t.ID(), p.Name, t.Path, wt, branch, base, t.ID(), t.ID(), t.ID())
 	if stacked {
 		pr := ""
 		if parent.PR() != "" {

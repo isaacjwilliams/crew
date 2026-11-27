@@ -98,8 +98,9 @@ func (g guard) check(input []byte) error {
 		return fmt.Errorf("can't work out where the crew home %s is (%v)", g.home, err)
 	}
 	if under(path, home) {
-		// A few of a project's files are the user's to change. They're in projects/,
-		// a state path, so this comes before the check below, which allows them all.
+		// Some agents may not edit memory.md, and none may edit mcp.json or
+		// ledger-format. They're in projects/, a state path, so this comes before
+		// the check below, which allows them all.
 		// Names are compared ignoring case: on a Mac, Memory.md is the same file.
 		if filepath.Dir(filepath.Dir(path)) == filepath.Join(home, "projects") {
 			switch strings.ToLower(filepath.Base(path)) {
@@ -112,7 +113,13 @@ func (g guard) check(input []byte) error {
 				// Every lead starts the servers in them without asking, so no agent
 				// edits them, the lead included: goal leads share its role.
 				return fmt.Errorf("%s gives the project's sessions and every lead their MCP servers, so only the user edits mcp.json. Ask them to make the change.", path)
+			case "ledger-format":
+				return fmt.Errorf("%s says which records the project's ledger has, and only crew migrate changes it.", path)
 			}
+		}
+		// Records are typed facts crew decides from, and only its commands write them.
+		if under(path, filepath.Join(home, "projects")) && strings.HasSuffix(strings.ToLower(path), ".records.jsonl") {
+			return fmt.Errorf("%s holds records only crew commands write. Add an item still to learn with 'crew to-learn TASK \"<item>\"', and settle one with 'crew learned TASK ITEM \"<answer>\"'.", path)
 		}
 		for _, s := range statePaths {
 			if under(path, filepath.Join(home, s)) {

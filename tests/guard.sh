@@ -45,6 +45,13 @@ for role in worker gardener lead; do
 done
 w block worker "$W" "$L/projects/p/MCP.json"
 w allow lead "$M" "$L/projects/p/tasks/mcp.json"   # only the project's own file, not one of that name in a task folder
+# --- no agent edits records or the ledger's format: only crew commands write them
+for role in worker gardener lead; do
+  w block $role "$M" "$L/projects/p/tasks/001-x.records.jsonl"
+  w block $role "$M" "$L/projects/p/ledger-format"
+done
+out=$(jq -n --arg p "$L/projects/p/tasks/001-x.records.jsonl" --arg d "$M" '{cwd:$d,tool_input:{file_path:$p}}' | CREW_HOME=$L "$G" worker 2>&1)
+check "the guard names the crew commands that write still-to-learn records" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"* ]]'
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"
@@ -237,7 +244,7 @@ check "Workflow: spike commits locally and never pushes, writes a report that st
 check "Workflow: spike opens no PR and runs no observer, automated review or evidence" \
   "! spike_workflow | grep -qE 'gh pr create|git push -u|casual-observer|/pr-review|crew review-summary' && spike_workflow | grep -q 'Tests, the observer, a PR, automated review and .## Evidence. are for builds, so skip them'"
 check "the lead lists what's still to learn and opens a spike for each approach, then puts the answers side by side" \
-  "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Set the objective\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'write their answers side by side under the item, tick it, and finish the brief from them' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no brief review' $A/lead.md"
+  "awk '/^3\\. \\*\\*Investigate\\*\\*/ && !i {i=NR} /^4\\. \\*\\*Find out what.s still to learn\\.\\*\\*/ && !l {l=NR} /^5\\. \\*\\*Set the objective\\*\\*/ && !p {p=NR} END {exit !(i && l && p && i < l && l < p)}' $A/lead.md && grep -q 'crew new \"<what it tries>\" --kind spike --informs <draft>' $A/lead.md && grep -q 'crew to-learn <draft> \"<question>\"' $A/lead.md && grep -q 'settle the item with their answers side by side, .crew learned <draft> <item>' $A/lead.md && grep -q 'It needs the user.s go-ahead like any task, but no brief review' $A/lead.md"
 check "the goal lead opens and readies spikes without parking, and hears when one reports" \
   "grep -q '^- \\*\\*Spikes\\*\\* (step 4) are yours to open and mark ready without parking' $A/goal-lead.md && grep -q '^- \\*\\*A spike reported\\*\\*' $A/goal-lead.md && grep -q '^- \\*\\*Run the brief review\\*\\* (step 8)' $A/goal-lead.md && grep -q '^8\\. \\*\\*Finish the brief\\*\\*.*start a brief review' $A/lead.md"
 check "leads start a brief review with the task file's path alone, which crew costs reads to charge the review to its task" \

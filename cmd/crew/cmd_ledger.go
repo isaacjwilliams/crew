@@ -122,20 +122,21 @@ func cut(s string, n int) string {
 }
 
 // A showKind is a kind of ledger file crew show prints and crew path names: its
-// type word, the argument after it, if any, whether it takes --project, and how
-// to find the file. find takes both the argument and --project, and each kind
-// uses what it needs.
+// type word, the argument after it, if any, whether it takes --project, how to
+// find the file, and how crew show prints it, when not as it is on disk. find
+// takes both the argument and --project, and each kind uses what it needs.
 type showKind struct {
 	word, arg string
 	project   bool
 	find      func(c *Crew, arg, project string) (string, error)
+	show      func(path string) (string, error)
 }
 
 // showKinds are the kinds crew show takes. The first, task, is what an argument
 // with no type word names, as for every command that takes TASK. A type word wins
 // over a task whose ID is that word: crew show task goal reaches the task.
 var showKinds = []showKind{
-	{word: "task", arg: "TASK", find: ledgerKind("tasks")},
+	{word: "task", arg: "TASK", find: ledgerKind("tasks"), show: shownTask},
 	{word: "proposal", arg: "PROPOSAL", find: ledgerKind("proposals")},
 	{word: "goal", arg: "GOAL", find: ledgerKind("goals")},
 	{word: "memory", project: true, find: projectFile("memory.md")},
@@ -176,10 +177,16 @@ func (k showKind) synopsis(cmd string) string {
 	return s
 }
 
-// crew show [TYPE] ARG: a ledger file as it is on disk.
+// crew show [TYPE] ARG: a ledger file as it is on disk, or a task with its
+// records (shownTask).
 func cmdShow(c *Crew, args []string) error {
-	path, err := c.ledgerFile("show", args)
+	k, path, err := c.ledgerFile("show", args)
 	if err != nil {
+		return err
+	}
+	if k.show != nil {
+		out, err := k.show(path)
+		fmt.Print(out)
 		return err
 	}
 	f, err := os.Open(path)
@@ -193,7 +200,7 @@ func cmdShow(c *Crew, args []string) error {
 
 // crew path [TYPE] ARG: the path of the file crew show prints.
 func cmdPath(c *Crew, args []string) error {
-	path, err := c.ledgerFile("path", args)
+	_, path, err := c.ledgerFile("path", args)
 	if err != nil {
 		return err
 	}
@@ -201,15 +208,15 @@ func cmdPath(c *Crew, args []string) error {
 	return nil
 }
 
-// ledgerFile is the file args name for crew show or crew path (cmd): a type
-// word from showKinds and what follows it, or a task.
-func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
+// ledgerFile is the file args name for crew show or crew path (cmd), and its
+// kind: a type word from showKinds and what follows it, or a task.
+func (c *Crew) ledgerFile(cmd string, args []string) (showKind, string, error) {
 	if len(args) == 0 {
 		var words []string
 		for _, k := range showKinds {
 			words = append(words, k.word)
 		}
-		return "", usage("crew " + cmd + " [" + strings.Join(words, "|") + "] … (see 'crew help')")
+		return showKind{}, "", usage("crew " + cmd + " [" + strings.Join(words, "|") + "] … (see 'crew help')")
 	}
 	k := showKinds[0] // task
 	if i := slices.IndexFunc(showKinds, func(kind showKind) bool { return kind.word == args[0] }); i >= 0 {
@@ -222,12 +229,13 @@ func (c *Crew) ledgerFile(cmd string, args []string) (string, error) {
 	}
 	arg, err := parseText(args, flags, k.synopsis(cmd))
 	if err != nil {
-		return "", err
+		return showKind{}, "", err
 	}
 	if given, takes := arg != "", k.arg != ""; given != takes {
-		return "", usage(k.synopsis(cmd))
+		return showKind{}, "", usage(k.synopsis(cmd))
 	}
-	return k.find(c, arg, project)
+	path, err := k.find(c, arg, project)
+	return k, path, err
 }
 
 func cmdFind(c *Crew, args []string) error {

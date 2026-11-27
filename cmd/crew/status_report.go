@@ -578,11 +578,15 @@ func leavesStack(t, parent Task) bool {
 
 // folds: a draft outside a goal, and every draft stacked on it, has no open
 // question and nothing still to learn (no open item, and every spike finished),
-// so the plain text counts the stack in one line rather than listing it. It
-// doesn't ask learning: that names finished spikes too, which a row still shows
-// but which have nothing left to tell the draft.
+// so the plain text counts the stack in one line rather than listing it. A draft
+// whose items can't be read doesn't fold, so its row can say why. It doesn't ask
+// learning: that names finished spikes too, which a row still shows but which
+// have nothing left to tell the draft.
 func (s *statusView) folds(t Task) bool {
-	if t.Status() != Draft || t.OpenQuestions() > 0 || t.StillToLearn() > 0 || s.hasUnfinishedSpike(t) {
+	if t.Status() != Draft || t.OpenQuestions() > 0 || s.hasUnfinishedSpike(t) {
+		return false
+	}
+	if items, err := t.StillToLearn(); err != nil || openItems(items) > 0 {
 		return false
 	}
 	for _, k := range s.kids[t.Path] {
@@ -747,15 +751,18 @@ func (s *statusView) branchesOf(t Task) (branchRead, bool) {
 	return b, read && b.on == s.branches.placeOf(t)
 }
 
-// learning is what a draft is still learning: how many items under Still to
-// learn are open, and the spikes that inform it, with their status: "2 to learn;
-// 041 done, 042 working". It's empty when there's neither.
+// learning is what a draft is still learning: how many of its still-to-learn
+// items are open, and the spikes that inform it, with their status: "2 to learn;
+// 041 done, 042 working". When its items can't be read, it says why in place of
+// their count. It's empty when there's nothing to say.
 func (s *statusView) learning(t Task) string {
 	if t.Status() != Draft {
 		return ""
 	}
 	var parts []string
-	if n := t.StillToLearn(); n > 0 {
+	if items, err := t.StillToLearn(); err != nil {
+		parts = append(parts, "to learn: "+err.Error())
+	} else if n := openItems(items); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d to learn", n))
 	}
 	var spikes []string

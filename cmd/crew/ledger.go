@@ -8,6 +8,7 @@ package main
 // crew's ledger lock: agents edit these files too, so nothing is held in memory.
 
 import (
+	"crypto/rand"
 	"fmt"
 	"iter"
 	"maps"
@@ -160,8 +161,20 @@ func sectionLines(lines []string, heading string) []string {
 // comments and blank lines.
 func section(lines []string, heading string) string {
 	var out []string
+	for _, l := range uncommented(sectionLines(lines, heading)) {
+		if strings.Trim(l, " \t") != "" {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// uncommented is each of lines without the HTML comments in it, which may run
+// across lines.
+func uncommented(lines []string) []string {
+	var out []string
 	inComment := false
-	for _, l := range sectionLines(lines, heading) {
+	for _, l := range lines {
 		var b strings.Builder
 		for l != "" {
 			if inComment {
@@ -182,11 +195,17 @@ func section(lines []string, heading string) string {
 				}
 			}
 		}
-		if strings.Trim(b.String(), " \t") != "" {
-			out = append(out, b.String())
-		}
+		out = append(out, b.String())
 	}
-	return strings.Join(out, "\n")
+	return out
+}
+
+// trimBlankEnd is lines without the blank lines at their end.
+func trimBlankEnd(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // OpenQuestions counts the unchecked items under Open questions: each is a
@@ -299,13 +318,59 @@ func splitLines(text string) []string {
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
-// writeLines rewrites the file in place, each line ending in a newline.
+// writeLines rewrites the file, each line ending in a newline.
 func (d Doc) writeLines(ls []string) error {
 	var b strings.Builder
 	for _, l := range ls {
 		b.WriteString(l + "\n")
 	}
-	return os.WriteFile(d.Path, []byte(b.String()), 0o644)
+	return replaceFile(d.Path, []byte(b.String()))
+}
+
+// replaceFile writes a ledger file in one step, so a write that fails partway
+// leaves the old file rather than part of the new one. It writes a temporary
+// file beside it (createReplacement) and renames it over the file.
+func replaceFile(path string, data []byte) error {
+	f, err := createReplacement(path)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
+}
+
+// createReplacement makes the temporary file replaceFile writes:
+// <file>.new-<random>, which .gitignore covers. It has the mode os.WriteFile
+// would give the file before anything is written to it, so no more people can
+// read the data than can read the file: the old file's mode, or for a new file
+// 0644 under the umask.
+func createReplacement(path string) (*os.File, error) {
+	tmp := path + ".new-" + rand.Text()
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	old, err := os.Stat(path)
+	if err != nil {
+		return os.OpenFile(tmp, flags, 0o644)
+	}
+	// The umask can only narrow the old mode here, and Chmod then sets it exactly.
+	f, err := os.OpenFile(tmp, flags, old.Mode().Perm())
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(old.Mode().Perm()); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return nil, err
+	}
+	return f, nil
 }
 
 // appendRaw adds text at the end of the file, after a newline if the file
@@ -671,9 +736,54 @@ func (t Task) rules() (kindRules, error) {
 	return r, nil
 }
 
-// StillToLearn counts the unchecked items under Still to learn: what the plan
-// rests on that nobody has checked yet. crew ready refuses until there are none.
-func (t Task) StillToLearn() int { return unchecked(t.Section("## Still to learn")) }
+// A LearnItem is something a draft's objective or gates rest on that nobody had
+// checked when it was added: a to_learn record, and the learned records that
+// answer it, oldest first. It's open until it has an answer.
+type LearnItem struct {
+	Record
+	Answers []Record
+}
+
+func (i LearnItem) Open() bool { return len(i.Answers) == 0 }
+
+// StillToLearn are the task's still-to-learn items, from its records alone, in
+// the order they were added. crew ready refuses a draft while one is open.
+func (t Task) StillToLearn() ([]LearnItem, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
+	}
+	return learnItems(records), nil
+}
+
+// learnItems are the still-to-learn items records add, with their answers.
+// Records from readRecords name only items they add, which it checks.
+func learnItems(records []Record) []LearnItem {
+	var items []LearnItem
+	for _, r := range records {
+		if r.ToLearn != nil {
+			items = append(items, LearnItem{Record: r})
+		}
+	}
+	for _, r := range records {
+		if r.Learned != nil {
+			i := slices.IndexFunc(items, func(i LearnItem) bool { return i.ID == r.Learned.Item })
+			items[i].Answers = append(items[i].Answers, r)
+		}
+	}
+	return items
+}
+
+// openItems counts the items that are still open.
+func openItems(items []LearnItem) int {
+	n := 0
+	for _, i := range items {
+		if i.Open() {
+			n++
+		}
+	}
+	return n
+}
 
 // DesignInBrief is an error when the brief says how to meet its objective, in
 // a section its kind leaves empty. crew ready and crew dispatch both refuse it.

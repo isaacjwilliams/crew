@@ -129,6 +129,12 @@ func cmdDoctor(c *Crew, args []string) error {
 		if r := own["AUTO_REVIEW_REBUTTALS"]; !slices.Contains([]string{"0", "1", "2"}, r) {
 			d.check(fmt.Sprintf("%s: AUTO_REVIEW_REBUTTALS is 0, 1 or 2 (got '%s')", p, r), false, fixSetting)
 		}
+		// Until crew migrate, crew won't decide from the project's records.
+		format, hint := checkLedgerFormat(pd), ""
+		if format != nil {
+			hint = format.Error()
+		}
+		d.check(p+": ledger in this crew's format", format == nil, hint)
 		local := Settings{}
 		err := readEnvFile(filepath.Join(pd, "local.env"), local)
 		d.check(p+": cloned on this machine (local.env)", err == nil && local["REPO"] != "" && isDir(local["REPO"]), "run 'crew project add' in your clone of it")
