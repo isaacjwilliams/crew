@@ -127,6 +127,20 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    PR: picked up, or being changed (used by workers)
   crew review-summary TASK FILE    Post FILE as the automated-review summary on the
                                    task's PR, or edit the one there (used by workers)
+  crew automated-review TASK FROM..HEAD --fork SHA --reviewers claude[,codex] [--failed NAME]
+                                   Record an automated review of the commits
+                                   FROM..HEAD of the task's branch; prints the
+                                   heading its text goes under (used by pr-review)
+  crew finding TASK SEVERITY "<title>" [--split|--flipped] [--pre-existing]
+                                   Record a finding of the newest recorded review
+                                   at its agreed severity; prints its number,
+                                   REVIEW.FINDING (used by pr-review)
+  crew outcome TASK FINDING "<outcome>"
+                                   Record what the worker did about a finding,
+                                   as its Outcome line says (used by workers)
+  crew user-decided TASK FINDING "<decision>"
+                                   Record your decision on a finding left for you
+                                   (used by workers)
   crew ci-fix TASK                 If CI is red on the head of the task's open PR, and
                                    the worker handed it over, send it the failure as a
                                    review round, once a commit; past MAX_CI_FIXES

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParseText(t *testing.T) {
 	var why string
@@ -17,5 +20,20 @@ func TestParseText(t *testing.T) {
 		if _, err := parseText(args, flags(), "use"); err == nil {
 			t.Errorf("parseText(%q) succeeded; want a refusal", args)
 		}
+	}
+}
+
+// A switch takes no value: what follows it is one of the other arguments.
+func TestParseArgs(t *testing.T) {
+	var fork string
+	var split, flipped bool
+	args, err := parseArgs([]string{"001", "--split", "must fix", "--fork", "abc", "a title"},
+		map[string]*string{"--fork": &fork}, map[string]*bool{"--split": &split, "--flipped": &flipped}, "use")
+	if err != nil || !slices.Equal(args, []string{"001", "must fix", "a title"}) || fork != "abc" || !split || flipped {
+		t.Errorf("got %q, fork %q, split %v, flipped %v, err %v; want the other arguments in order and the flags set", args, fork, split, flipped, err)
+	}
+	// A word that starts with "--" but isn't one of the flags is a mistake.
+	if _, err := parseArgs([]string{"--unknown"}, nil, map[string]*bool{"--split": &split}, "use"); err == nil {
+		t.Error("parseArgs took an unknown flag")
 	}
 }

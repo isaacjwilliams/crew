@@ -69,7 +69,7 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                          "needs its item and its answer",
 		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                        "needs an id, an at and a by",
 		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                            "already taken",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "settles cccccccc, which no line adds",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "names cccccccc, which no line records as a to_learn",
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}} {}`:                                         "more than one value",
 		`- [ ] typed by hand`: "not a record crew can read",
 		``:                    "not a record crew can read",

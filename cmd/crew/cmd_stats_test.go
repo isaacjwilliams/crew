@@ -90,9 +90,7 @@ func TestStatsOfReview(t *testing.T) {
 		"**Review summaries**\n- [x] review 7 (commented)\n  > see inline\n\n" +
 		"**Inline comments**\n- [x] `a.go:3` — comment 9 — [link](u9)\n  > why?\n\n## Log\n"
 	reviews, _, _ := strings.Cut(reviewedTask, "## Review rounds")
-	reviews += "### Automated review 5 — 2026-11-12 09:00\n\n- Reviewers: Claude reviewer\n\n" +
-		"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n" +
-		"#### 2. [must fix] g — `g.go:7`\n- Earlier: repeat of review 3 #1\n- Agreed severity: disputed\n- Outcome: left for the user: still open from review 3\n\n"
+	reviews += stillOpenReview
 	s := statsOf(Task{docWith(t, reviews+round)}, history{})
 	got := []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
@@ -101,10 +99,7 @@ func TestStatsOfReview(t *testing.T) {
 
 	// The user later decided what review 3 left for them, the repeat included:
 	// stats still counts what automated review couldn't settle on its own.
-	decided := reviews + round
-	for _, o := range []string{"left for the user\n", "left for the user: pre-existing, proposal 013-h.md\n", "left for the user: still open from review 3\n"} {
-		decided = strings.ReplaceAll(decided, "- Outcome: "+o, "- Outcome: "+strings.TrimSuffix(o, "\n")+"; decided by the user: no change\n")
-	}
+	decided := decideAll(reviews) + round
 	if n := strings.Count(decided, "; decided by the user"); n != 4 {
 		t.Fatalf("decided %d findings, want 4", n)
 	}
@@ -119,6 +114,21 @@ func TestStatsOfReview(t *testing.T) {
 	if s := statsOf(Task{docWith(t, first+"## Log\n")}, history{}); s.reviews != 1 || s.cleanAfter != 0 {
 		t.Errorf("a task never clean: reviews %d, clean after %d", s.reviews, s.cleanAfter)
 	}
+}
+
+// stillOpenReview is a fifth review for reviewedTask (ledger_test.go): it
+// repeats two findings review 3 left for the user, one of them disputed.
+const stillOpenReview = "### Automated review 5 — 2026-11-12 09:00\n\n- Reviewers: Claude reviewer\n\n" +
+	"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n" +
+	"#### 2. [must fix] g — `g.go:7`\n- Earlier: repeat of review 3 #1\n- Agreed severity: disputed\n- Outcome: left for the user: still open from review 3\n\n"
+
+// decideAll adds the user's decision, no change, to what review 3 of
+// reviewedTask and stillOpenReview left for them, as the worker adds it.
+func decideAll(reviews string) string {
+	for _, o := range []string{"left for the user\n", "left for the user: pre-existing, proposal 013-h.md\n", "left for the user: still open from review 3\n"} {
+		reviews = strings.ReplaceAll(reviews, "- Outcome: "+o, "- Outcome: "+strings.TrimSuffix(o, "\n")+"; decided by the user: no change\n")
+	}
+	return reviews
 }
 
 func TestRoughly(t *testing.T) {

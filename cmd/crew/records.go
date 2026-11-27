@@ -34,8 +34,12 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn *ToLearn `json:"to_learn,omitempty"`
-	Learned *Learned `json:"learned,omitempty"`
+	ToLearn         *ToLearn         `json:"to_learn,omitempty"`
+	Learned         *Learned         `json:"learned,omitempty"`
+	AutomatedReview *AutomatedReview `json:"automated_review,omitempty"`
+	Finding         *Finding         `json:"finding,omitempty"`
+	Outcome         *FindingOutcome  `json:"outcome,omitempty"`
+	Decision        *FindingDecision `json:"decision,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -89,22 +93,22 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	toLearn := map[string]bool{} // whether the record with each ID adds an item
+	kinds := map[string]string{} // the kind of the record with each ID
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if _, taken := toLearn[r.ID]; err == nil && taken {
+		if _, taken := kinds[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		toLearn[r.ID] = r.ToLearn != nil
+		kinds[r.ID] = r.payloads()[0]
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !toLearn[r.Learned.Item] {
-			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
+		if id, kind := r.follows(); id != "" && kinds[id] != kind {
+			return nil, fmt.Errorf("%s:%d: it names %s, which no line records as a %s", name, i+1, id, kind)
 		}
 	}
 	return records, nil
@@ -125,25 +129,62 @@ func parseRecord(line []byte) (Record, error) {
 	return r, r.check()
 }
 
+// payloads are the JSON names of the record's payloads, of which it should
+// have exactly one.
+func (r Record) payloads() []string {
+	var names []string
+	for _, p := range []struct {
+		name string
+		set  bool
+	}{
+		{"to_learn", r.ToLearn != nil}, {"learned", r.Learned != nil},
+		{"automated_review", r.AutomatedReview != nil}, {"finding", r.Finding != nil},
+		{"outcome", r.Outcome != nil}, {"decision", r.Decision != nil},
+	} {
+		if p.set {
+			names = append(names, p.name)
+		}
+	}
+	return names
+}
+
+// follows is the ID of the record this one names, and the kind that record
+// is, or nothing when it names none.
+func (r Record) follows() (id, kind string) {
+	switch {
+	case r.Learned != nil:
+		return r.Learned.Item, "to_learn"
+	case r.Finding != nil:
+		return r.Finding.Review, "automated_review"
+	case r.Outcome != nil:
+		return r.Outcome.Finding, "finding"
+	case r.Decision != nil:
+		return r.Decision.Finding, "finding"
+	}
+	return "", ""
+}
+
 // check says what's missing from a record or wrong with it.
 func (r Record) check() error {
 	if r.ID == "" || r.At.IsZero() || r.By == "" {
 		return errors.New("a record needs an id, an at and a by")
 	}
-	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
-		if set {
-			payloads++
-		}
-	}
-	if payloads != 1 {
-		return fmt.Errorf("a record holds exactly one payload, not %d", payloads)
+	if n := len(r.payloads()); n != 1 {
+		return fmt.Errorf("a record holds exactly one payload, not %d", n)
 	}
 	switch {
 	case r.ToLearn != nil && strings.TrimSpace(r.ToLearn.Text) == "":
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.AutomatedReview != nil:
+		return r.AutomatedReview.check()
+	case r.Finding != nil:
+		return r.Finding.check()
+	case r.Outcome != nil:
+		return r.Outcome.check()
+	case r.Decision != nil && (r.Decision.Finding == "" || strings.TrimSpace(r.Decision.Decision) == ""):
+		return errors.New("a decision record needs its finding and the user's decision")
 	}
 	return nil
 }

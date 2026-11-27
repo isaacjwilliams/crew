@@ -81,6 +81,12 @@ var commands = map[string]func(*Crew, []string) error{
 	"tick":           cmdTick,
 	"pause":          cmdPause,
 	"resume":         cmdResume,
+
+	// pr-review and workers record automated reviews.
+	"automated-review": cmdAutomatedReview,
+	"finding":          cmdFinding,
+	"outcome":          cmdOutcome,
+	"user-decided":     cmdUserDecided,
 }
 
 func main() {
@@ -147,26 +153,38 @@ func usage(text string) error { return fail("usage: %s", text) }
 
 // parseText reads the arguments of a command that takes loose words and flags,
 // like crew propose: it sets each flag named in flags to the argument after it,
-// and returns the other arguments joined by spaces. An argument that starts with
-// "--" but isn't one of flags, or a flag with nothing after it, is a mistake, so
-// it fails with use rather than put the argument into the text. So the text can't
-// have a word that starts with "--".
+// and returns the other arguments joined by spaces. So the text can't have a
+// word that starts with "--" (parseArgs).
 func parseText(args []string, flags map[string]*string, use string) (string, error) {
-	var words []string
+	words, err := parseArgs(args, flags, nil, use)
+	return strings.Join(words, " "), err
+}
+
+// parseArgs reads a command's arguments: it sets each flag named in values to
+// the argument after it and each one named in switches to true, and returns the
+// other arguments in order. An argument that starts with "--" but isn't one of
+// the flags, or a flag in values with nothing after it, is a mistake, so it
+// fails with use rather than take the argument as one of the others.
+func parseArgs(args []string, values map[string]*string, switches map[string]*bool, use string) ([]string, error) {
+	var rest []string
 	for len(args) > 0 {
-		if flag := flags[args[0]]; flag != nil {
+		if flag := values[args[0]]; flag != nil {
 			if len(args) == 1 {
-				return "", fail("%s needs a value; usage: %s", args[0], use)
+				return nil, fail("%s needs a value; usage: %s", args[0], use)
 			}
 			*flag, args = args[1], args[2:]
 			continue
 		}
-		if strings.HasPrefix(args[0], "--") {
-			return "", fail("'%s' isn't an option here; usage: %s", args[0], use)
+		if flag := switches[args[0]]; flag != nil {
+			*flag, args = true, args[1:]
+			continue
 		}
-		words, args = append(words, args[0]), args[1:]
+		if strings.HasPrefix(args[0], "--") {
+			return nil, fail("'%s' isn't an option here; usage: %s", args[0], use)
+		}
+		rest, args = append(rest, args[0]), args[1:]
 	}
-	return strings.Join(words, " "), nil
+	return rest, nil
 }
 
 func warn(format string, a ...any) {

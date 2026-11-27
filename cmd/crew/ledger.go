@@ -8,6 +8,7 @@ package main
 // crew's ledger lock: agents edit these files too, so nothing is held in memory.
 
 import (
+	"cmp"
 	"crypto/rand"
 	"fmt"
 	"iter"
@@ -972,41 +973,51 @@ func (t Task) NewestReview() int {
 }
 
 // An automated review of the task's PR: its number and when it was recorded,
-// the commits it read, which reviewers didn't report, and its findings.
+// the commits it read, which reviewers ran and which of them didn't report, and
+// its findings. crew automated-review records the fields that have a JSON name.
 type AutomatedReview struct {
-	Number int
-	At     time.Time // from its heading
+	Number int       `json:"n"`
+	At     time.Time `json:"-"` // its record's, or from its heading
 	// It read From..Head. Fork is the fork point of the PR it reviewed, so
 	// Fork..Head is the whole PR as it was then. A review in the text leaves all
 	// three empty when crew can't read its Range line.
-	From string
-	Fork string
-	Head string
-	// Failed are the reviewers that didn't report. One that failed only in a
+	From string `json:"from"`
+	Fork string `json:"fork"`
+	Head string `json:"head"`
+	// Reviewers ran it, and Failed didn't report. One that failed only in a
 	// round reported first. The text gives only whether the Claude reviewer
 	// failed.
-	Failed   []string
-	Findings []Finding
+	Reviewers []string  `json:"reviewers"`
+	Failed    []string  `json:"failed,omitempty"`
+	Findings  []Finding `json:"-"`
 }
 
-// reviewerClaude names the Claude reviewer in Failed.
-const reviewerClaude = "claude"
+// The reviewers an automated review runs.
+const (
+	reviewerClaude = "claude"
+	reviewerCodex  = "codex"
+)
+
+var reviewers = []string{reviewerClaude, reviewerCodex}
 
 // A finding of an automated review: its number in the review, the severity the
 // review agreed on and how the reviewers stood on it, then what the worker did
-// about it and, for one left for the user, the user's decision.
+// about it and, for one left for the user, the user's decision. crew finding
+// records the fields that have a JSON name.
 type Finding struct {
-	Number   int
-	Severity Severity
+	Review   string   `json:"review"` // the ID of its review's record
+	Number   int      `json:"n"`
+	Title    string   `json:"title"`
+	Severity Severity `json:"severity"`
 	// Labels on a severity it's held at: one reviewer refutes it (Split), an
 	// earlier review settled it as not a defect (Flipped), or the same failure
 	// happens at the fork point (PreExisting).
-	Split       bool
-	Flipped     bool
-	PreExisting bool
+	Split       bool `json:"split,omitempty"`
+	Flipped     bool `json:"flipped,omitempty"`
+	PreExisting bool `json:"pre_existing,omitempty"`
 
-	Outcome  FindingOutcome // its Kind is OutcomeOpen until the worker gives one
-	Decision string         // the user's, once they decide a finding left for them
+	Outcome  FindingOutcome `json:"-"` // its Kind is OutcomeOpen until the worker gives one
+	Decision string         `json:"-"` // the user's, once they decide a finding left for them
 }
 
 // The agreed severity of a finding, as pr-review's SKILL.md step 7 settles it:
@@ -1026,12 +1037,29 @@ const (
 
 var severities = []Severity{SeverityMustFix, SeverityShouldFix, SeverityFixLater, SeverityNitpick, SeverityWithdrawn, SeverityDisputed, SeverityUncertain}
 
-// FindingOutcome is what the worker did about a finding.
+// held: a finding at s is held at a severity, which labels may go with.
+func (s Severity) held() bool {
+	return s == SeverityMustFix || s == SeverityShouldFix || s == SeverityFixLater || s == SeverityNitpick
+}
+
+// FindingOutcome is what the worker did about a finding, from crew outcome or
+// the text.
 type FindingOutcome struct {
-	Kind Outcome
+	Finding string  `json:"finding"` // the ID of the finding's record
+	Kind    Outcome `json:"kind"`
 	// StillOpenFrom is the earlier review that left the finding for the user,
 	// when it repeats one the user hadn't decided yet.
-	StillOpenFrom int
+	StillOpenFrom int `json:"still_open_from,omitempty"`
+	// Text is the outcome as the worker wrote it on the finding's Outcome line,
+	// which starts with its Kind: "fixed in abc1234", say.
+	Text string `json:"text,omitempty"`
+}
+
+// FindingDecision is the user's decision on a finding left for them, from crew
+// user-decided.
+type FindingDecision struct {
+	Finding  string `json:"finding"` // the ID of the finding's record
+	Decision string `json:"decision"`
 }
 
 // AutomatedReviews is the reviews under ## Automated reviews, oldest first, in
@@ -1095,7 +1123,8 @@ func (f *Finding) readSeverity(line string) {
 // line: its kind from the first words ("left for the user: pre-existing, …" is
 // OutcomeLeftForUser, say), the review it's still open from, and the user's
 // decision, which the worker adds after what it first wrote ("left for the
-// user; decided by the user: no change"), sometimes with what it did next.
+// user; decided by the user: no change" is "no change"), sometimes with what
+// it did next.
 func (f *Finding) readOutcome(line string) {
 	f.Outcome.Kind = OutcomeOther
 	if line == "" {
@@ -1112,7 +1141,7 @@ func (f *Finding) readOutcome(line string) {
 		f.Outcome.StillOpenFrom = atoiOr0(n)
 	}
 	if _, decision, ok := strings.Cut(line, "; decided by the user"); ok {
-		f.Decision = "decided by the user" + decision
+		f.Decision = cmp.Or(strings.TrimSpace(strings.TrimPrefix(decision, ":")), "decided")
 	}
 }
 
