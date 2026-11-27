@@ -40,7 +40,7 @@ tests/run.sh            # must pass before a change is done
 
 Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint` runs `gofmt`, `go vet` (for Linux and macOS) and `go test ./...`.
 
-CI (`.github/workflows/test.yml`) runs every suite on Linux and `go test ./...` on macOS for each pull request, whatever its base, and each push to `main`. Its runner has neither claude nor fish, so lint skips their checks there: run `tests/run.sh` yourself too.
+CI runs every suite on each pull request and push to `main` (see `tests/README.md`), but its runner has neither claude nor fish, so lint skips their checks there: run `tests/run.sh` yourself too.
 
 - Add or update a test for every bug fix and behaviour change, in `guard.sh`, `crew-e2e.sh` or `host.sh`, or as a Go unit test for logic (front matter, settings files, the guard's table, stacks). Make sure the new test fails without the fix.
 - After changing an agent file, `claude plugin validate agents` must pass. It runs as part of `tests/run.sh lint`.

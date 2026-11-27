@@ -10,7 +10,7 @@ Requires Linux, Go (each suite builds `crew` from this checkout), bash, git, jq,
 
 CI (`.github/workflows/test.yml`) runs each suite as a check of its own on `ubuntu-latest`, and `go test ./...` on `macos-latest`, for every pull request, whatever branch it targets, and every push to `main`; the release workflow runs it before it publishes. The runner has shellcheck but neither fish nor claude, so `lint` skips the fish syntax check and `claude plugin validate` there.
 
-The suites run only on Linux: they use GNU and util-linux tools (`sed -i`, `stat -c`, `flock`, `setsid`, `script -qc`), and the stub `claude` reads `/proc`. On macOS, `go test ./...` runs in CI (`.github/workflows/test.yml`), covering the logic both systems share; the rest is the Mac's live checks in `ARCHITECTURE.md`.
+The suites run only on Linux: they use GNU and util-linux tools (`sed -i`, `stat -c`, `flock`, `setsid`, `script -qc`), and the stub `claude` reads `/proc`. On macOS, `go test ./...` runs in CI, covering the logic both systems share; the rest is the Mac's live checks in `ARCHITECTURE.md`.
 
 | Suite | What it covers |
 |---|---|
