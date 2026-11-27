@@ -247,9 +247,9 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			m.wheel(-wheelStep)
+			m.wheel(-1)
 		case tea.MouseWheelDown:
-			m.wheel(wheelStep)
+			m.wheel(1)
 		}
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
@@ -535,13 +535,25 @@ func (m *liveStatus) page(by int) {
 // wheelStep is how many screen lines a turn of the mouse wheel scrolls.
 const wheelStep = 3
 
-// wheel scrolls the screen by n lines, up or down, and not past either end.
-// The cursor stays on its line while that's still all on the screen, and
-// otherwise goes to the nearest line that is.
-func (m *liveStatus) wheel(n int) {
+// wheel scrolls the screen a turn up or down (by is -1 or 1), and not past
+// either end. A turn is wheelStep lines, or the whole screen when that's less.
+// The cursor stays on its line while that's still all on the screen. A line
+// taller than the screen shows each of its rows before the cursor leaves it.
+// Otherwise the cursor goes to the nearest line that's all on the screen.
+func (m *liveStatus) wheel(by int) {
+	n := by * min(wheelStep, m.bodyHeight())
+	was := m.top
 	m.top = max(0, min(m.top+n, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
-	if start, end := m.cursorSpan(); m.wholly(start, end) {
+	target := m.top
+	start, end := m.cursorSpan()
+	if m.wholly(start, end) {
 		return
+	}
+	if end-start > m.bodyHeight() {
+		if m.scroll(); m.top != was {
+			return
+		}
+		m.top = target
 	}
 	m.setCursor(m.nearestWhole(n))
 	m.scroll()
@@ -581,11 +593,12 @@ func (m *liveStatus) click(x, y int) {
 	}
 	i := m.lineAt(n)
 	start := m.drawnHeight(0, i)
+	end := start + len(m.shown[i].drawn)
+	wasWhole := m.wholly(start, end)
 	m.setCursor(i)
-	// A line cut off by the screen's edge stays as it is. Only when the new
-	// line's strip takes so much room that none of it is left on screen does
-	// the screen move.
-	if end := start + len(m.shown[i].drawn); end <= m.top || start >= m.top+m.bodyHeight() {
+	// A line cut off by the screen's edge stays as it is. A whole one stays
+	// whole, and one the new strip leaves no room for comes into view.
+	if wasWhole || end <= m.top || start >= m.top+m.bodyHeight() {
 		m.scroll()
 	}
 	// Only a line's first row has its marker.
@@ -706,7 +719,7 @@ func (m *liveStatus) bar() string {
 	if m.settingsErr != nil {
 		state += ", on the settings crew started with: " + m.settingsErr.Error()
 	}
-	return state + "   ↑↓/wheel move  ←→ fold  r refresh  q quit"
+	return state + "   ↑↓ move  ←→ fold  r refresh  q quit"
 }
 
 // fit cuts a line to the screen's width: the bar, or a line indented past the

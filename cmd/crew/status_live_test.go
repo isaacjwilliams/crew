@@ -1126,6 +1126,47 @@ func TestLiveStatusWheelReachesTheEndsWhateverTheScreensHeight(t *testing.T) {
 	}
 }
 
+func TestLiveStatusWheelShowsEveryRowOnTheWay(t *testing.T) {
+	for height := 8; height <= 16; height++ {
+		for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
+			m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
+			if button == tea.MouseWheelUp {
+				press(m, "end")
+			}
+			seen := map[int]bool{}
+			for range 200 {
+				for n := m.top; n < m.top+m.bodyHeight(); n++ {
+					seen[n] = true
+				}
+				wheeled(m, button, 1)
+			}
+			for n := range m.drawnHeight(0, len(m.shown)) {
+				if !seen[n] {
+					t.Errorf("at height %d, wheeling (%v) never shows screen line %d", height, button, n)
+				}
+			}
+		}
+	}
+}
+
+func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
+	for height := 8; height <= 20; height++ {
+		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
+		for turns := 0; turns < 15; turns++ {
+			for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
+				i := m.lineAt(m.top + y - len(m.headings))
+				start := startOf(m, i)
+				whole := m.wholly(start, start+len(m.shown[i].drawn))
+				clicked(m, 0, y)
+				if whole && !m.wholly(start, start+len(m.shown[i].drawn)) {
+					t.Fatalf("at height %d after %d turns, a click at screen line %d cuts off the whole line it highlights", height, turns, y)
+				}
+			}
+			wheeled(m, tea.MouseWheelDown, 1)
+		}
+	}
+}
+
 func TestLiveStatusClickNeverHidesTheLineItHighlights(t *testing.T) {
 	for height := 8; height <= 20; height++ {
 		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
