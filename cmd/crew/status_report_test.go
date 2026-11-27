@@ -215,13 +215,13 @@ func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 	parent, idea := p.Rows[0], p.Rows[1]
 	if got := rowIDs(parent.Kids); !slices.Equal(got, []string{"011-child"}) {
 		t.Errorf("010-parent's kids = %v, want 011-child", got)
-	} else if notes := parent.Kids[0].Notes; !slices.Contains(notes, "1 open question(s)") {
+	} else if notes := texts(parent.Kids[0].Notes); !slices.Contains(notes, "1 open question(s)") {
 		t.Errorf("011-child's notes = %q, want its open question", notes)
 	}
 	if parent.Folded || !idea.Folded {
 		t.Errorf("folded: 010-parent %v, 012-idea %v; want only the draft folded", parent.Folded, idea.Folded)
 	}
-	if risky := p.Rows[2]; !slices.Equal(risky.Notes, []string{"high"}) || risky.Merge == nil || !slices.Contains(risky.Merge.InTheWay, "no security review yet") {
+	if risky := p.Rows[2]; !slices.Equal(texts(risky.Notes), []string{"high"}) || risky.Merge == nil || !slices.Contains(texts(risky.Merge.InTheWay), "no security review yet") {
 		t.Errorf("013-risky's notes = %q and merge check %+v, want its tier, and its security review in the way", risky.Notes, risky.Merge)
 	}
 	var review []string
@@ -289,7 +289,7 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 		checks := map[string]string{}
 		for _, row := range buildReport(c, []string{"p"}, false, statusReads{prs: prs, workers: workers, branches: branches}).Projects[0].Rows {
 			if row.Merge != nil {
-				checks[row.Task.ID()] = row.Merge.String()
+				checks[row.Task.ID()] = row.Merge.wording().text
 			}
 		}
 		if got := checks["013-risky"]; !strings.HasSuffix(got, "(couldn't read GitHub; as of the last sync)") {
@@ -413,10 +413,10 @@ func rowOf(t *testing.T, g goalReport, id string) taskRow {
 	return taskRow{}
 }
 
-// afterNote is the "after" note on a task's row, or "".
-func afterNote(t *testing.T, g goalReport, id string) string {
+// afterOnRow is the "after" note on a task's row, or "".
+func afterOnRow(t *testing.T, g goalReport, id string) string {
 	t.Helper()
-	for _, n := range rowOf(t, g, id).Notes {
+	for _, n := range texts(rowOf(t, g, id).Notes) {
 		if strings.HasPrefix(n, "after ") {
 			return n
 		}
@@ -531,7 +531,7 @@ func TestGoalAfterNotesNameOnlyWhatEachTaskWaitsOnNext(t *testing.T) {
 		"243": "",
 		"244": "",
 	} {
-		if got := afterNote(t, g, id); got != want {
+		if got := afterOnRow(t, g, id); got != want {
 			t.Errorf("%s's note = %q, want %q", id, got, want)
 		}
 	}
@@ -542,7 +542,7 @@ func TestGoalAfterNoteNamesWhatsStillToMergeOnceAParentIsInFlight(t *testing.T) 
 	tasks[1] = "259 merged depends_on: 160"
 	tasks[2] = "195 merged depends_on: 259"
 	tasks[3] = "235 working base: b160; branch: b235; depends_on: 160, 195"
-	if got := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "165"); got != "after 160" {
+	if got := afterOnRow(t, goalReportOf(goalLedger(t, tasks...)), "165"); got != "after 160" {
 		t.Errorf("165's note = %q, want %q", got, "after 160")
 	}
 }
@@ -550,7 +550,7 @@ func TestGoalAfterNoteNamesWhatsStillToMergeOnceAParentIsInFlight(t *testing.T) 
 func TestGoalAfterNoteAlwaysNamesAnAbandonedTask(t *testing.T) {
 	tasks := slices.Clone(boardsGoal)
 	tasks[7] = "242 abandoned depends_on: 170"
-	if got, want := afterNote(t, goalReportOf(goalLedger(t, tasks...)), "166"), "after 170, 242 (abandoned)"; got != want {
+	if got, want := afterOnRow(t, goalReportOf(goalLedger(t, tasks...)), "166"), "after 170, 242 (abandoned)"; got != want {
 		t.Errorf("166's note = %q, want %q", got, want)
 	}
 }
@@ -563,7 +563,7 @@ func TestGoalAfterNoteLeavesOutWhatItWaitsOnThroughATaskItDoesntName(t *testing.
 		"b ready depends_on: x",
 		"c ready depends_on: a, b",
 	))
-	if got, want := afterNote(t, g, "c"), "after b"; got != want {
+	if got, want := afterOnRow(t, g, "c"), "after b"; got != want {
 		t.Errorf("c's note = %q, want %q", got, want)
 	}
 }
@@ -574,7 +574,7 @@ func TestGoalAfterNoteNamesTasksThatWaitOnEachOther(t *testing.T) {
 		"b ready depends_on: a",
 		"c ready depends_on: a, b",
 	))
-	if got, want := afterNote(t, g, "c"), "after a, b"; got != want {
+	if got, want := afterOnRow(t, g, "c"), "after a, b"; got != want {
 		t.Errorf("c's note = %q, want %q", got, want)
 	}
 }

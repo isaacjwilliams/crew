@@ -76,7 +76,6 @@ var commands = map[string]func(*Crew, []string) error{
 	"doctor":         cmdDoctor,
 	"host":           cmdHost,
 	"lead":           cmdLead,
-	"serve":          cmdServe,
 	"setup":          cmdSetup,
 	"upgrade":        cmdUpgrade,
 	"migrate":        cmdMigrate,

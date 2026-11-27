@@ -301,7 +301,7 @@ func TestAJobWaitingOnItsBackgroundCommand(t *testing.T) {
 	if as.jobBusy("waits") || !as.jobBusy("mid") || !as.jobBusy("none") {
 		t.Errorf("busy: waiting %v, mid-turn %v, with no transcript %v; want false, true, true", as.jobBusy("waits"), as.jobBusy("mid"), as.jobBusy("none"))
 	}
-	if got := goalFields(goalReport{Goal: Goal{docWith(t, "---\nstatus: running\n---\n")}, Lead: *as.find("waits")})[workerField]; got != "idle (bin/rails server)" {
+	if got := goalFields(goalReport{Goal: Goal{docWith(t, "---\nstatus: running\n---\n")}, Lead: *as.find("waits")})[workerField].text; got != "idle (bin/rails server)" {
 		t.Errorf("a goal lead waiting on its background command shows as %q", got)
 	}
 	for _, job := range []string{"gone", "done", "asks", "shell"} {

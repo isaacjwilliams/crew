@@ -13,8 +13,8 @@ package main
 // loaded job whose plist changes is booted out and bootstrapped again.
 //
 // Booting out a job can end crew itself, when crew runs in that job: the tick's
-// stand-down runs in crew-tick, and a phone lead's crew upgrade in crew-lead. So
-// for each job, the bootout is the last thing crew asks of launchd.
+// stand-down runs in crew-tick. So the bootout is the last thing crew asks of
+// launchd.
 
 import (
 	"bytes"
@@ -30,7 +30,7 @@ import (
 // crewServices are the jobs crew host up turns on and handing over turns off.
 // The tick's comes last: its stand-down turns the jobs off from inside it, and
 // booting it out ends the tick.
-var crewServices = []string{"crew-lead", "crew-gardener", "crew-tick"}
+var crewServices = []string{"crew-gardener", "crew-tick"}
 
 // enableServices loads the crew's jobs now, and at every login.
 func enableServices() {
@@ -51,14 +51,6 @@ func disableServices() {
 // serviceEnabled: crew host up has turned the job on here, which for launchd
 // means it's loaded (launchctl print).
 func serviceEnabled(job string) bool { return launchctl("print", target(job)) == nil }
-
-// restartLeadService restarts the lead's Remote Control server, so new phone
-// sessions run the lead this home has now.
-func restartLeadService() {
-	if launchctl("kickstart", "-k", target("crew-lead")) != nil {
-		warn("couldn't restart crew-lead (launchctl kickstart)")
-	}
-}
 
 // servicePath is the PATH a loaded job runs crew with, read from its installed
 // plist, and how to add a directory to it.

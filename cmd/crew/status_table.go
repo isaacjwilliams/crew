@@ -4,12 +4,13 @@ package main
 // in columns under named headings. The plain text gives each column the width
 // of its widest value; the live view caps them to fit the screen, wrapping a
 // longer value inside its column, or shows each row as a card when even that
-// doesn't fit.
+// doesn't fit. Each lays out the fields as it words them (wording).
 
 import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The fields of a task's or a goal's line, in the order of their columns.
@@ -31,7 +32,7 @@ var columns = [...]struct {
 }{
 	statusField: {"status", 11},
 	workerField: {"worker", 16},
-	prField:     {"PR", 6},
+	prField:     {"PR", 14},
 	modelField:  {"model", 8},
 	effortField: {"effort", 6},
 	notesField:  {"notes", 0},
@@ -44,7 +45,7 @@ var columns = [...]struct {
 const (
 	idHeading = "task"
 	idCap     = 40
-	minNotes  = 20
+	minNotes  = 13
 	columnGap = "  "
 )
 
@@ -53,31 +54,42 @@ const (
 func headings() statusLine {
 	l := statusLine{head: idHeading}
 	for _, c := range columns {
-		l.fields = append(l.fields, c.heading)
+		l.fields = append(l.fields, same(c.heading))
 	}
 	return l
 }
 
 // table is how wide each column is: the ID's, with the line's indent, then each
-// field's, in columns' order.
+// field's, in columns' order. live: it holds the fields as the live view words
+// them, not as the plain text does.
 type table struct {
+	live   bool
 	id     int
 	fields [len(columns)]int
+}
+
+// value is a field as the table words it.
+func (t table) value(f wording) string {
+	if t.live {
+		return f.live
+	}
+	return f.text
 }
 
 // measure is the table each line holding fields fits in unwrapped, with the
 // headings: every such line in lines and under them, folded lines' kids too.
 // The live view measures them all, so opening a fold never moves the columns.
 // indent is how wide a line's indent is at a depth. A project is at depth 0,
-// and its rows and their headings at depth 1.
-func measure(lines []statusLine, indent func(depth int) int) table {
-	var t table
+// and its rows and their headings at depth 1. live: measure the fields as the
+// live view words them.
+func measure(lines []statusLine, indent func(depth int) int, live bool) table {
+	t := table{live: live}
 	var add func(l statusLine, depth int)
 	add = func(l statusLine, depth int) {
 		if l.hasFields() {
 			t.id = max(t.id, indent(depth)+lipgloss.Width(l.head))
 			for i, f := range l.fields {
-				t.fields[i] = max(t.fields[i], lipgloss.Width(f))
+				t.fields[i] = max(t.fields[i], lipgloss.Width(t.value(f)))
 			}
 		}
 		for _, k := range l.kids {
@@ -114,7 +126,7 @@ func (t table) fit(width int) (table, bool) {
 func (t table) row(indent string, l statusLine) []string {
 	cells := [][]string{hang(indent, l.head, t.id)}
 	for i, f := range l.fields {
-		cells = append(cells, strings.Split(lipgloss.Wrap(f, t.fields[i], ""), "\n"))
+		cells = append(cells, strings.Split(lipgloss.Wrap(t.value(f), t.fields[i], ""), "\n"))
 	}
 	widths := append([]int{t.id}, t.fields[:]...)
 	var blocks []string
@@ -131,10 +143,11 @@ func (t table) row(indent string, l statusLine) []string {
 	return lines
 }
 
-// card lays out a line with fields for a screen too narrow for the table: its
-// head after indent, then each field that has a value, on a line of its own
-// under the head as "heading: value". When the head doesn't fit, the indent's
-// spaces give way first, and only a head wider than the screen is cut.
+// card lays out a line with fields for a screen too narrow for the table, as
+// the live view words them: its head after indent, then each field that has a
+// value, on a line of its own under the head as "heading: value". When the head
+// doesn't fit, the indent's spaces give way first, and only a head wider than
+// the screen is cut.
 func card(indent string, l statusLine, width int) []string {
 	// Drop as many of the indent's leading spaces as the head is too wide by.
 	over := max(0, lipgloss.Width(indent+l.head)-width)
@@ -143,8 +156,8 @@ func card(indent string, l statusLine, width int) []string {
 	lines := []string{cutWithEllipsis(head, width)}
 	under := strings.Repeat(" ", lipgloss.Width(indent)+2)
 	for i, f := range l.fields {
-		if f != "" {
-			lines = append(lines, hang(under, columns[i].heading+": "+f, width)...)
+		if f.live != "" {
+			lines = append(lines, hang(under, columns[i].heading+": "+f.live, width)...)
 		}
 	}
 	return lines
@@ -162,8 +175,12 @@ func hang(indent, text string, width int) []string {
 		return lines
 	}
 	under := strings.Repeat(" ", lipgloss.Width(indent)+2)
-	// Wrapping only puts line breaks in, so the first line starts the text.
-	rest := strings.TrimLeft(strings.TrimPrefix(text, first), " ")
+	// Wrapping only breaks lines at spaces and closes any style at a break, so
+	// the rest is the text after the first line's cells and the space it broke
+	// at. Cutting by cells keeps the rest's styles.
+	rest := ansi.TruncateLeft(text, lipgloss.Width(first), "")
+	broke := ansi.Strip(rest)
+	rest = ansi.TruncateLeft(rest, len(broke)-len(strings.TrimLeft(broke, " ")), "")
 	for _, l := range strings.Split(lipgloss.Wrap(rest, max(1, room-2), ""), "\n") {
 		lines = append(lines, under+l)
 	}

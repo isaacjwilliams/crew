@@ -11,24 +11,16 @@ permissions:
   contents: write
 
 jobs:
-  # The shell suites need Linux. On a Mac, the Go tests check the parsing they
-  # share with Linux, and that the macOS code builds and runs.
-  test-macos:
-    if: github.repository == 'isaacjwilliams/crew'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Test
-        run: go test ./...
+  # The checks every pull request gets: every suite, lint included, on Linux,
+  # and the Go tests on a Mac.
+  test:
+    uses: ./.github/workflows/test.yml
 
   release:
     # Only the public repo publishes releases: a private crew home that pushes a
     # tag never builds one.
     if: github.repository == 'isaacjwilliams/crew'
-    needs: test-macos
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,13 +49,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      # The suites need bash, git, jq and util-linux (flock, setsid, script), which
-      # the runner has. Lint stays a local check: it needs the claude CLI.
-      - name: Test
-        run: |
-          go test ./...
-          tests/run.sh guard crew-e2e host
 
       # Named crew-<uname -s>-<uname -m>, which is what bin/crew asks for. Go signs
       # the darwin/arm64 binary ad hoc, which Apple silicon needs, even when

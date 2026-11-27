@@ -1,15 +1,13 @@
 package main
 
-// Starting the lead: crew lead, which bin/lead runs, and execLead, which crew
-// lead and crew serve share. A lead runs in the home's lead/, whose settings make
-// the session the lead and give it the ledger and the project checkouts.
+// Starting the lead: crew lead, which bin/lead runs. A lead runs in the home's lead/, whose settings
+// make the session the lead and give it the ledger and the project checkouts.
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -50,7 +48,11 @@ func cmdLead(c *Crew, args []string) error {
 	}
 	cmd := c.claude(slices.Concat([]string{"--name", name}, flags, claudeArgs)...)
 	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(flags))
-	return c.execLead(cmd)
+	// The session loads lead/.mcp.json and the lead's settings from lead/.
+	if err := os.Chdir(c.path("lead")); err != nil {
+		return fail("%s is missing", c.path("lead"))
+	}
+	return execClaude(cmd)
 }
 
 // leadFlags is the flags a lead for proj ("" for every project) starts with,
@@ -101,9 +103,8 @@ func (c *Crew) leadFingerprint(flags []string) string {
 // Code adds what it prints to the prompt. With each prompt, the session hears
 // the news since its previous one (leadNews). A lead runs on the instructions
 // and settings it started with, so once they've changed, crew lead's session
-// is also told to have the user start a new lead. The phone lead (crew serve)
-// hears the news too; a goal lead runs with the lead's settings, and hears
-// nothing (see inWorkerOrGoalLead).
+// is also told to have the user start a new lead. A goal lead runs with the
+// lead's settings, and hears nothing (see inWorkerOrGoalLead).
 func (c *Crew) leadHook(in io.Reader) error {
 	if inWorkerOrGoalLead() {
 		return nil
@@ -114,7 +115,7 @@ func (c *Crew) leadHook(in io.Reader) error {
 	}
 	// Without a session ID in the input, leadNews has no record to keep and says nothing.
 	json.NewDecoder(in).Decode(&input)
-	// The project crew lead or crew serve gave the session in CREW_PROJECT.
+	// The project crew lead gave the session in CREW_PROJECT.
 	proj, err := c.scope("", false)
 	if err != nil {
 		return err
@@ -147,14 +148,4 @@ func takeProject(args []string) (project string, rest []string, err error) {
 		return "", nil, fail("--project needs a project (crew status --all lists them)")
 	}
 	return args[i+1], slices.Concat(args[:i], args[i+2:]), nil
-}
-
-// execLead replaces crew with cmd, a lead's claude command, run in the home's
-// lead/. Its caller syncs the MCP servers first, since the session loads
-// lead/.mcp.json.
-func (c *Crew) execLead(cmd *exec.Cmd) error {
-	if err := os.Chdir(c.path("lead")); err != nil {
-		return fail("%s is missing", c.path("lead"))
-	}
-	return execClaude(cmd)
 }

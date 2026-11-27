@@ -13,7 +13,7 @@ check "crew and lead linked into ~/.local/bin" '[[ $(readlink "$HOME/.local/bin/
 check "and the fish completions installed, and nothing else for fish" '[[ -f $HOME/.config/fish/completions/crew.fish && -f $HOME/.config/fish/completions/lead.fish && $(find "$HOME/.config/fish" -type f | wc -l) == 2 ]]'
 check "install says when ~/.local/bin isn't on PATH, and what to add" '[[ $out == *"~/.local/bin isn'"'"'t on your PATH"*"fish_add_path ~/.local/bin"* ]]'
 check "systemd units installed, timers not enabled" '[[ -f $HOME/.config/systemd/user/crew-gardener.timer && -f $HOME/.config/systemd/user/crew-tick.timer ]] && ! grep -q "user enable" "$HOME/systemctl-calls.log"'
-check "install says the units are off here, and what turns them on" '[[ $out == *"off on this machine: crew-tick.timer crew-gardener.timer crew-lead.service. crew host up turns them on"* ]]'
+check "install says the units are off here, and what turns them on" '[[ $out == *"off on this machine: crew-tick.timer crew-gardener.timer. crew host up turns them on"* ]]'
 check "CREW_HOME set for Claude Code sessions" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
 check "AGENTS.md setting applied with --yes" '[[ $(jq -r ".pluginConfigs[\"agents-md@builtin\"].options.instructionFiles" "$HOME/.claude/settings.json") == claude-md-and-agents-md ]]'
 check "work root created" '[[ -d $HOME/agent-work ]]'
@@ -42,11 +42,10 @@ check "crew doctor flags an untrusted work root as a required check" '[[ $doctor
 jq -n --arg p "$HOME/agent-work" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
 check "with only the work root trusted, as after setup, no required check fails" '[[ $doctor_out == *"ok   $HOME/agent-work trusted"* && $doctor_out == *"Required checks passed."* ]]'
-check "and the lead directory is an optional check, fixed by running lead once" '[[ $doctor_out == *"FAIL $H/lead trusted (optional) — run lead once and accept the trust prompt"* ]]'
 check "and so is ~/.local/bin on PATH, with what to add" '[[ $doctor_out == *"FAIL ~/.local/bin on PATH (optional) — add it in your shell'"'"'s startup file: fish_add_path ~/.local/bin"* ]]'
-jq -n --arg p "$H" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
+jq -n --arg p "$HOME" '{projects: {($p): {hasTrustDialogAccepted: true}}}' >"$HOME/.claude.json"
 doctor_out=$(PATH="$H/bin:$PATH" crew doctor 2>&1 || true)
-check "crew doctor finds the lead directory trusted through the home, where Claude Code records it" '[[ $doctor_out == *"ok   $H/lead trusted"* ]]'
+check "crew doctor finds the work root trusted through a parent folder, where Claude Code records it" '[[ $doctor_out == *"ok   $HOME/agent-work trusted"* ]]'
 doctor_out=$(PATH="$HOME/.local/bin:$PATH" crew doctor 2>&1 || true)
 check "crew doctor, run through the link, finds ~/.local/bin on PATH" '[[ $doctor_out == *"ok   ~/.local/bin on PATH"* ]]'
 ln -sfn "$HOME/other/crew/bin/lead" "$HOME/.local/bin/lead"
@@ -83,6 +82,15 @@ check "a changed agent is replaced by rename, not rewritten in place" '[[ $(stat
 check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
+# A home upgraded from a version that shipped the lead service and enabled it:
+# install disables and removes any unit the home stops shipping, which is how
+# it loses crew-lead.
+echo '[Service]' >"$H/systemd/crew-lead.service"
+"$H/bin/crew" install --yes >/dev/null 2>&1
+systemctl --user enable --now crew-lead.service
+rm "$H/systemd/crew-lead.service"
+"$H/bin/crew" install --yes >/dev/null 2>&1
+check "the lead service an older version enabled is turned off and its unit removed" '[[ ! -e $HOME/.config/systemd/user/crew-lead.service ]] && grep -q "disable --now crew-lead.service" "$HOME/systemctl-calls.log" && ! grep -qx crew-lead.service "$HOME/systemctl-enabled"'
 check "other agents are left alone" '[[ -f $HOME/.claude/agents/implementer.md ]]'
 check "the plan reviewer is replaced by the brief reviewer" '[[ ! -e $HOME/.claude/agents/plan-reviewer.md && -f $HOME/.claude/agents/brief-reviewer.md ]]'
 check "workers are denied the brief reviewer by the name it's installed under" \
@@ -129,7 +137,7 @@ out=$("$H/bin/crew" install --yes 2>&1)
 check "a re-run with a custom home backs nothing up" '[[ $out != *"backed up"* ]]'
 check "CREW_HOME set to the custom home" '[[ $(jq -r .env.CREW_HOME "$HOME/.claude/settings.json") == "$H" ]]'
 check "crew and lead are linked into the custom home" '[[ $(readlink "$HOME/.local/bin/crew") == "$H/bin/crew" && $(readlink "$HOME/.local/bin/lead") == "$H/bin/lead" ]]'
-for s in gardener tick lead; do
+for s in gardener tick; do
   check "$s service points at the custom home" 'grep -q "^Environment=CREW_HOME=$H\$" "$HOME/.config/systemd/user/crew-$s.service" && grep -q "^ExecStart=$H/bin/crew " "$HOME/.config/systemd/user/crew-$s.service"'
 done
 
@@ -176,7 +184,7 @@ out=$(cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add 2>&1)
 check "nothing is changed before a machine runs the crew" '[[ $out == *"no machine runs the crew"* ]]'
 out=$(tower "$TH/bin/crew" host up </dev/null 2>&1)
 check "host up claims the lease on origin" '[[ $(origin_host) == tower && $(cat "$TH/host") == tower && $out == *"crew runs on tower"* ]]'
-check "host up installs, and enables the timers and the lead service" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled" && grep -qx crew-lead.service "$SB/tower/systemctl-enabled"'
+check "host up installs, and enables the timers" '[[ -f $SB/tower/.claude/agents/lead.md ]] && grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx crew-gardener.timer "$SB/tower/systemctl-enabled"'
 check "without a terminal, host up starts no claude to trust the work root, and leaves it to doctor" '! grep -qx "claude " "$SB/tower/claude-calls.log" && [[ $out != *"Trusting"* && $out == *"FAIL $SB/tower/agent-work trusted"* ]]'
 # script gives host up a terminal on stdin, as a person running it has.
 out=$(tower script -qec "$TH/bin/crew host up" /dev/null </dev/null 2>&1)
@@ -191,14 +199,9 @@ jq -n --arg p "$SB/tower/agent-work" '{projects: {($p): {hasTrustDialogAccepted:
 : >"$SB/tower/claude-calls.log"
 out=$(tower script -qec "$TH/bin/crew host up" /dev/null </dev/null 2>&1)
 check "on a terminal, host up starts no claude once the work root is trusted" '! grep -qx "claude " "$SB/tower/claude-calls.log" && [[ $out != *"Trusting"* && $out == *"ok   $SB/tower/agent-work trusted"* ]]'
-rm -f "$TH/lead/.mcp.json"
-tower "$TH/bin/crew" serve >/dev/null 2>&1
-check "serve writes the leads' MCP servers before it starts" '[[ $(jq -c . "$TH/lead/.mcp.json") == "{\"mcpServers\":{}}" ]]'
-check "on the machine that runs the crew, serve runs the lead's Remote Control server in lead/" '[[ $(tail -n 1 "$SB/tower/claude-calls.log") == "claude remote-control --name crew --spawn same-dir --permission-mode auto" && $(cat "$SB/tower/claude.cwd") == "$TH/lead" ]]'
 (cd "$SB/tower/webapp" && tower "$TH/bin/crew" project add >/dev/null)
 P=$(basename "$(ls -d "$TH"/projects/*/)")
 tower "$TH/bin/crew" new "Lease test" --project "$P" >/dev/null
-check "the lead's Remote Control server works on every project" '[[ $(grep " remote-control " "$SB/tower/claude-env.log" | tail -1) == "all claude remote-control "* ]]'
 # In DIR, run `lead ARGS` in bash, through the link install made, and print the
 # claude call it made, with its --settings as {…}: lead_off shows the part of them
 # these checks are about, the project servers it switches off.
@@ -268,10 +271,8 @@ check "a stand-down that fails on the way leaves the tick on to try again" '[[ $
 git -C "$TH" branch -q -D lost
 out=$(tower "$TH/bin/crew" tick 2>&1)
 lost=$(git -C "$TH" branch --list "lost/tower-*" --format="%(refname:short)")
-check "the old host's next tick stands down: units off, crew sessions stopped" '[[ $out == *"standing down"* ]] && grep -q "disable --now crew-tick.timer crew-gardener.timer crew-lead.service" "$SB/tower/systemctl-calls.log" && ! grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx "claude stop job1" "$SB/tower/claude-calls.log"'
+check "the old host's next tick stands down: units off, crew sessions stopped" '[[ $out == *"standing down"* ]] && grep -q "disable --now crew-tick.timer crew-gardener.timer" "$SB/tower/systemctl-calls.log" && ! grep -qx crew-tick.timer "$SB/tower/systemctl-enabled" && grep -qx "claude stop job1" "$SB/tower/claude-calls.log"'
 check "it keeps the ledger commit origin never got on a lost/ branch, and resets to origin" '[[ -n $lost ]] && git -C "$TH" log -1 --format=%s "$lost" | grep -q "log 001-lease-test" && [[ $(git -C "$TH" rev-parse @) == "$(git --git-dir="$SB/crew.git" rev-parse main)" && $(cat "$TH/host") == laptop && ! -e $TH/.crew-lease-lost ]]'
-rc=0; tower "$TH/bin/crew" serve >/dev/null 2>&1 || rc=$?
-check "on a machine that doesn't run the crew, serve exits 3, so its unit stays stopped" '[[ $rc == 3 ]]'
 out=$(tower "$TH/bin/crew" log 1 "from a worker still on the tower" 2>&1)
 check "a worker's crew log on the stood-down machine fails with the new holder's name" '[[ $out == *"crew runs on laptop; this machine can only read"* ]]'
 
@@ -311,7 +312,7 @@ out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup makes the private repo origin and the public one upstream" '[[ $(git -C "$H" remote get-url origin) == "$HOME/remotes/isaac/crew.git" && $(git -C "$H" remote get-url upstream) == "$SB/public.git" ]]'
 check "and nothing can be pushed to the public repo" '! git -C "$H" push -q upstream main 2>/dev/null && [[ -z $(git --git-dir="$SB/public.git" log --oneline main -- config/crew.env) ]]'
 check "it commits the person's settings, from the template, to the private repo" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" log -1 --format=%s main -- config/crew.env) == "crew: set up for isaac" ]] && cmp -s "$H/config/crew.env" "$H/templates/crew.env"'
-check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-lead.service "$HOME/systemctl-enabled"'
+check "and runs the crew here: the lease claimed, the units enabled" '[[ $(git --git-dir="$HOME/remotes/isaac/crew.git" show main:host) == tower ]] && grep -qx crew-tick.timer "$HOME/systemctl-enabled" && grep -qx crew-gardener.timer "$HOME/systemctl-enabled"'
 check "and its closing text says to put ~/.local/bin on PATH and run lead, and nothing more" '[[ $out == *"With ~/.local/bin on your PATH, run lead."* && $out != *"crew project add"* && $out != *"BRANCH_PREFIX"* ]]'
 out=$(CREW_HOST=tower "$H/bin/crew" setup </dev/null 2>&1)
 check "setup refuses a home that's set up already" '[[ $out == *"set up already"* ]]'
@@ -393,8 +394,8 @@ check "a project the user paused stays paused" '[[ $(sed -n "s/^by: //p" "$H/pro
 check "a release, not whatever upstream's main has since" '! grep -q unreleased "$H/README.md"'
 check "the new version installs itself, with units that are on left unmentioned" '[[ $out == *"Done (crew 9.9.9)"* && $out != *"off on this machine"* ]]'
 check "and installs it: the changed agent is copied, the old one backed up" 'grep -q "# new in v2" "$HOME/.claude/agents/lead.md" && compgen -G "$HOME/.local/share/agent-crew/backups/*/.claude/agents/lead.md" >/dev/null && ! grep -q "# new in v2" "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/lead.md'
-check "and pushes the merge and the lifted pause to the private repo, and restarts the lead's server" \
-  'wait_for "[[ \$(git --git-dir=\"$HOME/remotes/isaac/crew.git\" rev-parse main) == \$(git -C \"$H\" rev-parse @) ]]" && grep -q "restart crew-lead.service" "$HOME/systemctl-calls.log"'
+check "and pushes the merge and the lifted pause to the private repo" \
+  'wait_for "[[ \$(git --git-dir=\"$HOME/remotes/isaac/crew.git\" rev-parse main) == \$(git -C \"$H\" rev-parse @) ]]"'
 check "only the new version's binary is left" '[[ $(ls "$H/bin/release") == crew-9.9.9 ]]'
 head=$(git -C "$H" rev-parse @); out=$(up --yes)
 check "run again on the release it has, upgrade pauses nothing, and installs it again" \

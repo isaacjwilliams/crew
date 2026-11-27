@@ -20,7 +20,7 @@ Setup
                                    with the public one as upstream, and run the crew here
   crew upgrade [--yes]             Pause the crew while sessions wrap up, merge the
                                    public repo's new version, install it, push,
-                                   restart the lead's server, and lift the pause.
+                                   and lift the pause.
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
@@ -48,9 +48,6 @@ Setup
                                    previous prompt, and say when the lead's
                                    instructions or settings changed since it
                                    started (always exits 0)
-  crew serve                       Serve the lead with Remote Control (what
-                                   crew-lead.service runs); exits 3 on a machine
-                                   that doesn't run the crew
   crew doctor                      Check dependencies, versions, trust and settings
   crew version                     Print crew's version
   crew config [KEY] [--project P|--task T]

@@ -238,33 +238,6 @@ func (c *Crew) hostDown(force bool) error {
 	return nil
 }
 
-// exitNotHost is what crew serve exits with on a machine that doesn't run the
-// crew, which crew-lead.service takes as "don't restart" (RestartPreventExitStatus).
-const exitNotHost = 3
-
-// crew serve is what crew-lead.service runs: the lead, as a Remote Control server
-// in the home's lead/, so the person opens it from Claude Mobile.
-func cmdServe(c *Crew, args []string) error {
-	if len(args) > 0 {
-		return usage("crew serve")
-	}
-	if err := c.requireHost(); err != nil {
-		report(err)
-		return exitQuietly(exitNotHost)
-	}
-	// Its sessions load lead/.mcp.json, so bring it up to date. A project's problem
-	// is reported and doesn't stop the lead.
-	c.syncMCP()
-	// Without --continue: it fails when no earlier server ran here, and serves only
-	// one session. A plain start brings back the last server's sessions, if it
-	// stopped in the last few hours. same-dir keeps sessions in lead/, not in
-	// worktrees of the home. Run like any session crew starts, so this home's crew
-	// is the one its sessions find.
-	cmd := c.claude("remote-control", "--name", "crew", "--spawn", "same-dir", "--permission-mode", c.Settings["LEAD_PERMISSION_MODE"])
-	cmd.Env = append(cmd.Env, "CREW_PROJECT="+allProjects)
-	return c.execLead(cmd)
-}
-
 // crew setup [--name NAME] turns a fresh clone of the public crew repo into a
 // person's own crew: a private GitHub repo becomes origin, the public one
 // upstream, which can never be pushed to, so a ledger can't reach it. Then it

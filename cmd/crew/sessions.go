@@ -879,7 +879,7 @@ func (c *Crew) sessionSettings(settings *object, p *Project) string {
 //
 //	empty        a worker or goal lead (sessionSettings sets it so)
 //	a value      crew lead's session: the fingerprint of what it loaded
-//	unset        the phone lead (crew serve), or no session crew started
+//	unset        a session crew didn't start (a plain claude)
 func inWorkerOrGoalLead() bool {
 	fp, set := os.LookupEnv("CREW_LEAD_FINGERPRINT")
 	return set && fp == ""
@@ -888,7 +888,7 @@ func inWorkerOrGoalLead() bool {
 // addPauseHook adds the PostToolUse hook that runs crew pause --hook after every
 // tool call, for the sessions a pause asks to wrap up: workers and goal leads.
 // It's added here, not listed in a settings file, so the user's own leads (crew
-// lead, crew serve) never get it. Nor does the gardener: it has no file to note
+// lead) never get it. Nor does the gardener: it has no file to note
 // where it stopped, and garden would take its early end for a finished review.
 func addPauseHook(settings *object) {
 	run := newObject()

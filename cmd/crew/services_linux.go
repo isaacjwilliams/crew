@@ -12,7 +12,7 @@ import (
 )
 
 // crewServices are the units crew host up enables and handing over disables.
-var crewServices = []string{"crew-tick.timer", "crew-gardener.timer", "crew-lead.service"}
+var crewServices = []string{"crew-tick.timer", "crew-gardener.timer"}
 
 // enableServices starts the crew's units now, and at every boot.
 func enableServices() { systemctlNow("enable") }
@@ -30,14 +30,6 @@ func systemctlNow(action string) {
 // is-enabled).
 func serviceEnabled(unit string) bool {
 	return exec.Command("systemctl", "--user", "is-enabled", "--quiet", unit).Run() == nil
-}
-
-// restartLeadService restarts the lead's Remote Control server, so new phone
-// sessions run the lead this home has now.
-func restartLeadService() {
-	if exec.Command("systemctl", "--user", "restart", "crew-lead.service").Run() != nil {
-		warn("couldn't restart crew-lead.service")
-	}
 }
 
 // servicePath is the PATH an enabled unit runs crew with: service is what runs

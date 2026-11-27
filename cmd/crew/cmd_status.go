@@ -66,7 +66,7 @@ func printReport(w io.Writer, r statusReport) {
 	lines := asPrinted(reportLines(r))
 	// Two spaces a level. The live view's indent is two wider, for its fold
 	// marker (indentWidth).
-	t := measure(lines, func(depth int) int { return 2 * depth })
+	t := measure(lines, func(depth int) int { return 2 * depth }, false)
 	for _, l := range lines {
 		if len(l.kids) > 0 {
 			fmt.Fprintln(w)
@@ -99,7 +99,7 @@ type statusLine struct {
 	head string // what the line says; for a task or a goal, its ID
 	// fields are a task's or a goal's values, one for each of columns, in
 	// order; nil for any other line.
-	fields []string
+	fields []wording
 	kids   []statusLine
 	folded bool // the text shows only this line, which counts its kids
 }
@@ -293,14 +293,15 @@ func goalLines(g goalReport) statusLine {
 // goalFields are what a goal's line says after its ID: its status, its lead's
 // state under worker, and in its notes how many of its tasks have merged and
 // how many are in flight.
-func goalFields(g goalReport) []string {
-	notes := fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr))
+func goalFields(g goalReport) []wording {
+	progress := fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr))
+	notes := stripOnly(progress)
 	if g.CapErr != nil {
-		notes += "  " + g.CapErr.Error()
+		notes = joinNotes([]wording{notes, capNote(g.CapErr)})
 	} else if g.InFlight.full() {
-		notes += ": full"
+		notes = standing(progress+": full", goalFullSign)
 	}
-	return []string{statusField: g.Goal.Get("status"), workerField: g.Lead.stateText(), notesField: notes}
+	return []wording{statusField: same(g.Goal.Get("status")), workerField: same(g.Lead.stateText()), notesField: notes}
 }
 
 // slotsText is "used/limit", with ? for a limit set to something that isn't a
@@ -403,23 +404,24 @@ func rowLines(r taskRow, before string) statusLine {
 }
 
 // rowFields are what a task's row says after its ID: its status, its worker's
-// state, its PR, the model and effort it runs with, and in its notes its merge
-// check and the rest.
-func rowFields(r taskRow) []string {
-	pr := ""
+// state, its PR (in the live view with its marks), the model and effort it runs
+// with, and in its notes its merge check and the rest.
+func rowFields(r taskRow) []wording {
+	var pr wording
 	if r.Task.PR() != "" {
-		pr = "#" + r.Task.PRNumber()
+		number := "#" + r.Task.PRNumber()
+		pr = wording{number, number + " " + prMarks(r.PR)}
 	}
 	notes := r.Notes
 	if r.Merge != nil {
-		notes = append([]string{r.Merge.String()}, notes...)
+		notes = append([]wording{r.Merge.wording()}, notes...)
 	}
-	return []string{
-		statusField: string(r.Task.Status()),
-		workerField: r.Worker.stateText(),
+	return []wording{
+		statusField: same(string(r.Task.Status())),
+		workerField: same(r.Worker.stateText()),
 		prField:     pr,
-		modelField:  r.Task.Model(),
-		effortField: r.Task.Effort(),
-		notesField:  strings.Join(notes, "  "),
+		modelField:  same(r.Task.Model()),
+		effortField: same(r.Task.Effort()),
+		notesField:  joinNotes(notes),
 	}
 }

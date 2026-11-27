@@ -1,0 +1,52 @@
+# Runs crew's suites on every pull request, whatever branch it targets, and on
+# every push to main. The release workflow runs it too, before it publishes.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    # A crew home pushes its ledger (statePaths in cmd/crew/home.go) to its own
+    # main; those pushes shouldn't start a run at all.
+    paths-ignore: [projects/**, reports/**]
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Both jobs run only in the public repo: a private crew home is a copy of it
+# that pushes to its own GitHub repo.
+jobs:
+  # One job for each suite, so a red check names the suite that failed. lint
+  # runs go test ./... too. The runner has neither claude nor fish, so lint skips
+  # claude plugin validate and the fish syntax check, and still runs gofmt,
+  # go vet and shellcheck.
+  linux:
+    if: github.repository == 'isaacjwilliams/crew'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [lint, guard, crew-e2e, host]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The suites need bash, git, jq, shellcheck and util-linux (flock,
+      # setsid, script), which the runner has.
+      - name: Run ${{ matrix.suite }}
+        run: tests/run.sh ${{ matrix.suite }}
+
+  # The shell suites need Linux. On a Mac, the Go tests check the parsing they
+  # share with Linux, and that the macOS code builds and runs.
+  macos:
+    if: github.repository == 'isaacjwilliams/crew'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Go tests
+        run: go test ./...

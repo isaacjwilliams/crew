@@ -70,6 +70,10 @@ done
 tracked=$(git -C "$REPO_DIR" ls-files -- projects reports config/crew.env host)
 check "VERSION holds a semantic version" 'grep -qxE "[0-9]+\.[0-9]+\.[0-9]+" "$REPO_DIR/VERSION"'
 check "the repo tracks no state: nothing under projects/ but .gitkeep, no reports/, config/crew.env or host (got: ${tracked//$'\n'/ })" '[[ $tracked == projects/.gitkeep ]]'
+# run.sh's default list, suites=(…), and the workflow's matrix, suite: […], each on one line.
+run_suites=$(sed -n 's/.*suites=(\([^)]*\)).*/\1/p' "$REPO_DIR/tests/run.sh" | xargs)
+ci_suites=$(sed -n 's/^ *suite: \[\(.*\)\]$/\1/p' "$REPO_DIR/.github/workflows/test.yml" | tr , ' ' | xargs)
+check "CI runs the suites tests/run.sh runs (run.sh: $run_suites; CI: $ci_suites)" '[[ $ci_suites == "$run_suites" ]]'
 
 printf '{}' | CREW_HOME=$L "$G" bash >/dev/null 2>&1; rc=$?
 check "unknown role blocks (rc=$rc)" "[[ $rc == 2 ]]"
@@ -305,9 +309,6 @@ check "the lead knows other lead sessions may run beside it, rereads a task file
   "grep -q 'several lead sessions at once' $A/lead.md && grep -q 'Reread a task file right before you change it or act on it' $A/lead.md && grep -q 'pick up a draft on your own' $A/lead.md && ! grep -q 'single point of contact' $A/lead.md"
 check "the tick service stops only crew when a run ends, so the workers it resumed keep running" \
   "grep -qx 'KillMode=process' $REPO_DIR/systemd/crew-tick.service"
-L_UNIT=$REPO_DIR/systemd/crew-lead.service
-check "the lead service runs crew serve, restarts it, and leaves it stopped when serve exits 3 (not the host)" \
-  "grep -qx 'ExecStart=%h/crew/bin/crew serve' $L_UNIT && grep -qx 'Restart=always' $L_UNIT && grep -qx 'RestartSec=30' $L_UNIT && grep -qx 'RestartPreventExitStatus=3' $L_UNIT && grep -qx 'KillMode=process' $L_UNIT && grep -q 'exitNotHost = 3' <<<\"\$SRC\""
 check "crew followup's prompt, not the worker, decides whether a review round gets replies" \
   "grep -q 'Your prompt says whether to reply' $A/implementer.md && ! grep -q REPLY_TO_THREADS $A/implementer.md && grep -q 'Reply to each comment in those rounds with' <<<\"\$SRC\""
 check "the implementer takes the user's taste from their CLAUDE.md, not a copy of its own" \

@@ -24,8 +24,7 @@ The README's pitch rests on these principles in particular:
 ## Safety rules for working in this repo
 
 - **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/.local/bin/`, `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
-- **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
-- **Never run `claude remote-control`**, not even with `--help`: it may start a server. Read https://code.claude.com/docs/en/remote-control.md instead.
+- **Don't run `crew setup`, `crew install`, `crew host …` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
 - **Never push this repo, or create GitHub repos,** unless the user asks: nothing here is public until they publish it.
 - **Don't touch `~/crew` or `~/agent-work`.** They hold live task state and unmerged work.
 - **Don't run this checkout's `bin/crew` outside the tests.** It would take this checkout as its home (or the real `~/crew`, when `CREW_HOME` is set) and write a ledger there. Exercise the Go code through the tests (`tests/run.sh`, `go test ./...`).
@@ -40,6 +39,8 @@ tests/run.sh            # must pass before a change is done
 
 Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint` runs `gofmt`, `go vet` (for Linux and macOS) and `go test ./...`.
 
+CI runs every suite on each pull request and push to `main` (see `tests/README.md`), but its runner has neither claude nor fish, so lint skips their checks there: run `tests/run.sh` yourself too.
+
 - Add or update a test for every bug fix and behaviour change, in `guard.sh`, `crew-e2e.sh` or `host.sh`, or as a Go unit test for logic (front matter, settings files, the guard's table, stacks). Make sure the new test fails without the fix.
 - After changing an agent file, `claude plugin validate agents` must pass. It runs as part of `tests/run.sh lint`.
 - For changes that depend on live Claude Code behaviour (background sessions, resume, hooks firing, AGENTS.md loading), tell the user a live smoke test is needed. List exactly what to try.
@@ -49,7 +50,7 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
 - **Shipped code** is Go, on the standard library and Charm's bubbletea and lipgloss for `crew status`'s live view, plus three `sh` files in `bin/` (the launcher `crew`, the hook forwarder `crew-guard` and the `lead` shim) and the fish completions.
   - Runtime dependencies are git, gh, claude and curl (the launcher fetches the binary with it). Go is needed only to develop crew, never to run it. Don't add other Go modules (Charm's bubbles is the one exception, should the live view need it), Python or Node.
   - `gofmt` and `go vet` are the Go lint. Keep shellcheck clean at `-S warning` for `bin/` and `tests/`.
-  - Linux is the reference, and crew runs on macOS too. Code that runs a system's own tools goes in a `_linux.go` file with a `_darwin.go` beside it; the parsing and choices around it go in a neutral file, so `go test` on Linux covers them. The shell suites are Linux-only; the release workflow runs `go test` on macOS.
+  - Linux is the reference, and crew runs on macOS too. Code that runs a system's own tools goes in a `_linux.go` file with a `_darwin.go` beside it; the parsing and choices around it go in a neutral file, so `go test` on Linux covers them. The shell suites are Linux-only; CI runs `go test` on macOS.
   - **Services** are `systemd/` units on Linux and `launchd/` plists on a Mac, one plist per `.service`. `services_linux.go` and `services_darwin.go` define the same functions and are the only places crew runs `systemctl` or `launchctl`; callers never branch on the system. A change to a unit needs the same change to its plist: `services_test.go` checks that they agree.
   - Binaries are never committed. A release's workflow builds them (`.github/workflows/release.yml`), and `bin/crew` downloads the one for the home's `VERSION` into the gitignored `bin/release/`.
   - A command returns its refusal as an error: `fail` (exit 1), `notYet` (exit 4, a dispatch that only has to wait; `crew cleanup` also exits 4 (`exitNotYet`) for a task it leaves, which tick reads) or `exitQuietly(code)`. `warn` is for what doesn't stop it.
@@ -94,6 +95,7 @@ Developing crew needs Go (see `go.mod`); running it doesn't. `tests/run.sh lint`
   - A version bump is a PR of its own, never part of a feature PR, so the user chooses which merged changes go into each version and every release tag lands on a bump's merge commit. When the user asks for a release, the lead opens the bump PR as a task.
   - When the bump PR merges, the lead writes the release notes from `.github/release-notes.md`, for the people who run crew: what changed for them, and anything to do before or after upgrading. It checks every claim against the changes the tag will release (`git log <last tag>..<merge sha>`, and the diff), where `<merge sha>` is the full SHA of the bump PR's merge commit. It writes the notes to a file.
   - Then the lead shows the user the notes, so they can read them before tagging, and gives them the commands to run in their clone: `git fetch origin`, `git tag -a v<version> <merge sha> -F <notes file>`, `git push origin v<version>`. When their clone is on another machine, they save the notes there first. Only the user pushes the tag.
+- Update **`plans/review-findings.md`** when your change finishes one of its items: set its state there, in the same PR. "Keeping the list true" in that file says how a spike's item, which has no PR, is marked.
 - Update the **Contracts** table in `ARCHITECTURE.md` if you change anything listed there, and update every side of that contract.
 - Update `SETUP.md` for anything the user sees: commands, config keys, workflow.
 - Update `LEDGER.md` for ledger conventions: statuses, keys, layout.

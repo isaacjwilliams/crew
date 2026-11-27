@@ -120,9 +120,11 @@ type taskRow struct {
 	// Worker is its worker as claude agents lists it, zero when it isn't
 	// listed, or one in the state "not listed yet" before the first listing.
 	Worker Agent
+	// PR is its PR as GitHub answered, or as crew sync last recorded it.
+	PR gitHubPR
 	// Merge says whether a pr-open task's PR can merge now; nil for any other task.
 	Merge *mergeCheck
-	Notes []string
+	Notes []wording
 	Kids  []taskRow // the tasks stacked on it
 	// Folded: a draft outside a goal that the plain text counts, with its whole
 	// stack, rather than lists (folds).
@@ -555,6 +557,7 @@ func (s *statusView) rowWaits(rows []taskRow, rowOf map[string]int, tasks func(t
 // row works out one task's row, then the rows of the tasks stacked on it.
 func (s *statusView) row(t Task) taskRow {
 	r := taskRow{Task: t, Worker: s.agent(t.WorkerJob()), Notes: s.notes(t)}
+	r.PR, _ = s.prOf(t)
 	r.Merge = s.mergeCheck(t, r.Worker)
 	for _, k := range s.kids[t.Path] {
 		r.Kids = append(r.Kids, s.row(k))
@@ -563,13 +566,14 @@ func (s *statusView) row(t Task) taskRow {
 }
 
 // lookNote says what look a PR waiting on the user needs: its tier and the
-// tier's look. A high-risk task still waiting for its security review has only
-// its tier: its merge check says what's missing.
-func lookNote(t Task) string {
+// tier's look, or in the live view its tier. A high-risk task still waiting for
+// its security review has only its tier: its merge check says what's missing.
+func lookNote(t Task) wording {
+	tier := t.Risk().Label()
 	if t.AwaitsSecurityReview() {
-		return t.Risk().Label()
+		return forUser(tier, tier)
 	}
-	return t.Risk().Label() + ": " + t.Risk().Look()
+	return forUser(tier+": "+t.Risk().Look(), tier)
 }
 
 // leavesStack: a ready task whose parent is in flight can dispatch as soon as the
@@ -639,44 +643,44 @@ func (s *statusView) goalDispatches(t Task) bool {
 // notes are what a task's row says after its merge check: its PR's state, and
 // what it waits for or on. A pr-open task's merge check already says what
 // stands in its PR's way, so its notes give only the look it needs.
-func (s *statusView) notes(t Task) []string {
+func (s *statusView) notes(t Task) []wording {
 	st := t.Status()
-	var notes []string
+	var notes []wording
 	if st == PROpen {
 		notes = append(notes, lookNote(t))
 	} else {
 		notes = append(notes, s.prNotes(t)...)
 	}
-	if l := s.learning(t); l != "" {
+	if l := s.learning(t); l.text != "" {
 		notes = append(notes, l)
 	}
 	// informs holds the draft's full ID, as crew new writes it: NNN-<name>.
 	if d := t.Get("informs"); d != "" {
 		n, _, _ := strings.Cut(d, "-")
-		notes = append(notes, "informs "+n)
+		notes = append(notes, stripOnly("informs "+n))
 	}
 	if t.Get("interrupted") != "" {
-		notes = append(notes, "interrupted by a pause")
+		notes = append(notes, standing("interrupted by a pause", pausedSign))
 	}
 	if t.AutomatedReviewOff() {
-		notes = append(notes, "automated review off")
+		notes = append(notes, stripOnly("automated review off"))
 	}
 	if st == Ready && (t.Goal() != "" || t.Get("go_ahead") != "") {
 		// crew tick dispatches these in priority order; the rest go by hand.
 		if n, err := t.Priority(); err != nil {
-			notes = append(notes, "priority ?")
+			notes = append(notes, forUser("priority ?", "priority?"))
 		} else if n != 0 {
-			notes = append(notes, fmt.Sprintf("priority %d", n))
+			notes = append(notes, stripOnly(fmt.Sprintf("priority %d", n)))
 		}
 	}
 	if p, ok := s.branches.liveParent(t); ok && leavesStack(t, p) {
-		notes = append(notes, "on "+taskNumber(p))
+		notes = append(notes, stripOnly("on "+taskNumber(p)))
 	}
 	if !st.InFlight() && !st.Finished() {
 		if next, err := s.deps.next(t); err != nil {
-			notes = append(notes, err.Error())
+			notes = append(notes, forUser(err.Error(), "depends_on?"))
 		} else if len(next) > 0 {
-			notes = append(notes, after(next))
+			notes = append(notes, afterNote(next))
 		}
 	}
 	// crew tick dispatches a goal's ready tasks, and others on a go-ahead, so
@@ -686,9 +690,9 @@ func (s *statusView) notes(t Task) []string {
 	if st == Ready && !s.goalDispatches(t) {
 		if g, ok := s.taskGoal(t); ok && !s.shown(g.Get("status")) {
 			if c, err := s.goalCap(g); err != nil {
-				notes = append(notes, err.Error())
+				notes = append(notes, capNote(err))
 			} else if c.full() {
-				notes = append(notes, "goal "+g.ID()+" full")
+				notes = append(notes, standing("goal "+g.ID()+" full", goalFullSign))
 			}
 		}
 		notes = append(notes, goAheadNotes(t)...)
@@ -698,46 +702,48 @@ func (s *statusView) notes(t Task) []string {
 
 // goAheadNotes say whether crew tick dispatches a ready task that no goal will:
 // on a go-ahead, saying what it waits for, or else by hand.
-func goAheadNotes(t Task) []string {
+func goAheadNotes(t Task) []wording {
+	byHand := forUser("dispatch by hand", "dispatch")
 	g, err := t.GoAhead()
 	switch {
 	case err != nil:
-		return []string{err.Error(), "dispatch by hand"}
+		return []wording{forUser(err.Error(), "go_ahead?"), byHand}
 	case g == nil:
-		return []string{"dispatch by hand"}
+		return []wording{byHand}
 	}
 	after := taskNumber(g.After)
 	switch {
 	case g.After.Status() == Abandoned:
-		return []string{"go-ahead never met: " + after + " abandoned", "dispatch by hand"}
+		return []wording{stripOnly("go-ahead never met: " + after + " abandoned"), byHand}
 	case g.Met():
-		return []string{"go-ahead met: " + after + " reached " + string(g.Status)}
+		return []wording{standing("go-ahead met: "+after+" reached "+string(g.Status), goAheadSign)}
 	}
-	return []string{"go-ahead once " + after + " is " + string(g.Status)}
+	return []wording{standing("go-ahead once "+after+" is "+string(g.Status), waitingSign)}
 }
 
 // prNotes is what a task that isn't pr-open says of its PR and its branch: the
-// PR's state as crew sync last read it, a restack or retarget it needs, and its
-// open questions. A pr-open task's merge check says these instead.
-func (s *statusView) prNotes(t Task) []string {
-	var notes []string
+// PR's state as crew sync last read it, which the live view's PR marks show, a
+// restack or retarget it needs, and its open questions. A pr-open task's merge
+// check says these instead.
+func (s *statusView) prNotes(t Task) []wording {
+	var notes []wording
 	if prs := t.Get("pr_state"); prs != "" {
-		notes = append(notes, "("+prs+")")
+		notes = append(notes, stripOnly("("+prs+")"))
 	}
 	if t.Status().InFlight() {
 		b, read := s.branchesOf(t)
 		if !read {
-			notes = append(notes, "branches not read yet")
+			notes = append(notes, stripOnly("branches not read yet"))
 		}
 		if b.restack != "" {
-			notes = append(notes, "needs restack: "+b.restack)
+			notes = append(notes, standing("needs restack: "+b.restack, mustMoveSign))
 		}
 		if b.retarget != "" {
-			notes = append(notes, b.retarget)
+			notes = append(notes, standing(b.retarget, mustMoveSign))
 		}
 	}
 	if q := t.OpenQuestions(); q > 0 {
-		notes = append(notes, fmt.Sprintf("%d open question(s)", q))
+		notes = append(notes, questionsNote(q))
 	}
 	return notes
 }
@@ -758,14 +764,16 @@ func (s *statusView) branchesOf(t Task) (branchRead, bool) {
 // learning is what a draft is still learning: how many of its still-to-learn
 // items are open, and the spikes that inform it, with their status: "2 to learn;
 // 041 done, 042 working". When its items can't be read, it says why in place of
-// their count. It's empty when there's nothing to say.
-func (s *statusView) learning(t Task) string {
+// their count, and that's the user's to fix. It's empty when there's nothing to
+// say.
+func (s *statusView) learning(t Task) wording {
 	if t.Status() != Draft {
-		return ""
+		return wording{}
 	}
 	var parts []string
-	if items, err := t.StillToLearn(); err != nil {
-		parts = append(parts, "to learn: "+err.Error())
+	items, unread := t.StillToLearn()
+	if unread != nil {
+		parts = append(parts, "to learn: "+unread.Error())
 	} else if n := openItems(items); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d to learn", n))
 	}
@@ -776,7 +784,14 @@ func (s *statusView) learning(t Task) string {
 	if len(spikes) > 0 {
 		parts = append(parts, strings.Join(spikes, ", "))
 	}
-	return strings.Join(parts, "; ")
+	text := strings.Join(parts, "; ")
+	switch {
+	case text == "":
+		return wording{}
+	case unread != nil:
+		return forUser(text, "to learn?")
+	}
+	return standing(text, learningSign)
 }
 
 // dependencies are what tasks wait on, as crew dispatch sees them (pendingDeps).
@@ -867,6 +882,15 @@ func (d *dependencies) deliveredBefore(t Task) map[string]bool {
 }
 
 const afterNamed = 4 // how many tasks "after" names before it only counts them
+
+// afterNote is a note on the tasks a task waits on (after). An abandoned one
+// will never merge, so it's the user's to act on.
+func afterNote(deps []Task) wording {
+	if slices.ContainsFunc(deps, func(d Task) bool { return d.Status() == Abandoned }) {
+		return forUser(after(deps), "dep abandoned")
+	}
+	return standing(after(deps), waitingSign)
+}
 
 // after names the tasks a task waits on by number, or counts them when there are
 // more than a few. An abandoned one will never merge, so it's always named.
