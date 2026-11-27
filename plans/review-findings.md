@@ -18,7 +18,7 @@ These are small, and they touch little of what the records migration (moving cre
 
 | # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
-| 1 | This document | none | nothing | done (this PR) |
+| 1 | This document | none | nothing | done (#125) |
 | 2 | The Contract convention, settled by drafting the guard's Contract (a spike) **(needs intake)** | none | nothing | to do |
 | 3 | CI runs the suites on every PR | none | nothing | to do |
 | 4 | CI fails a PR that breaks the Contract | none | 2, 3 | to do |
@@ -83,10 +83,10 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **Where.**
 
-- `sessions.go`: `agents()` is `as, _ := c.listAgents(); return as`. `listAgents`, beside it, returns an error, and its comment says it is for "the callers that mustn't take a failure for nothing running". Only pause, upgrade and status use it.
+- `sessions.go`: `agents()` is `as, _ := c.listAgents(); return as`. `listAgents`, beside it, returns an error, and its comment says it is for "the callers that mustn't take a failure for nothing running". Only pause (and so upgrade), `stopJobs` and status use it.
 - The callers that take the empty list as the answer: the tick's snapshot (`cmd_tick.go`, `as := c.agents()`), `followupRefusal`'s busy check and `startRestack` (`cmd_followup.go`), the same check in `cmd_feedback.go` and `cmd_goal.go`, the worker count in `dispatchChecks` (`cmd_dispatch.go`), `closeSession` and `removeSession` (`sessions.go`), and `waitForLaunch` (`sessions.go`).
 - `launchSession` (`sessions.go`) discards `claude --bg`'s exit code and looks for a line that starts with `backgrounded`, taking its third field as the job. No such line returns `notStarted`. `relaunch` answers `notStarted` from a resume by starting a fresh session, and `crew dispatch` answers it by leaving the task `ready`, so the tick tries it again.
-- `ARCHITECTURE.md` says "A failed `claude agents` is never read as nothing running" and names `listAgents`. That holds for pause alone.
+- `ARCHITECTURE.md` says "A failed `claude agents` is never read as nothing running" and names `listAgents`. That holds for the pause flow and `stopJobs`, not for the `agents()` callers below.
 
 **What it costs.** A failed listing during a tick makes a worker that is mid-turn look idle. `crew followup` then resumes its session, which Claude Code answers by starting a copy beside it (`closeSession`'s own comment says so), or `crew cleanup` removes the worktree under a worker still running. A reworded `backgrounded` line would have every dispatch and followup start a session, report failure and start another. `runningWorkers` counts only recorded jobs, so `MAX_WORKERS` would not see them.
 
@@ -236,7 +236,7 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 - `tests/guard.sh` is 534 lines; 184 contain `grep -q`, most of them a sentence searched for in a prompt, such as the check for "Push after every commit". Such a check fails when wording changes and passes whatever the agent does.
 - `crew review-eval` (`cmd_review_eval.go`) is the one behavioural eval. The maintainer reports that it has never been run; the repo can't show that, so it is not checked here.
 - `ARCHITECTURE.md` says of itself, under "Live verification": "the lead, implementer, gardener and misses agent haven't been run end to end against a real model. Do a smoke test with a tiny task after any significant change."
-- `lead.md` quotes the implementer's step numbers (first-run steps 5 and 9, for the security review), so renumbering one file breaks another's instructions. `tests/guard.sh` covers some of these by regex.
+- `lead.md` quotes the implementer's step numbers (first-run step 5 for the security review and step 9 for automated review), so renumbering one file breaks another's instructions. `tests/guard.sh` covers some of these by regex.
 
 **What it costs.** Regressions in what an agent does show up in real work, noticed by the user. Not measured: how often.
 
@@ -258,11 +258,11 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **What it costs.** Tokens and latency for a step with no judgment in it when the rebase is clean. Each session is also another chance to stall or improvise. A model is needed only when the rebase conflicts or the checks fail afterwards.
 
-**The rule.** A clean restack or retarget is done by crew, and a model session is started only for a conflict.
+**The rule.** A clean restack or retarget is done by crew, and a model session is started only when the rebase conflicts or the checks fail afterwards.
 
-**Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session for a conflict, and `ARCHITECTURE.md`'s "Stacked tasks" flow and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
+**Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session when the rebase conflicts or the checks fail afterwards, and `ARCHITECTURE.md`'s "Stacked tasks" flow and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
 
-**Settled by** item 5. An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work.
+**Settled by** item 5. An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work, except that item 5 also keeps a session for checks that fail after a clean rebase.
 
 ### 11. Proposals have no triage
 
@@ -287,9 +287,9 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **Where.**
 
-- It is 1,122 lines and 40,709 words (`wc`). Its `crew` internals section is followed by a Contracts table of 116 rows (as of `f5b790d`).
+- It is 1,122 lines and 40,709 words (`wc`). Its `crew` internals section is followed by a Contracts table of about 115 rows (as of `f5b790d`).
 - Drift that can be checked now:
-  - "Eight Claude Code agents" (`ARCHITECTURE.md`, line 7), against `LEDGER.md`'s opening line, which lists the lead, the implementer, the casual observer, the gardener and the misses agent.
+  - `LEDGER.md`'s opening line names the lead, the implementer, the casual observer, the gardener and the misses agent as the crew, while `agents/` holds eight profiles and `ARCHITECTURE.md` (line 7, "Eight Claude Code agents") lists them all. `LEDGER.md` leaves out the goal lead, the brief reviewer and the reviewer.
   - `MAX_WORKERS` is described in `config/defaults.env` as workers "running or waiting on you", in SETUP.md as "Your review capacity isn't exceeded", and counted by `runningWorkers` (`sessions.go`) as busy jobs only.
   - The Assumptions section says "the lead, implementer, gardener and misses agent haven't been run end to end against a real model", and carries many "not confirmed" and "None has run yet" notes. Nothing says which are still true. A search for `not confirmed`, `haven't been` and `None has` finds 12 lines.
   - `LEDGER.md` and `ARCHITECTURE.md` say "`crew` can't tell a lead from a worker", while `inWorkerOrGoalLead()` exists.
