@@ -4,7 +4,7 @@ On 2026-11-27 five independent reviewers read crew, each through one lens: state
 
 One item doesn't come from the reviewers or their reports: the user took up a suggestion from Codex on 2026-11-27, that the implementer's profile loads its procedures before it knows it needs them. It is [the addition](#addition-the-implementer-loads-every-procedure-at-start) after the twelve findings, and item 20. Codex's second suggestion, about `ARCHITECTURE.md`, is not an addition: it sharpens finding 12 and item 19.
 
-The reviewers read commit `aa8782a`. Everything below was checked against `main` at `f5b790d`, after the typed task records (#119) merged; the addition and the sizes in finding 12's last bullet were measured at `f7ab9b4`. Where `main` has moved since, the entry says so. Counts are given only where they were measured on `main`; a figure the review gave and nobody has re-measured is marked "not measured".
+The reviewers read commit `aa8782a`. Everything below was checked against `main` at `f5b790d`, after the typed task records (#119) merged; the addition and the "Measured" paragraph of finding 12 were measured at `f7ab9b4`. Where `main` has moved since, the entry says so. Counts are given only where they were measured on `main`; a figure the review gave and nobody has re-measured is marked "not measured".
 
 Read this file, then `CLAUDE.md` and `ARCHITECTURE.md`, before taking an item. Keep [Progress](#progress) true: see [Keeping the list true](#keeping-the-list-true).
 
@@ -12,7 +12,7 @@ Read this file, then `CLAUDE.md` and `ARCHITECTURE.md`, before taking an item. K
 
 The twelve findings, described in full [below](#the-findings), and one addition, item 20: 1 a failed lookup reads as "nothing there"; 2 ledger writes aren't safe; 3 nothing times out; 4 crew has no notion of who is calling; 5 the host lease; 6 the status machine isn't written down; 7 the tick infers what its steps did; 8 no seam for git, gh and claude; 9 prompts have no behavioural test; 10 model sessions do deterministic work; 11 proposals have no triage; 12 `ARCHITECTURE.md` has drifted; the addition is that the implementer loads every procedure at start. Below, "the Contract" is the IMP-style list of numbered obligations for each component, each tied to the tests that prove it; "the seam" is item 11's way to stand in for `git`, `gh` and `claude` in a Go test.
 
-Items are in the order they are done, except that an item added later takes the next number and sits in the group it waits on, so item 20 is in the third group. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on, and item 20 settles the addition, not a finding.
+Items are in the order they are done. The one exception is an item added later: it takes the next number and sits in the group it waits on. Item 20 is numbered last but is done after the migration, with 13 to 17. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on, and item 20 settles the addition, not a finding.
 
 ### Now, beside the records migration
 
@@ -301,7 +301,7 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **What it costs.** A standing tax on every change, and a file too long to read before "any structural change", as `CLAUDE.md` asks. Once it holds claims that are false, a reader can't tell which.
 
-**The rule.** `ARCHITECTURE.md` holds what code can't say (the principles, the flows, the assumptions about Claude Code, the Contracts) and leaves the rest to the code. A change starts from a short required read, the design principles, and has a way to find the flows and contracts it touches, so it doesn't have to read the whole file. This comes from Codex's second suggestion, which the user took up on 2026-11-27: "preserve a short mandatory read for the principles and give each change a way to find the relevant flows and contracts."
+**The rule.** `ARCHITECTURE.md` holds what code can't say (the principles, the flows, the assumptions about Claude Code, the Contracts) and leaves the rest to the code. A change starts from a short required read, the design principles, and has a way to find the flows and contracts it touches, so it doesn't have to read the whole file. This is Codex's second suggestion, which the user took up on 2026-11-27.
 
 **Measured at `f7ab9b4`.** `ARCHITECTURE.md` is 262,781 bytes (Codex's review said 261,801). Its `## Design principles` section, lines 20 to 70, is 8,245 bytes, about 3% of the file. Its `## Main flows` section, lines 184 to 717, is 88,933 bytes. What a change would find in the file by number or by area, and what a mandatory read should hold, is not measured.
 
@@ -330,7 +330,7 @@ Not one of the twelve findings: Codex raised it on 2026-11-27, and the user took
 | Workflow: restack | 2,366 |
 | When you're blocked | 1,433 |
 
-Five sections are procedures for one phase that most tasks never reach or reach late: spike, automated review, split proposal, review rounds and restack. Together they are 22,601 bytes, 48% of the profile. (Which of the others could also wait is part of the work.)
+Five sections are procedures that apply only once a task reaches their phase, and most tasks reach some of them late or never: spike, automated review, split proposal, review rounds and restack. Together they are 22,601 bytes, 48% of the profile. (Which of the others could also wait is part of the work.)
 
 **What it costs.** Codex's estimate is "several thousand tokens" for each worker. Not measured: tokens (these are bytes), and what loading less does to cost. A worker's system prompt is cached after its first call, so the saving would be in cache reads on each call and in what the model has to attend to, and neither has been measured.
 
@@ -340,9 +340,9 @@ Five sections are procedures for one phase that most tasks never reach or reach 
 
 - `CLAUDE.md`'s Stacks rule says the restack note and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md` are one contract, and `tests/guard.sh` checks they agree. Item 5 rewrites them first.
 - `lead.md` quotes the implementer's step numbers (finding 9), and `tests/guard.sh` greps its sentences. Moving text moves what they find.
-- `ARCHITECTURE.md`'s Assumptions section assumes a resumed worker keeps the system prompt it started with. A procedure loaded later is part of the conversation instead, and whether it survives a compaction is not measured.
+- `ARCHITECTURE.md`'s Assumptions section assumes a resumed worker keeps the system prompt it started with. A procedure loaded later is part of the conversation instead, and whether it survives a compaction is not measured. If it doesn't, a resumed worker may no longer have the procedure it was told to follow.
 
-**Settled by** item 20. How the procedures are loaded is open: a file the worker reads, or a skill, say. Item 20 changes no rule in `CLAUDE.md` or `ARCHITECTURE.md`, but it moves the text two of their contracts are about.
+**Settled by** item 20. How the procedures are loaded is open: a file the worker reads, or a skill, say. Item 20 changes no rule in `CLAUDE.md` or `ARCHITECTURE.md` (item 19 is the one that changes a rule), but it moves the text two of their contracts are about.
 
 ## What changes a stated rule
 
