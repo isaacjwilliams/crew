@@ -42,8 +42,8 @@ func cmdAutomatedReview(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	review := AutomatedReview{Reviewers: names(ran), Failed: names(failed)}
-	if review.From, review.Fork, review.Head, err = branchRange(p.Repo(), t.Branch(), from, fork, head); err != nil {
+	from, fork, head, err = branchRange(p.Repo(), t.Branch(), from, fork, head)
+	if err != nil {
 		return err
 	}
 	if err := c.lock(); err != nil {
@@ -54,11 +54,12 @@ func cmdAutomatedReview(c *Crew, args []string) error {
 		return fail("%v", err)
 	}
 	// Reviews recorded before crew had these records are numbered in the text.
-	review.Number = t.NewestReview()
-	for _, r := range recordedReviews(records) {
-		review.Number = max(review.Number, r.Number)
+	review := AutomatedReview{Number: t.NewestReview() + 1, From: from, Fork: fork, Head: head, Reviewers: names(ran), Failed: names(failed)}
+	for _, r := range records {
+		if r.AutomatedReview != nil {
+			review.Number = max(review.Number, r.AutomatedReview.Number+1)
+		}
 	}
-	review.Number++
 	r := newRecord("crew automated-review", records)
 	r.AutomatedReview = &review
 	if err := t.AddRecords(r); err != nil {
@@ -132,13 +133,22 @@ func cmdFinding(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
-	i := lastIndexFunc(records, func(r Record) bool { return r.AutomatedReview != nil })
-	if i < 0 {
+	var review int // the newest review's number
+	for _, r := range slices.Backward(records) {
+		if r.AutomatedReview != nil {
+			f.Review, review = r.ID, r.AutomatedReview.Number
+			break
+		}
+	}
+	if f.Review == "" {
 		return fail("%s has no automated review recorded: crew automated-review records one", t.ID())
 	}
-	f.Review = records[i].ID
-	review := records[i].AutomatedReview.Number
-	f.Number = 1 + len(slices.DeleteFunc(slices.Clone(records), func(r Record) bool { return r.Finding == nil || r.Finding.Review != f.Review }))
+	f.Number = 1
+	for _, r := range records {
+		if r.Finding != nil && r.Finding.Review == f.Review {
+			f.Number++
+		}
+	}
 	r := newRecord("crew finding", records)
 	r.Finding = &f
 	if err := t.AddRecords(r); err != nil {
@@ -154,6 +164,10 @@ func cmdFinding(c *Crew, args []string) error {
 // writes on the finding's Outcome line.
 func cmdOutcome(c *Crew, args []string) error {
 	const use = `crew outcome TASK FINDING "<outcome>"`
+	args, err := parseArgs(args, nil, nil, use)
+	if err != nil {
+		return err
+	}
 	if len(args) != 3 {
 		return usage(use)
 	}
@@ -220,6 +234,10 @@ func parseOutcome(text string) (FindingOutcome, error) {
 // a finding the worker left for them, once.
 func cmdUserDecided(c *Crew, args []string) error {
 	const use = `crew user-decided TASK FINDING "<the user's decision>"`
+	args, err := parseArgs(args, nil, nil, use)
+	if err != nil {
+		return err
+	}
 	if len(args) != 3 {
 		return usage(use)
 	}
@@ -256,16 +274,6 @@ func cmdUserDecided(c *Crew, args []string) error {
 	return nil
 }
 
-// lastIndexFunc is the index of the last element of s that satisfies f, or -1.
-func lastIndexFunc[E any](s []E, f func(E) bool) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if f(s[i]) {
-			return i
-		}
-	}
-	return -1
-}
-
 // A recordedFinding is a finding's record, with the number of its review and
 // the records of its outcome and the user's decision, if it has them.
 type recordedFinding struct {
@@ -279,19 +287,22 @@ type recordedFinding struct {
 func findingRecord(t Task, records []Record, name string) (recordedFinding, error) {
 	review, finding, _ := strings.Cut(name, ".")
 	var f recordedFinding
+	f.review, _ = strconv.Atoi(review)
+	reviewID := ""
 	for _, r := range records {
-		if r.AutomatedReview != nil && strconv.Itoa(r.AutomatedReview.Number) == review {
-			f.review = r.AutomatedReview.Number
-			for _, r2 := range records {
-				if r2.Finding != nil && r2.Finding.Review == r.ID && strconv.Itoa(r2.Finding.Number) == finding {
-					f.Record = r2
-				}
-			}
+		if r.AutomatedReview != nil && r.AutomatedReview.Number == f.review {
+			reviewID = r.ID
+		}
+	}
+	for _, r := range records {
+		if r.Finding != nil && r.Finding.Review == reviewID && strconv.Itoa(r.Finding.Number) == finding {
+			f.Record = r
 		}
 	}
 	if f.ID == "" {
 		return f, fail("%s records no finding %s (crew show %s lists them)", t.ID(), name, t.ID())
 	}
+	// A merge may put an outcome or a decision before its finding.
 	for _, r := range records {
 		switch {
 		case r.Outcome != nil && r.Outcome.Finding == f.ID && f.outcome == nil:
@@ -390,9 +401,9 @@ func withReviews(t Task, ls []string) []string {
 func reviewLines(reviews []AutomatedReview) []string {
 	var out []string
 	for _, r := range reviews {
-		who := strings.Join(r.Reviewers, " and ")
+		who := andList(r.Reviewers)
 		if len(r.Failed) > 0 {
-			who += " (" + strings.Join(r.Failed, " and ") + " didn't report)"
+			who += " (" + andList(r.Failed) + " didn't report)"
 		}
 		out = append(out, fmt.Sprintf("- Review %d, %s: `%s..%s` (fork point `%s`), by %s",
 			r.Number, r.At.Local().Format(logTime), cut(r.From, 12), cut(r.Head, 12), cut(r.Fork, 12), who))
@@ -436,7 +447,7 @@ func (r *AutomatedReview) check() error {
 	}
 	for _, name := range r.Reviewers {
 		if !slices.Contains(reviewers, name) {
-			return fmt.Errorf("'%s' isn't a reviewer crew knows: give %s", name, strings.Join(reviewers, " or "))
+			return fmt.Errorf("'%s' isn't a reviewer crew knows: give %s", name, orList(reviewers))
 		}
 	}
 	for _, name := range r.Failed {
@@ -481,11 +492,12 @@ func (o *FindingOutcome) check() error {
 	return nil
 }
 
-// listed lists values in quotes: 'a', 'b' or 'c'.
+// listed lists values in quotes, since some are more than a word: 'a', 'b' or
+// 'c'.
 func listed[S ~string](values []S) string {
-	var q []string
-	for _, v := range values {
-		q = append(q, "'"+string(v)+"'")
+	q := make([]string, len(values))
+	for i, v := range values {
+		q[i] = "'" + string(v) + "'"
 	}
-	return strings.Join(q[:len(q)-1], ", ") + " or " + q[len(q)-1]
+	return orList(q)
 }
