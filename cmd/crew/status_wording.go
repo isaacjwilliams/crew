@@ -121,6 +121,7 @@ var (
 	pausedSign           = sign{"ǁ", lipgloss.Magenta} // a pause stopped its worker
 	goalFullSign         = sign{"▮", lipgloss.Yellow}  // its goal has as many tasks in flight as it allows
 	noSecurityReviewSign = sign{"⚷", lipgloss.Red}     // it's high risk and its security review hasn't run
+	lastSyncSign         = sign{"◷", lipgloss.Yellow}  // GitHub couldn't be read, so its merge check goes by the last sync
 )
 
 // prMarks are the facts about a PR the live view shows beside its number: its

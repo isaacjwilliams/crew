@@ -107,7 +107,7 @@ goal 002-bad-cap |  | max_in_flight?
 121-blocked | #121 CI✓ ⊖ | low
 122-merged | #122 CI✓ ⋈ | low
 123-closed | #123 CI✓ ⊗ | low
-124-last-sync | #124 CI✗ ✎ | low
+124-last-sync | #124 CI✗ ✎ | ◷ low
 125-never-synced | #125 CI? | low
 126-not-asked | #126 CI- | low
 127-no-pr |  | no PR low
@@ -178,6 +178,24 @@ func TestTheUsersWordsStandOut(t *testing.T) {
 	} {
 		if tc.note.live != tc.want {
 			t.Errorf("%q shows as %q, want %q", tc.note.text, tc.note.live, tc.want)
+		}
+	}
+}
+
+// A merge check that went by the last sync says so in the live view too, so a
+// merge GitHub couldn't confirm doesn't look like one it did.
+func TestAMergeCheckFromTheLastSyncShowsItsSign(t *testing.T) {
+	for _, tc := range []struct {
+		check mergeCheck
+		want  string
+	}{
+		{mergeCheck{LastSync: true}, "merge ◷"},
+		{mergeCheck{LastSync: true, AwaitingUser: 1}, "merge 1 finding ◷"},
+		{mergeCheck{LastSync: true, InTheWay: []wording{stripOnly("CI failing")}}, "◷"},
+		{mergeCheck{}, "merge"},
+	} {
+		if got := uncolored(tc.check.wording().live); got != tc.want {
+			t.Errorf("%+v shows %q, want %q", tc.check, got, tc.want)
 		}
 	}
 }

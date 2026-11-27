@@ -32,7 +32,7 @@ type mergeCheck struct {
 // or "merged on GitHub", saying when it went by the last sync. The live view
 // shows what stands in the way as its notes show them, and a PR that can merge
 // now as merge, in green, with the findings left for the user. A merged or
-// closed PR's mark says it all.
+// closed PR's mark says it all. A sign follows when it went by the last sync.
 func (m mergeCheck) wording() wording {
 	var w wording
 	switch {
@@ -49,6 +49,7 @@ func (m mergeCheck) wording() wording {
 	}
 	if m.LastSync {
 		w.text += " (couldn't read GitHub; as of the last sync)"
+		w.live = strings.TrimSpace(w.live + " " + lastSyncSign.String())
 	}
 	return w
 }
