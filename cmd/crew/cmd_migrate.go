@@ -65,12 +65,13 @@ func cmdMigrate(c *Crew, args []string) error {
 			}
 			fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
 		}
-		// Below ledgerFormat, so below 2.
-		n, err := migrateMemorySuggestions(c.suggestionsDoc(p), p)
-		if err != nil {
-			return fail("%s: %v", p, err)
+		if have < 2 {
+			n, err := migrateMemorySuggestions(c.suggestionsDoc(p), p)
+			if err != nil {
+				return fail("%s: %v", p, err)
+			}
+			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
 		}
-		fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
 		}
@@ -244,7 +245,7 @@ func migrateMemorySuggestions(d Doc, project string) (int, error) {
 		r := newRecord("crew migrate", records)
 		r.At, r.Suggested = o.made, &o.Suggested
 		records, moved = append(records, r), append(moved, r)
-		if !o.ticked {
+		if !o.kept && o.declined == "" {
 			continue
 		}
 		settled := newRecord("crew migrate", records)
@@ -273,9 +274,9 @@ func migrateMemorySuggestions(d Doc, project string) (int, error) {
 // after it.
 type oldSuggestion struct {
 	Suggested
-	made         time.Time // the date on the line
-	ticked, kept bool
-	declined     string // the reason, for one declined
+	made     time.Time // the date on the line
+	kept     bool
+	declined string // the reason, for one declined
 }
 
 var oldSuggestionLine = regexp.MustCompile(`^- \[([ xX])\] \*\*(.+?)\*\* (.+?)\. \(([^(),]+), (\d{4}-\d{2}-\d{2})\)(?: → (?:(kept)|declined: (.+)))?$`)
@@ -286,8 +287,8 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 	if m == nil {
 		return oldSuggestion{}, fmt.Errorf("not a suggestion crew can read: %s", line)
 	}
-	o := oldSuggestion{Suggested: Suggested{Fact: m[2], Why: m[3], Source: m[4]}, ticked: m[1] != " ", kept: m[6] != "", declined: m[7]}
-	if o.ticked != (o.kept || o.declined != "") {
+	o := oldSuggestion{Suggested: Suggested{Fact: m[2], Why: m[3], Source: m[4]}, kept: m[6] != "", declined: m[7]}
+	if ticked := m[1] != " "; ticked != (o.kept || o.declined != "") {
 		return o, fmt.Errorf("a ticked suggestion, and only a ticked one, ends \"→ kept\" or \"→ declined: <reason>\": %s", line)
 	}
 	var err error

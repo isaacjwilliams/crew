@@ -142,28 +142,34 @@ func (d Doc) readRecords() ([]Record, error) {
 	return records, nil
 }
 
-// adds is what the record adds for a later record to settle, in words, or ""
+// The kinds of item records add, in the words an error names them by.
+const (
+	itemToLearn      = "an item to learn"
+	memorySuggestion = "a memory suggestion"
+)
+
+// adds is the kind of item the record adds for a later record to settle, or ""
 // when it adds nothing.
 func (r Record) adds() string {
 	switch {
 	case r.ToLearn != nil:
-		return "an item to learn"
+		return itemToLearn
 	case r.Suggested != nil:
-		return "a memory suggestion"
+		return memorySuggestion
 	}
 	return ""
 }
 
-// settles is the ID of the item the record settles, and what that item is, as
-// adds words it; what is "" for a record that settles nothing.
+// settles is the ID of the item the record settles, and that item's kind; what
+// is "" for a record that settles nothing.
 func (r Record) settles() (item, what string) {
 	switch {
 	case r.Learned != nil:
-		return r.Learned.Item, "an item to learn"
+		return r.Learned.Item, itemToLearn
 	case r.Kept != nil:
-		return r.Kept.Suggestion, "a memory suggestion"
+		return r.Kept.Suggestion, memorySuggestion
 	case r.Declined != nil:
-		return r.Declined.Suggestion, "a memory suggestion"
+		return r.Declined.Suggestion, memorySuggestion
 	}
 	return "", ""
 }
@@ -178,13 +184,13 @@ type Item struct {
 
 func (i Item) Open() bool { return len(i.Settled) == 0 }
 
-// items are the items the records add of one kind, the records adds is true
-// of, in the order they were added, each with what settles it. Records from
-// readRecords settle only items of the kind they name, which it checks.
-func items(records []Record, adds func(Record) bool) []Item {
+// items are the items of one kind the records add, in the order they were
+// added, each with what settles it. Records from readRecords settle only items
+// of the kind they name, which it checks.
+func items(records []Record, kind string) []Item {
 	var items []Item
 	for _, r := range records {
-		if adds(r) {
+		if r.adds() == kind {
 			items = append(items, Item{Record: r})
 		}
 	}

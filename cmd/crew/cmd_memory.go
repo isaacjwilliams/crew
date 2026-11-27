@@ -80,7 +80,7 @@ func cmdKeep(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.settleSuggestion(proj, id, Record{Kept: &Kept{Suggestion: id}})
+	return c.settleSuggestion(proj, id, "keep", "kept", func(r *Record) { r.Kept = &Kept{Suggestion: id} })
 }
 
 // crew decline ID --why TEXT [--project P]: settles a suggestion the user
@@ -95,16 +95,13 @@ func cmdDecline(c *Crew, args []string) error {
 	if why = oneLine(why); why == "" {
 		return fail("say why the user declined it: %s", use)
 	}
-	return c.settleSuggestion(proj, id, Record{Declined: &Declined{Suggestion: id, Reason: why}})
+	return c.settleSuggestion(proj, id, "decline", "declined", func(r *Record) { r.Declined = &Declined{Suggestion: id, Reason: why} })
 }
 
-// settleSuggestion adds a kept or declined record, settle, for the project's
-// open suggestion id, refusing an ID that isn't one.
-func (c *Crew) settleSuggestion(proj, id string, settle Record) error {
-	verb, done := "decline", "declined"
-	if settle.Kept != nil {
-		verb, done = "keep", "kept"
-	}
+// settleSuggestion adds the record crew <verb> writes, with the payload settle
+// sets, for the project's open suggestion id, refusing an ID that isn't one. It
+// says the suggestion was done.
+func (c *Crew) settleSuggestion(proj, id, verb, done string, settle func(*Record)) error {
 	if id == "" || strings.Contains(id, " ") {
 		return fail("name one suggestion to %s by its ID (crew show memory-suggestions lists them)", verb)
 	}
@@ -129,7 +126,7 @@ func (c *Crew) settleSuggestion(proj, id string, settle Record) error {
 		return fail("%s is already settled: %s", id, settledLine(all[i].Settled[0]))
 	}
 	r := newRecord("crew "+verb, records)
-	r.Kept, r.Declined = settle.Kept, settle.Declined
+	settle(&r)
 	if err := d.AddRecords(r); err != nil {
 		return err
 	}
@@ -158,7 +155,7 @@ func suggestionsHead(proj string) string {
 // suggestions are the memory suggestions records add, in the order they were
 // made, each with what settled it.
 func suggestions(records []Record) []Item {
-	return items(records, func(r Record) bool { return r.Suggested != nil })
+	return items(records, memorySuggestion)
 }
 
 // memorySuggestions are a project's memory suggestions, from its records alone.
@@ -215,8 +212,14 @@ func shownSuggestions(path string) (string, error) {
 		return "", err
 	}
 	records, unread := d.Records()
+	var shown []string
+	if unread != nil {
+		shown = []string{"crew can't read the memory suggestions: " + unread.Error()}
+	} else {
+		shown = suggestionLines(suggestions(records))
+	}
 	if errors.Is(unread, errNotMigrated) {
-		return strings.Join(append(trimBlankEnd(ls), "", "crew can't read the memory suggestions: "+unread.Error()), "\n") + "\n", nil
+		return strings.Join(slices.Concat(trimBlankEnd(ls), []string{""}, shown), "\n") + "\n", nil
 	}
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the file's.
@@ -229,10 +232,8 @@ func shownSuggestions(path string) (string, error) {
 		}
 	}
 	body := trimBlankEnd(kept)
-	if unread != nil {
-		body = append(body, "", "crew can't read the memory suggestions: "+unread.Error())
-	} else if all := suggestions(records); len(all) > 0 {
-		body = append(append(body, ""), suggestionLines(all)...)
+	if len(shown) > 0 {
+		body = append(append(body, ""), shown...)
 	}
 	if len(typed) > 0 {
 		body = append(append(body, "", "Typed into the file, so not suggestions crew counts (crew remember adds one):"), typed...)

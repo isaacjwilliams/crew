@@ -312,8 +312,8 @@ func (s *statusView) settingsOf(project string) Settings {
 
 // waiting is what waits on the user in a project, from its tasks.
 func (s *statusView) waiting(project string, tasks []Task) waitingOnUser {
-	suggestions, err := s.memorySuggestions(project)
-	w := waitingOnUser{MemorySuggestions: openItems(suggestions), MemoryUnread: err}
+	memory, err := s.memorySuggestions(project)
+	w := waitingOnUser{MemorySuggestions: openItems(memory), MemoryUnread: err}
 	for _, t := range tasks {
 		tw := waitingOf(t)
 		w.Questions += tw.Questions
