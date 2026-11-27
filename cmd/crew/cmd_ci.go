@@ -176,12 +176,10 @@ func cmdCIFix(c *Crew, args []string) error {
 	if fixes := reports.CIFixes(); fixes < maxFixes {
 		r := newRecord("crew ci-fix", records)
 		r.RedCI = &RedCI{Head: head, Checks: failed}
-		// Recorded before the round: if that fails, nothing is sent, and the
-		// next run tries again.
-		if err := t.AddRecords(r); err != nil {
+		n, err := reviewRound{redCI: r.RedCI}.addRecorded(t, t.PRNumber(), r)
+		if err != nil {
 			return err
 		}
-		n, _ := reviewRound{redCI: r.RedCI}.add(t, t.PRNumber())
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {

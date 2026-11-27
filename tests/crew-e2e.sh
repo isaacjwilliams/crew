@@ -3411,6 +3411,18 @@ check "before crew migrate, ci-fix and catch-up refuse, by hand and in a tick, a
 crew migrate >/dev/null; o5=$(crew ci-fix "$NM")
 check "once migrated, ci-fix carries on its count where it was" '[[ $(cat "$NMF") == 2 && $o5 == *"CI is still red on 7979ccc after 2 CI rounds the branch caused (MAX_CI_FIXES=2)"* ]]'
 rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$NM" status abandoned
+# A ledger crew can't write fails crew ci-fix and crew catch-up, rather than saying they recorded a
+# round, and they record nothing, so the next run sends it.
+WF=$(pr_task "Round writes that fail"); hand_over "$WF"
+ci_round 8080aaaffff0 >/dev/null; answer_ci "$WF" 8080aaa   # so it has a records file
+WD=$(dirname "$WF"); r=$(crew get "$WF" review_rounds)
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; WB=$(base_moves)
+ci 9191bbbffff0 test:FAILURE; chmod a-w "$WD"
+o1=$(crew ci-fix "$WF" 2>&1); c1=$?; o2=$(crew catch-up "$WF" 2>&1); c2=$?
+chmod u+w "$WD"; o3=$(crew ci-fix "$WF"); o4=$(crew catch-up "$WF")
+check "a ledger crew can't write fails ci-fix and catch-up, and they record nothing, so the next run sends the round" \
+  '((c1 == 1 && c2 == 1)) && [[ $o1$o2 != *"recorded"* && $o3 == "round $((r + 1)) recorded: CI failed on 9191bbb (test); crew tick sends it to the worker" && $o4 == "round $((r + 2)) recorded: conflicts with main at $WB; crew tick sends it to the worker" ]]'
+rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$WF" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
 # End to end: dispatch still waits on exactly what it did, with a merged entry written beside an unmerged one.

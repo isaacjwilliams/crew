@@ -98,12 +98,10 @@ func cmdCatchUp(c *Crew, args []string) error {
 	}
 	r := newRecord("crew catch-up", records)
 	r.BaseConflict = conflict
-	// Recorded before the round: if that fails, nothing is sent, and the next
-	// run tries again.
-	if err := t.AddRecords(r); err != nil {
+	n, err := reviewRound{conflict: conflict}.addRecorded(t, num, r)
+	if err != nil {
 		return err
 	}
-	n, _ := reviewRound{conflict: conflict}.add(t, num)
 	t.Log(fmt.Sprintf("review round %d recorded: conflicts with %s at %s", n, conflict.Base, conflict.At))
 	t.Touch()
 	c.commit("catch-up " + p.Name + "/" + t.ID())

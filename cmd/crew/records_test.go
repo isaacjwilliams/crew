@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -334,6 +335,38 @@ Some prose that isn't an item.
 `
 	if string(b) != wantFile {
 		t.Errorf("task file =\n%s\nwant\n%s", b, wantFile)
+	}
+}
+
+// crew ci-fix and crew catch-up add a round before its record: a round crew
+// can't write leaves no record, so the next run sends the report again, and a
+// record crew can't write leaves the round, which the next run sends again.
+func TestRoundAddedBeforeItsRecord(t *testing.T) {
+	report := func() (reviewRound, Record) {
+		r := newRecord("crew ci-fix", nil)
+		r.RedCI = &RedCI{Head: "ccc3333", Checks: []string{"test"}}
+		return reviewRound{redCI: r.RedCI}, r
+	}
+	task := learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
+	os.Remove(task.Path)
+	round, r := report()
+	if _, err := round.addRecorded(task, "12", r); err == nil {
+		t.Error("addRecorded wrote a round into a task file that isn't there")
+	}
+	if _, err := os.Stat(task.RecordsPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a round crew couldn't write left records: %v", err)
+	}
+
+	task = learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
+	if err := os.Mkdir(task.RecordsPath(), 0o755); err != nil { // a records file crew can't write
+		t.Fatal(err)
+	}
+	round, r = report()
+	if _, err := round.addRecorded(task, "12", r); err == nil {
+		t.Error("addRecorded wrote a record into a records file it can't write")
+	}
+	if b, _ := os.ReadFile(task.Path); !strings.Contains(string(b), "- [ ] CI failed on ccc3333: test") || task.Get("review_rounds") != "1" {
+		t.Errorf("a record crew couldn't write took its round with it:\n%s", b)
 	}
 }
 

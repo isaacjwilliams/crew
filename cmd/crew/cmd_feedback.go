@@ -280,7 +280,9 @@ func cmdFeedback(c *Crew, args []string) error {
 	var n int
 	var round string
 	if !r.empty() {
-		n, round = r.add(t, num)
+		if n, round, err = r.add(t, num); err != nil {
+			return err
+		}
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
 		if len(r.reviewRequests) > 0 {
 			msg += ", with a request for another automated review"
@@ -332,7 +334,10 @@ func cmdReview(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	n, _, err := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	if err != nil {
+		return err
+	}
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -376,7 +381,7 @@ func (r reviewRound) empty() bool {
 // add writes the round into the task as its next, before ## Log, and counts it
 // in review_rounds. It returns the round's number and text. Run it with the
 // ledger lock held.
-func (r reviewRound) add(t Task, prNumber string) (int, string) {
+func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
@@ -417,9 +422,21 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	if len(r.reviewRequests) > 0 {
 		b.WriteString("\n")
 	}
-	t.InsertBefore("## Log", b.String())
-	t.Set("review_rounds", fmt.Sprint(n))
-	return n, b.String()
+	if err := t.InsertBefore("## Log", b.String()); err != nil {
+		return 0, "", err
+	}
+	return n, b.String(), t.Set("review_rounds", fmt.Sprint(n))
+}
+
+// addRecorded adds the round, then the record of what it reports, and returns
+// the round's number. In that order, a run stopped between the two leaves no
+// record, so the next run sends the report again rather than never.
+func (r reviewRound) addRecorded(t Task, prNumber string, report Record) (int, error) {
+	n, _, err := r.add(t, prNumber)
+	if err != nil {
+		return 0, err
+	}
+	return n, t.AddRecords(report)
 }
 
 // withRoundReports is the task file's lines with the red CI and conflicts crew
