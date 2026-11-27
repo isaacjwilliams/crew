@@ -89,25 +89,83 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	toLearn := map[string]bool{} // whether the record with each ID adds an item
+	adds := map[string]string{} // what the record with each ID adds, if anything
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if _, taken := toLearn[r.ID]; err == nil && taken {
+		if _, taken := adds[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		toLearn[r.ID] = r.ToLearn != nil
+		adds[r.ID] = r.adds()
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !toLearn[r.Learned.Item] {
-			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
+		if item, what := r.settles(); what != "" && adds[item] != what {
+			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as %s", name, i+1, item, what)
 		}
 	}
 	return records, nil
+}
+
+// adds is what the record adds for a later record to settle, in words, or ""
+// when it adds nothing.
+func (r Record) adds() string {
+	if r.ToLearn != nil {
+		return "an item to learn"
+	}
+	return ""
+}
+
+// settles is the ID of the item the record settles, and what that item is, as
+// adds words it; what is "" for a record that settles nothing.
+func (r Record) settles() (item, what string) {
+	if r.Learned != nil {
+		return r.Learned.Item, "an item to learn"
+	}
+	return "", ""
+}
+
+// An Item is something a record adds for later records to settle, such as an
+// item still to learn, and the records that settle it, oldest first. Two clones
+// may each settle it, so it can have more than one. It's open until one does.
+type Item struct {
+	Record
+	Settled []Record
+}
+
+func (i Item) Open() bool { return len(i.Settled) == 0 }
+
+// items are the items the records add of one kind, the records adds is true
+// of, in the order they were added, each with what settles it. Records from
+// readRecords settle only items of the kind they name, which it checks.
+func items(records []Record, adds func(Record) bool) []Item {
+	var items []Item
+	for _, r := range records {
+		if adds(r) {
+			items = append(items, Item{Record: r})
+		}
+	}
+	for _, r := range records {
+		item, _ := r.settles()
+		if i := slices.IndexFunc(items, func(i Item) bool { return i.ID == item }); item != "" && i >= 0 {
+			items[i].Settled = append(items[i].Settled, r)
+		}
+	}
+	return items
+}
+
+// openItems counts the items that are still open.
+func openItems(items []Item) int {
+	n := 0
+	for _, i := range items {
+		if i.Open() {
+			n++
+		}
+	}
+	return n
 }
 
 // parseRecord reads one line of a records file, refusing a field it doesn't

@@ -53,7 +53,7 @@ func TestStillToLearnReadsRecordsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].ID != a.ID || !items[0].Open() || items[1].ID != b.ID || len(items[1].Answers) != 2 || openItems(items) != 1 {
+	if len(items) != 2 || items[0].ID != a.ID || !items[0].Open() || items[1].ID != b.ID || len(items[1].Settled) != 2 || openItems(items) != 1 {
 		t.Errorf("StillToLearn = %+v; want %s open, then %s with both answers", items, a.ID, b.ID)
 	}
 }
@@ -293,7 +293,7 @@ Some prose that isn't an item.
 	var got []item
 	for _, i := range learnItems(records) {
 		it := item{text: i.ToLearn.Text}
-		for _, a := range i.Answers {
+		for _, a := range i.Settled {
 			it.answers = append(it.answers, a.Learned.Answer)
 		}
 		got = append(got, it)
