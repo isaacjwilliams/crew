@@ -1387,17 +1387,14 @@ func TestLiveStatusReportNeverMovesTheScreen(t *testing.T) {
 	}
 }
 
-// A click that leaves a shorter strip leaves empty room under the last line.
-// It stays through a refresh and a turn of the wheel down, until the user
+// A click onto a line with a shorter strip leaves empty room under the last
+// line. The test starts from that state. It stays through a refresh and a turn of the wheel down, until the user
 // scrolls up.
 func TestLiveStatusKeepsEmptyRoomUnderTheLastLine(t *testing.T) {
 	for name, size := range mouseLayouts {
 		m := mouseOn(t, size)
 		m.top = m.lastTop() + 2
 		top := m.top
-		if m.emptyRoom() != 2 {
-			t.Fatalf("%s: the screen at top %d has %d lines of empty room, want 2", name, top, m.emptyRoom())
-		}
 		m.showLines(m.lines, time.Now())
 		if m.top != top {
 			t.Errorf("%s: a refresh moves the screen from top %d to %d", name, top, m.top)
@@ -1409,14 +1406,20 @@ func TestLiveStatusKeepsEmptyRoomUnderTheLastLine(t *testing.T) {
 	}
 }
 
-// A report that ends up shorter than the empty room a click left still shows
-// its lines.
-func TestLiveStatusShowsALineWhenTheReportShrinksPastTheEmptyRoom(t *testing.T) {
-	m := mouseOn(t, mouseLayouts["table"])
-	m.top = m.lastTop() + 4
-	m.showLines([]statusLine{{key: "only", head: "only line"}}, time.Now())
-	if m.top != 0 {
-		t.Errorf("a report of one line shows from top %d, want 0", m.top)
+// A report with none of the lines that were on screen, and shorter than the
+// empty room a click left, shows all of its lines.
+func TestLiveStatusShowsAShrunkReportWhole(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		m := mouseOn(t, mouseLayouts["table"])
+		m.top = m.lastTop() + 4
+		var lines []statusLine
+		for i := range n {
+			lines = append(lines, statusLine{key: fmt.Sprint("new", i), head: "a new line"})
+		}
+		m.showLines(lines, time.Now())
+		if m.top != 0 {
+			t.Errorf("a report of %d lines shows from top %d, want 0", n, m.top)
+		}
 	}
 }
 

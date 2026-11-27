@@ -280,16 +280,17 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 		i = m.cursor
 	}
 	m.setCursor(i)
-	// Put the first old row that's still in the report back at its screen line.
-	// emptyRoom is added to the end clamp so room a click left under the last
-	// line survives the refresh.
+	// Put the first old row that's still in the report back at its screen line,
+	// and keep the room a click left under the last line. With no old row left
+	// to hold in place, the screen goes no further than the report's end.
+	room := 0
 	for _, row := range onScreen {
 		if j := m.indexOf(row.key); j >= 0 {
-			m.top = m.drawnHeight(0, j) - row.at
+			m.top, room = m.drawnHeight(0, j)-row.at, emptyRoom
 			break
 		}
 	}
-	m.top = max(0, min(m.top, m.lastTop()+emptyRoom, m.drawnHeight(0, len(m.shown))-1))
+	m.top = max(0, min(m.top, m.lastTop()+room))
 }
 
 // screenRow is a line on the screen, with the screen line it starts on,
