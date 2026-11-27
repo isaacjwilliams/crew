@@ -168,7 +168,7 @@ This repo is the public one, and never contains state: nothing under `projects/`
   news/<YYYY-MM-DD>.log                 what crew did that day, for the leads (What the lead hears); not committed
   news/held-back                        what the last crew tick held back, and why; not committed
   news/sessions/<session_id>            what a lead's session has been told; not committed
-  logs/crew-{tick,gardener}.log    on a Mac, the launchd jobs' output (systemd keeps it in the journal); not committed
+  logs/crew-{tick,gardener}.log         on a Mac, the launchd jobs' output (systemd keeps it in the journal); not committed
 ~/agent-work/<owner>-<repo>/
   <task-id>/                            git worktree on the task branch (one per dispatched task)
   _gardener/                            detached checkout of origin/<default> for the gardener
