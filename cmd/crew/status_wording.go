@@ -18,6 +18,7 @@ import (
 
 // wording is something a status line says: text is its full words, as the
 // plain text prints them, and live is what the live view shows in its place.
+// An empty live shows nothing there, leaving the words to the strip.
 type wording struct{ text, live string }
 
 // same is words that read the same in the plain text and the live view.
@@ -92,7 +93,7 @@ var (
 	ciFailingMark   = sign{"CI✗", lipgloss.Red}
 	ciRunningMark   = sign{"CI⧗", lipgloss.Yellow}
 	ciCancelledMark = sign{"CI⊘", lipgloss.BrightBlack}
-	noChecksMark    = sign{"CI-", lipgloss.BrightBlack}
+	ciNoneMark      = sign{"CI-", lipgloss.BrightBlack}
 	ciUnknownMark   = sign{"CI?", lipgloss.BrightBlack}
 )
 
@@ -157,7 +158,7 @@ func ciMark(pr gitHubPR) sign {
 	case ciCancelled:
 		return ciCancelledMark
 	}
-	return noChecksMark
+	return ciNoneMark
 }
 
 // openPRMarks are what GitHub says of an open PR besides its checks. GitHub

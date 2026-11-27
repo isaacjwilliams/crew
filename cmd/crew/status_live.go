@@ -390,8 +390,9 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 	return open && len(l.kids) > 0
 }
 
-// bodyHeight is how many screen lines the report's lines get, between the
-// headings and the strip.
+// bodyHeight is how many screen lines the report's lines get: the screen less
+// the headings, the strip and the bar under it. It's at least 1, so a short
+// screen still shows the cursor's line.
 func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)-len(m.strip())) }
 
 // strip is the cursor's line's notes as the plain text words them, wrapped to
@@ -495,8 +496,8 @@ func (m *liveStatus) scroll() {
 }
 
 // highlight shows the cursor's line reversed across the screen. A colored part
-// of the line ends by resetting every style, which ends the reverse too, so it
-// turns the reverse back on after each.
+// of the line ends by resetting every style (lipgloss writes \x1b[m), which ends
+// the reverse too, so it turns the reverse back on after each.
 func highlight(line string, width int) string {
 	const reset, reverse = "\x1b[m", "\x1b[7m"
 	return lipgloss.NewStyle().Reverse(true).Width(width).Render(strings.ReplaceAll(line, reset, reset+reverse))

@@ -144,8 +144,9 @@ func (t table) row(indent string, l statusLine) []string {
 
 // card lays out a line with fields for a screen too narrow for the table, as
 // the live view words them: its head after indent, then each field that has a
-// value, on a line of its own under the head as "heading: value". When the head doesn't fit, the indent's
-// spaces give way first, and only a head wider than the screen is cut.
+// value, on a line of its own under the head as "heading: value". When the head
+// doesn't fit, the indent's spaces give way first, and only a head wider than
+// the screen is cut.
 func card(indent string, l statusLine, width int) []string {
 	// Drop as many of the indent's leading spaces as the head is too wide by.
 	over := max(0, lipgloss.Width(indent+l.head)-width)
