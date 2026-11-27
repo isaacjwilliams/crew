@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -1043,63 +1044,16 @@ func TestLiveStatusAsksTheTerminalForTheMouse(t *testing.T) {
 	}
 }
 
-func TestLiveStatusWheelMovesTheScreenAndNotTheHighlight(t *testing.T) {
-	for name, size := range mouseLayouts {
-		m := mouseOn(t, size)
-		m.moveTo(m.lineAt(6))
-		cursor, top := m.cursor, m.top
-		for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
-			wheeled(m, button, 1)
-			if m.top == top {
-				t.Errorf("%s: the wheel (%v) leaves the same lines on screen", name, button)
-			}
-			if m.cursor != cursor {
-				t.Errorf("%s: the wheel (%v) moves the highlight from line %d to %d", name, button, cursor, m.cursor)
-			}
-			if !onScreen(m) {
-				t.Errorf("%s: the wheel (%v) leaves the highlighted line off screen", name, button)
-			}
-			top = m.top
-		}
-	}
-}
-
-func TestLiveStatusWheelMovesTheHighlightOnlyToKeepItOnScreen(t *testing.T) {
-	for name, size := range mouseLayouts {
-		m := mouseOn(t, size)
-		wheeled(m, tea.MouseWheelDown, 1)
-		if m.cursor == 0 || !onScreen(m) {
-			t.Fatalf("%s: wheeling down from the top leaves the highlight on line %d, want the first line wholly on screen", name, m.cursor)
-		}
-		if start := startOf(m, m.cursor); start < m.top || (m.cursor > 0 && startOf(m, m.cursor-1) >= m.top) {
-			t.Errorf("%s: wheeling down puts the highlight on line %d, not the nearest on screen", name, m.cursor)
-		}
-
-		press(m, "end")
-		wheeled(m, tea.MouseWheelUp, 1)
-		last := len(m.shown) - 1
-		if m.cursor == last || !onScreen(m) {
-			t.Fatalf("%s: wheeling up from the bottom leaves the highlight on line %d, want the last line wholly on screen", name, m.cursor)
-		}
-		if end := startOf(m, m.cursor+1); end > m.top+m.bodyHeight() || startOf(m, m.cursor+2) <= m.top+m.bodyHeight() && m.cursor+1 < last {
-			t.Errorf("%s: wheeling up puts the highlight on line %d, not the nearest on screen", name, m.cursor)
-		}
-	}
-}
-
 func TestLiveStatusWheelStopsAtTheEnds(t *testing.T) {
 	for name, size := range mouseLayouts {
 		m := mouseOn(t, size)
 		wheeled(m, tea.MouseWheelUp, 3)
-		if m.top != 0 || m.cursor != 0 {
-			t.Errorf("%s: wheeling up at the top moves to top %d, line %d", name, m.top, m.cursor)
+		if m.top != 0 {
+			t.Errorf("%s: wheeling up at the top moves to top %d", name, m.top)
 		}
 		wheeled(m, tea.MouseWheelDown, 100)
 		if want := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top != want {
 			t.Errorf("%s: wheeling down stops at top %d, want %d: the last line at the bottom", name, m.top, want)
-		}
-		if !onScreen(m) {
-			t.Errorf("%s: the highlight is off screen at the bottom", name)
 		}
 		wheeled(m, tea.MouseWheelDown, 3)
 		if want := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top != want {
@@ -1200,58 +1154,268 @@ func TestLiveStatusWheelShowsEveryRowOfATallLine(t *testing.T) {
 	}
 }
 
-func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
-	for height := 8; height <= 20; height++ {
-		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
-		for turns := 0; turns < 15; turns++ {
-			for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
-				i := m.lineAt(m.top + y - len(m.headings))
-				start := startOf(m, i)
-				whole := m.wholly(start, start+len(m.shown[i].drawn))
-				top := m.top
-				clicked(m, m.width-1, y)
-				wholeAfter := m.wholly(start, start+len(m.shown[i].drawn))
-				if whole && !wholeAfter {
-					t.Fatalf("at height %d after %d turns, a click at screen line %d cuts off the whole line it highlights", height, turns, y)
-				}
-				room := max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
-				if m.top > room {
-					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves the screen at %d, past the last screenful at %d", height, turns, y, m.top, room)
-				}
-				end := start + len(m.shown[i].drawn)
-				if stays := whole && start >= top && end <= top+m.bodyHeight(); stays && m.top != min(top, room) {
-					t.Fatalf("at height %d after %d turns, a click at screen line %d moves the screen from %d to %d for a line that stays whole", height, turns, y, top, m.top)
-				}
-			}
-			wheeled(m, tea.MouseWheelDown, 1)
+// withVariedNotes gives every third line with fields notes of a different
+// length, some too long for a short strip, so a line's strip is taller or
+// shorter than the next one's.
+func withVariedNotes(m *liveStatus) {
+	n := 0
+	for i := range m.shown {
+		if m.shown[i].hasFields() {
+			n++
+			m.shown[i].fields[notesField].text = strings.Repeat("a note of some length ", n%4*n%7)
 		}
 	}
+	m.layOut()
+	m.scroll()
 }
 
-func TestLiveStatusClickNeverHidesTheLineItHighlights(t *testing.T) {
-	for height := 8; height <= 20; height++ {
-		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
-		for turns := 0; turns < 15; turns++ {
-			for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
-				clicked(m, m.width-1, y)
-				if !slices.ContainsFunc(body(m), func(l string) bool { return strings.Contains(l, "\x1b[7m") }) {
-					t.Fatalf("at height %d after %d turns, a click at screen line %d leaves no highlighted line on screen", height, turns, y)
-				}
-			}
-			wheeled(m, tea.MouseWheelDown, 1)
-		}
-	}
+// stripped is how the strip and the body look: their height, and what the strip
+// says.
+func stripped(m *liveStatus) string {
+	return fmt.Sprintf("%d %q", m.bodyHeight(), m.strip())
 }
 
-func TestLiveStatusKeepsTheWheelsPlaceAcrossReports(t *testing.T) {
+func TestLiveStatusWheelMovesOnlyTheScreen(t *testing.T) {
 	for name, size := range mouseLayouts {
-		m := liveOn(variedReport(t))
-		m.Update(size)
-		wheeled(m, tea.MouseWheelDown, 2)
-		top, cursor, was := m.top, m.cursor, body(m)
-		m.Update(reportBuilt{report: variedReport(t)})
-		if m.top != top || m.cursor != cursor || !slices.Equal(body(m), was) {
-			t.Errorf("%s: a new report moves the screen from top %d, line %d to top %d, line %d", name, top, cursor, m.top, m.cursor)
+		m := mouseOn(t, size)
+		withVariedNotes(m)
+		wentOff := map[string]bool{}
+		for cursor := range m.shown {
+			m.moveTo(cursor)
+			want := stripped(m)
+			for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
+				if button == tea.MouseWheelDown {
+					m.top = 0
+				}
+				for {
+					top := m.top
+					wheeled(m, button, 1)
+					if m.cursor != cursor || stripped(m) != want {
+						t.Fatalf("%s: the wheel (%v) moves the highlight to line %d, or changes the strip, from line %d", name, button, m.cursor, cursor)
+					}
+					if start, end := m.cursorSpan(); !m.wholly(start, end) {
+						wentOff[fmt.Sprint(button, start < m.top)] = true
+					}
+					turn := min(wheelStep, m.bodyHeight())
+					atEnd := m.top == 0 || m.top == m.drawnHeight(0, len(m.shown))-m.bodyHeight()
+					if moved := max(m.top-top, top-m.top); moved != turn && !atEnd {
+						t.Fatalf("%s: the wheel (%v) from top %d moves the screen to top %d, not by a turn of %d", name, button, top, m.top, turn)
+					}
+					if m.top == top {
+						break
+					}
+				}
+			}
+		}
+		if len(wentOff) != 4 {
+			t.Errorf("%s: the wheel took the highlight off the screen only as %v, want down and up, above and below", name, wentOff)
+		}
+	}
+}
+
+func TestLiveStatusClickNeverMovesTheScreen(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		withVariedNotes(m)
+		taller, shorter := 0, 0
+		for from := range m.shown {
+			for turns := 0; turns < 20; turns += 3 {
+				for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
+					m.setCursor(from)
+					m.top = min(turns*wheelStep, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
+					top, body := m.top, m.bodyHeight()
+					if y >= len(m.headings)+body {
+						continue // the strip of the line the cursor starts on covers this row
+					}
+					want := m.lineAt(top + y - len(m.headings))
+					clicked(m, m.width-1, y)
+					if m.cursor != want || m.top != top {
+						t.Fatalf("%s: from line %d at top %d, a click at screen line %d goes to line %d (want %d) and top %d", name, from, top, y, m.cursor, want, m.top)
+					}
+					taller, shorter = taller+b2i(m.bodyHeight() < body), shorter+b2i(m.bodyHeight() > body)
+				}
+			}
+		}
+		if taller == 0 || shorter == 0 {
+			t.Errorf("%s: clicks met %d taller and %d shorter strips, want both", name, taller, shorter)
+		}
+	}
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func TestLiveStatusClickOnTheMarkerKeepsTheLineWhereItWas(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		var folds []int // the lines a click can fold
+		for i, l := range m.shown {
+			if l.hasFields() && len(l.kids) > 0 {
+				// Notes so long that the strip, once the line is highlighted, covers it.
+				l.fields[notesField].text = strings.Repeat("a long note ", 30)
+				folds = append(folds, i)
+			}
+		}
+		m.layOut()
+		if len(folds) == 0 {
+			t.Fatalf("%s: no line with fields has others under it", name)
+		}
+		for _, i := range folds {
+			for want := 0; want < m.bodyHeight(); want++ {
+				m.setCursor(i)
+				x := m.markerColumn()
+				m.setCursor(0)
+				m.top = max(0, startOf(m, i)-want)
+				row, open := startOf(m, i)-m.top, m.shown[i].open
+				clicked(m, x, len(m.headings)+row)
+				last := m.drawnHeight(0, len(m.shown)) - m.bodyHeight()
+				if m.shown[i].open == open || (startOf(m, i)-m.top != row && m.top != max(0, last)) {
+					t.Fatalf("%s: a click on line %d's marker, on screen line %d, leaves it open=%v at screen line %d, top %d", name, i, row, m.shown[i].open, startOf(m, i)-m.top, m.top)
+				}
+				m.fold(open) // put it back
+			}
+		}
+	}
+}
+
+// replacing is a report with the changes made to the lines the view shows now.
+type replacing func(lines *[]statusLine)
+
+// inserting puts a line in front of the line with this key.
+func inserting(before string) replacing {
+	return func(lines *[]statusLine) {
+		for i := range *lines {
+			if (*lines)[i].key == before {
+				*lines = slices.Insert(*lines, i, statusLine{key: "new", head: "new line", fields: slices.Clone((*lines)[i].fields)})
+				return
+			}
+			inserting(before)(&(*lines)[i].kids)
+		}
+	}
+}
+
+// removing takes out the line with this key.
+func removing(key string) replacing {
+	return func(lines *[]statusLine) {
+		*lines = slices.DeleteFunc(*lines, func(l statusLine) bool { return l.key == key })
+		for i := range *lines {
+			removing(key)(&(*lines)[i].kids)
+		}
+	}
+}
+
+// growingNotes gives the line with this key notes too long for the strip.
+func growingNotes(key string) replacing {
+	return func(lines *[]statusLine) {
+		for i := range *lines {
+			if l := &(*lines)[i]; l.key == key && l.hasFields() {
+				l.fields = slices.Clone(l.fields)
+				l.fields[notesField].text = strings.Repeat("a long note ", 40)
+			}
+			growingNotes(key)(&(*lines)[i].kids)
+		}
+	}
+}
+
+func TestLiveStatusReportNeverMovesTheScreen(t *testing.T) {
+	for name, size := range mouseLayouts {
+		for _, place := range []string{"above", "on", "below"} {
+			for _, change := range []string{"nothing", "adds a line above the screen", "adds a line between the highlight and the screen", "grows the highlight's notes", "removes the highlight", "removes a line on the screen"} {
+				m := mouseOn(t, size)
+				wheeled(m, tea.MouseWheelDown, 4)
+				var cursor int
+				switch place {
+				case "above":
+					cursor = m.lineAt(m.top) - 2
+				case "on":
+					cursor = m.lineAt(m.top+m.bodyHeight()/2) + 1
+				case "below":
+					cursor = m.lineAt(m.top+m.bodyHeight()) + 2
+				}
+				m.setCursor(cursor)
+				at := fmt.Sprintf("%s, highlight %s, a report that %s", name, place, change)
+				first, last := m.lineAt(m.top), m.lineAt(m.top+m.bodyHeight()-1)
+				var edit replacing
+				switch change {
+				case "adds a line above the screen":
+					edit = inserting(m.shown[max(first-3, 0)].key)
+				case "adds a line between the highlight and the screen":
+					edit = inserting(m.shown[max(first-1, 0)].key)
+				case "grows the highlight's notes":
+					edit = growingNotes(m.shown[cursor].key)
+				case "removes the highlight":
+					edit = removing(m.shown[cursor].key)
+				case "removes a line on the screen":
+					edit = removing(m.shown[last].key)
+				default:
+					edit = func(*[]statusLine) {}
+				}
+				before := map[string]int{} // each shown line on the screen: its screen line
+				for _, row := range m.rows() {
+					before[row.key] = row.at
+				}
+				key, top := m.shown[cursor].key, m.top
+				// A line that's removed takes its room with it: the lines after it move up.
+				removedAt := 1 << 30
+				if strings.HasPrefix(change, "removes") {
+					removed := key
+					if change == "removes a line on the screen" {
+						removed = m.shown[last].key
+					}
+					if was, ok := before[removed]; ok {
+						removedAt = was
+					}
+				}
+				edit(&m.lines)
+				m.showLines(m.lines, time.Now())
+				for _, row := range m.rows() {
+					if was, ok := before[row.key]; ok && was != row.at && was < removedAt {
+						t.Errorf("%s: line %q moves from screen line %d to %d", at, row.key, was, row.at)
+					}
+				}
+				if change != "removes the highlight" && m.shown[m.cursor].key != key {
+					t.Errorf("%s: the highlight goes from %q to %q", at, key, m.shown[m.cursor].key)
+				}
+				if m.top != top && change == "nothing" {
+					t.Errorf("%s: the screen moves from top %d to %d", at, top, m.top)
+				}
+			}
+		}
+	}
+}
+
+func TestLiveStatusUpAndDownShowALineThatIsNotWhollyOnScreen(t *testing.T) {
+	for name, size := range mouseLayouts {
+		for _, by := range []int{1, -1} {
+			for cursor := range 12 {
+				m := mouseOn(t, size)
+				withVariedNotes(m)
+				m.moveTo(cursor + 1)
+				// Wheeled off the screen, or under its strip after a click.
+				for _, setUp := range []func(){
+					func() { m.top = startOf(m, m.cursor) + len(m.shown[m.cursor].drawn) },
+					func() { m.top = max(0, startOf(m, m.cursor)-m.bodyHeight()-1) },
+					func() { m.top = max(0, startOf(m, m.cursor)-m.bodyHeight()+1) },
+				} {
+					m.moveTo(cursor + 1)
+					setUp()
+					if start, end := m.cursorSpan(); m.wholly(start, end) {
+						continue
+					}
+					from := m.cursor
+					press(m, map[int]string{1: "down", -1: "up"}[by])
+					if m.cursor != from+by {
+						t.Errorf("%s: from line %d off the screen, a press (%d) goes to line %d", name, from, by, m.cursor)
+					}
+					if start, end := m.cursorSpan(); !m.wholly(start, end) {
+						t.Errorf("%s: from line %d off the screen, a press (%d) leaves line %d off it", name, from, by, m.cursor)
+					}
+				}
+			}
 		}
 	}
 }
@@ -1774,28 +1938,6 @@ func TestLiveStatusSaysWhenTheWorkersCouldntBeListed(t *testing.T) {
 		}
 		if !failed && !strings.Contains(got, "merge now") {
 			t.Errorf("at %v, after a listing succeeded, 024-ready shows %q", run.open(), got)
-		}
-	}
-}
-
-// A click on a line with shorter notes than the line it leaves makes room on
-// the screen. At the end of the report the screen then moves up to use it.
-func TestLiveStatusClickAtTheEndLeavesNoEmptyRoom(t *testing.T) {
-	for _, size := range mouseLayouts {
-		m := mouseOn(t, size)
-		last := len(m.shown) - 1
-		for !m.shown[last].hasFields() {
-			last--
-		}
-		m.shown = m.shown[:last+1]
-		m.shown[last].fields[notesField].text = strings.Repeat("a long note ", 12)
-		m.moveTo(last)
-		for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
-			m.moveTo(last)
-			clicked(m, m.width-1, y)
-			if room := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top > room {
-				t.Errorf("at %dx%d, a click at screen line %d leaves the screen at %d, past the last screenful at %d", size.Width, size.Height, y, m.top, room)
-			}
 		}
 	}
 }
