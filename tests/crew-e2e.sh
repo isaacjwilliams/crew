@@ -3346,6 +3346,22 @@ ci_round 9999cccffff0 >/dev/null; answer_ci "$CM" 9999ccc
 out=$(ci_round 0000dddffff0)
 check "branch caused, handed back, branch caused: a new red head is a question, after 2 CI rounds" '[[ $out == *"$TCM: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CM" status) == needs-input && $(crew get "$CM" review_rounds) == 3 ]] && [[ $(section "$CM" "## Open questions") == *"- [ ] CI is still red on 0000ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test."* ]]'
 crew set "$CM" status abandoned
+CR=$(pr_task "Red CI the worker reverses"); TCR=$(basename "$CR" .md); hand_over "$CR"
+ci_round 1212aaaffff0 >/dev/null; answer_ci "$CR" 1212aaa --not-the-branch
+crew ci-summary "$CR" 1212aaa "$HOME/ci.md" >/dev/null   # the worker takes it back: its branch did cause it
+ci_round 3434bbbffff0 >/dev/null; answer_ci "$CR" 3434bbb
+out=$(ci_round 5656cccffff0)
+check "a round the worker says its branch didn't cause, then that it did, counts toward MAX_CI_FIXES" '[[ $out == *"$TCR: CI still red after 2 CI rounds the branch caused, for you"* && $(crew get "$CR" review_rounds) == 2 ]]'
+crew set "$CR" status abandoned
+# A round that only reports red CI or a conflict holds none of the user's feedback, so it
+# doesn't count toward MAX_REVIEW_ROUNDS; a round that asks for a review does.
+RR=$(pr_task "Rounds of crew's reports"); TRR=$(basename "$RR" .md); hand_over "$RR"; echo 'MAX_REVIEW_ROUNDS=0' >>"$PE"
+ci 7878dddffff0 test:FAILURE; setstate "done" null; o1=$(crew tick 2>&1); answer_ci "$RR" 7878ddd
+echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; base_moves >/dev/null; setstate "done" null; o2=$(crew tick 2>&1)
+hand_over "$RR"; setstate "done" null; o3=$(crew review "$RR" 2>&1)
+check "rounds crew ci-fix and crew catch-up make don't count toward MAX_REVIEW_ROUNDS, and a review request's does" \
+  '[[ $o1 == *"$TRR: CI round 1 recorded"* && $o2 == *"$TRR: catch-up round 2 recorded"* && $o1$o2 != *"rounds of review"* && $o3 == *"$TRR has had 1 rounds of review (MAX_REVIEW_ROUNDS=0)"* ]]'
+sed -i '/^MAX_REVIEW_ROUNDS=0$/d' "$PE"; rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$RR" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
 # End to end: dispatch still waits on exactly what it did, with a merged entry written beside an unmerged one.
