@@ -339,6 +339,56 @@ Some prose that isn't an item.
 
 // A crew migrate stopped after writing a task's records, and before taking the
 // checkboxes out of its file, leaves both. Run again, it only takes them out.
+func TestShownTaskRoundReports(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	task := learnTask(t, "# A\n\n## Review rounds\n<!-- Appended by crew. -->\n\n### Round 1 — 2026-11-25 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test (the branch didn't cause it)\n\n## Log\n")
+	for _, r := range []Record{
+		{ID: "aaaaaaaa", At: at, By: "crew ci-fix", RedCI: &RedCI{Head: "aaa1111", Checks: []string{"test", "lint"}}},
+		{ID: "bbbbbbbb", At: at.Add(time.Hour), By: "crew ci-summary", CICause: &CICause{RedCI: "aaaaaaaa", BranchCaused: false}},
+		{ID: "cccccccc", At: at.Add(2 * time.Hour), By: "crew ci-summary", CICause: &CICause{RedCI: "aaaaaaaa", BranchCaused: true}},
+		{ID: "dddddddd", At: at.Add(3 * time.Hour), By: "crew ci-fix", RedCI: &RedCI{Head: "bbb2222", Checks: []string{"test"}}},
+		{ID: "eeeeeeee", At: at.Add(4 * time.Hour), By: "crew catch-up", BaseConflict: &BaseConflict{Base: "main", At: "ccc3333"}},
+	} {
+		if err := task.AddRecords(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Review rounds\n<!-- Appended by crew. -->\n\nRecorded by crew:\n" +
+		"- Red CI on aaa1111: test, lint (aaaaaaaa, sent 2026-11-25 10:00 by crew ci-fix)\n" +
+		"  - the branch didn't cause it, said 2026-11-25 11:00 by crew ci-summary\n" +
+		"  - the branch caused it, said 2026-11-25 12:00 by crew ci-summary\n" +
+		"- Red CI on bbb2222: test (dddddddd, sent 2026-11-25 13:00 by crew ci-fix)\n" +
+		"  - no word from the worker yet on whether its branch caused it\n" +
+		"- Conflict with main at ccc3333 (eeeeeeee, sent 2026-11-25 14:00 by crew catch-up)\n" +
+		"\n### Round 1 — 2026-11-25 10:00 (PR #12)\n\n- [x] CI failed on aaa1111: test (the branch didn't cause it)\n\n## Log\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+
+	noSection := learnTask(t, "# B\n\n## Log\n")
+	if got, _ := shownTask(noSection.Path); got != "# B\n\n## Log\n" {
+		t.Errorf("shownTask with no reports = %q; want the file as it is", got)
+	}
+	if err := noSection.AddRecords(Record{ID: "aaaaaaaa", At: at, By: "crew catch-up", BaseConflict: &BaseConflict{Base: "main", At: "ccc3333"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := shownTask(noSection.Path); got != "# B\n\n## Review rounds\nRecorded by crew:\n- Conflict with main at ccc3333 (aaaaaaaa, sent 2026-11-25 10:00 by crew catch-up)\n\n## Log\n" {
+		t.Errorf("shownTask with a report and no section = %q; want the section before Log", got)
+	}
+	os.WriteFile(noSection.RecordsPath(), []byte("oops\n"), 0o644)
+	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Review rounds\ncrew can't read the red CI and conflicts it sent: 001-a.records.jsonl:1: not a record crew can read") {
+		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in the section", got)
+	}
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	if got, _ := shownTask(task.Path); strings.Contains(got, "Recorded by crew") {
+		t.Errorf("shownTask in a project not yet migrated = %q; want the file as it is", got)
+	}
+}
+
 // Before format 2, the rounds' lines were what crew read: reportsTask's rounds
 // report red CI on aaa1111, which the branch didn't cause, and on bbb2222, and
 // conflicts at eee5555 and fff6666. Lines quoted in a comment, in the brief or

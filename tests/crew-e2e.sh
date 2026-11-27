@@ -3391,6 +3391,11 @@ check "ticking a CI line, or writing after it, doesn't make crew send its head a
   '((c3 == 3)) && [[ $o3 == "nothing to do: the red CI on 2424bbb is reported already" && $o4 == "round $((r + 2)) recorded: CI failed on 3535ccc (test); crew tick sends it to the worker" ]]'
 ci 4646dddffff0 test:FAILURE; o5=$(crew ci-fix "$HE")
 check "marking a line the branch didn't cause by hand doesn't take its round out of MAX_CI_FIXES" '[[ $o5 == *"CI is still red on 4646ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2)"* ]]'
+sh=$(crew show "$HE" | awk '$0=="## Review rounds" {on=1; next} on && /^###? / {exit} on'); printf '%s\n' "$sh" >"$HOME/shown-rounds"
+check "show lists each red CI crew sent with its head, checks and the worker's word, and each conflict with its base commit" \
+  'has "^Recorded by crew:$" && has "^- Red CI on 1313aaa: test \([0-9a-f]{8}, sent .* by crew ci-fix\)$" && has "^  - the branch didn'"'"'t cause it, said .* by crew ci-summary$" &&
+   has "^- Red CI on 2424bbb: test " && has "^  - the branch caused it, said " && has "^- Red CI on 3535ccc: test " && has "^  - no word from the worker yet on whether its branch caused it$" &&
+   has "^- Conflict with main at [0-9a-f]{7} \([0-9a-f]{8}, sent .* by crew catch-up\)$" && has "^- Conflict with main at $HB " && ! has "4646ddd"'
 crew set "$HE" status abandoned
 # A home upgraded to a crew that reads records, but not yet migrated, reads none: crew ci-fix and
 # crew catch-up refuse, rather than send what they sent already or count CI rounds from none.

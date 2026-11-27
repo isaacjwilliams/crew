@@ -7,12 +7,15 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -417,6 +420,66 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
 	return n, b.String()
+}
+
+// withRoundReports is the task file's lines with the red CI and conflicts crew
+// sent its worker, from its records, at the top of Review rounds: what crew
+// decides from, where the rounds' own lines may have been ticked or edited.
+// When crew can't read the records, the section says why. A project not yet
+// migrated has no such records, so its file is shown as it is.
+func withRoundReports(t Task, ls []string) []string {
+	reports, err := t.RoundReports()
+	var shown []string
+	switch {
+	case errors.Is(err, errNotMigrated):
+		return ls
+	case err != nil:
+		shown = []string{"crew can't read the red CI and conflicts it sent: " + err.Error()}
+	case len(reports.RedCI)+len(reports.Conflicts) == 0:
+		return ls
+	default:
+		shown = append([]string{"Recorded by crew:"}, reports.lines()...)
+	}
+	start := slices.Index(ls, "## Review rounds")
+	if start < 0 {
+		start = slices.Index(ls, "## Log")
+		if start < 0 {
+			start = len(ls)
+		}
+		ls = slices.Insert(ls, start, "## Review rounds")
+	}
+	// After the section's own comment, if it has one.
+	at := start + 1
+	for _, l := range uncommented(ls[at:]) {
+		if strings.TrimSpace(l) != "" {
+			break
+		}
+		at++
+	}
+	return slices.Concat(ls[:at], shown, []string{""}, ls[at:])
+}
+
+// lines are the round reports as Markdown, oldest first: each red CI with its
+// checks, and under it the worker's word on its cause, then each conflict.
+func (rr RoundReports) lines() []string {
+	var out []string
+	for _, r := range rr.RedCI {
+		out = append(out, fmt.Sprintf("- Red CI on %s: %s (%s, sent %s)", r.RedCI.Head, cmp.Or(strings.Join(r.RedCI.Checks, ", "), "no checks named"), r.ID, stamp(r.Record)))
+		if len(r.Causes) == 0 {
+			out = append(out, "  - no word from the worker yet on whether its branch caused it")
+		}
+		for _, c := range r.Causes {
+			word := "the branch caused it"
+			if !c.CICause.BranchCaused {
+				word = "the branch didn't cause it"
+			}
+			out = append(out, fmt.Sprintf("  - %s, said %s", word, stamp(c)))
+		}
+	}
+	for _, r := range rr.Conflicts {
+		out = append(out, fmt.Sprintf("- Conflict with %s at %s (%s, sent %s)", r.BaseConflict.Base, r.BaseConflict.At, r.ID, stamp(r)))
+	}
+	return out
 }
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of
