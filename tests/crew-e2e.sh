@@ -2400,6 +2400,29 @@ out=$(crew tick 2>&1)
 check "a report the goal lead has been sent isn't sent again" '[[ $out != *"goal $G8"* && $(resumes) == $((n + 1)) ]]'
 KO=$(crew new "Outside learning"); sed -i '/^## Still to learn$/a - [ ] Will it fit?' "$KO"
 check "status lists a draft outside a goal that has something to learn, rather than fold it into the count" '[[ $(crew status | grep "$(basename "$KO" .md)") == *"draft"*"1 to learn" ]]'
+# A stack of three drafts outside a goal, the middle one informed by spikes: it folds
+# when every spike is finished, and is listed, with its stack, when anything is open.
+stack3() { # <name>: sets ${1}_TOP, ${1}_MID, ${1}_END to the three drafts, top first
+  local t m e
+  t=$(crew new "$1 top"); m=$(crew new "$1 middle" --on "$(num "$t")"); e=$(crew new "$1 end" --on "$(num "$m")")
+  printf -v "${1}_TOP" %s "$t"; printf -v "${1}_MID" %s "$m"; printf -v "${1}_END" %s "$e"
+}
+# FS: every spike finished; FU: a spike unfinished; FI: an open item; FQ: an open question.
+stack3 FS; FSD=$(crew new "FS done spike" --kind spike --informs "$(num "$FS_MID")"); FSA=$(crew new "FS abandoned spike" --kind spike --informs "$(num "$FS_MID")")
+sed -i "s/^status: .*/status: done/" "$FSD"; crew set "$FSA" status abandoned   # crew set refuses done
+st=$(crew status)
+check "status folds a stack whose middle draft has a done and an abandoned spike into the draft count" \
+  '[[ $st == *"  3 draft(s)"* &&  $st != *"$(basename "$FS_TOP" .md)"* && $st != *"$(basename "$FS_MID" .md)"* && $st != *"$(basename "$FS_END" .md)"* ]]'
+stack3 FU; FUS=$(crew new "FU spike" --kind spike --informs "$(num "$FU_MID")"); crew set "$FUS" status working
+stack3 FI; sed -i '/^## Still to learn$/a - [ ] Will it fit?' "$FI_MID"
+stack3 FQ; sed -i '/^## Open questions$/a - [ ] Which way?' "$FQ_MID"
+FQS=$(crew new "FQ spike" --kind spike --informs "$(num "$FQ_MID")"); sed -i "s/^status: .*/status: done/" "$FQS"
+st=$(crew status)
+check "status lists a stack in full when its middle draft has an unfinished spike, an open item or an open question" \
+  '[[ -n $(row "$(basename "$FU_TOP" .md)") && -n $(row "$(basename "$FU_MID" .md)") && -n $(row "$(basename "$FU_END" .md)") && -n $(row "$(basename "$FI_TOP" .md)") && -n $(row "$(basename "$FI_MID" .md)") && -n $(row "$(basename "$FI_END" .md)") && -n $(row "$(basename "$FQ_TOP" .md)") && -n $(row "$(basename "$FQ_MID" .md)") && -n $(row "$(basename "$FQ_END" .md)") ]]'
+check "status still names the spikes, finished ones included, in the row of a listed draft" \
+  '[[ $(row "$(basename "$FQ_MID" .md)") == *"$(num "$FQS") done"* && $(row "$(basename "$FU_MID" .md)") == *"$(num "$FUS") working"* ]]'
+for f in "$FS_TOP" "$FS_MID" "$FS_END" "$FU_TOP" "$FU_MID" "$FU_END" "$FI_TOP" "$FI_MID" "$FI_END" "$FQ_TOP" "$FQ_MID" "$FQ_END" "$FUS"; do crew set "$f" status abandoned; done
 crew goal abandon "$GF8" >/dev/null 2>&1
 for f in "$KC" "$KD" "$KT" "$KO" "$KA"; do crew set "$f" status abandoned; done
 rm -f "$HOME/gh-pr-state"
