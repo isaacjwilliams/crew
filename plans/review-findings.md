@@ -8,16 +8,18 @@ Read this file, then `CLAUDE.md` and `ARCHITECTURE.md`, before taking an item. K
 
 ## Progress
 
+The twelve findings, described in full [below](#the-findings): 1 a failed lookup reads as "nothing there"; 2 ledger writes aren't safe; 3 nothing times out; 4 crew has no notion of who is calling; 5 the host lease; 6 the status machine isn't written down; 7 the tick infers what its steps did; 8 no seam for git, gh and claude; 9 prompts have no behavioural test; 10 model sessions do deterministic work; 11 proposals have no triage; 12 `ARCHITECTURE.md` has drifted. Below, "the Contract" is the IMP-style list of numbered obligations for each component, each tied to the tests that prove it; "the seam" is item 11's way to stand in for `git`, `gh` and `claude` in a Go test.
+
 Items are in the order they are done. A state is `to do`, `done`, or, for a spike, `answered`. Items marked **(needs intake)** have an objective that is itself a design question, so the user takes each through a high-effort intake session before any work on it starts: 2 (the Contract convention, which item 4 enforces), 11 (the tool seam), 12 (the multi-machine crew) and 15 (roles and authority). Items 2, 11 and 12 are spikes: they open no PR, so see [Keeping the list true](#keeping-the-list-true). The "Settles" column names the findings an item answers; items 1 to 4 settle none, because they build what the rest relies on.
 
 ### Now, beside the records migration
 
 These are small, and they touch little of what the records migration (moving crew's text-read facts onto the record store in `records.go`, begun in #119) is still editing.
 
-| # | Item | Settles | Waits on | State |
+| # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
 | 1 | This document | none | nothing | done (this PR) |
-| 2 | The Contract convention, settled by drafting the guard's Contract (a spike)  **(needs intake)** | none | nothing | to do |
+| 2 | The Contract convention, settled by drafting the guard's Contract (a spike) **(needs intake)** | none | nothing | to do |
 | 3 | CI runs the suites on every PR | none | nothing | to do |
 | 4 | CI fails a PR that breaks the Contract | none | 2, 3 | to do |
 | 5 | A clean restack or retarget starts no model session | 10 | nothing | to do |
@@ -31,26 +33,26 @@ These are small, and they touch little of what the records migration (moving cre
 
 They change no code the migration touches, so they start now. Each ends in a report, and the build work it shapes is then added to this list.
 
-| # | Item | Settles | Waits on | State |
+| # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
-| 11 | A seam for git, gh and claude, so a command's behaviour can be tested in Go  **(needs intake)** | 8 (first half) | nothing | to do |
-| 12 | A multi-machine crew, where some tasks or steps run on one machine and some on another. It replaces the host lease  **(needs intake)** | 5 | nothing | to do |
+| 11 | A seam for git, gh and claude, so a command's behaviour can be tested in Go **(needs intake)** | 8 (first half) | nothing | to do |
+| 12 | A multi-machine crew, where some tasks or steps run on one machine and some on another. It replaces the host lease **(needs intake)** | 5 | nothing | to do |
 
 ### After the records migration has merged
 
 Each of these rewrites code that every piece of the migration edits. Doing them first would mean rebasing each piece of the migration over them, or the reverse.
 
-| # | Item | Settles | Waits on | State |
+| # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
 | 13 | A task's transition is one write that either lands whole or not at all, and a session is on record before it starts | 2 | the migration | to do |
 | 14 | The legal status transitions are stated in one place and every command goes through it | 6 | the migration | to do |
-| 15 | crew knows which role is calling, and a role can't clear its own gates  **(needs intake)** | 4 (authority half) | the migration | to do |
+| 15 | crew knows which role is calling, and a role can't clear its own gates **(needs intake)** | 4 (authority half) | the migration | to do |
 | 16 | The tick calls its steps directly and hears from each what it did | 7 | the migration, 11 | to do |
 | 17 | The e2e suite is split into cases that run alone, each tied to the obligation it proves | 8 (second half) | the migration, 2, 11 | to do |
 
 ### After the Contract exists
 
-| # | Item | Settles | Waits on | State |
+| # | Item | Settles (finding) | Waits on (item) | State |
 |---|------|---------|----------|-------|
 | 18 | Prompt rules that matter have a behavioural check, and `crew review-eval` is run | 9 | 2 | to do |
 | 19 | `ARCHITECTURE.md` keeps what code can't say and drops the narration | 12 | 2 | to do |
@@ -258,7 +260,7 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **The rule.** A clean restack or retarget is done by crew, and a model session is started only for a conflict.
 
-**Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session for a conflict, and `ARCHITECTURE.md`'s "Stacked tasks" and the "Stacked tasks" and "Workflow: restack" parts of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
+**Against a stated convention.** `CLAUDE.md` says: "`crew restack` only starts a fresh worker on Sonnet with the rebase or retarget to run; it never resumes the worker's conversation." That is to change: the command does the clean case itself and starts a session for a conflict, and `ARCHITECTURE.md`'s "Stacked tasks" flow and the "Stacked tasks" and "Workflow: restack" sections of `implementer.md`, which `tests/guard.sh` checks agree with the restack note, change with it.
 
 **Settled by** item 5. An open proposal, "crew does clean restacks itself, and only conflicts start a session", is the same work.
 
@@ -285,7 +287,7 @@ Each entry says what is wrong, where in the code it shows, what it costs, the ru
 
 **Where.**
 
-- It is 1,122 lines and 40,709 words (`wc`). Its `crew` internals section runs from line 717 to line 823, and the Contracts table (lines 879 to 1001) has 116 rows.
+- It is 1,122 lines and 40,709 words (`wc`). Its `crew` internals section is followed by a Contracts table of 116 rows (as of `f5b790d`).
 - Drift that can be checked now:
   - "Eight Claude Code agents" (`ARCHITECTURE.md`, line 7), against `LEDGER.md`'s opening line, which lists the lead, the implementer, the casual observer, the gardener and the misses agent.
   - `MAX_WORKERS` is described in `config/defaults.env` as workers "running or waiting on you", in SETUP.md as "Your review capacity isn't exceeded", and counted by `runningWorkers` (`sessions.go`) as busy jobs only.
