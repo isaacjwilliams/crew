@@ -2499,6 +2499,30 @@ check "migrate moves a project's checkboxes into records, settled with their ans
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 crew set "$UT" status abandoned
 
+# Automated reviews: pr-review records each review and its findings through crew,
+# and the worker each outcome and the user's decisions. crew show lists them.
+RV=$(crew new "Reviewed through crew"); RVI=$(basename "$RV" .md); RVR=${RV%.md}.records.jsonl; fill "$RV"
+crew set "$RV" branch agent/reviewed
+fork=$(git -C "$SB/webapp" rev-parse main); tree=$(git -C "$SB/webapp" rev-parse "main^{tree}")
+c1=$(git -C "$SB/webapp" commit-tree -p "$fork" -m "First" "$tree"); c2=$(git -C "$SB/webapp" commit-tree -p "$c1" -m "Second" "$tree")
+git -C "$SB/webapp" branch -q agent/reviewed "$c2"
+heading=$(crew automated-review "$RV" "$fork..$c2" --fork "$fork" --reviewers claude,codex --failed codex)
+K1=$(crew finding "$RV" "must fix" "A nil map"); K2=$(crew finding "$RV" "should fix" "An old race" --split --pre-existing); K3=$(crew finding "$RV" nitpick "A name")
+crew outcome "$RV" "$K1" "fixed in abc1234" >/dev/null; crew outcome "$RV" "$K2" "left for the user: pre-existing, a day's work" >/dev/null
+crew user-decided "$RV" "$K2" "leave it for now" >/dev/null
+sh=$(crew show "$RV" | awk '$0=="## Automated reviews" {on=1; next} on && /^## / {exit} on')
+check "the review commands write records beside the task, numbered as crew prints them, each in a commit of its own" \
+  '[[ $heading =~ ^"### Automated review 1 — "$(date +%F)" "[0-9:]{5}$ && $K1 == 1.1 && $K2 == 1.2 && $K3 == 1.3 && $(wc -l <"$RVR") == 7 && $(git -C "$L" log -1 --format=%s) == "user-decided $RVI" && -z $(git -C "$L" status --porcelain -- "$RVR") ]]'
+check "show lists the recorded review with its range and reviewers, each finding with its severity and outcome, and the decision" \
+  'has "^- Review 1, $(date +%F) [0-9:]{5}: \`${fork:0:12}\.\.${c2:0:12}\` \(fork point \`${fork:0:12}\`\), by claude and codex \(codex didn.t report\)$" &&
+   has "^  - 1\.1 \[must fix\] A nil map: fixed in abc1234$" && has "^  - 1\.2 \[split: held at pre-existing: should fix\] An old race: left for the user: pre-existing, a day.s work$" &&
+   has "^    - decided by the user: leave it for now$" && has "^  - 1\.3 \[nitpick\] A name: no outcome yet$"'
+head=$(git -C "$L" rev-parse HEAD); sum=$(cksum <"$RVR")
+o1=$(crew outcome "$RV" 1.9 "recorded" 2>&1); r1=$?; o2=$(crew finding "$RV" critical "A crash" 2>&1); r2=$?; o3=$(crew outcome "$RV" "$K3" "left for user" 2>&1); r3=$?
+check "the review commands refuse a finding that isn't recorded, a severity or outcome crew doesn't know, saying why and changing nothing" \
+  '((r1 == 1 && r2 == 1 && r3 == 1)) && [[ $o1 == "crew: $RVI records no finding 1.9 (crew show $RVI lists them)" && $o2 == *"'"'"'critical'"'"' isn'"'"'t a severity crew knows"* && $o3 == *"doesn'"'"'t start with an outcome crew knows"* && $(git -C "$L" rev-parse HEAD) == "$head" && $(cksum <"$RVR") == "$sum" ]]'
+crew set "$RV" status abandoned; git -C "$SB/webapp" branch -q -D agent/reviewed
+
 # Two crew processes at once on one machine both get the ledger lock in turn, so
 # neither loses a record.
 CT=$(crew new "Busy draft"); CTI=$(basename "$CT" .md); CR=${CT%.md}.records.jsonl
