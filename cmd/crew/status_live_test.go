@@ -903,6 +903,52 @@ func TestLiveStatusReachesEveryLineAsTheStripGrows(t *testing.T) {
 	}
 }
 
+// On a screen too short for a line's notes, ↓ scrolls through them in the
+// strip before it moves on, and ↑ scrolls back, so every word can be read.
+func TestLiveStatusScrollsThroughNotesTooLongForTheStrip(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 3}, {Width: 40, Height: 4}} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(size)
+		overflowed := false
+		for i := range m.shown {
+			m.moveTo(i)
+			want := m.notes()
+			overflowed = overflowed || len(want) > len(m.strip())
+			// readAll presses key until the cursor leaves line i, and says
+			// whether the strip showed every line of its notes on the way.
+			readAll := func(key string) bool {
+				seen := map[string]bool{}
+				for m.cursor == i {
+					for _, l := range stripOn(m) {
+						seen[strings.TrimRight(strings.TrimSuffix(strings.TrimRight(uncolored(l), " "), "…"), " ")] = true
+					}
+					press(m, key)
+				}
+				for _, l := range want {
+					if !seen[strings.TrimRight(l, " ")] {
+						return false
+					}
+				}
+				return true
+			}
+			if i+1 < len(m.shown) && !readAll("j") {
+				t.Errorf("at %dx%d, j leaves %s before the strip shows all of %q", size.Width, size.Height, m.shown[i].head, want)
+			}
+			if i > 0 {
+				m.moveTo(i)
+				m.stripTop = len(want) // as if scrolled down to the notes' end
+				if !readAll("k") {
+					t.Errorf("at %dx%d, k leaves %s before the strip shows all of %q", size.Width, size.Height, m.shown[i].head, want)
+				}
+			}
+		}
+		if !overflowed {
+			t.Errorf("at %dx%d, no line's notes are too long for the strip", size.Width, size.Height)
+		}
+	}
+}
+
 func TestLiveStatusScrollsThroughARowTallerThanTheScreen(t *testing.T) {
 	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 3}, {Width: 60, Height: 4}} {
 		m := liveOn(variedReport(t))

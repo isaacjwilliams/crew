@@ -135,6 +135,11 @@ type liveStatus struct {
 	shown  []shownLine // every line not under a closed one, in order
 	cursor int         // the line it's on, in shown
 	top    int         // how many screen lines of shown are above the screen
+	// stripTop is how many lines of the cursor's notes the user scrolled
+	// above the strip, on notes too long for it; stripOf is the key of the
+	// line they're the notes of.
+	stripTop int
+	stripOf  string
 	// table is the report's columns fitted to the screen, and inColumns whether
 	// they fit; when they don't, each task and goal is a card. headings are
 	// the table's, pinned at the top of the screen: none for cards.
@@ -303,8 +308,18 @@ func (m *liveStatus) current() (shownLine, bool) {
 }
 
 func (m *liveStatus) moveTo(i int) {
-	m.cursor = max(0, min(i, len(m.shown)-1))
+	m.setCursor(i)
 	m.scroll()
+}
+
+// setCursor puts the cursor on line i. The strip starts at the top of another
+// line's notes, and keeps its place in the same line's from one report to the
+// next.
+func (m *liveStatus) setCursor(i int) {
+	m.cursor = max(0, min(i, len(m.shown)-1))
+	if l, _ := m.current(); l.key != m.stripOf {
+		m.stripTop, m.stripOf = 0, l.key
+	}
 }
 
 // setOpen opens or closes the line the cursor is on, if it has lines under it.
@@ -395,25 +410,45 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 // screen still shows the cursor's line.
 func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)-len(m.strip())) }
 
-// strip is the cursor's line's notes as the plain text words them, wrapped to
-// the screen, between the report's lines and the bar: one empty line for a
-// line without notes. It leaves the report's lines at least one screen line,
-// cutting its last line short with … when it has to.
+// strip is the cursor's line's notes, between the report's lines and the bar.
+// It leaves the report's lines at least one screen line. Notes too long for it
+// show from notesTop, the last line cut short with … while more follow.
 func (m *liveStatus) strip() []string {
-	room := m.height - 1 - len(m.headings) - 1 // the bar, and a line of the report
+	room := m.stripRoom()
 	if room <= 0 {
 		return nil
 	}
+	lines := m.notes()[m.notesTop():]
+	if len(lines) > room {
+		lines = lines[:room]
+		lines[room-1] += "…"
+	}
+	return lines
+}
+
+// stripRoom is how many screen lines the strip may take: all but the
+// headings, the bar and a line of the report.
+func (m *liveStatus) stripRoom() int { return m.height - len(m.headings) - 2 }
+
+// notes are the cursor's line's notes as the plain text words them, wrapped a
+// cell short of the screen, so … fits after any line: one empty line for a
+// line without notes.
+func (m *liveStatus) notes() []string {
 	notes := ""
 	if m.cursor < len(m.shown) && m.shown[m.cursor].hasFields() {
 		notes = m.shown[m.cursor].fields[notesField].text
 	}
-	lines := strings.Split(lipgloss.Wrap(notes, m.width, ""), "\n")
-	if len(lines) > room {
-		lines = lines[:room]
-		lines[room-1] = cut(lines[room-1], m.width-1) + "…"
+	return strings.Split(lipgloss.Wrap(notes, max(1, m.width-1), ""), "\n")
+}
+
+// notesTop is how many lines of the cursor's notes are above the strip: as
+// many as the user scrolled, but no more than the strip needs to show the
+// rest, and none when there's no strip.
+func (m *liveStatus) notesTop() int {
+	if m.stripRoom() <= 0 {
+		return 0
 	}
-	return lines
+	return max(0, min(m.stripTop, len(m.notes())-m.stripRoom()))
 }
 
 // drawnHeight is how many screen lines the shown lines from i to j take.
@@ -447,13 +482,18 @@ func (m *liveStatus) lineAt(n int) int {
 	return len(m.shown) - 1
 }
 
-// step moves the cursor one line up or down. On a line taller than the
-// screen, it scrolls through that line first.
+// step moves the cursor one line up or down. Going down, it first scrolls
+// through a line taller than the screen, then through notes too long for the
+// strip; going up, it scrolls back through them the other way round.
 func (m *liveStatus) step(by int) {
 	start, end := m.cursorSpan()
 	switch {
 	case by > 0 && end > m.top+m.bodyHeight():
 		m.top++
+	case by > 0 && m.stripRoom() > 0 && m.notesTop()+m.stripRoom() < len(m.notes()):
+		m.stripTop = m.notesTop() + 1
+	case by < 0 && m.notesTop() > 0:
+		m.stripTop = m.notesTop() - 1
 	case by < 0 && start < m.top:
 		m.top--
 	default:
@@ -472,7 +512,7 @@ func (m *liveStatus) page(by int) {
 	if by < 0 {
 		edge = m.top - 1
 	}
-	m.cursor = max(0, m.lineAt(edge))
+	m.setCursor(m.lineAt(edge))
 	if by < 0 {
 		m.top = edge + 1 - m.bodyHeight()
 	} else {
