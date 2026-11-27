@@ -70,6 +70,9 @@ done
 tracked=$(git -C "$REPO_DIR" ls-files -- projects reports config/crew.env host)
 check "VERSION holds a semantic version" 'grep -qxE "[0-9]+\.[0-9]+\.[0-9]+" "$REPO_DIR/VERSION"'
 check "the repo tracks no state: nothing under projects/ but .gitkeep, no reports/, config/crew.env or host (got: ${tracked//$'\n'/ })" '[[ $tracked == projects/.gitkeep ]]'
+run_suites=$(sed -n 's/.*suites=(\([^)]*\)).*/\1/p' "$REPO_DIR/tests/run.sh")
+ci_suites=$(sed -n 's/^ *suite: \[\(.*\)\]$/\1/p' "$REPO_DIR/.github/workflows/test.yml")
+check "CI runs the suites tests/run.sh runs (run.sh: $run_suites; CI: $ci_suites)" '[[ ${ci_suites//,/} == "$run_suites" ]]'
 
 printf '{}' | CREW_HOME=$L "$G" bash >/dev/null 2>&1; rc=$?
 check "unknown role blocks (rc=$rc)" "[[ $rc == 2 ]]"
