@@ -46,7 +46,10 @@ complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the
 # The open memory suggestions, from crew show, up to the lines typed into the file:
 # those of the project --project names, if it's typed.
 function __crew_open_suggestions
-    set -l words (commandline -opc)
+    # Expanded, so a variable typed after --project gives its value. This comes
+    # first, before any local could hide the user's variable of that name.
+    # Fish before 4.0 can't expand them, and reads them as typed.
+    set -l words (commandline -xpc 2>/dev/null; or commandline -opc)
     set -l project
     if set -l i (contains -i -- --project $words)
         set project --project $words[(math $i + 1)]
