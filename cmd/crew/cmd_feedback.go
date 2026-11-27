@@ -312,7 +312,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	t.Touch()
 	c.commit("feedback " + p.Name + "/" + t.ID())
 	if asked.Len() > 0 {
-		fmt.Print("For the user (under Open questions):\n" + asked.String())
+		fmt.Print("Asked the user (crew show lists the questions):\n" + asked.String())
 	}
 	if round == "" {
 		return nil

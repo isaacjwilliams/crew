@@ -110,7 +110,7 @@ type redCI struct {
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
 // once for each head commit. After MAX_CI_FIXES rounds the branch caused
-// (Task.CIFixes), it asks the user under Open questions instead. Exits 3 when
+// (Task.CIFixes), it asks the user instead. Exits 3 when
 // there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
@@ -185,7 +185,7 @@ func cmdCIFix(c *Crew, args []string) error {
 			return fail("%v", err)
 		}
 		t.Log(fmt.Sprintf("CI still red on %s after %d CI rounds the branch caused; %s", head, fixes, recordedForTheUser))
-		fmt.Printf("CI is still red on %s after %d CI rounds the branch caused (MAX_CI_FIXES=%d); recorded under Open questions\n", head, fixes, maxFixes)
+		fmt.Printf("CI is still red on %s after %d CI rounds the branch caused (MAX_CI_FIXES=%d); asked the user\n", head, fixes, maxFixes)
 	}
 	t.Touch()
 	c.commit("ci-fix " + p.Name + "/" + t.ID())

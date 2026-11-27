@@ -318,9 +318,9 @@ From any terminal, `crew attach TASK` attaches to a task's worker (`crew attach 
 
 - syncs PR states from GitHub;
 - records your new review comments as a round and resumes the task's worker with it as soon as the worker is free: not mid-turn, and not holding a prompt open. A worker that ended its turn on a question for you is free; your answer is what it's waiting for. A worker idle for over an hour with 100k tokens of context or more is replaced by a fresh one instead, which costs less than resuming it: its prompt cache has expired, so a resume would pay to cache that whole context again. The task's Log says so, with how long it was idle and how big its context was;
-- records collaborators' comments under the task's Open questions, for you;
+- records collaborators' comments as questions for you;
 - marks a task `needs-input` once its worker is idle and an Open question waits on you;
-- nudges a worker whose turn ended while its task still says it's being worked on, with no question asked, once its transcript has been quiet for 8 minutes: it resumes the worker once to carry on. A worker waiting on a background command it started, such as a long test run, isn't nudged however long the command runs: `crew status` shows it as `idle (<what's running>)`, so you can judge the wait yourself. If the worker stalls again with no new commit and no change of status, or its worktree isn't on this machine, the tick asks the lead under the task's Open questions instead. `crew nudge TASK` does the same by hand. Once the worker moves on after such a question (a new commit, a change of status, or a `crew followup` to it, which is your answer), the next tick checks the question off, with what settled it, and a task waiting only on it goes back to the status it had before `needs-input`; `crew settle TASK` does that by hand;
+- nudges a worker whose turn ended while its task still says it's being worked on, with no question asked, once its transcript has been quiet for 8 minutes: it resumes the worker once to carry on. A worker waiting on a background command it started, such as a long test run, isn't nudged however long the command runs: `crew status` shows it as `idle (<what's running>)`, so you can judge the wait yourself. If the worker stalls again with no new commit and no change of status, or its worktree isn't on this machine, the tick asks the lead a question instead. `crew nudge TASK` does the same by hand. Once the worker moves on after such a question (a new commit, a change of status, or a `crew followup` to it, which is your answer), the next tick settles the question, with what settled it, and a task waiting only on it goes back to the status it had before `needs-input`; `crew settle TASK` does that by hand;
 - restacks stacked tasks whose parent moved or merged, bottom-up, and has a task's worker retarget its PR when the PR targets a branch other than the task's base, never sending the same restack twice. A restack runs in a fresh session on Sonnet, which takes over as the task's worker: it costs far less than resuming the worker's long conversation. The next review round starts a fresh session on the task's own model;
 - cleans up merged tasks and done spikes;
 - gives a fresh worker to a task in progress that moved here from another machine, since its old session stayed there;
@@ -352,7 +352,7 @@ The lead runs `crew goal new` and `crew goal start`. A **goal lead** then does t
 - **How far a goal runs ahead of you** is its `max_in_flight`: how many of its tasks may be dispatched and unmerged at once, each task of a stack included. Once it's reached, the goal's other ready tasks wait until one merges, so a goal that took a wrong turn has only a few PRs to undo. It's `GOAL_MAX_IN_FLIGHT` (3) unless you give the goal its own, when you start it ("at most 2 at a time") or later with `crew goal cap GOAL N`.
 - **Putting a task next** ("do the standings card next") is its `priority`, a whole number: higher goes first, and a task without one is 0. Ask the lead, which runs `crew set TASK priority N` with N above the other ready tasks'. `crew tick` dispatches the ready tasks of every running goal, and those whose go-ahead is met, highest priority first, then by project and ID, so the next free worker goes to the task you put next. It doesn't get round a cap or a dependency: while its goal is at `max_in_flight`, or it waits on another task, the tasks after it go ahead. `crew status` shows the priority of a ready task that `crew tick` dispatches (a goal's, or one with a go-ahead) beside it when it isn't 0, and lists a running goal's ready tasks in the order they'll go.
 
-- **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a brief-review finding it can't settle. Each stays a draft task with its question under Open questions, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
+- **Parked items** are the decisions the goal lead leaves to you: anything irreversible (a migration, a public API change, a new dependency), anything outside the goal as you wrote it, an unclear item, or a brief-review finding it can't settle. Each stays a draft task with its question open, and the rest of the goal carries on. The lead tells you about them; your answer goes back with `crew goal note`.
 - **Workers' questions** go to the goal lead first. Ones it shouldn't answer reach you through the lead, like any worker question.
 - **Telling the goal lead something** ("pick up the cards added since", "use the new layout") is `crew goal note GOAL "…"`, usually through the lead. It reopens a finished goal too.
 - **Stopping a goal** is `crew goal abandon GOAL`. Its tasks stay as they are.
@@ -556,7 +556,7 @@ Codex runs read-only, with approvals off, on every call (`crew codex`), and with
 Review in GitHub as you normally would: submit a review, or leave a PR comment. With the tick timer on (below), that's all: within a few minutes `crew tick` records your comments as "Round N" in the task and resumes the worker that wrote the PR, as soon as it's idle. Without the timer, tell the lead "I reviewed #42", or run `crew tick` yourself. The two steps it does are also commands of their own:
 
 ```sh
-crew feedback '#42'    # YOUR new comments → "Round N"; collaborators' → Open questions, for you
+crew feedback '#42'    # YOUR new comments → "Round N"; collaborators' → questions, for you
 crew followup '#42'    # resumes the same worker session on the rounds it hasn't had
 crew review '#42'      # asks for another pass of automated review, as a round of its own
 ```
@@ -565,7 +565,7 @@ When the worker picks up a round, it reacts 👀 to each of your comments in it,
 
 The worker makes the changes as new commits (no force-push), pushes, replies to each of your comments with what it did (set `REPLY_TO_THREADS=no` to turn this off), and marks the task `pr-open` again. An inline comment gets a reply in its thread; a conversation comment or review summary gets a PR comment that quotes it.
 
-Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` lists them under the task's Open questions, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored.
+Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` records each as a question for you, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored.
 
 ### Red CI
 
@@ -573,7 +573,7 @@ Workers run the project's checks before they push, but a PR can still go red on 
 
 The worker finds out why. If its branch caused the failure, it fixes it and pushes. If not (a flaky test, a problem with the CI service, the base branch already red), it changes no code and reruns the failed jobs once. If it can't rerun them, or they fail again, it hands the PR back to you without a question: its comment says CI needs someone to rerun it or to fix the base, and the task's row in `crew status` shows the red CI. Either way it posts one comment on the PR saying which checks failed, why, and what it did, so your collaborators can see why the extra commits are there. In a round that also has your comments, it fixes CI first.
 
-A task gets `MAX_CI_FIXES` of these rounds that its branch caused (2 by default). After that, red CI on a new commit waits on you instead: the task turns `needs-input`, with the question under Open questions; look into it yourself, or tell the worker to try again. `MAX_CI_FIXES=0` turns this off. Rounds that only report red CI don't count toward `MAX_REVIEW_ROUNDS`.
+A task gets `MAX_CI_FIXES` of these rounds that its branch caused (2 by default). After that, red CI on a new commit waits on you instead: the task turns `needs-input`, with a question for you; look into it yourself, or tell the worker to try again. `MAX_CI_FIXES=0` turns this off. Rounds that only report red CI don't count toward `MAX_REVIEW_ROUNDS`.
 
 **CI other than GitHub Actions.** Workers read GitHub Actions logs and rerun its failed jobs with `gh run`, which their settings allow. For any other CI, say in the project's `AGENTS.md` or its crew memory how to read the logs and rerun failed jobs, and allow those commands in `projects/<project>/worker-settings.json`. Without that, a worker reproduces the failure locally from the CI config in the repo, and leaves the rerun to you.
 
@@ -836,7 +836,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 - `crew`: end-to-end checks in a crew home made from a copy of the repo, against scratch git repos, with stub `claude`, `gh` and `wt` binaries. They cover:
   - branch names chosen with `--branch` (validated, prefixed, made unique), ready checks, dispatch, and dependency gating;
   - worker-side updates from inside a worktree;
-  - feedback rounds, which skip the worker's own replies and comments in unsubmitted reviews, and put collaborators' comments under Open questions instead;
+  - feedback rounds, which skip the worker's own replies and comments in unsubmitted reviews, and record collaborators' comments as questions instead;
   - requests for another pass of automated review: your `crew review` comment and `crew review`, each a line in a round, and one summary comment per pass;
   - `crew tick`: recording a round while the worker is busy and sending it once it's free, with any rounds before it, including to a worker that asked you a question, marking a task waiting on you, restacking once and only once, cleaning up merged tasks, and never running twice at once;
   - followup: refusing while a worker is busy, continuing one that ended its turn on a question, never resending an old round, resuming, and falling back to a fresh worker;

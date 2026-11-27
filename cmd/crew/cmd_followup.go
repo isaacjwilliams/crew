@@ -369,7 +369,7 @@ func cmdRestack(c *Crew, args []string) error {
 func (c *Crew) sendRetarget(p *Project, t Task, reason string, again bool) error {
 	base := t.Base()
 	if !again && t.Get("retarget_sent") == base {
-		return fail("%s's worker was already asked to retarget its PR to %s; check its Open questions and log, or send it again with --again", t.ID(), base)
+		return fail("%s's worker was already asked to retarget its PR to %s; check its questions (crew show) and log, or send it again with --again", t.ID(), base)
 	}
 	note := fmt.Sprintf("Retarget (%s): your PR belongs on your base, %s, and there's nothing to rebase. Run `gh pr edit --base %s`, then follow your restack workflow.", reason, base, base)
 	return c.startRestack(p, t, note, "", base)
@@ -395,7 +395,7 @@ func (c *Crew) sendRebase(p *Project, idx Branches, t Task, parent Task, retarge
 		return nil
 	}
 	if !again && t.Get("restack_sent") == r.onto {
-		return fail("%s's worker was already asked to restack onto %s; check its Open questions and log, or send it again with --again", t.ID(), cut(r.onto, 12))
+		return fail("%s's worker was already asked to restack onto %s; check its questions (crew show) and log, or send it again with --again", t.ID(), cut(r.onto, 12))
 	}
 	then, retargetTo := r.afterPush(t, retarget)
 	return c.startRestack(p, t, "Restack ("+r.reason+"): "+r.steps("follow your restack workflow")+then, r.onto, retargetTo)
@@ -577,7 +577,7 @@ func cmdNudge(c *Crew, args []string) error {
 		t.Log(log)
 		t.Touch()
 		c.commit("nudge " + p.Name + "/" + t.ID())
-		fmt.Printf("%s: %s; recorded under Open questions\n", t.ID(), log)
+		fmt.Printf("%s: %s; asked the lead\n", t.ID(), log)
 		return nil
 	}
 	// Making the worktree again can take minutes of a repo's hooks, and isn't

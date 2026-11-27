@@ -51,7 +51,7 @@ for role in worker gardener lead; do
   w block $role "$M" "$L/projects/p/ledger-format"
 done
 out=$(jq -n --arg p "$L/projects/p/tasks/001-x.records.jsonl" --arg d "$M" '{cwd:$d,tool_input:{file_path:$p}}' | CREW_HOME=$L "$G" worker 2>&1)
-check "the guard names the crew commands that write still-to-learn records" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"* ]]'
+check "the guard names the crew commands that write records: still to learn and questions" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"*"crew ask TASK"*"crew hand-on TASK QUESTION"*"crew answer TASK QUESTION"* ]]'
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"
@@ -291,10 +291,10 @@ check "lead opens the draft task before investigating" \
 for f in lead implementer; do
   check "$f rereads the task file after a compaction" "grep -q 'compacted' $A/$f.md && grep -qi 'reread' $A/$f.md"
 done
-check "a question waiting on the user is an unchecked item under Open questions, ticked by whoever records the answer" \
-  "grep -q 'as an unchecked item (.- \[ \] ….)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/lead.md && grep -q 'Whoever records the answer under' $C/../templates/task.md"
+check "a question is opened with crew ask and settled with crew answer, never written or ticked by hand" \
+  "grep -qF 'Ask it: \`crew ask <task> \"<question>\"\`' $A/implementer.md && grep -q 'Never write or tick a question under Open questions yourself' $A/implementer.md && grep -qF 'settle the question with \`crew answer <task> <id>' $A/implementer.md && grep -qF 'settle the question with \`crew answer <task> <id>' $A/lead.md && grep -q 'which only crew commands write' $C/../templates/task.md"
 check "collaborators' comments wait for the user: the lead asks, and workers leave them alone unless told" \
-  "grep -q 'never acted on without the user' $A/lead.md && grep -q 'quote a collaborator.s PR comment are for the user' $A/implementer.md"
+  "grep -q 'never acted on without the user' $A/lead.md && grep -q 'Questions that quote a collaborator.s PR comment .*are for the user' $A/implementer.md"
 check "the lead runs crew tick at the start of a session and for status, so rounds and restacks go out without the timer" \
   "grep -q '^initialPrompt: .*crew tick; crew status' $A/lead.md && grep -q 'run .crew tick. and then .crew status.' $A/lead.md"
 check "a request given when the lead starts replaces the wait after its briefing" \
@@ -479,7 +479,7 @@ check "the split question lives once, in Workflow: split proposal, with its thre
 check "every pass of automated review ends: past AUTO_REVIEWS, only an answer to the worker's question runs another review" \
   "S=\$(section '## Workflow: automated review' $A/implementer.md) && grep -q 'It ends with a question, never with another review on your own' <<<\"\$S\" && [[ \$(grep -c 'go back to step 1\|run another pass' <<<\"\$S\") == 2 ]] && grep -q 'this pass has run fewer reviews than .AUTO_REVIEWS., go back to step 1' <<<\"\$S\" && grep -q '^   - \\*\\*review it anyway\\*\\*: run another pass' <<<\"\$S\""
 check "a worker whose split was taken leaves the task waiting on the lead, so crew tick doesn't nudge it" \
-  "grep -q '^   - \\*\\*split as proposed\\*\\*: .*add .- \\[ \\] Split as proposed: open the pieces as tasks and abandon this one.. under Open questions, set the status to .needs-input., and end your turn' $A/implementer.md"
+  "grep -q '^   - \\*\\*split as proposed\\*\\*: .*ask .crew ask <task> --split \"Split as proposed: open the pieces as tasks and abandon this one.\"., set the status to .needs-input., and end your turn' $A/implementer.md"
 check "a pass that didn't converge offers a split only on a branch past MAX_PR_LINES or holding two concerns, and otherwise asks only review it anyway or take it as it is; a split proposal posts its summary without marking the PR ready" \
   "S=\$(section '## Workflow: automated review' $A/implementer.md) && grep -q 'If the branch has something to split, because it.s past .MAX_PR_LINES. (measured as in first-run step 4; 0 sets no limit) or holds two concerns that would be reviewed for different things, follow .Workflow: split proposal. instead of step 4' <<<\"\$S\" && [[ \$(grep -c '^   - \\*\\*\\(review it anyway\\|take it as it is\\)\\*\\*: ' <<<\"\$S\") == 2 ]] && section '## Workflow: split proposal' $A/implementer.md | grep 'post the summary' | grep -q 'Don.t mark the PR ready'"
 check "the summary ends an unconverged pass with the proposed pieces when it proposes a split, otherwise with the unreviewed fixes, never with the limit running out" \
@@ -513,8 +513,8 @@ check "workers may spawn reviewer" "jq -e >/dev/null '.permissions.deny | index(
 for h in "## Intake: turning a request into a brief" "### The brief standard" "## Stacked tasks" "## Splitting a task"; do
   check "goal-lead reads lead.md's \"${h#\#* }\", which still exists" "grep -qxF '$h' $A/lead.md && grep -qF '\"${h#\#* }\"' $A/goal-lead.md"
 done
-check "goal-lead parks a question the way crew counts open questions, and logs one it leaves for the user as lead.md expects" \
-  "grep -q 'as an unchecked item (.- \[ \] ….)' $A/goal-lead.md && grep -q 'For the user: <why>' $A/goal-lead.md && grep -q 'Log says \"For the user\"' $A/lead.md"
+check "goal-lead parks a draft with crew ask and hands a worker's question on with crew hand-on, as lead.md expects" \
+  "grep -qF 'crew ask <task> \"<question>\"' $A/goal-lead.md && grep -qF 'crew hand-on <task> <id> \"<why>\"' $A/goal-lead.md && grep -q 'hands it on with .crew hand-on.' $A/lead.md"
 check "goal leads may read the installed lead.md without a prompt" "jq -e >/dev/null '.permissions.allow | index(\"Read(~/.claude/agents/lead.md)\")' $LS"
 check "goal-lead never dispatches; crew tick does" "grep -q 'Never .crew dispatch.: .crew tick. dispatches your ready tasks' $A/goal-lead.md"
 

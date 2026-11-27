@@ -119,7 +119,7 @@ func (g guard) check(input []byte) error {
 		}
 		// Records are typed facts crew decides from, and only its commands write them.
 		if under(path, filepath.Join(home, "projects")) && strings.HasSuffix(strings.ToLower(path), ".records.jsonl") {
-			return fmt.Errorf("%s holds records only crew commands write. Add an item still to learn with 'crew to-learn TASK \"<item>\"', and settle one with 'crew learned TASK ITEM \"<answer>\"'.", path)
+			return fmt.Errorf("%s holds records only crew commands write. Add an item still to learn with 'crew to-learn TASK \"<item>\"', and settle one with 'crew learned TASK ITEM \"<answer>\"'. Ask a question with 'crew ask TASK \"<question>\"', hand one on to the user with 'crew hand-on TASK QUESTION \"<why>\"', and settle one with 'crew answer TASK QUESTION \"<answer>\"'.", path)
 		}
 		for _, s := range statePaths {
 			if under(path, filepath.Join(home, s)) {

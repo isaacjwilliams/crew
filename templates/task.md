@@ -85,9 +85,8 @@ updated: {{NOW}}
      a new dependency). Follow-up ideas go in the Log. -->
 
 ## Open questions
-<!-- Questions waiting on the user, one unchecked item each ("- [ ] …"): a worker's when it is
-     blocked, and collaborators' PR comments from `crew feedback`. Whoever records the answer under
-     Decisions ticks the item. -->
+<!-- Questions waiting on someone, which only crew commands write: crew ask opens one, crew
+     hand-on leaves one for the user, and crew answer settles it. crew show lists them. -->
 
 ## Decisions
 <!-- Dated decisions made after dispatch, each ending with whose call it was: "(user)" for the

@@ -99,7 +99,7 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    dispatch it
   crew feedback TASK [--since ISO]
                                    Pull new PR comments: yours into a review round,
-                                   collaborators' under Open questions for you
+                                   collaborators' as questions for you
   crew followup TASK [--fresh] [--note TEXT]
                                    Resume the task's worker on the latest round/note
   crew attach TASK                 Attach this terminal to the task's worker; a
