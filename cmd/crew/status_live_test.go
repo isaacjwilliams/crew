@@ -1149,6 +1149,57 @@ func TestLiveStatusWheelShowsEveryRowOnTheWay(t *testing.T) {
 	}
 }
 
+func TestLiveStatusWheelNeverMovesTheScreenAgainstItsTurn(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 24, Height: 5}, {Width: 24, Height: 7}, {Width: 40, Height: 6}, {Width: 60, Height: 5}} {
+		for turns := 0; turns < 10; turns++ {
+			for y := 0; y < size.Height-1; y++ {
+				for _, button := range []tea.MouseButton{tea.MouseWheelUp, tea.MouseWheelDown} {
+					m := mouseOn(t, size)
+					wheeled(m, tea.MouseWheelDown, turns)
+					clicked(m, 0, y)
+					top := m.top
+					wheeled(m, button, 1)
+					if moved := m.top - top; (button == tea.MouseWheelUp && moved > 0) || (button == tea.MouseWheelDown && moved < 0) {
+						t.Fatalf("at %dx%d after %d turns and a click at screen line %d, the wheel (%v) moves the screen from top %d to %d", size.Width, size.Height, turns, y, button, top, m.top)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestLiveStatusWheelShowsEveryRowOfATallLine(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 24, Height: 6}, {Width: 24, Height: 7}} {
+		for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
+			m := mouseOn(t, size)
+			tall := slices.IndexFunc(m.shown, func(l shownLine) bool { return len(l.drawn) > m.bodyHeight()+1 })
+			if tall < 0 {
+				t.Fatalf("at %dx%d no line is taller than the screen", size.Width, size.Height)
+			}
+			m.moveTo(tall)
+			if button == tea.MouseWheelUp {
+				m.top = startOf(m, tall) + len(m.shown[tall].drawn) - m.bodyHeight()
+			}
+			seen := map[int]bool{}
+			for m.cursor == tall {
+				for n := m.top; n < m.top+m.bodyHeight(); n++ {
+					seen[n] = true
+				}
+				before := m.top
+				wheeled(m, button, 1)
+				if m.top == before && m.cursor == tall {
+					break
+				}
+			}
+			for n := startOf(m, tall); n < startOf(m, tall)+len(m.shown[tall].drawn); n++ {
+				if !seen[n] {
+					t.Errorf("at %dx%d, wheeling (%v) through line %d never shows its screen line %d", size.Width, size.Height, button, tall, n)
+				}
+			}
+		}
+	}
+}
+
 func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
 	for height := 8; height <= 20; height++ {
 		m := mouseOn(t, tea.WindowSizeMsg{Width: 40, Height: height})
@@ -1157,9 +1208,14 @@ func TestLiveStatusClickKeepsAWholeLineWhole(t *testing.T) {
 				i := m.lineAt(m.top + y - len(m.headings))
 				start := startOf(m, i)
 				whole := m.wholly(start, start+len(m.shown[i].drawn))
+				top := m.top
 				clicked(m, 0, y)
-				if whole && !m.wholly(start, start+len(m.shown[i].drawn)) {
+				wholeAfter := m.wholly(start, start+len(m.shown[i].drawn))
+				if whole && !wholeAfter {
 					t.Fatalf("at height %d after %d turns, a click at screen line %d cuts off the whole line it highlights", height, turns, y)
+				}
+				if whole && m.top != top && m.wholly(start, start+len(m.shown[i].drawn)) && startOf(m, i) >= top && start+len(m.shown[i].drawn) <= top+m.bodyHeight() {
+					t.Fatalf("at height %d after %d turns, a click at screen line %d moves a line that stays whole", height, turns, y)
 				}
 			}
 			wheeled(m, tea.MouseWheelDown, 1)
