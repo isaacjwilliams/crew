@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A sampleReview is an automated review as pr-review settles it: the reviewers
@@ -301,4 +302,49 @@ func ledgerState(t *testing.T, f followupCrew, task Task) string {
 	head, _ := git(f.Home, "rev-parse", "HEAD")
 	status, _ := git(f.Home, "status", "--porcelain")
 	return strings.Join(append(state, head, status), "\n---\n")
+}
+
+// crew show puts the recorded reviews at the top of Automated reviews, after
+// the section's comment and before the text written beside them.
+func TestShownTaskReviews(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	fork, from, head := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40)
+	file := "# A\n\n## Automated reviews\n<!-- Reviews. -->\n\n### Automated review 1 — 2026-11-25 10:00\n\n## Log\n- x\n"
+	task := learnTask(t, file)
+	if got, _ := shownTask(task.Path); got != file {
+		t.Errorf("shownTask of a task with no review records = %q; want the file as it is", got)
+	}
+	for _, r := range []Record{
+		{ID: "r1", At: at, By: "crew automated-review", AutomatedReview: &AutomatedReview{Number: 1, From: from, Fork: fork, Head: head, Reviewers: []string{"claude", "codex"}, Failed: []string{"codex"}}},
+		{ID: "f1", At: at, By: "crew finding", Finding: &Finding{Review: "r1", Number: 1, Title: "a nil map", Severity: SeverityMustFix}},
+		{ID: "f2", At: at, By: "crew finding", Finding: &Finding{Review: "r1", Number: 2, Title: "an old race", Severity: SeverityShouldFix, Split: true, PreExisting: true}},
+		{ID: "f3", At: at, By: "crew finding", Finding: &Finding{Review: "r1", Number: 3, Title: "a name", Severity: SeverityNitpick}},
+		{ID: "o1", At: at, By: "crew outcome", Outcome: &FindingOutcome{Finding: "f1", Kind: OutcomeFixed, Text: "fixed in abc1234"}},
+		{ID: "o2", At: at, By: "crew outcome", Outcome: &FindingOutcome{Finding: "f2", Kind: OutcomeLeftForUser, Text: "left for the user: pre-existing, a day's work; proposal 012-race.md"}},
+		{ID: "d2", At: at, By: "crew user-decided", Decision: &FindingDecision{Finding: "f2", Decision: "leave it for now"}},
+	} {
+		if err := task.AddRecords(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Automated reviews\n<!-- Reviews. -->\n\nRecorded by crew:\n" +
+		"- Review 1, 2026-11-25 10:00: `bbbbbbbbbbbb..cccccccccccc` (fork point `aaaaaaaaaaaa`), by claude and codex (codex didn't report)\n" +
+		"  - 1.1 [must fix] a nil map: fixed in abc1234\n" +
+		"  - 1.2 [split: held at pre-existing: should fix] an old race: left for the user: pre-existing, a day's work; proposal 012-race.md\n" +
+		"    - decided by the user: leave it for now\n" +
+		"  - 1.3 [nitpick] a name: no outcome yet\n" +
+		"\n### Automated review 1 — 2026-11-25 10:00\n\n## Log\n- x\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+
+	noSection := learnTask(t, "# B\n\n## Log\n- x\n")
+	os.WriteFile(noSection.RecordsPath(), []byte("oops\n"), 0o644)
+	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Automated reviews\n\ncrew can't read the reviews' records: 001-a.records.jsonl:1: not a record crew can read") {
+		t.Errorf("shownTask with an unreadable records file = %q; want Automated reviews to say so", got)
+	}
 }

@@ -95,7 +95,7 @@ func shownTask(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.Join(withLearning(t, ls), "\n") + "\n", nil
+	return strings.Join(withReviews(t, withLearning(t, ls)), "\n") + "\n", nil
 }
 
 // withLearning is the task file's lines with its still-to-learn items from its

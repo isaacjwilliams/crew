@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -343,6 +344,86 @@ func recordedReviews(records []Record) []AutomatedReview {
 		}
 	}
 	return reviews
+}
+
+const reviewsHeading = "## Automated reviews"
+
+// withReviews is the task file's lines with its recorded automated reviews at
+// the top of Automated reviews, before the text written beside them. When crew
+// can't read the records, the section says why. A project not yet migrated has
+// no review records: the commands that write them refuse there.
+func withReviews(t Task, ls []string) []string {
+	reviews, err := t.RecordedReviews()
+	var shown []string
+	switch {
+	case errors.Is(err, errNotMigrated):
+		return ls
+	case err != nil:
+		shown = []string{"crew can't read the reviews' records: " + err.Error()}
+	case len(reviews) == 0:
+		return ls
+	default:
+		shown = append([]string{"Recorded by crew:"}, reviewLines(reviews)...)
+	}
+	start := slices.Index(ls, reviewsHeading)
+	if start < 0 {
+		start = slices.IndexFunc(ls, func(l string) bool { return l == "## Review rounds" || l == "## Log" })
+		if start < 0 {
+			start = len(ls)
+		}
+		ls = slices.Insert(ls, start, reviewsHeading, "")
+	}
+	// After the section's own comment, if it has one.
+	at := start + 1
+	for _, l := range uncommented(ls[at:]) {
+		if strings.TrimSpace(l) != "" {
+			break
+		}
+		at++
+	}
+	return slices.Concat(ls[:at], shown, []string{""}, ls[at:])
+}
+
+// reviewLines are the reviews as Markdown: each review, its range and its
+// reviewers, and under it each finding with its severity and outcome, and the
+// user's decision.
+func reviewLines(reviews []AutomatedReview) []string {
+	var out []string
+	for _, r := range reviews {
+		who := strings.Join(r.Reviewers, " and ")
+		if len(r.Failed) > 0 {
+			who += " (" + strings.Join(r.Failed, " and ") + " didn't report)"
+		}
+		out = append(out, fmt.Sprintf("- Review %d, %s: `%s..%s` (fork point `%s`), by %s",
+			r.Number, r.At.Local().Format(logTime), cut(r.From, 12), cut(r.Head, 12), cut(r.Fork, 12), who))
+		if len(r.Findings) == 0 {
+			out = append(out, "  - no findings")
+		}
+		for _, f := range r.Findings {
+			outcome := cmp.Or(f.Outcome.Text, "no outcome yet")
+			out = append(out, fmt.Sprintf("  - %d.%d [%s] %s: %s", r.Number, f.Number, f.agreed(), f.Title, outcome))
+			if f.Decided() {
+				out = append(out, "    - decided by the user: "+f.Decision)
+			}
+		}
+	}
+	return out
+}
+
+// agreed is the finding's severity with its labels, as its Agreed severity
+// line starts.
+func (f Finding) agreed() string {
+	s := string(f.Severity)
+	if f.PreExisting {
+		s = "pre-existing: " + s
+	}
+	switch {
+	case f.Split:
+		s = "split: held at " + s
+	case f.Flipped:
+		s = "flipped: " + s
+	}
+	return s
 }
 
 // check says what's wrong with a review record.
