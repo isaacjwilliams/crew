@@ -111,7 +111,7 @@ case ${1:-} in
   rm)
     if [[ -f $HOME/rm-fail ]]; then echo "Error: couldn't delete ${2:-}" >&2; exit 1; fi
     agents 'map(select(.id != $id))' --arg id "${2:-}" ;;
-  attach|logs|remote-control) : ;;
+  attach|logs) : ;;
   *)
     if [[ " $* " == *" --bg "* ]]; then
       if [[ -f $HOME/fail-resume && -n $resume ]]; then echo "Error: session not found"; exit 1; fi

@@ -52,8 +52,8 @@ func cmdMCP(c *Crew, args []string) error {
 // It's best-effort: it reports each problem as it goes and carries on, so one
 // project's broken mcp.json doesn't keep the others' servers from the leads. That
 // project keeps the mcp.local.json it had. It returns whether there were no
-// problems, which only crew mcp sync needs: crew install, crew lead and crew
-// serve go on either way.
+// problems, which only crew mcp sync needs: crew install and crew lead go
+// on either way.
 func (c *Crew) syncMCP() bool {
 	ok := true
 	for _, proj := range c.projects("") {

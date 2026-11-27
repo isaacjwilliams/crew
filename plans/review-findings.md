@@ -27,7 +27,7 @@ These are small, and they touch little of what the records migration (moving cre
 | 6 | A failed lookup is never read as "nothing there" | 1 | nothing | to do |
 | 7 | Every call to an outside tool has a time limit, no lock is held across the network, and a tick that didn't run shows in `crew status` | 3 | nothing | to do |
 | 8 | The guard and the allow rules close the gaps the security review names: `project.env`, `worker-settings.json`, force-push to any ref, `crew evidence` taking any file | 4 (configuration half) | nothing | to do |
-| 9 | `crew serve` and the phone lead are removed | 5 (in part) | nothing | to do |
+| 9 | `crew serve` and the phone lead are removed | 5 (in part) | nothing | done (#131) |
 | 10 | Proposals get triage | 11 | nothing | to do |
 
 ### Design first, as spikes

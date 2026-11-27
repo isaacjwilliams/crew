@@ -17,8 +17,8 @@ import (
 // up yet changes nothing. Then crew upgrade says what the upgrade does to the
 // sessions working now and asks to go ahead, and pauses every project, so they
 // wrap up before the release is merged (pauseAndMerge). Once the release is
-// installed, it lifts the pause it made, pushes, restarts the lead's server, and
-// removes the binaries of other versions.
+// installed, it lifts the pause it made, pushes, and removes the binaries of
+// other versions.
 func cmdUpgrade(c *Crew, args []string) error {
 	yes := false
 	switch {
@@ -94,8 +94,6 @@ func cmdUpgrade(c *Crew, args []string) error {
 	if !c.pushNow(os.Stdout) {
 		warn("couldn't push the upgrade to origin; crew tick pushes it later")
 	}
-	// The lead's server runs the new lead from now on, for new phone sessions.
-	restartLeadService()
 	now := c.crewVersion()
 	old, _ := filepath.Glob(c.path("bin/release/crew-*"))
 	for _, f := range old {

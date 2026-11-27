@@ -24,8 +24,7 @@ The README's pitch rests on these principles in particular:
 ## Safety rules for working in this repo
 
 - **Edit sources here, never the installed copies or a live home**: `~/.claude/agents/`, `~/crew/`, `~/.local/bin/`, `~/.config/fish/`, `~/.config/systemd/user/`, `~/Library/LaunchAgents/`. The user's home takes changes from this repo with `crew upgrade`.
-- **Don't run `crew setup`, `crew install`, `crew host …`, `crew serve` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
-- **Never run `claude remote-control`**, not even with `--help`: it may start a server. Read https://code.claude.com/docs/en/remote-control.md instead.
+- **Don't run `crew setup`, `crew install`, `crew host …` or `crew upgrade` against the real HOME unless the user asks.** They change the live setup on this machine, its GitHub repos or its lease. The tests run them under a fake HOME, which is fine.
 - **Never push this repo, or create GitHub repos,** unless the user asks: nothing here is public until they publish it.
 - **Don't touch `~/crew` or `~/agent-work`.** They hold live task state and unmerged work.
 - **Don't run this checkout's `bin/crew` outside the tests.** It would take this checkout as its home (or the real `~/crew`, when `CREW_HOME` is set) and write a ledger there. Exercise the Go code through the tests (`tests/run.sh`, `go test ./...`).
