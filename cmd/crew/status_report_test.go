@@ -38,12 +38,12 @@ func reportTask(t *testing.T, c *Crew, project, name string, asks bool, fields .
 func suggestFact(t *testing.T, c *Crew, project, fact string) string {
 	t.Helper()
 	r := Record{Suggested: &Suggested{Fact: fact, Why: "Why not.", Source: "lead"}}
-	return settleFact(t, c, project, r)
+	return addSuggestionRecord(t, c, project, r)
 }
 
-// settleFact adds a record to the project's memory suggestions, as crew
+// addSuggestionRecord adds a record to the project's memory suggestions, as crew
 // remember, crew keep and crew decline do, and returns its ID.
-func settleFact(t *testing.T, c *Crew, project string, r Record) string {
+func addSuggestionRecord(t *testing.T, c *Crew, project string, r Record) string {
 	t.Helper()
 	dir := c.path("projects", project)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

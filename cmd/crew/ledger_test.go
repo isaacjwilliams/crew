@@ -1267,7 +1267,7 @@ func TestMemorySuggestionsComeFromRecordsAlone(t *testing.T) {
 	kept := suggestFact(t, c, "p", "Kept")
 	suggestFact(t, c, "p", "Open")
 	suggestFact(t, c, "p", "Declined")
-	settleFact(t, c, "p", Record{Kept: &Kept{Suggestion: kept}})
+	addSuggestionRecord(t, c, "p", Record{Kept: &Kept{Suggestion: kept}})
 	all, err := c.memorySuggestions("p")
 	if err != nil {
 		t.Fatal(err)
@@ -1281,7 +1281,7 @@ func TestMemorySuggestionsComeFromRecordsAlone(t *testing.T) {
 	if len(all) != 3 || !slices.Equal(open, []string{"Open", "Declined"}) {
 		t.Errorf("suggestions = %+v; want three, Open and Declined open", all)
 	}
-	settleFact(t, c, "p", Record{Declined: &Declined{Suggestion: all[2].ID, Reason: "Not true."}})
+	addSuggestionRecord(t, c, "p", Record{Declined: &Declined{Suggestion: all[2].ID, Reason: "Not true."}})
 	if all, _ := c.memorySuggestions("p"); openItems(all) != 1 {
 		t.Errorf("after a decline, %d open; want 1", openItems(all))
 	}
