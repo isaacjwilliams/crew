@@ -586,7 +586,7 @@ func (s *statusView) folds(t Task) bool {
 	if t.Status() != Draft || t.OpenQuestions() > 0 || s.hasUnfinishedSpike(t) {
 		return false
 	}
-	if items, err := t.StillToLearn(); err != nil || openItems(items) > 0 {
+	if items, err := t.StillToLearn(); err != nil || countOpen(items) > 0 {
 		return false
 	}
 	for _, k := range s.kids[t.Path] {
@@ -762,7 +762,7 @@ func (s *statusView) learning(t Task) string {
 	var parts []string
 	if items, err := t.StillToLearn(); err != nil {
 		parts = append(parts, "to learn: "+err.Error())
-	} else if n := openItems(items); n > 0 {
+	} else if n := countOpen(items); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d to learn", n))
 	}
 	var spikes []string

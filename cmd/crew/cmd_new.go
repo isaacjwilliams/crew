@@ -260,7 +260,7 @@ func cmdReady(c *Crew, args []string) error {
 	if err != nil {
 		return fail("can't read what %s still has to learn: %v", t.ID(), err)
 	}
-	if n := openItems(items); n > 0 {
+	if n := countOpen(items); n > 0 {
 		return fail("%d item(s) still to learn are open: answer each, with a spike where it needs trying (crew new --kind spike --informs %s), then settle it with crew learned %s ITEM ANSWER", n, t.ID(), t.ID())
 	}
 	if rules.pr && !t.Risk().Valid() {

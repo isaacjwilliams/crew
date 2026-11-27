@@ -40,23 +40,30 @@ func cmdAsk(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	q := Question{Kind: QuestionWorker, Asker: "worker", For: "user", Text: text}
-	if t.Goal() != "" {
-		q.For = "goal-lead"
-	}
+	// A lead or goal lead parks a draft for the user; a worker asks its goal
+	// lead, or the user outside a goal.
+	var q Question
+	inGoal := t.Goal() != ""
 	switch st := t.Status(); {
 	case st.Finished():
 		return fail("%s is '%s': nobody is left to answer a question on it", t.ID(), st)
 	case st == Draft && split:
 		return fail("%s is a draft: only a worker proposes to split its branch", t.ID())
 	case st == Draft:
-		q = Question{Kind: QuestionParked, Asker: "lead", For: "user", Text: text}
-		if t.Goal() != "" {
+		q = Question{Kind: QuestionParked, Asker: "lead", For: "user"}
+		if inGoal {
 			q.Asker = "goal-lead"
 		}
-	case split:
-		q.Kind = QuestionSplit
+	default:
+		q = Question{Kind: QuestionWorker, Asker: "worker", For: "user"}
+		if split {
+			q.Kind = QuestionSplit
+		}
+		if inGoal {
+			q.For = "goal-lead"
+		}
 	}
+	q.Text = text
 	rs, err := t.ask("crew ask", q)
 	if err != nil {
 		return fail("%v", err)
@@ -138,13 +145,7 @@ func cmdAnswer(c *Crew, args []string) error {
 	}
 	t.Log(fmt.Sprintf("Answered question %s", id))
 	c.commit("answer " + t.ID())
-	open := 0
-	for _, q := range questionItems(append(records, r)) {
-		if q.Open() {
-			open++
-		}
-	}
-	fmt.Printf("settled %s; %d question(s) still open\n", id, open)
+	fmt.Printf("settled %s; %d question(s) still open\n", id, countOpen(questionItems(records))-1)
 	return nil
 }
 
@@ -188,7 +189,7 @@ func (t Task) ask(by string, qs ...Question) ([]Record, error) {
 	if err := t.AddRecords(rs...); err != nil {
 		return nil, err
 	}
-	return rs, t.AppendToSection("## Open questions", items.String())
+	return rs, t.AppendToSection(questionsHeading, items.String())
 }
 
 // question is a question's first line.
@@ -197,20 +198,35 @@ func (r Record) question() string {
 	return first
 }
 
-// openQuestionsItem is a question as an unchecked item under Open questions,
-// its first line ending with its marker and the rest indented under it.
+// openQuestionsItem is a question as an unchecked item under Open questions.
 func (r Record) openQuestionsItem() string {
-	first, rest, _ := strings.Cut(r.Question.Text, "\n")
-	item := "- [ ] " + first + questionMarker(r.ID) + "\n"
-	for _, l := range splitLines(rest) {
-		item += strings.TrimRight("  "+l, " ") + "\n"
-	}
-	return item
+	return strings.Join(r.itemLines("[ ]"), "\n") + "\n"
 }
 
-func questionMarker(id string) string { return " (question " + id + ")" }
+// itemLines are a question as an item with the checkbox box: its first line
+// ends with its marker, and the rest is indented under it.
+func (r Record) itemLines(box string) []string {
+	first, rest, _ := strings.Cut(r.Question.Text, "\n")
+	out := []string{"- " + box + " " + first + " (question " + r.ID + ")"}
+	for _, l := range splitLines(rest) {
+		out = append(out, strings.TrimRight("  "+l, " "))
+	}
+	return out
+}
 
-var questionMarkerEnd = regexp.MustCompile(` \(question [0-9a-f]+\)$`)
+var questionMarkerEnd = regexp.MustCompile(` \(question ([0-9a-f]+)\)$`)
+
+// itemQuestion is the ID of the question an item's first line was written
+// for, or "" when the line isn't one.
+func itemQuestion(l string) string {
+	if !strings.HasPrefix(l, "- [ ]") && !strings.HasPrefix(l, "- [x]") {
+		return ""
+	}
+	if m := questionMarkerEnd.FindStringSubmatch(l); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // cutQuestionMarker is an item's first line without its question marker, and
 // the marker, or "" when it has none.
@@ -230,9 +246,9 @@ func (t Task) tickQuestions(ids ...string) error {
 	on := false
 	for i, l := range ls {
 		if strings.HasPrefix(l, "## ") {
-			on = l == "## Open questions"
+			on = l == questionsHeading
 		}
-		if on && strings.HasPrefix(l, "- [ ]") && slices.ContainsFunc(ids, func(id string) bool { return strings.HasSuffix(l, questionMarker(id)) }) {
+		if on && strings.HasPrefix(l, "- [ ]") && slices.Contains(ids, itemQuestion(l)) {
 			ls[i] = "- [x]" + strings.TrimPrefix(l, "- [ ]")
 			ticked = true
 		}
@@ -258,31 +274,25 @@ func withQuestions(t Task, ls []string) []string {
 	if errors.Is(unread, errNotMigrated) || unread == nil && len(items) == 0 {
 		return ls
 	}
-	start := slices.Index(ls, questionsHeading)
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, questionsHeading, "")
-	}
-	end := start + 1 + len(sectionLines(ls[start:], questionsHeading))
+	ls, start, end := placeSection(ls, questionsHeading)
 	if unread != nil {
 		return slices.Concat(ls[:start+1], []string{"crew can't read the questions: " + unread.Error()}, ls[start+1:])
+	}
+	byID := map[string]QuestionItem{}
+	for _, q := range items {
+		byID[q.ID] = q
 	}
 	section := ls[start+1 : end]
 	var body []string
 	shown := map[string]bool{}
 	for i := 0; i < len(section); i++ {
-		j := slices.IndexFunc(items, func(q QuestionItem) bool {
-			return (strings.HasPrefix(section[i], "- [ ]") || strings.HasPrefix(section[i], "- [x]")) && strings.HasSuffix(section[i], questionMarker(q.ID))
-		})
-		if j < 0 {
+		q, ok := byID[itemQuestion(section[i])]
+		if !ok {
 			body = append(body, section[i])
 			continue
 		}
-		body = append(body, questionLines(items[j])...)
-		shown[items[j].ID] = true
+		body = append(body, questionLines(q)...)
+		shown[q.ID] = true
 		for i+1 < len(section) && strings.HasPrefix(section[i+1], "  ") {
 			i++
 		}
@@ -304,8 +314,7 @@ func questionLines(q QuestionItem) []string {
 	if q.Open() {
 		box = "[ ]"
 	}
-	out := strings.Split(strings.Replace(q.openQuestionsItem(), "- [ ]", "- "+box, 1), "\n")
-	out = append(out[:len(out)-1], fmt.Sprintf("  - %s: asked by %s, %s", questionKindNames[q.Question.Kind], askerName(q.Question.Asker), stamp(q.Record)))
+	out := append(q.itemLines(box), fmt.Sprintf("  - %s: asked by %s, %s", questionKindNames[q.Question.Kind], askerName(q.Question.Asker), stamp(q.Record)))
 	if q.HandedOn != nil {
 		out = append(out, fmt.Sprintf("  - handed on to the user %s: %s", stamp(*q.HandedOn), q.HandedOn.HandedOn.Why))
 	}
@@ -313,15 +322,7 @@ func questionLines(q QuestionItem) []string {
 		return append(out, "  - waits on the "+whom(q.WaitsOn()))
 	}
 	for _, a := range q.Answers {
-		lead := "  - settled " + stamp(a) + ":"
-		if lines := strings.Split(a.Answer.Text, "\n"); len(lines) == 1 {
-			out = append(out, lead+" "+lines[0])
-		} else {
-			out = append(out, lead)
-			for _, l := range lines {
-				out = append(out, strings.TrimRight("    "+l, " "))
-			}
-		}
+		out = append(out, answerLines(a, a.Answer.Text)...)
 	}
 	return out
 }

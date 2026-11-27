@@ -81,7 +81,7 @@ func cmdLearned(c *Crew, args []string) error {
 		return err
 	}
 	c.commit("learned " + t.ID())
-	fmt.Printf("settled %s; %d item(s) still open\n", id, openItems(items)-1)
+	fmt.Printf("settled %s; %d item(s) still open\n", id, countOpen(items)-1)
 	return nil
 }
 
@@ -111,18 +111,10 @@ func withLearning(t Task, ls []string) []string {
 	} else {
 		items = learnLines(learning)
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
+	if !slices.Contains(ls, learnHeading) && len(items) == 0 {
 		return ls
 	}
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, learnHeading, "")
-	}
-	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
+	ls, start, end := placeSection(ls, learnHeading)
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
 	var kept, typed []string // the section's comments and blank lines, and the rest
@@ -156,18 +148,39 @@ func learnLines(items []LearnItem) []string {
 		}
 		out = append(out, fmt.Sprintf("- %s %s (%s, added %s)", box, i.ToLearn.Text, i.ID, stamp(i.Record)))
 		for _, a := range i.Answers {
-			lead := "  - settled " + stamp(a) + ":"
-			if lines := strings.Split(a.Learned.Answer, "\n"); len(lines) == 1 {
-				out = append(out, lead+" "+lines[0])
-			} else {
-				out = append(out, lead)
-				for _, l := range lines {
-					out = append(out, strings.TrimRight("    "+l, " "))
-				}
-			}
+			out = append(out, answerLines(a, a.Learned.Answer)...)
 		}
 	}
 	return out
+}
+
+// answerLines are an answer under its item: when it was given and by which
+// command, then its text, on the same line when it's one line long.
+func answerLines(a Record, text string) []string {
+	lead := "  - settled " + stamp(a) + ":"
+	lines := strings.Split(text, "\n")
+	if len(lines) == 1 {
+		return []string{lead + " " + lines[0]}
+	}
+	out := []string{lead}
+	for _, l := range lines {
+		out = append(out, strings.TrimRight("    "+l, " "))
+	}
+	return out
+}
+
+// placeSection is the lines with the section heading in them, added before
+// the Log when it's missing, and where the heading and the section's end are.
+func placeSection(ls []string, heading string) ([]string, int, int) {
+	start := slices.Index(ls, heading)
+	if start < 0 {
+		start = slices.Index(ls, "## Log")
+		if start < 0 {
+			start = len(ls)
+		}
+		ls = slices.Insert(ls, start, heading, "")
+	}
+	return ls, start, start + 1 + len(sectionLines(ls[start:], heading))
 }
 
 // stamp says when a record was written, and by which command.

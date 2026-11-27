@@ -774,8 +774,8 @@ func learnItems(records []Record) []LearnItem {
 	return items
 }
 
-// openItems counts the items that are still open.
-func openItems(items []LearnItem) int {
+// countOpen counts the items, or questions, that are still open.
+func countOpen[T interface{ Open() bool }](items []T) int {
 	n := 0
 	for _, i := range items {
 		if i.Open() {
@@ -1708,7 +1708,7 @@ func (t Task) SettleNudgeQuestions(by string) error {
 	in := false
 	for i, l := range ls {
 		if strings.HasPrefix(l, "## ") {
-			in = l == "## Open questions"
+			in = l == questionsHeading
 		}
 		if in && isOpenNudgeQuestion(l) {
 			// The question's marker stays last, for crew show to find it by.
