@@ -98,6 +98,8 @@ func cmdCatchUp(c *Crew, args []string) error {
 	}
 	r := newRecord("crew catch-up", records)
 	r.BaseConflict = conflict
+	// Recorded before the round: if that fails, nothing is sent, and the next
+	// run tries again.
 	if err := t.AddRecords(r); err != nil {
 		return err
 	}

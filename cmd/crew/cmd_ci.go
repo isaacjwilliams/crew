@@ -176,6 +176,8 @@ func cmdCIFix(c *Crew, args []string) error {
 	if fixes := reports.CIFixes(); fixes < maxFixes {
 		r := newRecord("crew ci-fix", records)
 		r.RedCI = &RedCI{Head: head, Checks: failed}
+		// Recorded before the round: if that fails, nothing is sent, and the
+		// next run tries again.
 		if err := t.AddRecords(r); err != nil {
 			return err
 		}
@@ -276,18 +278,19 @@ func cmdCISummary(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
-	had := len(records)
+	var causes []Record
 	for _, r := range roundReports(records).CIOn(head) {
 		if !r.WorkerSaid(branchCaused) {
-			cause := newRecord("crew ci-summary", records)
+			// newRecord is passed the causes too, so no two get one ID.
+			cause := newRecord("crew ci-summary", append(records, causes...))
 			cause.CICause = &CICause{RedCI: r.ID, BranchCaused: branchCaused}
-			records = append(records, cause)
+			causes = append(causes, cause)
 		}
 	}
-	if len(records) == had {
+	if len(causes) == 0 {
 		return nil
 	}
-	if err := t.AddRecords(records[had:]...); err != nil {
+	if err := t.AddRecords(causes...); err != nil {
 		return err
 	}
 	t.Touch()

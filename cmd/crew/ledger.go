@@ -1472,8 +1472,9 @@ func checklistItem(l string) (string, bool) {
 }
 
 // RoundReports are what crew sent a task's worker in review rounds of its own,
-// from its records alone, oldest first: red CI on the PR's head (crew ci-fix),
-// and conflicts with its base (crew catch-up), as base_conflict records.
+// oldest first, read from its records: red CI on the PR's head (red_ci
+// records, from crew ci-fix) and conflicts with its base (base_conflict
+// records, from crew catch-up).
 type RoundReports struct {
 	RedCI     []CIReport
 	Conflicts []Record
@@ -1486,15 +1487,16 @@ type CIReport struct {
 	Causes []Record
 }
 
-// BranchCaused: the worker's latest word is that its branch caused the red CI,
-// or it hasn't given one yet. Such a report counts toward MAX_CI_FIXES.
-func (r CIReport) BranchCaused() bool {
+// Counts: the report counts toward MAX_CI_FIXES. It does unless the worker's
+// latest word is that its branch didn't cause the red CI.
+func (r CIReport) Counts() bool {
 	return len(r.Causes) == 0 || r.Causes[len(r.Causes)-1].CICause.BranchCaused
 }
 
-// WorkerSaid: the worker's latest word on the red CI is branchCaused.
+// WorkerSaid: the worker has given its word on the red CI, and its latest is
+// branchCaused.
 func (r CIReport) WorkerSaid(branchCaused bool) bool {
-	return len(r.Causes) > 0 && r.BranchCaused() == branchCaused
+	return len(r.Causes) > 0 && r.Causes[len(r.Causes)-1].CICause.BranchCaused == branchCaused
 }
 
 // RoundReports reads the task's round reports from its records.
@@ -1507,8 +1509,8 @@ func (t Task) RoundReports() (RoundReports, error) {
 }
 
 // roundReports are the round reports records add, with the worker's word on
-// each red CI. Records from readRecords name only red CI they add, which it
-// checks.
+// each red CI. Every ci_cause names a red_ci in records: readRecords refuses a
+// file where one doesn't (Record.follows).
 func roundReports(records []Record) RoundReports {
 	var rr RoundReports
 	for _, r := range records {
@@ -1545,7 +1547,7 @@ func (rr RoundReports) CIOn(head string) []CIReport {
 func (rr RoundReports) CIFixes() int {
 	n := 0
 	for _, r := range rr.RedCI {
-		if r.BranchCaused() {
+		if r.Counts() {
 			n++
 		}
 	}

@@ -407,7 +407,7 @@ func TestMigrateRoundReports(t *testing.T) {
 	rr := roundReports(records)
 	var heads []string
 	for _, r := range rr.RedCI {
-		heads = append(heads, fmt.Sprintf("%s %q %v", r.RedCI.Head, r.RedCI.Checks, r.BranchCaused()))
+		heads = append(heads, fmt.Sprintf("%s %q %v", r.RedCI.Head, r.RedCI.Checks, r.Counts()))
 	}
 	if want := []string{`aaa1111 ["test" "lint"] false`, `bbb2222 ["test"] true`}; !slices.Equal(heads, want) {
 		t.Errorf("red CI = %q, want %q", heads, want)
@@ -441,7 +441,7 @@ func TestMigrateRoundReports(t *testing.T) {
 	if err := writeLedgerFormat(filepath.Dir(filepath.Dir(task.Path))); err != nil {
 		t.Fatal(err)
 	}
-	if after, err := task.RoundReports(); err != nil || after.CIFixes() != 1 || after.RedCI[0].BranchCaused() || !after.RedCI[1].BranchCaused() {
+	if after, err := task.RoundReports(); err != nil || after.CIFixes() != 1 || after.RedCI[0].Counts() || !after.RedCI[1].Counts() {
 		t.Errorf("after editing the marks by hand: %+v, %v; want aaa1111 still not the branch's, and bbb2222 the branch's", after, err)
 	}
 }

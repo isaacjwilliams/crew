@@ -213,6 +213,9 @@ const ciNotTheBranch = " (the branch didn't cause it)"
 // migrateRoundReports records the red CI and conflicts the task's review rounds
 // report, as crew read them from the rounds' lines before format 2, and says
 // how many of each it recorded. Each record is dated by its round's heading.
+// The lines are "- [ ] CI failed on <head>: <check>, <check>", ending
+// " (the branch didn't cause it)" once the worker said so, and
+// "- [ ] Conflicts with <base> at <sha>", each ticked or not.
 //
 // It writes the task's records in one go. No command writes red_ci or
 // base_conflict records before format 2, so a task that has one has been
@@ -229,6 +232,8 @@ func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
 	if slices.ContainsFunc(records, func(r Record) bool { return r.RedCI != nil || r.BaseConflict != nil }) {
 		return 0, 0, nil
 	}
+	// record adds a record to records, so the next gets an ID of its own; the
+	// ones this adds are records[had:].
 	had := len(records)
 	record := func(at time.Time, fill func(*Record)) Record {
 		r := newRecord("crew migrate", records)

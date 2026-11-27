@@ -137,7 +137,8 @@ func withLearning(t Task, ls []string) []string {
 }
 
 // withSection is ls with heading, and the index of the heading in it: where
-// the file has it, or added before ## Log, or at the end without a Log.
+// the file has it, or added before ## Log, or at the end without a Log. An
+// added heading has no blank line after it: the caller writes the section.
 func withSection(ls []string, heading string) ([]string, int) {
 	if i := slices.Index(ls, heading); i >= 0 {
 		return ls, i
