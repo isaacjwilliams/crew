@@ -540,10 +540,16 @@ const wheelStep = 3
 // otherwise goes to the nearest line that is.
 func (m *liveStatus) wheel(n int) {
 	m.top = max(0, min(m.top+n, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
-	start, end := m.cursorSpan()
-	if m.wholly(start, end) {
+	if start, end := m.cursorSpan(); m.wholly(start, end) {
 		return
 	}
+	m.setCursor(m.nearestWhole())
+	m.scroll()
+}
+
+// nearestWhole is the shown line nearest the cursor that's wholly on the
+// screen, or the first line drawn on it when every one is cut off.
+func (m *liveStatus) nearestWhole() int {
 	nearest, start := -1, 0
 	for i, l := range m.shown {
 		end := start + len(l.drawn)
@@ -552,11 +558,10 @@ func (m *liveStatus) wheel(n int) {
 		}
 		start = end
 	}
-	if nearest < 0 { // every line on screen is cut off, so take the first
-		nearest = m.lineAt(m.top)
+	if nearest < 0 {
+		return m.lineAt(m.top)
 	}
-	m.setCursor(nearest)
-	m.scroll()
+	return nearest
 }
 
 // click puts the cursor on the line drawn at column x of screen line y, and
@@ -565,17 +570,21 @@ func (m *liveStatus) wheel(n int) {
 // a line, and does nothing. The screen stays where it is, unless the new
 // line's strip leaves less room and hides the line.
 func (m *liveStatus) click(x, y int) {
-	n := m.top + y - len(m.headings)
+	n := m.top + y - len(m.headings) // the screen line y, counted from the first shown line
 	if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() || n >= m.drawnHeight(0, len(m.shown)) {
 		return
 	}
 	i := m.lineAt(n)
 	start := m.drawnHeight(0, i)
+	// A line clicked while it's partly cut off stays as it is, and isn't
+	// scrolled into view; only a whole one is kept on screen if its strip
+	// takes room from the body.
 	wasWhole := m.wholly(start, start+len(m.shown[i].drawn))
 	m.setCursor(i)
 	if wasWhole {
 		m.scroll()
 	}
+	// Only a line's first row has its marker.
 	if n == start && x == m.markerColumn() {
 		m.setOpen(!m.shown[i].open)
 	}
@@ -587,9 +596,12 @@ func (m *liveStatus) click(x, y int) {
 // short of room.
 func (m *liveStatus) markerColumn() int {
 	l := m.shown[m.cursor]
+	if len(l.kids) == 0 {
+		return -1
+	}
 	before, _, found := strings.Cut(l.drawn[0], l.marker())
 	column := lipgloss.Width(before)
-	if !found || len(l.kids) == 0 || column >= m.width {
+	if !found || column >= m.width {
 		return -1
 	}
 	return column
