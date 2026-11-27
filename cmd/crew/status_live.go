@@ -3,7 +3,9 @@ package main
 // crew status's live view: the lines the plain text prints (reportLines), in a
 // terminal, built again every few seconds, with folds the user opens and closes.
 // Task and goal lines are a table with its headings pinned at the top, or cards
-// on a screen too narrow for it (status_table.go).
+// on a screen too narrow for it (status_table.go). Their notes are short there
+// (status_wording.go), so a strip at the bottom words the cursor's line's notes
+// in full.
 
 import (
 	"slices"
@@ -389,8 +391,29 @@ func (m *liveStatus) isOpen(l statusLine) bool {
 }
 
 // bodyHeight is how many screen lines the report's lines get, between the
-// headings and the bar.
-func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)) }
+// headings and the strip.
+func (m *liveStatus) bodyHeight() int { return max(1, m.height-1-len(m.headings)-len(m.strip())) }
+
+// strip is the cursor's line's notes as the plain text words them, wrapped to
+// the screen, between the report's lines and the bar: one empty line for a
+// line without notes. It leaves the report's lines at least one screen line,
+// cutting its last line short with … when it has to.
+func (m *liveStatus) strip() []string {
+	room := m.height - 1 - len(m.headings) - 1 // the bar, and a line of the report
+	if room <= 0 {
+		return nil
+	}
+	notes := ""
+	if m.cursor < len(m.shown) && m.shown[m.cursor].hasFields() {
+		notes = m.shown[m.cursor].fields[notesField].text
+	}
+	lines := strings.Split(lipgloss.Wrap(notes, m.width, ""), "\n")
+	if len(lines) > room {
+		lines = lines[:room]
+		lines[room-1] = cut(lines[room-1], m.width-1) + "…"
+	}
+	return lines
+}
 
 // drawnHeight is how many screen lines the shown lines from i to j take.
 func (m *liveStatus) drawnHeight(i, j int) int {
@@ -441,15 +464,19 @@ func (m *liveStatus) step(by int) {
 
 // page moves the screen a screenful up or down, and the cursor to the line on
 // the screen line just past the old screen's edge, so every line shows on one
-// screen or the next.
+// screen or the next. The new screen starts or ends at that edge, as tall as
+// the strip of the cursor's new line leaves it.
 func (m *liveStatus) page(by int) {
-	body := m.bodyHeight()
-	edge := m.top + body
+	edge := m.top + m.bodyHeight()
 	if by < 0 {
 		edge = m.top - 1
 	}
-	m.top += by * body
-	m.moveTo(m.lineAt(edge))
+	m.cursor = max(0, m.lineAt(edge))
+	m.top = edge
+	if by < 0 {
+		m.top = edge + 1 - m.bodyHeight()
+	}
+	m.scroll()
 }
 
 // scroll moves the screen as little as keeps the cursor's line on it: all of
@@ -474,8 +501,8 @@ func highlight(line string, width int) string {
 	return lipgloss.NewStyle().Reverse(true).Width(width).Render(strings.ReplaceAll(line, reset, reset+reverse))
 }
 
-// View is the headings, the lines on show from the top, and the bar. The
-// cursor's line is highlighted across the screen, all of it when it wraps.
+// View is the headings, the lines on show from the top, the strip and the bar.
+// The cursor's line is highlighted across the screen, all of it when it wraps.
 func (m *liveStatus) View() tea.View {
 	body := m.bodyHeight()
 	var screen []string
@@ -498,6 +525,7 @@ func (m *liveStatus) View() tea.View {
 	for len(screen) < len(m.headings)+body {
 		screen = append(screen, "")
 	}
+	screen = append(screen, m.strip()...)
 	v := tea.NewView(strings.Join(append(screen, fit(m.bar(), m.width)), "\n"))
 	v.AltScreen = true
 	return v

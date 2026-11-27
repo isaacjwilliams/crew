@@ -90,6 +90,19 @@ func screen(m *liveStatus) []string {
 	return strings.Split(m.View().Content, "\n")
 }
 
+// body is the screen lines that show the report's lines, between the headings
+// and the strip.
+func body(m *liveStatus) []string {
+	lines := screen(m)
+	return lines[len(m.headings) : len(lines)-1-len(m.strip())]
+}
+
+// stripOn is the screen lines the strip takes, above the bar.
+func stripOn(m *liveStatus) []string {
+	lines := screen(m)
+	return lines[len(lines)-1-len(m.strip()) : len(lines)-1]
+}
+
 // ansiCodes are the escapes that style the view: its colors and the cursor's
 // line.
 var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -496,11 +509,10 @@ func TestLiveStatusFitsTheScreen(t *testing.T) {
 }
 
 // onScreen: every line the cursor's line is drawn on is on the screen, between
-// the headings and the bar.
+// the headings and the strip.
 func onScreen(m *liveStatus) bool {
-	body := screen(m)[len(m.headings) : len(screen(m))-1]
 	var cursor []string
-	for _, l := range body {
+	for _, l := range body(m) {
 		if strings.Contains(l, "\x1b[7m") { // the cursor's style: reversed
 			cursor = append(cursor, strings.TrimRight(uncolored(l), " "))
 		}
@@ -701,7 +713,7 @@ func unseen(m *liveStatus, keys ...string) []string {
 	seen := make([]bool, len(report))
 	for last := ""; ; {
 		lines := screen(m)
-		for i, l := range lines[len(m.headings) : len(lines)-1] {
+		for i, l := range body(m) {
 			if n := m.top + i; n < len(report) && strings.TrimRight(uncolored(l), " ") == report[n] {
 				seen[n] = true
 			}
@@ -771,6 +783,109 @@ func TestLiveStatusHighlightsTheCursorsRowAcrossTheScreen(t *testing.T) {
 	}
 	if highlighted != len(drawn) {
 		t.Errorf("%d lines are highlighted, want 013-risky's %d", highlighted, len(drawn))
+	}
+}
+
+// stripSays is what the strip says, its lines joined.
+func stripSays(m *liveStatus) string { return words(strings.Join(stripOn(m), " ")) }
+
+// notesOf is what the cursor's line's notes say in the plain text, or nothing
+// for a line without notes.
+func notesOf(m *liveStatus) string {
+	if l := m.shown[m.cursor]; l.hasFields() {
+		return words(l.fields[notesField].text)
+	}
+	return ""
+}
+
+// The strip words the cursor's line's notes as the plain text does, wrapped
+// to the screen: on every line, in columns and on cards.
+func TestLiveStatusStripWordsTheCursorsNotesAsTheTextDoes(t *testing.T) {
+	r := variedReport(t)
+	text := strings.Split(plainText(r), "\n")
+	for _, width := range []int{120, 60} {
+		m := liveOn(r)
+		openAll(m)
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 60})
+		wrapped := false
+		for i := range m.shown {
+			m.moveTo(i)
+			got := stripOn(m)
+			if strip := stripSays(m); strip != notesOf(m) {
+				t.Errorf("at width %d, on %s the strip says %q, want %q", width, m.shown[i].head, strip, notesOf(m))
+			}
+			// A row the text prints ends with the same notes.
+			at := slices.IndexFunc(text, func(l string) bool { return strings.HasPrefix(words(l), words(m.shown[i].head)+" ") })
+			if m.shown[i].hasFields() && at >= 0 && !strings.HasSuffix(words(text[at]), stripSays(m)) {
+				t.Errorf("at width %d, the text's line %q doesn't end with the strip's %q", width, text[at], stripSays(m))
+			}
+			for _, line := range got {
+				if lipgloss.Width(line) > width {
+					t.Errorf("at width %d, a line of the strip is %d wide: %q", width, lipgloss.Width(line), line)
+				}
+			}
+			wrapped = wrapped || len(got) > 1
+		}
+		if !wrapped && width == 60 {
+			t.Errorf("at width %d, no line's notes wrap in the strip", width)
+		}
+		if inColumns := width == 120; m.inColumns != inColumns {
+			t.Errorf("at width %d, rows in columns: %v, want %v", width, m.inColumns, inColumns)
+		}
+	}
+}
+
+// The strip follows the cursor as it moves, and words the notes of the next
+// report once it's built.
+func TestLiveStatusStripFollowsTheCursorAndTheReport(t *testing.T) {
+	c := statusLedger(t)
+	m := liveOn(readReport(c, "p"))
+	openAll(m)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	goTo(t, m, "014-later")
+	if got, want := stripSays(m), notesOf(m); got != want || want == "" {
+		t.Fatalf("on 014-later, the strip says %q, want %q", got, want)
+	}
+	for _, key := range []string{"j", "k"} {
+		press(m, key)
+		if got := stripSays(m); got != notesOf(m) {
+			t.Errorf("after %s onto %s, the strip says %q, want %q", key, m.shown[m.cursor].head, got, notesOf(m))
+		}
+	}
+	reportTask(t, c, "p", "014-later", true, "status: working", "base: main")
+	m.Update(reportBuilt{report: readReport(c, "p")})
+	if got := stripSays(m); got != "1 open question(s)" {
+		t.Errorf("once 014-later asks, the strip says %q, want its question", got)
+	}
+}
+
+// However tall the strip grows on a short screen, the cursor's line stays on
+// screen, as much of it as fits, and every line is reachable, a line at a time
+// or a page at a time.
+func TestLiveStatusReachesEveryLineAsTheStripGrows(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 5}, {Width: 120, Height: 7}, {Width: 60, Height: 5}, {Width: 60, Height: 9}} {
+		m := liveOn(variedReport(t))
+		openAll(m)
+		m.Update(size)
+		grew := false
+		for _, keys := range [][]string{{"j"}, {"k"}, {"pgdown"}, {"pgup"}} {
+			if missed := unseen(m, keys...); len(missed) > 0 {
+				t.Errorf("at %dx%d, %s never shows %q", size.Width, size.Height, keys[0], missed)
+			}
+		}
+		for i := range m.shown {
+			m.moveTo(i)
+			grew = grew || len(m.strip()) > 1
+			if len(m.shown[i].drawn) <= m.bodyHeight() && !onScreen(m) {
+				t.Errorf("at %dx%d, %s isn't all on screen:\n%s", size.Width, size.Height, m.shown[i].head, strings.Join(screen(m), "\n"))
+			}
+			if got := len(screen(m)); got != size.Height {
+				t.Errorf("at %dx%d, the screen is %d lines", size.Width, size.Height, got)
+			}
+		}
+		if !grew && size.Width == 60 {
+			t.Errorf("at %dx%d, the strip never takes more than a line", size.Width, size.Height)
+		}
 	}
 }
 
