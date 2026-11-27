@@ -183,7 +183,7 @@ func TestMergeCheck(t *testing.T) {
 			}
 			got := ""
 			if m := s.mergeCheck(task, tc.worker); m != nil {
-				got = m.String()
+				got = m.wording().text
 			}
 			if got != tc.want {
 				t.Errorf("merge check = %q, want %q", got, tc.want)

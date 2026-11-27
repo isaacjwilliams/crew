@@ -292,12 +292,12 @@ func goalLines(g goalReport) statusLine {
 // state under worker, and in its notes how many of its tasks have merged and
 // how many are in flight.
 func goalFields(g goalReport) []wording {
-	notes := stripOnly(fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr)))
+	progress := fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr))
+	notes := stripOnly(progress)
 	if g.CapErr != nil {
 		notes = joinNotes([]wording{notes, capNote(g.CapErr)})
 	} else if g.InFlight.full() {
-		notes.text += ": full"
-		notes.live = goalFullSign.String()
+		notes = standing(progress+": full", goalFullSign)
 	}
 	return []wording{statusField: same(g.Goal.Get("status")), workerField: same(g.Lead.stateText()), notesField: notes}
 }

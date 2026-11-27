@@ -28,39 +28,28 @@ type mergeCheck struct {
 	LastSync bool
 }
 
-// String words the check: "merge now", "not yet: CI running; draft" or "merged
-// on GitHub", and says when it went by the last sync.
-func (m mergeCheck) String() string {
-	s := "merge now"
-	switch {
-	case m.Closed != "":
-		s = m.Closed + " on GitHub"
-	case len(m.InTheWay) > 0:
-		s = "not yet: " + strings.Join(texts(m.InTheWay), "; ")
-	case m.AwaitingUser > 0:
-		s += fmt.Sprintf(", %d finding(s) left for you", m.AwaitingUser)
-	}
-	if m.LastSync {
-		s += " (couldn't read GitHub; as of the last sync)"
-	}
-	return s
-}
-
-// wording is the check as a note. The live view shows what stands in the way
-// as its notes show them, and a PR that can merge now as merge, in green, with
-// the findings left for the user. A merged or closed PR's mark says it all.
+// wording words the check as a note: "merge now", "not yet: CI running; draft"
+// or "merged on GitHub", saying when it went by the last sync. The live view
+// shows what stands in the way as its notes show them, and a PR that can merge
+// now as merge, in green, with the findings left for the user. A merged or
+// closed PR's mark says it all.
 func (m mergeCheck) wording() wording {
-	w := joinNotes(m.InTheWay)
+	var w wording
 	switch {
 	case m.Closed != "":
-		w.live = ""
-	case len(m.InTheWay) == 0:
-		w.live = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green).Render("merge")
+		w = stripOnly(m.Closed + " on GitHub")
+	case len(m.InTheWay) > 0:
+		w = wording{"not yet: " + strings.Join(texts(m.InTheWay), "; "), joinNotes(m.InTheWay).live}
+	default:
+		w = wording{"merge now", usersWords.Foreground(lipgloss.Green).Render("merge")}
 		if m.AwaitingUser > 0 {
-			w.live += " " + lipgloss.NewStyle().Bold(true).Render(plural(m.AwaitingUser, "finding"))
+			w.text += fmt.Sprintf(", %d finding(s) left for you", m.AwaitingUser)
+			w.live += " " + usersWords.Render(plural(m.AwaitingUser, "finding"))
 		}
 	}
-	w.text = m.String()
+	if m.LastSync {
+		w.text += " (couldn't read GitHub; as of the last sync)"
+	}
 	return w
 }
 

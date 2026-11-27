@@ -465,16 +465,17 @@ func (m *liveStatus) step(by int) {
 // page moves the screen a screenful up or down, and the cursor to the line on
 // the screen line just past the old screen's edge, so every line shows on one
 // screen or the next. The new screen starts or ends at that edge, as tall as
-// the strip of the cursor's new line leaves it.
+// the strip of the cursor's new line leaves it, so the cursor moves first.
 func (m *liveStatus) page(by int) {
 	edge := m.top + m.bodyHeight()
 	if by < 0 {
 		edge = m.top - 1
 	}
 	m.cursor = max(0, m.lineAt(edge))
-	m.top = edge
 	if by < 0 {
 		m.top = edge + 1 - m.bodyHeight()
+	} else {
+		m.top = edge
 	}
 	m.scroll()
 }

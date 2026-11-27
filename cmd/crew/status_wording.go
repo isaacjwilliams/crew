@@ -23,11 +23,12 @@ type wording struct{ text, live string }
 // same is words that read the same in the plain text and the live view.
 func same(s string) wording { return wording{s, s} }
 
+// usersWords is how the live view shows what's the user's to act on.
+var usersWords = lipgloss.NewStyle().Bold(true)
+
 // forUser is a note on something that's the user's to act on: the live view
 // says it in a word or two, in bold.
-func forUser(text, words string) wording {
-	return wording{text, lipgloss.NewStyle().Bold(true).Render(words)}
-}
+func forUser(text, words string) wording { return wording{text, usersWords.Render(words)} }
 
 // standing is a note on where a line stands that asks nothing of the user: the
 // live view shows its sign.
@@ -49,24 +50,13 @@ func texts(fields []wording) []string {
 // joinNotes is a line's notes as one field: the text has every note's words,
 // and the live view each word or sign once.
 func joinNotes(notes []wording) wording {
-	var j wording
 	var lives []string
 	for _, n := range notes {
-		j.text = joined(j.text, n.text, "  ")
 		if n.live != "" && !slices.Contains(lives, n.live) {
 			lives = append(lives, n.live)
 		}
 	}
-	j.live = strings.Join(lives, " ")
-	return j
-}
-
-// joined is s and more with sep between them, or whichever isn't empty.
-func joined(s, more, sep string) string {
-	if s == "" || more == "" {
-		return s + more
-	}
-	return s + sep + more
+	return wording{strings.Join(texts(notes), "  "), strings.Join(lives, " ")}
 }
 
 // questionsNote is a note on a task's open questions, which are the user's to

@@ -239,7 +239,7 @@ func TestBuildReportGoesByOneRoundOfReads(t *testing.T) {
 		checks := map[string]string{}
 		for _, row := range buildReport(c, []string{"p"}, false, statusReads{prs: prs, workers: workers, branches: branches}).Projects[0].Rows {
 			if row.Merge != nil {
-				checks[row.Task.ID()] = row.Merge.String()
+				checks[row.Task.ID()] = row.Merge.wording().text
 			}
 		}
 		if got := checks["013-risky"]; !strings.HasSuffix(got, "(couldn't read GitHub; as of the last sync)") {
