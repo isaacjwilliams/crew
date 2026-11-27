@@ -77,6 +77,15 @@ fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^#
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n${3:+$3\\n}" "$1"; }   # task-file review-number [record-line]
 clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
+# A task's question records, one line each: its kind, who asked it and who answers it.
+questions() { jq -r 'select(.question) | "\(.question.kind) \(.question.asker) \(.question.for)"' "${1%.md}.records.jsonl"; }
+# The IDs of a task's questions that no answer has settled.
+open_ids() { [[ ! -e ${1%.md}.records.jsonl ]] || jq -rs '[.[].answer.question] as $a | .[] | select(.question and (.id | IN($a[]) | not)) | .id' "${1%.md}.records.jsonl"; }
+# The user answers a task's open questions: through crew answer for those crew
+# recorded, and by ticking any item a test typed under Open questions.
+answer_all() {
+  local id; for id in $(open_ids "$1"); do crew answer "$1" "$id" "As you think best." >/dev/null || return; done
+  sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$1"; }
 # What a worker does before its hand-over: it records the evidence for each acceptance
 # criterion, on its branch as it is now, here or on origin. Recording it again names
 # the new commit.
@@ -506,6 +515,10 @@ cp "$HOME/agents.json" "$HOME/agents.before"; setstate "done" null   # the worke
 echo OPEN >"$HOME/gh-pr-state"; echo main >"$HOME/gh-pr-base-12"; checks "$passing"
 check "status says merge now for an open PR that merges cleanly, with its checks passing and its automated review recorded" \
   '[[ $(merge_note) == *" #12  "*"  merge now  high: read the diff; security review ran" ]]'
+q=$(crew ask 1 "Keep the old filter URLs working? I recommend yes."); a=$(merge_note)
+crew answer 1 "$q" "Yes, keep them." >/dev/null; b=$(merge_note)
+check "the merge check counts a question asked through crew ask, and stops once crew answer settles it" \
+  '[[ $a == *" not yet: 1 open question(s)  high"* && $b == *"  merge now  high"* && $(questions "$F1") == "worker worker user" ]]'
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; a=$(merge_note); rm "$HOME/gh-pr-mergeable"
 touch "$HOME/gh-pr-draft"; b=$(merge_note); rm "$HOME/gh-pr-draft"
 checks '"status": "COMPLETED", "conclusion": "FAILURE"'; c=$(merge_note); checks '"status": "IN_PROGRESS"'; d=$(merge_note); checks "$passing"
@@ -575,7 +588,7 @@ check "followup refuses with nothing new" '! crew followup 1 2>/dev/null'
 out=$(crew feedback 1)
 check "the review round has the user's comments only (not bob's, not a worker reply, not a pending review)" 'r=$(section "$F1" "## Review rounds"); [[ $r == *"comment 111"* && $r != *"comment 112"* && $r != *"comment 113"* && $r != *"comment 114"* ]]'
 check "feedback lists conversation comments and review summaries by ID, but not worker replies" '[[ $out == *"comment 115"* && $out != *"comment 117"* && $out == *"review 900 (changes_requested)"* ]]'
-check "collaborators' comments go under Open questions, unchecked, for the user" '[[ $(section "$F1" "## Open questions") == *"- [ ] @bob commented on \`src/search.ts:50\` in PR #12, comment 112 — [link](u112)"*"> nit from bob"* && $(section "$F1" "## Open questions") == *"- [ ] @bob reviewed PR #12 (commented), review 902"* && $(section "$F1" "## Review rounds") != *"bob"* ]]'
+check "collaborators' comments are questions for the user, each a record from its @login, with its item under Open questions" '[[ $(questions "$F1" | grep -c "^collaborator @bob user$") == 2 ]] && [[ $(section "$F1" "## Open questions") == *"- [ ] @bob commented on \`src/search.ts:50\` in PR #12, comment 112 — [link](u112)"*"> nit from bob"* && $(section "$F1" "## Open questions") == *"- [ ] @bob reviewed PR #12 (commented), review 902"* && $(section "$F1" "## Review rounds") != *"bob"* ]]'
 check "comments from people without write access, and from bots, are never pulled" '! grep -q "Drive-by idea\|Coverage report" "$F1"'
 check "followup resumes on a new round" 'crew followup 1 >/dev/null && [[ $(crew get 1 status) == addressing-feedback && $(crew get 1 last_round_sent) == 1 ]]'
 check "resume passes the recorded session" 'grep -q -- "--resume $(crew get 1 worker_session) " "$HOME/claude-calls.log"'
@@ -1280,7 +1293,7 @@ ci() {  # head name:conclusion…: the PR's head commit and its check runs; a co
     jq -cn --arg n "${c%%:*}" --arg c "${c#*:}" '{__typename: "CheckRun", name: $n} + if $c == "-" then {status: "IN_PROGRESS"} else {status: "COMPLETED", conclusion: $c} end'
   done | jq -cs . >"$HOME/gh-pr-checks"
 }
-sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
+answer_all "$F13"   # the user has answered them
 setstate "done" null; crew set 13 status working; n=$(resumes)
 ci aaaa1111ffff test:FAILURE lint:SUCCESS docs:SKIPPED
 out=$(crew tick 2>/dev/null)
@@ -1310,10 +1323,9 @@ check "crew followup won't resume the worker of an abandoned task, or rebuild it
 crew set 13 worktree "$WT13"; crew set 13 status working; hand_over 13
 # Only crew ci-fix asks for headRefOid, so the hook leaves crew sync's read alone.
 printf '#!/bin/sh\ncase "$*" in *headRefOid*) crew set 13 status abandoned ;; esac\n' >"$HOME/gh-pr-view-hook"; chmod +x "$HOME/gh-pr-view-hook"
-sed -i '/^## Open questions$/a - [ ] Euros or pounds?' "$F13"
-crew tick >/dev/null 2>&1
+q=$(crew ask 13 "Euros or pounds?"); crew tick >/dev/null 2>&1
 check "a task abandoned during a tick isn't marked needs-input by it" '[[ $(crew get 13 status) == abandoned ]]'
-rm "$HOME/gh-pr-view-hook"; sed -i '/^- \[ \] Euros or pounds?$/d' "$F13"; crew set 13 status working; hand_over 13
+rm "$HOME/gh-pr-view-hook"; crew answer 13 "$q" "Euros." >/dev/null; crew set 13 status working; hand_over 13
 echo CLOSED >"$HOME/gh-pr-state"
 out=$(crew tick 2>/dev/null); byhand=$(crew ci-fix 13)
 check "red CI on a PR closed without merging is left alone, by tick and by hand" '[[ -z $out && $byhand == *"PR #12 is closed"* && $(crew get 13 pr_state) == closed && $(crew get 13 status) == pr-open && $(crew get 13 review_rounds) == 9 ]]'
@@ -1321,7 +1333,9 @@ echo OPEN >"$HOME/gh-pr-state"
 crew tick >/dev/null 2>&1; setstate "done" null; hand_over 13; ci cccc3333ffff test:FAILURE lint:FAILURE
 out=$(crew tick 2>/dev/null)
 check "past MAX_CI_FIXES CI rounds, red CI on a new head is a question for you, not a round" '[[ $out == *"013-tick-routing: CI still red after 2 CI rounds the branch caused, for you"* && $out == *"waiting on you (1 open question(s))"* && $(crew get 13 review_rounds) == 10 && $(crew get 13 status) == needs-input ]] && [[ $(section "$F13" "## Open questions") == *"- [ ] CI is still red on cccc333 after 2 CI rounds the branch caused (MAX_CI_FIXES=2): test, lint. Look at it yourself, or tell the worker to try again."* ]]'
-hand_over 13; sed -i 's/^- \[ \] CI is still red/- [x] CI is still red/' "$F13"
+check "that question is crew's record of red CI for the user, naming its head" \
+  '[[ $(jq -rs '"'"'map(select(.question.kind == "red-ci")) | .[] | "\(.question.asker) \(.question.for) \(.question.head)"'"'"' "${F13%.md}.records.jsonl") == "crew user cccc333" ]]'
+hand_over 13; crew answer 13 "$(open_ids "$F13")" "I'll look at it." >/dev/null
 out=$(crew tick 2>/dev/null)
 check "that question is asked once, though its head stays red" '[[ -z $out && $(grep -c "CI is still red on cccc333" "$F13") == 1 ]]'
 out=$(crew ci-fix 13); code=$?
@@ -1351,7 +1365,7 @@ setstate "done" null
 base_moves() {  # another PR merges into main on origin; prints main's new short SHA
   git -C "$SB/webapp" commit -q --allow-empty -m "Another PR" && git -C "$SB/webapp" push -q && git -C "$SB/webapp" rev-parse --short=7 HEAD
 }
-sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"   # the user has answered them
+answer_all "$F13"   # the user has answered them
 crew set 13 status working; n=$(resumes); r=$(crew get 13 review_rounds)
 echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; B1=$(base_moves)
 out=$(crew tick 2>/dev/null); byhand=$(crew catch-up 13); code=$?
@@ -1425,7 +1439,7 @@ rm -f "$HOME/.claude/projects/stub/$s13.jsonl"
 WT13=$(crew get 13 worktree); STUB=$HOME/.claude/projects/stub
 NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, ask it with \`crew ask\` and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
 head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
-answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
+answer13() { answer_all "$F13"; }
 asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }
 quiet() { touch -d '20 minutes ago' "$STUB/$(crew get "$1" worker_session).jsonl"; }  # task: its transcript, 20 minutes ago
 stall() {  # task state pid [status]: the task's worker so, its last turn ended 20 minutes ago
@@ -1444,7 +1458,7 @@ crew log 13 "Still on it."; crew set 13 status working; stall13 "done" null
 out=$(crew tick 2>/dev/null); q=$(asked13)
 check "a second stall with no new commit or change of status since the nudge resumes no one, though the worker logged and set the status it had, and asks the lead" \
   '[[ $out == "$ASKED$NL""013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == $((n + 1)) && $(crew get 13 status) == needs-input && $(wc -l <<<"$q") == 1 ]]'
-check "the question names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
+check "the question is crew's, for the lead, and names the branch's head, and the transcript, which holds the last turn after its process exits" '[[ $(questions "$F13" | tail -1) == "nudge crew lead" && $q == *"still at $(head13)"* && $q == *"$STUB/$(crew get 13 worker_session).jsonl"* ]]'
 out=$(crew tick 2>/dev/null)
 check "a third tick does nothing more" '[[ -z $out && $(resumes) == $((n + 1)) && $(asked13 | wc -l) == 1 ]]'
 check "and with nothing after the question but tick's own needs-input, the task stays needs-input, the question open and counted" \
@@ -1457,11 +1471,10 @@ settled13() { section "$F13" "## Open questions" | grep -c "^- \[x\] Its worker'
 SETTLED="013-tick-routing: its worker moved on; nudge question settled"
 ask13() { work "$WT13" "ask$((++ASKS)).txt"; stall13 "done" null; crew tick >/dev/null 2>&1; stall13 "done" null; crew tick >/dev/null 2>&1
   [[ $(crew get 13 status) == needs-input && $(asked13 | wc -l) == 1 ]]; }
-sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
-sed -i '/^## Open questions$/a - [ ] CI still red on abc1234, for you' "$F13"
+crew ask 13 "Which way? A or B." >/dev/null; crew ask 13 --split "Split it in two? The parser, then the report." >/dev/null
 work "$WT13" settle1.txt; out=$(crew tick 2>/dev/null)
-check "a new commit alone settles the nudge question, saying which; a worker's own question and a CI question beside it stay open, and the task keeps waiting" \
-  '[[ $out == "$SETTLED" && $(settled13 "new commit $(head13)\.") == 1 && $(asked13 | wc -l) == 2 && $(crew get 13 status) == needs-input ]]'
+check "a new commit alone settles the nudge question, saying which, with an answer of crew settle's; a worker's own question and its split proposal beside it stay open, and the task keeps waiting" \
+  '[[ $out == "$SETTLED" && $(settled13 "new commit $(head13)\.") == 1 && $(asked13 | wc -l) == 2 && $(open_ids "$F13" | wc -l) == 2 && $(crew get 13 status) == needs-input ]] && [[ $(jq -rs '"'"'map(select(.answer)) | last | "\(.by): \(.answer.text)"'"'"' "${F13%.md}.records.jsonl") == "crew settle: The worker moved on: new commit $(head13)." ]]'
 answer13; crew set 13 status working
 ask13; work "$WT13" settle2.txt; out=$(crew tick 2>/dev/null)
 check "a new commit while needs-input puts the task back in its worker's turn, with no open question; its idle worker is nudged by the same tick" \
@@ -1528,9 +1541,9 @@ out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
 check "nothing is nudged while the project is paused, by tick or by hand; tick holds it back, saying why" '[[ $out == "013-tick-routing: a nudge waits: $(basename "$PD") is paused" && $byhand == *"crew resume --project $(basename "$PD")"* && $st == 4 && $(resumes) == "$n" ]]'
 check "a lead hears the nudge a pause holds back" '[[ $(prompt held) == *"$HELD"*"$NL- $PJ: 013-tick-routing: a nudge waits: $PJ is paused"* ]]'
 crew resume --project "$(basename "$PD")" >/dev/null
-sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$F13"
+crew ask 13 "Which way? A or B." >/dev/null
 out=$(crew tick 2>/dev/null)
-check "nothing is nudged when the task has an unchecked Open question: it waits on you" '[[ $out == "013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" ]]'
+check "nothing is nudged when its worker has asked a question: tick marks the task needs-input, as it waits on you" '[[ $out == "013-tick-routing: waiting on you (1 open question(s))" && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
 answer13; out=$(crew tick 2>/dev/null)
 check "nor while it's needs-input" '[[ -z $out && $(resumes) == "$n" ]]'
 record_evidence 13; hand_over 13; out=$(crew tick 2>/dev/null)
@@ -1538,9 +1551,9 @@ check "nor once it's pr-open" '[[ -z $out && $(resumes) == "$n" ]]'
 # The user takes a worker's split: the lead relays it, and the worker leaves the task to
 # the lead, as implementer.md's "split as proposed" says.
 crew set 13 status working; crew followup 13 --note "Split as proposed." >/dev/null 2>&1; n=$(resumes)
-sed -i '/^## Open questions$/a - [ ] Split as proposed: open the pieces as tasks and abandon this one.' "$F13"; crew set 13 status needs-input; stall13 "done" null
+crew ask 13 --split "Split as proposed: open the pieces as tasks and abandon this one." >/dev/null; crew set 13 status needs-input; stall13 "done" null
 out=$(crew tick 2>/dev/null)
-check "a worker whose split the user took isn't told to carry on" '[[ -z $out && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
+check "a worker whose split the user took isn't told to carry on" '[[ $(questions "$F13" | tail -1) == "split worker user" && -z $out && $(resumes) == "$n" && $(crew get 13 status) == needs-input ]]'
 answer13; crew set 13 status working; work "$WT13" nudge6.txt; stall13 "done" null
 jq 'map(.state="working" | .pid=4242 | .status="waiting")' "$HOME/agents.json" >"$HOME/agents-next"
 out=$(crew tick 2>/dev/null); byhand=$(crew nudge 13 2>&1); st=$?
@@ -1799,7 +1812,7 @@ crew set "$FA" status abandoned >/dev/null
 FB=$(crew new "Busy when its parent moved" --branch busy-child --on "$(tid "$FP")"); fill "$FB"; crew ready "$FB" >/dev/null; setstate "done" null; crew dispatch "$FB" >/dev/null
 FE=$(crew new "Asking when its parent moved" --branch asking-child --on "$(tid "$FP")"); fill "$FE"; crew ready "$FE" >/dev/null; setstate "done" null; crew dispatch "$FE" >/dev/null
 first_run "$FB" 63; first_run "$FE" 66
-sed -i '/^## Open questions$/a - [ ] Which way? A or B.' "$FE"; crew set "$FE" status needs-input
+crew ask "$FE" "Which way? A or B." >/dev/null; crew set "$FE" status needs-input
 work "$WTP" p3.txt; setstate working 4242 busy; n=$(launches)
 out=$(crew tick 2>&1)
 check "tick sends a busy first run nothing when its parent moves, and says its worker rebases it" \
@@ -1813,8 +1826,9 @@ check "a hand-over refused for a stale review hands over after a new one" \
 setstate "done" null; out=$(crew tick 2>&1); byhand=$(crew restack "$FE" 2>&1); st=$?
 check "a needs-input first run gets no restack from tick or by hand, which say who rebases it" \
   '[[ $out == *"$(tid "$FE"): restack ($(tid "$FP") moved) isn'"'"'t crew'"'"'s to send"* && $(restacks_of "$FE") == 0 && $st == 4 && $byhand == *"$(tid "$FE") hasn'"'"'t been handed over: its own worker moves its branch and PR before its first hand-over; crew check-base and crew hand-over tell it how"* ]]'
-sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$FE"; n=$(fresh_launches); r=$(resumes_of "$FE")
-crew followup "$FE" --note "A." >/dev/null 2>&1; crew set "$FE" status working
+answer_all "$FE"; n=$(fresh_launches); r=$(resumes_of "$FE")
+crew followup "$FE" --note "A." >/dev/null 2>&1
+check "once its question is answered, the lead's note gives the task back to its worker" '[[ $(crew get "$FE" status) == working && $(crew status | grep "^  $(tid "$FE") ") != *"open question"* ]]'
 out=$(crew hand-over "$FE" 2>&1); run_given "$(crew get "$FE" worktree)" "$out"; ranged_review "$FE" 2
 check "once answered, it reaches pr-open on the parent's tip with the answer's followup the only one sent" \
   'crew hand-over "$FE" >/dev/null && [[ $(crew get "$FE" status) == pr-open && $(own "$(tip first-parent)" asking-child | wc -l) == 1 && $(resumes_of "$FE") == $((r + 1)) && $(fresh_launches) == "$n" && $(restacks_of "$FE") == 0 ]]'
@@ -1944,7 +1958,8 @@ GT2=$(crew new "Season standings" --goal 1); T2=$(basename "$GT2" .md)
 NG=$(crew new "Not in a goal"); fill "$NG"; crew ready "$NG" >/dev/null
 check "new --goal makes the task one of the goal's" '[[ $(crew get "$GT1" goal) == "$G" && -z $(crew get "$NG" goal) ]]'
 check "new --goal refuses a goal that doesn't exist" '! crew new "Stray" --goal 9 2>/dev/null'
-sed -i '/^## Open questions$/a - [ ] Add a standings table? It needs a migration. I recommend yes.' "$GT2"
+crew ask "$GT2" "Add a standings table? It needs a migration. I recommend yes." >/dev/null
+check "a question asked on a goal's draft parks it: the goal lead's, for the user" '[[ $(questions "$GT2") == "parked goal-lead user" && $(tail -1 "$GT2") == *" — Parked: Add a standings table? It needs a migration. I recommend yes." ]]'
 check "status lists a goal's drafts with open questions under parked, and the rest under planning" '[[ $(crew status) == *"goal $G"*"running"*"0 of 2 task(s) merged, 0/3 in flight$NL    parked$NL         $T2"*"draft"*"1 open question(s)$NL    planning$NL         $T1"* ]]'
 fill "$GT1"; crew ready "$GT1" >/dev/null
 crew goal cap 1 0 >/dev/null; prompt held >/dev/null
@@ -1985,12 +2000,48 @@ sed -i '/^## Open questions$/a - [ ] @bob commented on PR #40, comment 77 — [l
 setstate "done" null; n=$(resumes)
 out=$(crew tick 2>&1)
 check "a collaborator's comment on a goal task isn't sent to the goal lead" '[[ $out != *"goal $G"* && $(resumes) == "$n" ]]'
-sed -i '/^## Open questions$/a - [ ] Which header style? A or B. I recommend A.' "$GT1"
+q1=$(crew ask "$GT1" "Which header style? A or B. I recommend A.")
 out=$(crew tick 2>&1)
-check "tick sends a goal task's worker question to the goal lead" '[[ $out == *"goal $G: input sent to its goal lead"* && $(last_launch) == "claude --resume $(gget "$GF" lead_session) --bg New input for goal $G"*"$T1: its worker has asked something"* && $(resumes) == $((n + 1)) ]]'
+check "tick sends a goal task's worker question, which is for the goal lead, to the goal lead" '[[ $(questions "$GT1") == "worker worker goal-lead" && $out == *"goal $G: input sent to its goal lead"* && $(last_launch) == "claude --resume $(gget "$GF" lead_session) --bg New input for goal $G"*"$T1: its worker has asked something"* && $(resumes) == $((n + 1)) ]]'
 setstate "done" null
 out=$(crew tick 2>&1)
 check "a question the goal lead has already been sent isn't sent again" '[[ $out != *"goal $G"* && $(resumes) == $((n + 1)) ]]'
+crew hand-on "$GT1" "$q1" "The header's style is the user's call." >/dev/null; out=$(crew tick 2>&1)
+check "nor once the goal lead hands it on to the user, and the task still waits on them" \
+  '[[ $out != *"goal $G"* && $(resumes) == $((n + 1)) && $(crew get "$GT1" status) == needs-input && $(tail -1 "$GT1") == *" — For the user: The header'"'"'s style is the user'"'"'s call." ]]'
+# Three questions on one goal task: the goal lead hands one on to the user and
+# answers another; crew show says where each stands.
+GQ=$(crew new "Season fixtures" --goal 1); crew set "$GQ" status working
+qa=$(crew ask "$GQ" "Home games first? I recommend yes."); qb=$(crew ask "$GQ" "Show kick-off times in local time? I recommend yes.")
+qc=$(crew ask "$GQ" $'Which fixtures feed?\nThe league\'s, or the clubs\'? I recommend the league\'s.')
+crew hand-on "$GQ" "$qa" "It changes what fans see first." >/dev/null; crew answer "$GQ" "$qb" "Yes: local time." >/dev/null
+check "three questions, one handed on and one answered: two are open, one waiting on the user, one on the goal lead" \
+  '[[ $(open_ids "$GQ" | tr "\n" " ") == "$qa $qc " && $(section "$GQ" "## Open questions" | grep -c "^- \[ \]") == 2 ]]'
+shown=$(section <(crew show "$GQ") "## Open questions" | sed -n '/^- \[/,$p' | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/WHEN/')
+check "crew show gives each question its kind, who asked it and when, who it waits on, and what settled it" '[[ $shown == "- [ ] Home games first? I recommend yes. (question $qa)
+  - worker'"'"'s question: asked by the worker, WHEN by crew ask
+  - handed on to the user WHEN by crew hand-on: It changes what fans see first.
+  - waits on the user
+
+- [x] Show kick-off times in local time? I recommend yes. (question $qb)
+  - worker'"'"'s question: asked by the worker, WHEN by crew ask
+  - settled WHEN by crew answer: Yes: local time.
+
+- [ ] Which fixtures feed? (question $qc)
+  The league'"'"'s, or the clubs'"'"'? I recommend the league'"'"'s.
+  - worker'"'"'s question: asked by the worker, WHEN by crew ask
+  - waits on the goal lead" ]]'
+ledger_of() { git -C "$L" rev-parse HEAD; git -C "$L" status --porcelain; cat "${1%.md}.records.jsonl" "$1" | cksum; }
+refused() {  # task message command...: the command fails, saying message, and leaves the ledger as it was
+  local t=$1 m=$2 before out; shift 2; before=$(ledger_of "$t")
+  ! out=$("$@" 2>&1) && [[ $out == *"$m"* && $(ledger_of "$t") == "$before" ]]; }
+check "crew ask refuses an empty question, and changes nothing" 'refused "$GQ" "say what the question is" crew ask "$GQ" "  "'
+check "hand-on and answer refuse a question the task doesn't have, and change nothing" \
+  'refused "$GQ" "has no question ffff0000 (crew show" crew hand-on "$GQ" ffff0000 "Why not." && refused "$GQ" "has no question ffff0000 (crew show" crew answer "$GQ" ffff0000 "Yes."'
+check "hand-on and answer refuse a settled question, saying when it was settled, and change nothing" \
+  'refused "$GQ" "$qb is already settled, on 20" crew hand-on "$GQ" "$qb" "Why not." && refused "$GQ" "$qb is already settled, on 20" crew answer "$GQ" "$qb" "Yes."'
+check "hand-on refuses a question already waiting on the user, and changes nothing" 'refused "$GQ" "$qa already waits on the user" crew hand-on "$GQ" "$qa" "Again."'
+crew set "$GQ" status abandoned
 setstate working 4242
 out=$(crew goal note 1 "Use style B for the header" 2>&1)
 check "a note to a busy goal lead is recorded and waits" '[[ $out == *"crew tick passes it to the goal lead"* && $(section "$GF" "## Decisions") == *"from the user: Use style B for the header"* && $(gget "$GF" unsent_notes) == 1 ]]'
@@ -2151,7 +2202,7 @@ st=$(crew status)
 check "status doesn't call a goal under its max_in_flight full" '[[ $st == *"goal $G5"*"2/3 in flight"$'"'"'\n'"'"'"    in flight"* && $st != *"in flight: full"* ]]'
 check "status numbers a ready task stacked on one in flight in next, on its parent and not after it" '[[ $(grep -c "$(basename "$SK" .md)" <<<"$st") == 1 && $(heading "$st" "next, in dispatch order" | head -1) == "      1  $(basename "$SK" .md)"*"on $(num "$SN")" ]]'
 check "status shows the first 5 tasks that can go next, and how many more there are" '[[ $(heading "$st" "next, in dispatch order" | grep -c "^      [1-5]  ") == 5 && $(heading "$st" "next, in dispatch order" | tail -1) == "      … (1 more)" ]]'
-SQ=$(crew new "Groups question on the sixth" --goal "$GF5" --on "$SL"); sed -i '/^## Open questions$/a - [ ] Which way? I recommend this one.' "$SQ"
+SQ=$(crew new "Groups question on the sixth" --goal "$GF5" --on "$SL"); crew ask "$SQ" "Which way? I recommend this one." >/dev/null
 st=$(crew status)
 check "status still lists a task past the first 5 that has a question in its stack, with its number" '[[ $(heading "$st" "next, in dispatch order" | grep -A1 "^      6  $(basename "$SL" .md)" | tail -1) == "        └ $(num "$SQ")"*"1 open question(s)" && $(heading "$st" "next, in dispatch order") != *"more)"* ]]'
 crew set "$SQ" status abandoned
@@ -2208,10 +2259,10 @@ sed -i '/^MAX_WORKERS=x$/d' "$PE"; crew goal cap "$GF5" 3 >/dev/null
 # nothing to ask fold into a count.
 OR=$(crew new "Outside ready"); fill "$OR"; crew ready "$OR" >/dev/null
 crew new "Outside draft one" >/dev/null; crew new "Outside draft two" >/dev/null
-OQ=$(crew new "Outside question"); sed -i '/^## Open questions$/a - [ ] Which way? I recommend this one.' "$OQ"
+OQ=$(crew new "Outside question"); crew ask "$OQ" "Which way? I recommend this one." >/dev/null
 st=$(crew status)
 check "status says a ready task outside a goal is dispatched by hand" '[[ $(row "$(basename "$OR" .md)") == *"ready"*"dispatch by hand" ]]'
-check "status folds drafts outside a goal into a count, and lists one with an open question" '[[ $st == *$'"'"'\n'"'"'"  2 draft(s)  (crew list --project $(basename "$PD") --status draft)"* && $st != *"outside-draft"* && $(row "$(basename "$OQ" .md)") == *"draft"*"1 open question(s)"* ]]'
+check "status folds drafts outside a goal into a count, and lists one the lead parked with a question" '[[ $(questions "$OQ") == "parked lead user" && $st == *$'"'"'\n'"'"'"  2 draft(s)  (crew list --project $(basename "$PD") --status draft)"* && $st != *"outside-draft"* && $(row "$(basename "$OQ" .md)") == *"draft"*"1 open question(s)"* ]]'
 check "status says when the workers running have reached MAX_WORKERS" 'echo "MAX_WORKERS=0" >>"$L/config/crew.env" && st=$(crew status) && [[ $(head -1 <<<"$st") == "workers running: "*"/0: full, nothing dispatches" && $st == *"$NL$(basename "$PD")  workers full (MAX_WORKERS 0 here)$NL"* ]]'
 sed -i '/^MAX_WORKERS=0$/d' "$L/config/crew.env"
 crew goal abandon "$GF5" >/dev/null 2>&1; crew goal abandon "$GF6" >/dev/null 2>&1
@@ -2416,7 +2467,7 @@ check "status folds a stack whose middle draft has a done and an abandoned spike
   '[[ $st == *"  3 draft(s)"* &&  $st != *"$(basename "$FS_TOP" .md)"* && $st != *"$(basename "$FS_MID" .md)"* && $st != *"$(basename "$FS_END" .md)"* ]]'
 stack3 FU; FUS=$(crew new "FU spike" --kind spike --informs "$(num "$FU_MID")"); crew set "$FUS" status working
 stack3 FI; crew to-learn "$FI_MID" "Will it fit?" >/dev/null
-stack3 FQ; sed -i '/^## Open questions$/a - [ ] Which way?' "$FQ_MID"
+stack3 FQ; crew ask "$FQ_MID" "Which way?" >/dev/null
 FQS=$(crew new "FQ spike" --kind spike --informs "$(num "$FQ_MID")"); sed -i "s/^status: .*/status: done/" "$FQS"
 st=$(crew status)
 check "status lists a stack in full when its middle draft has an unfinished spike, an open item or an open question" \
@@ -2611,7 +2662,7 @@ git init -q --bare "$SB/shop.git"; git clone -q "$SB/shop.git" "$SB/shop" 2>/dev
 (cd "$SB/shop" && echo "# Conventions" >AGENTS.md && git add -A && git commit -qm init && git push -q -u origin main && git remote set-head origin main && crew project add >/dev/null)
 P2=$(cd "$SB/shop" && crew config PROJECT)
 S1=$(crew new "Shop checkout" --project "$P2")
-QT=$(crew new "Which currency" --project "$PJ"); sed -i '/^## Open questions$/a - [ ] Euros or pounds?' "$QT"
+QT=$(crew new "Which currency" --project "$PJ"); crew ask "$QT" "Euros or pounds?" >/dev/null
 out=$(cd "$HOME" && crew status)
 check "outside a repo, status shows every project" '[[ $out == *"$NL$PJ$NL"* && $out == *"$NL$P2$NL"* && $out != *"other projects"* ]]'
 out=$(cd "$HOME" && crew find 1 2>&1)
@@ -3082,6 +3133,17 @@ rm "$SP/local.env"
 out=$(crew stats --project stats --since 2026-11-05 2>&1); st=$?
 check "without the project's clone, stats says it didn't check for reverts, and still reports" \
   '((st == 0)) && [[ $out == *"005-stats-fix fixes 004-stats-cause"*"  reverts: not checked (no clone of the project on this machine)" && $out != *"revert of"* ]]'
+# On a goal's task, only a question the goal lead hands on to the user waits on
+# them: from its hand-on until the task leaves needs-input. Here it waits 3h.
+SG=$L/projects/stats-goal; mkdir -p "$SG/tasks"; echo "DEFAULT_BRANCH=main" >"$SG/project.env"; cp "$PD/ledger-format" "$SG/"; GW=$SG/tasks/001-stats-goal.md
+sed -e 's/^status: .*/status: working/' -e 's/^kind: .*/kind: build/' -e 's/^goal:$/goal: 001-season/' "$L/templates/task.md" >"$GW"
+printf -- '- 2026-11-07 09:00 — status → needs-input\n' >>"$GW"; crew commit "stats goal fixture" >/dev/null
+q=$(crew ask "$GW" "Which tier?") && crew hand-on "$GW" "$q" "A pricing call." >/dev/null
+sed -i -E -e 's/^- [0-9-]{10} [0-9:]{5} — Asked the goal lead/- 2026-11-07 09:30 — Asked the goal lead/' \
+  -e 's/^- [0-9-]{10} [0-9:]{5} — For the user/- 2026-11-07 10:00 — For the user/' -e 's/^status: .*/status: merged/' "$GW"
+printf -- '- 2026-11-07 13:00 — status → working\n- 2026-11-08 12:00 — status → merged\n' >>"$GW"; crew commit "stats goal fixture" >/dev/null
+check "stats counts the wait on a goal task's question from when its goal lead handed it on to the user" \
+  '[[ $(crew stats --project stats-goal --since 2026-11-05 | tr -s " ") == *" 001-stats-goal build 0 0 - 3h 0 - 0 0 0 0 0"* ]]'
 
 # crew costs: each transcript folder is charged to the step the ledger gives it,
 # by the folder's name: the lead's, a task's worktree, a goal's checkout, the

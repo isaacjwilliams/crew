@@ -22,9 +22,9 @@ import (
 // the worker's, for its goal lead or, outside a goal, for the user; --split
 // marks it as a proposal to split the branch into smaller pieces.
 func cmdAsk(c *Crew, args []string) error {
-	split := len(args) > 0 && args[0] == "--split"
+	split := len(args) == 3 && args[1] == "--split"
 	if split {
-		args = args[1:]
+		args = []string{args[0], args[2]}
 	}
 	if len(args) != 2 {
 		return usage(`crew ask TASK [--split] "<question>"`)
