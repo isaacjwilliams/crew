@@ -1,11 +1,11 @@
 # Agent crew: setup and usage
 
-Eight Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal or on your phone.
+Eight Claude Code agents, a ledger that holds all coordination state outside the repo, and a small CLI (`crew`) that ties them together. You work in two places: **GitHub**, where you review and merge, and **the lead**, which you talk to about everything else, at a terminal.
 
 Everything lives in one private git repo of yours, your **crew home**, cloned to `~/crew`: the crew's code, your settings, and the ledger. It's a copy of the public crew repo, [isaacjwilliams/crew](https://github.com/isaacjwilliams/crew), and pulls new versions from it. Any machine with a clone can run the crew, one at a time.
 
 ```
-          you ──── talk ────▶  lead  (a session in ~/crew/lead, for every project; on the phone: crew)
+          you ──── talk ────▶  lead  (a session in ~/crew/lead, for every project)
            │                    │  writes briefs, dispatches, routes feedback
            │                    │  └─ brief-reviewer pass on each brief
            │                    ▼
@@ -74,7 +74,6 @@ Clone your private repo, not the public one: `git clone <your private repo> ~/cr
 | `~/.config/fish/completions/{crew,lead}.fish` | Tab completion in fish, including task IDs |
 | Linux: `~/.config/systemd/user/crew-gardener.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-gardener.plist` | Weekly gardener and misses agent |
 | Linux: `~/.config/systemd/user/crew-tick.{service,timer}`<br>Mac: `~/Library/LaunchAgents/crew-tick.plist` | `crew tick` every 3 minutes |
-| Linux: `~/.config/systemd/user/crew-lead.service`<br>Mac: `~/Library/LaunchAgents/crew-lead.plist` | The lead for your phone (see below) |
 
 These are the crew's **services**: systemd user units on Linux, launchd jobs on a Mac. `crew install` leaves them off; `crew host up` turns them on for the machine that runs the crew, and `crew host down` turns them off again.
 
@@ -105,25 +104,12 @@ Options:
 
 `crew` and `lead` are found through `~/.local/bin`, so it has to be on your `PATH`. If it isn't, install and `crew doctor` say what to add to your shell's startup file: `fish_add_path ~/.local/bin` in fish, or `export PATH="$HOME/.local/bin:$PATH"` in bash or zsh.
 
-### The lead on your phone
-
-`crew host up` also enables the `crew-lead` service, which runs `crew serve`: the lead as a Remote Control server named `crew`, on the machine that runs the crew. In the Claude app, open the Code tab and pick `crew` to talk to the lead from anywhere.
-
-- The lead waits for you to speak first: on the phone it doesn't open with a briefing, as `lead` does in a terminal. Say "Status" for one.
-- Sessions you start from the phone are throwaway: a session started that way hangs once the service restarts (after `crew upgrade`, say), so start a new one. The lead keeps everything in the ledger, so nothing is lost.
-- Workers don't show on the phone, because background sessions don't. Ask the lead about them.
-
-Two first-time prompts need a terminal on that machine, once. Until they're answered the service can't start the lead, and it's tried again every 30 seconds:
-
-1. Trust the lead's folder: run `lead` once and accept the trust dialog.
-2. Enable Remote Control, if you never have on this machine: run `crew serve` yourself, answer its question with `y`, then Ctrl+C and restart the service: `systemctl --user restart crew-lead.service` on Linux, `launchctl kickstart -k gui/$(id -u)/crew-lead` on a Mac. If the service shows as running after step 1 (`systemctl --user status crew-lead`, or on a Mac `launchctl print gui/$(id -u)/crew-lead`, whose `state` says `running`), it's enabled already, and `crew serve` would be refused while the service runs.
-
 ### On a Mac
 
 The crew runs the same way on a Mac, with these differences:
 
-- **The services are launchd jobs** (LaunchAgents), not systemd units: `crew-tick`, `crew-gardener` and `crew-lead`, in `~/Library/LaunchAgents/`. `launchctl print gui/$(id -u)/crew-tick` shows one. They write their output to `~/crew/logs/crew-tick.log`, `crew-gardener.log` and `crew-lead.log`.
-- **They run only while you're logged in, and not while the Mac sleeps.** macOS has no `enable-linger`. Ticks missed during sleep become one when it wakes, and a gardener run missed then happens on waking. This matters most for the lead on your phone: it's there only while the Mac is awake and you're logged in. To keep it reachable, set the Mac not to sleep while on power, in System Settings.
+- **The services are launchd jobs** (LaunchAgents), not systemd units: `crew-tick` and `crew-gardener`, in `~/Library/LaunchAgents/`. `launchctl print gui/$(id -u)/crew-tick` shows one. They write their output to `~/crew/logs/crew-tick.log` and `crew-gardener.log`.
+- **They run only while you're logged in, and not while the Mac sleeps.** macOS has no `enable-linger`. Ticks missed during sleep become one when it wakes, and a gardener run missed then happens on waking.
 - **A job's `PATH`** lists the usual places for crew's tools: the home's `bin`, `~/.local/bin`, mise's shims, Homebrew's (`/opt/homebrew/bin`, `/usr/local/bin`) and the system's. launchd has no drop-ins like `systemctl --user edit`, and `crew install` replaces an installed plist, so to add a directory, edit the job's plist in your home (`~/crew/launchd/crew-tick.plist`, say), commit it, and run `crew install`. `crew upgrade` merges your edit like any other; if a release changes the same line, it stops on the conflict for you to resolve.
 - **The machine's name** is its Local hostname (System Settings → General → Sharing), which doesn't change with the network.
 - **A path in another letter case** (`~/Crew/projects/…` for `~/crew`) names the same file on a Mac's usual disk, but the write guard compares paths as written, so it blocks an agent's edit to the ledger spelled that way. It never allows an edit it should block.
@@ -337,7 +323,7 @@ On a Mac the jobs run only while you're logged in (see [On a Mac](#on-a-mac)), a
 
 The lead runs `crew tick` at the start of a session and whenever you ask how things are going, so it works without the timer too, only less promptly.
 
-Whatever a tick does, and whatever it holds back, it says so with a line: a round waiting for a busy worker, a restack waiting for the one below it, a dispatch held by a cap or a dependency, a paused project's work. Your lead hears those lines with your next message, along with what workers did meanwhile (a PR handed over to you, a question for you), so it knows what crew did since you last spoke without running `crew tick` or being asked. It hears each line once, and something held back once until the reason changes. A new session starts with what happens from then on. A lead for one project hears only that project; the lead on your phone hears every project, like a plain `lead`, with each line's project before it. The lines stay on the machine that runs the crew for 30 days, in `~/crew/news/`: a file a day, and `held-back`.
+Whatever a tick does, and whatever it holds back, it says so with a line: a round waiting for a busy worker, a restack waiting for the one below it, a dispatch held by a cap or a dependency, a paused project's work. Your lead hears those lines with your next message, along with what workers did meanwhile (a PR handed over to you, a question for you), so it knows what crew did since you last spoke without running `crew tick` or being asked. It hears each line once, and something held back once until the reason changes. A new session starts with what happens from then on. A lead for one project hears only that project; a lead for every project (a plain `lead`) hears every project, with each line's project before it. The lines stay on the machine that runs the crew for 30 days, in `~/crew/news/`: a file a day, and `held-back`.
 
 ### Hand the crew a goal
 
@@ -785,8 +771,6 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
 ## 10. Troubleshooting
 
 - **A command says crew runs on another machine.** This machine doesn't hold the lease, so it only reads. Run `crew host` to see who does, and `crew host up --take` to move the crew here.
-- **A session on the phone stopped answering.** Sessions started from the phone hang once the `crew-lead` service restarts (after `crew upgrade`, or a crash). Start a new one: the lead picks up from the ledger.
-- **The phone doesn't list `crew`.** The lead service runs only on the machine that runs the crew, and on a Mac only while it's awake and you're logged in. On that machine, `systemctl --user status crew-lead` shows why it isn't running, or on a Mac `launchctl print gui/$(id -u)/crew-lead` and `~/crew/logs/crew-lead.log`; `crew doctor` checks the rest. The two first-time prompts in [The lead on your phone](#the-lead-on-your-phone) are the usual cause.
 - **`crew upgrade` stopped on a conflict.** An edit you made to crew's own files (an agent prompt, say) conflicts with the new version. Resolve the files it lists, `git -C ~/crew commit`, and run `crew upgrade` again, which lifts the pause; or `git -C ~/crew merge --abort` to stay on the old version, and `crew resume --project <p>` for each project it names (not `--all`, which would lift your own pauses too). The crew stays paused until you do one or the other. While the merge is open, git won't take the crew's ledger commits: each change stays in the files, `crew` warns, and the next commit after the merge takes it. Don't leave it open long.
 - **A task can't go back to `pr-open` after an upgrade.** Every move to `pr-open` goes through `crew hand-over`, which checks the task each time. A task dispatched before your home had `crew hand-over` has no `## Evidence` entries, so its next return, after a review round, a restack or a question you answered, is refused until its worker records evidence for each acceptance criterion; the lead resumes it with a note saying so. A task whose acceptance criteria aren't `- ` items is refused too, and that one is the lead's to fix: it rewrites them as `- ` items, keeping their words, and hands over again. A task with a PR and no recorded automated review is refused too, while `AUTO_REVIEWS` is above 0 for it, even one opened while it was 0: its worker runs a pass, or the lead lets a task that isn't high risk through with `crew set <task> auto_review no`. Until then the task stays where it was, and its PR on GitHub is unchanged.
 - **`crew tick` says it stood down.** Another machine took the lease. This one's timers are off and its workers stopped. If it says it kept work on a `lost/…` branch, those are ledger changes origin never got: compare them with `git -C ~/crew log -p lost/…` and copy over what matters on the machine that runs the crew.
@@ -850,7 +834,7 @@ To change agent behaviour, edit `~/.claude/agents/*.md`; running sessions pick u
   - goals: starting a goal lead in its own checkout, tasks joining a goal, `crew tick` dispatching a goal's ready tasks (holding one back for a cap, saying why, a goal's `max_in_flight` among them, counting every task of a stack), sending the goal lead your notes and its workers' questions only once, and closing, reopening and abandoning a goal;
   - stacked tasks: `--on`, dispatch once the parent's branch is pushed, sync reporting a moved or merged parent, `crew restack` through a real squash merge and rebases of a three-task stack, and a PR that targets a branch other than its task's base retargeted once, alone or with a rebase;
   - the home: settings layered from `defaults.env`, `crew.env` and `project.env`, the ledger pushed to a bare origin in the background (rebased over commits from elsewhere), agents' own edits committed by the hook, `crew checkout`, and tasks that moved here getting their worktrees back and fresh workers.
-- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, a stray file where a link goes, new and dropped files, the fish files an older install shipped, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `crew serve`; `lead`, run in bash through its link: its project scope, and the MCP servers it syncs, then switches off for one project; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, its confirmation, the pause it makes and lifts, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
+- Checks of a machine and its home, in fake `HOME`s: `crew install` (a fresh install, an unchanged re-run, an installed agent edited in place, a stray file where a link goes, new and dropped files, the fish files an older install shipped, skipped components, a home outside `~/crew`); the lease between two machines (claims, `--take`, a lost lease, the old machine standing down, a handover that has to rebase); `lead`, run in bash through its link: its project scope, and the MCP servers it syncs, then switches off for one project; `crew setup` against a fake public repo; `crew upgrade` to a release tag, a release whose binary isn't up yet, its confirmation, the pause it makes and lifts, and a conflict; and `bin/crew` downloading a missing binary, failing to, and fetching another version.
 - The fish completions were checked with fish 3.7.
 
 **Not verified:** the live checks listed under "Assumptions to re-check" in `ARCHITECTURE.md` (what the lead loads, project memory reaching sessions through the SessionStart hook, a real failover, everything on a Mac: the shell suites run only on Linux), the settings crew passes to a live `--bg` worker, goal lead or gardener reaching it (they're a JSON string to `--settings`, with the session's project in their `env`), a project's `mcp.json` servers reaching live workers and leads (the MCP entries under "Assumptions to re-check"), `crew dispatch` with a real repo's Worktrunk hooks (the `wt` flags and JSON output were checked against `wt` 0.78 in a scratch repo), a live worker carrying out a `crew restack` (the rebases in the tests are run by the test itself), GitHub retargeting a stacked PR when its parent's branch is deleted, an image from a private evidence repo showing on a PR, and live model runs of the agents, goal leads among them. I didn't want to spend your quota from this workspace, and the background-session supervisor needs your machine. Before handing a worker real backlog work, do a smoke test: a tiny, low-stakes task (a typo or a log message) through the whole loop, including one review round.
@@ -862,8 +846,8 @@ crew host down                       # releases the lease and turns the services
                                      # over unpushed work, push it, or use --force to drop it
 rm ~/.claude/agents/{lead,implementer,casual-observer,brief-reviewer,reviewer,gardener,misses,goal-lead}.md
 rm ~/.local/bin/{crew,lead} ~/.config/fish/completions/{crew,lead}.fish
-rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer} ~/.config/systemd/user/crew-lead.service
-rm ~/Library/LaunchAgents/crew-{tick,gardener,lead}.plist      # on a Mac, instead
+rm ~/.config/systemd/user/crew-{gardener,tick}.{service,timer}
+rm ~/Library/LaunchAgents/crew-{tick,gardener}.plist      # on a Mac, instead
 # Remove env.CREW_HOME from ~/.claude/settings.json.
 # ~/crew and ~/agent-work hold your history and any unmerged work: remove them deliberately.
 # Your private repo on GitHub keeps the ledger until you delete it.
