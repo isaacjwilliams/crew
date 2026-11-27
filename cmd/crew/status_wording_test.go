@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -177,6 +179,22 @@ func TestTheUsersWordsStandOut(t *testing.T) {
 		if tc.note.live != tc.want {
 			t.Errorf("%q shows as %q, want %q", tc.note.text, tc.note.live, tc.want)
 		}
+	}
+}
+
+// A draft whose items still to learn can't be read asks the user to fix that.
+func TestADraftWhoseItemsCantBeReadAsksTheUser(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "projects", "p", "tasks") // never migrated
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "001-a.md")
+	if err := os.WriteFile(p, []byte("---\nstatus: draft\n---\n## Log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := (&statusView{}).learning(Task{Doc{p}})
+	if want := usersWords.Render("to learn?"); got.live != want || !strings.Contains(got.text, "run crew migrate") {
+		t.Errorf("learning = %q, want %q in full and %q live", got, "run crew migrate", want)
 	}
 }
 

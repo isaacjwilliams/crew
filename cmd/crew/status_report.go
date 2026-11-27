@@ -647,8 +647,8 @@ func (s *statusView) notes(t Task) []wording {
 	} else {
 		notes = append(notes, s.prNotes(t)...)
 	}
-	if l := s.learning(t); l != "" {
-		notes = append(notes, standing(l, learningSign))
+	if l := s.learning(t); l.text != "" {
+		notes = append(notes, l)
 	}
 	// informs holds the draft's full ID, as crew new writes it: NNN-<name>.
 	if d := t.Get("informs"); d != "" {
@@ -760,14 +760,16 @@ func (s *statusView) branchesOf(t Task) (branchRead, bool) {
 // learning is what a draft is still learning: how many of its still-to-learn
 // items are open, and the spikes that inform it, with their status: "2 to learn;
 // 041 done, 042 working". When its items can't be read, it says why in place of
-// their count. It's empty when there's nothing to say.
-func (s *statusView) learning(t Task) string {
+// their count, and that's the user's to fix. It's empty when there's nothing to
+// say.
+func (s *statusView) learning(t Task) wording {
 	if t.Status() != Draft {
-		return ""
+		return wording{}
 	}
 	var parts []string
-	if items, err := t.StillToLearn(); err != nil {
-		parts = append(parts, "to learn: "+err.Error())
+	items, unread := t.StillToLearn()
+	if unread != nil {
+		parts = append(parts, "to learn: "+unread.Error())
 	} else if n := openItems(items); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d to learn", n))
 	}
@@ -778,7 +780,14 @@ func (s *statusView) learning(t Task) string {
 	if len(spikes) > 0 {
 		parts = append(parts, strings.Join(spikes, ", "))
 	}
-	return strings.Join(parts, "; ")
+	text := strings.Join(parts, "; ")
+	switch {
+	case text == "":
+		return wording{}
+	case unread != nil:
+		return forUser(text, "to learn?")
+	}
+	return standing(text, learningSign)
 }
 
 // dependencies are what tasks wait on, as crew dispatch sees them (pendingDeps).
