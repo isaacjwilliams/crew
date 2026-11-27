@@ -265,7 +265,8 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // same screen line, as far as the report's end allows, wherever the cursor is.
 func (m *liveStatus) show(r statusReport, at time.Time) { m.showLines(reportLines(r), at) }
 
-// showLines is show for a report that's already lines.
+// showLines is show for a report that's already lines, so a test can change
+// the lines on show and put them back.
 func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 	var key string
 	if l, ok := m.current(); ok {
@@ -279,6 +280,9 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 		i = m.cursor
 	}
 	m.setCursor(i)
+	// Put the first old row that's still in the report back at its screen line.
+	// emptyRoom is added to the end clamp so room a click left under the last
+	// line survives the refresh.
 	for _, row := range onScreen {
 		if j := m.indexOf(row.key); j >= 0 {
 			m.top = m.drawnHeight(0, j) - row.at
@@ -553,9 +557,9 @@ func (m *liveStatus) lineAt(n int) int {
 	return len(m.shown) - 1
 }
 
-// step moves the cursor one line up or down, and shows it. When the cursor's
-// line isn't all on the screen (the wheel took it off, or a click left its strip
-// over it) that's all it does. Otherwise, going down, it first scrolls through a
+// step moves the cursor one line up or down, and shows it. If the cursor's line
+// isn't all on the screen (the wheel took it off, or a click left its strip over
+// it), that's all it does. Otherwise, going down, it first scrolls through a
 // line taller than the screen, then through notes too long for the strip; going
 // up, it scrolls back through them the other way round.
 func (m *liveStatus) step(by int) {
@@ -753,5 +757,3 @@ func (m *liveStatus) bar() string {
 func fit(line string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }
-
-// away is how many lines apart two lines are.
