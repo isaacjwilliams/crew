@@ -167,7 +167,7 @@ sed -i '/^LEAD_PERMISSION_MODE=default$/d' "$PE"
 out=$(CREW_LEAD_FINGERPRINT=$fp crew lead --hook </dev/null)
 check "and says nothing once everything a lead loads is as it was" '[[ -z $out ]]'
 # The lead's hook also tells each session what crew did since its previous prompt (news.go).
-prompt() {  # session [event]: what the lead's hook adds to a prompt from that session; by default one for every project, which isn't crew lead's own session
+prompt() {  # session [event]: what the lead's hook adds to a prompt from that session; by default CREW_PROJECT=all with no crew lead fingerprint
   jq -nc --arg s "$1" --arg e "${2:-UserPromptSubmit}" '{session_id: $s, hook_event_name: $e, prompt: "hello"}' 2>/dev/null |
     CREW_PROJECT=${CREW_PROJECT:-all} crew lead --hook
 }

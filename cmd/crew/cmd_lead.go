@@ -1,6 +1,6 @@
 package main
 
-// Starting the lead: crew lead, which bin/lead runs, and execLead. A lead runs in the home's lead/, whose settings
+// Starting the lead: crew lead, which bin/lead runs. A lead runs in the home's lead/, whose settings
 // make the session the lead and give it the ledger and the project checkouts.
 
 import (
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -49,7 +48,11 @@ func cmdLead(c *Crew, args []string) error {
 	}
 	cmd := c.claude(slices.Concat([]string{"--name", name}, flags, claudeArgs)...)
 	cmd.Env = append(cmd.Env, "CREW_PROJECT="+sessionProject, "CREW_LEAD_FINGERPRINT="+c.leadFingerprint(flags))
-	return c.execLead(cmd)
+	// The session loads lead/.mcp.json and the lead's settings from lead/.
+	if err := os.Chdir(c.path("lead")); err != nil {
+		return fail("%s is missing", c.path("lead"))
+	}
+	return execClaude(cmd)
 }
 
 // leadFlags is the flags a lead for proj ("" for every project) starts with,
@@ -145,14 +148,4 @@ func takeProject(args []string) (project string, rest []string, err error) {
 		return "", nil, fail("--project needs a project (crew status --all lists them)")
 	}
 	return args[i+1], slices.Concat(args[:i], args[i+2:]), nil
-}
-
-// execLead replaces crew with cmd, a lead's claude command, run in the home's
-// lead/. Its caller syncs the MCP servers first, since the session loads
-// lead/.mcp.json.
-func (c *Crew) execLead(cmd *exec.Cmd) error {
-	if err := os.Chdir(c.path("lead")); err != nil {
-		return fail("%s is missing", c.path("lead"))
-	}
-	return execClaude(cmd)
 }

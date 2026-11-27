@@ -82,7 +82,9 @@ check "a changed agent is replaced by rename, not rewritten in place" '[[ $(stat
 check "a new fish file is installed" '[[ -f $HOME/.config/fish/completions/crew-extra.fish ]]'
 check "a dropped agent is removed and backed up" '[[ ! -e $HOME/.claude/agents/gardener.md ]] && ls "$HOME"/.local/share/agent-crew/backups/*/.claude/agents/gardener.md >/dev/null 2>&1'
 check "a dropped unit is disabled and removed" '[[ ! -e $HOME/.config/systemd/user/crew-gardener.timer ]] && grep -q "disable --now crew-gardener.timer" "$HOME/systemctl-calls.log"'
-# A home upgraded from a version that shipped the lead service, and enabled it.
+# A home upgraded from a version that shipped the lead service and enabled it:
+# install disables and removes any unit the home stops shipping, which is how
+# it loses crew-lead.
 echo '[Service]' >"$H/systemd/crew-lead.service"
 "$H/bin/crew" install --yes >/dev/null 2>&1
 systemctl --user enable --now crew-lead.service

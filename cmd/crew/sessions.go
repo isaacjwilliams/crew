@@ -879,7 +879,7 @@ func (c *Crew) sessionSettings(settings *object, p *Project) string {
 //
 //	empty        a worker or goal lead (sessionSettings sets it so)
 //	a value      crew lead's session: the fingerprint of what it loaded
-//	unset        no session crew started
+//	unset        a session crew didn't start (a plain claude)
 func inWorkerOrGoalLead() bool {
 	fp, set := os.LookupEnv("CREW_LEAD_FINGERPRINT")
 	return set && fp == ""
