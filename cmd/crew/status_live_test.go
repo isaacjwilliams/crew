@@ -27,15 +27,6 @@ func showsLive(l statusLine) string {
 	return strings.Join(lives, "  ")
 }
 
-// texts are the fields as the plain text words them.
-func texts(fields []wording) []string {
-	var out []string
-	for _, f := range fields {
-		out = append(out, f.text)
-	}
-	return out
-}
-
 // liveOn is the live view showing r, as it is once its first report comes in.
 func liveOn(r statusReport) *liveStatus {
 	m := newLiveStatus(statusFeed{})

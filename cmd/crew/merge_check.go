@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"charm.land/lipgloss/v2"
 )
 
 // mergeCheck is whether a pr-open task's PR can be merged now.
@@ -16,7 +18,7 @@ type mergeCheck struct {
 	Closed string
 	// InTheWay is what stands between the PR and a merge, what's likely to clear
 	// soonest first. It's empty when the PR can merge now.
-	InTheWay []string
+	InTheWay []wording
 	// AwaitingUser counts the findings the newest automated review left for the
 	// user that they haven't decided yet. They never stand in the way: the user
 	// can merge without deciding them.
@@ -34,7 +36,7 @@ func (m mergeCheck) String() string {
 	case m.Closed != "":
 		s = m.Closed + " on GitHub"
 	case len(m.InTheWay) > 0:
-		s = "not yet: " + strings.Join(m.InTheWay, "; ")
+		s = "not yet: " + strings.Join(texts(m.InTheWay), "; ")
 	case m.AwaitingUser > 0:
 		s += fmt.Sprintf(", %d finding(s) left for you", m.AwaitingUser)
 	}
@@ -42,6 +44,24 @@ func (m mergeCheck) String() string {
 		s += " (couldn't read GitHub; as of the last sync)"
 	}
 	return s
+}
+
+// wording is the check as a note. The live view shows what stands in the way
+// as its notes show them, and a PR that can merge now as merge, in green, with
+// the findings left for the user. A merged or closed PR's mark says it all.
+func (m mergeCheck) wording() wording {
+	w := joinNotes(m.InTheWay)
+	switch {
+	case m.Closed != "":
+		w.live = ""
+	case len(m.InTheWay) == 0:
+		w.live = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green).Render("merge")
+		if m.AwaitingUser > 0 {
+			w.live += " " + lipgloss.NewStyle().Bold(true).Render(plural(m.AwaitingUser, "finding"))
+		}
+	}
+	w.text = m.String()
+	return w
 }
 
 // mergeCheck works out whether a pr-open task's PR can merge now, from the PR as
@@ -53,10 +73,10 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	}
 	ref := t.PR()
 	if ref == "" {
-		return &mergeCheck{InTheWay: []string{"no PR"}}
+		return &mergeCheck{InTheWay: []wording{forUser("no PR", "no PR")}}
 	}
 	if _, asked := s.prs[ref]; !asked {
-		return &mergeCheck{InTheWay: []string{"PR not read on GitHub yet"}}
+		return &mergeCheck{InTheWay: []wording{stripOnly("PR not read on GitHub yet")}}
 	}
 	pr, answered := s.prOf(t)
 	m := &mergeCheck{LastSync: !answered}
@@ -65,7 +85,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		m.Closed = strings.ToLower(pr.State)
 		return m
 	case "":
-		return &mergeCheck{InTheWay: []string{"couldn't read the PR on GitHub, and crew sync hasn't recorded it yet"}}
+		return &mergeCheck{InTheWay: []wording{stripOnly("couldn't read the PR on GitHub, and crew sync hasn't recorded it yet")}}
 	}
 	base := s.branches.effectiveBase(t)
 	parent, onParent := s.branches.liveParent(t)
@@ -75,39 +95,40 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	retarget := s.branches.offBaseReason(t, pr.Base)
 	defaultBranch := s.settings["DEFAULT_BRANCH"]
 	// Every reason that holds is listed, even where one leads to another (a
-	// merged parent still the base both needs a restack and may conflict).
+	// merged parent still the base both needs a restack and may conflict). The
+	// live view leaves to the strip what the PR's marks show.
 	for _, c := range []struct {
 		holds  bool
-		reason string
+		reason wording
 	}{
 		// Clears within seconds: the branches crew status hasn't read yet.
-		{!known, "branches not read yet"},
+		{!known, stripOnly("branches not read yet")},
 		// Clears by itself, within minutes: the worker, crew tick, GitHub or CI.
-		{s.workersUnseen == "" && worker.busy(), "worker busy"},
-		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), unsentRounds(t) + " not sent yet"},
-		{pr.Mergeable == mergeableUnknown, "GitHub still checking for conflicts"},
-		{pr.CI == ciRunning, "CI running"},
-		{atoiOr0(t.AutoReviews(s.settings["AUTO_REVIEWS"])) > 0 && t.NewestReview() == 0, "no automated review yet"},
+		{s.workersUnseen == "" && worker.busy(), standing("worker busy", underWaySign)},
+		{atoiOr0(t.Get("review_rounds")) > atoiOr0(t.Get("last_round_sent")), standing(unsentRounds(t)+" not sent yet", underWaySign)},
+		{pr.Mergeable == mergeableUnknown, stripOnly("GitHub still checking for conflicts")},
+		{pr.CI == ciRunning, stripOnly("CI running")},
+		{atoiOr0(t.AutoReviews(s.settings["AUTO_REVIEWS"])) > 0 && t.NewestReview() == 0, standing("no automated review yet", underWaySign)},
 		// Clears once the branch is where it belongs: a restack or retarget crew
 		// sends the worker, or the parent's PR merging.
-		{restack != "", "needs restack: " + restack},
-		{retarget != "", retarget},
-		{onParent, "stacked on " + taskNumber(parent)},
-		{!stacked && defaultBranch != "" && t.Base() != defaultBranch, fmt.Sprintf("based on %s, not %s", t.Base(), defaultBranch)},
+		{restack != "", standing("needs restack: "+restack, mustMoveSign)},
+		{retarget != "", standing(retarget, mustMoveSign)},
+		{onParent, standing("stacked on "+taskNumber(parent), waitingSign)},
+		{!stacked && defaultBranch != "" && t.Base() != defaultBranch, standing(fmt.Sprintf("based on %s, not %s", t.Base(), defaultBranch), mustMoveSign)},
 		// Needs a fix from the worker.
-		{pr.Mergeable == conflicting, "conflicts with " + base},
-		{pr.CI == ciFailing, "CI failing"},
-		{pr.Draft, "draft"},
-		{t.AwaitsSecurityReview(), "no security review yet"},
+		{pr.Mergeable == conflicting, stripOnly("conflicts with " + base)},
+		{pr.CI == ciFailing, stripOnly("CI failing")},
+		{pr.Draft, stripOnly("draft")},
+		{t.AwaitsSecurityReview(), standing("no security review yet", noSecurityReviewSign)},
 		// Needs someone on GitHub: an update of the branch, a rerun of the
 		// checks, or a reviewer's approval.
-		{pr.MergeState == "BEHIND", "behind " + base},
-		{pr.CI == ciCancelled, "CI cancelled"},
-		{pr.ReviewDecision == "CHANGES_REQUESTED", "changes requested"},
-		{pr.ReviewDecision == "REVIEW_REQUIRED", "review required"},
+		{pr.MergeState == "BEHIND", stripOnly("behind " + base)},
+		{pr.CI == ciCancelled, stripOnly("CI cancelled")},
+		{pr.ReviewDecision == "CHANGES_REQUESTED", stripOnly("changes requested")},
+		{pr.ReviewDecision == "REVIEW_REQUIRED", stripOnly("review required")},
 		// Needs the user.
-		{t.OpenQuestions() > 0, fmt.Sprintf("%d open question(s)", t.OpenQuestions())},
-		{s.workersUnseen != "", s.workersUnseen},
+		{t.OpenQuestions() > 0, questionsNote(t.OpenQuestions())},
+		{s.workersUnseen != "", stripOnly(s.workersUnseen)},
 	} {
 		if c.holds {
 			m.InTheWay = append(m.InTheWay, c.reason)
@@ -116,7 +137,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	// GitHub has the last word: a PR it blocks for a reason not named above, such
 	// as a required check that hasn't reported, isn't merge now either.
 	if len(m.InTheWay) == 0 && pr.MergeState == "BLOCKED" {
-		m.InTheWay = []string{"blocked by a branch rule on GitHub"}
+		m.InTheWay = []wording{stripOnly("blocked by a branch rule on GitHub")}
 	}
 	if reviews := t.AutomatedReviews(); len(reviews) > 0 {
 		m.AwaitingUser = reviews[len(reviews)-1].AwaitingUser()

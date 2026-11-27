@@ -2,10 +2,15 @@ package main
 
 // How crew status words what a line says twice: in full for the plain text,
 // and as the live view shows it in its columns. Beside a PR's number, the
-// live view shows facts about the PR on GitHub as marks.
+// live view shows facts about the PR on GitHub as marks. In its notes, it
+// words only what's the user's to act on, shows where the line stands as a
+// sign, and leaves the rest to the strip under the report, which words the
+// cursor's notes in full.
 
 import (
+	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -17,6 +22,69 @@ type wording struct{ text, live string }
 
 // same is words that read the same in the plain text and the live view.
 func same(s string) wording { return wording{s, s} }
+
+// forUser is a note on something that's the user's to act on: the live view
+// says it in a word or two, in bold.
+func forUser(text, words string) wording {
+	return wording{text, lipgloss.NewStyle().Bold(true).Render(words)}
+}
+
+// standing is a note on where a line stands that asks nothing of the user: the
+// live view shows its sign.
+func standing(text string, s sign) wording { return wording{text, s.String()} }
+
+// stripOnly is a note the live view leaves to the strip: what the PR's marks
+// already show, and details that ask nothing of the user.
+func stripOnly(text string) wording { return wording{text: text} }
+
+// texts are the full words of each of fields.
+func texts(fields []wording) []string {
+	var out []string
+	for _, f := range fields {
+		out = append(out, f.text)
+	}
+	return out
+}
+
+// joinNotes is a line's notes as one field: the text has every note's words,
+// and the live view each word or sign once.
+func joinNotes(notes []wording) wording {
+	var j wording
+	var lives []string
+	for _, n := range notes {
+		j.text = joined(j.text, n.text, "  ")
+		if n.live != "" && !slices.Contains(lives, n.live) {
+			lives = append(lives, n.live)
+		}
+	}
+	j.live = strings.Join(lives, " ")
+	return j
+}
+
+// joined is s and more with sep between them, or whichever isn't empty.
+func joined(s, more, sep string) string {
+	if s == "" || more == "" {
+		return s + more
+	}
+	return s + sep + more
+}
+
+// questionsNote is a note on a task's open questions, which are the user's to
+// answer.
+func questionsNote(n int) wording {
+	return forUser(fmt.Sprintf("%d open question(s)", n), plural(n, "question"))
+}
+
+// capNote is a note on a goal whose max_in_flight crew can't read.
+func capNote(err error) wording { return forUser(err.Error(), "max_in_flight?") }
+
+// plural is "1 thing" or "n things".
+func plural(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return fmt.Sprintf("%d %ss", n, thing)
+}
 
 // sign is a short symbol the live view shows in a color. Its symbol alone
 // tells it from every other sign, so the view reads the same without color.
@@ -50,6 +118,18 @@ var (
 	changesRequestedMark = sign{"✎", lipgloss.Red}
 	reviewRequiredMark   = sign{"⦿", lipgloss.Yellow}
 	blockedMark          = sign{"⊖", lipgloss.Red} // by a branch rule none of the others names
+)
+
+// The signs for where a line stands, in its notes.
+var (
+	underWaySign         = sign{"⧗", lipgloss.Yellow}  // something else is at work on it: its worker, crew tick or a review
+	waitingSign          = sign{"⋯", lipgloss.Blue}    // it waits on other tasks
+	goAheadSign          = sign{"»", lipgloss.Green}   // its go-ahead is met, so crew tick dispatches it
+	mustMoveSign         = sign{"↻", lipgloss.Cyan}    // its branch or its PR has to move to another base
+	learningSign         = sign{"⌕", lipgloss.Blue}    // a spike that informs it is still finding out
+	pausedSign           = sign{"ǁ", lipgloss.Magenta} // a pause stopped its worker
+	goalFullSign         = sign{"▮", lipgloss.Yellow}  // its goal has as many tasks in flight as it allows
+	noSecurityReviewSign = sign{"⚷", lipgloss.Red}     // it's high risk and its security review hasn't run
 )
 
 // prMarks are the facts about a PR the live view shows beside its number: its

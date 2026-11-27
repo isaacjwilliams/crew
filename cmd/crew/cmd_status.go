@@ -292,13 +292,14 @@ func goalLines(g goalReport) statusLine {
 // state under worker, and in its notes how many of its tasks have merged and
 // how many are in flight.
 func goalFields(g goalReport) []wording {
-	notes := fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr))
+	notes := stripOnly(fmt.Sprintf("%d of %d task(s) merged, %s in flight", g.Merged, g.Total, slotsText(g.InFlight, g.CapErr)))
 	if g.CapErr != nil {
-		notes += "  " + g.CapErr.Error()
+		notes = joinNotes([]wording{notes, capNote(g.CapErr)})
 	} else if g.InFlight.full() {
-		notes += ": full"
+		notes.text += ": full"
+		notes.live = goalFullSign.String()
 	}
-	return []wording{statusField: same(g.Goal.Get("status")), workerField: same(g.Lead.stateText()), notesField: same(notes)}
+	return []wording{statusField: same(g.Goal.Get("status")), workerField: same(g.Lead.stateText()), notesField: notes}
 }
 
 // slotsText is "used/limit", with ? for a limit set to something that isn't a
@@ -411,7 +412,7 @@ func rowFields(r taskRow) []wording {
 	}
 	notes := r.Notes
 	if r.Merge != nil {
-		notes = append([]string{r.Merge.String()}, notes...)
+		notes = append([]wording{r.Merge.wording()}, notes...)
 	}
 	return []wording{
 		statusField: same(string(r.Task.Status())),
@@ -419,6 +420,6 @@ func rowFields(r taskRow) []wording {
 		prField:     pr,
 		modelField:  same(r.Task.Model()),
 		effortField: same(r.Task.Effort()),
-		notesField:  same(strings.Join(notes, "  ")),
+		notesField:  joinNotes(notes),
 	}
 }

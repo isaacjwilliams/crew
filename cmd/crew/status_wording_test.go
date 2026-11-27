@@ -70,6 +70,116 @@ func TestEveryRowWithAPRShowsItsChecks(t *testing.T) {
 	}
 }
 
+// everyNoteLive is how the live view words each row of everyNoteLedger, with
+// its color taken out: its head, its PR, and its notes. The strip words the
+// rest, as the plain text does (everyNoteText).
+const everyNoteLive = `
+goal 001-full |  | ▮
+    301-in-flight |  |
+    1  302-next |  |
+goal 002-bad-cap |  | max_in_flight?
+    1  303-next |  |
+091-open-parent | #91 CI✓ | merge low
+  └ 110-stacked | #110 CI✓ | ⋯ low
+  └ 128-branches-unread | #128 CI✓ | ⋯ low
+  └ 209-branches-unread |  |
+101-merge-now | #101 CI✓ | merge low
+102-findings-left | #102 CI✓ | merge 2 findings medium
+103-worker-busy | #103 CI✓ | ⧗ low
+104-round-not-sent | #104 CI✓ | ⧗ low
+105-checking-conflicts | #105 CI✓ ↯? | low
+106-ci-running | #106 CI⧗ | low
+107-not-reviewed | #107 CI✓ | ⧗ low
+108-restack | #108 CI✓ | ↻ low
+109-retarget | #109 CI✓ | ↻ low
+111-based-elsewhere | #111 CI✓ | ↻ low
+112-conflicts | #112 CI✓ ↯ | low
+113-ci-failing | #113 CI✗ | low
+114-draft | #114 CI✓ ◌ | low
+115-no-security-review | #115 CI✓ | ⚷ high
+116-behind | #116 CI✓ ⇣ | low
+117-ci-cancelled | #117 CI⊘ | low
+118-changes-requested | #118 CI✓ ✎ | low
+119-review-required | #119 CI✓ ⦿ | low
+120-asks | #120 CI✓ | 1 question low
+121-blocked | #121 CI✓ ⊖ | low
+122-merged | #122 CI✓ ⋈ | low
+123-closed | #123 CI✓ ⊗ | low
+124-last-sync | #124 CI✗ ✎ | low
+125-never-synced | #125 CI? | low
+126-not-asked | #126 CI- | low
+127-no-pr |  | no PR low
+129-no-risk-tier | #129 CI✓ | merge no risk tier
+130-secured | #130 CI✓ | merge high
+201-changes-requested | #201 CI✗ ✎ |
+202-draft | #202 CI⧗ ◌ ↯ ⇣ |
+203-closed | #203 CI- ⊗ |
+204-approved | #204 CI✓ ⊖ ✦ |
+205-review-required | #205 CI⊘ ↯? ⦿ |
+206-no-pr-yet |  |
+207-restack |  | ↻
+208-retarget | #208 CI- | ↻
+210-asks |  | 1 question
+211-interrupted |  | ǁ
+212-review-off |  |
+213-merged-pr | #213 CI- ⋈ |
+220-learning |  | ⌕
+221-spike |  |
+230-by-hand |  | dispatch
+231-bad-go-ahead |  | go_ahead? dispatch
+232-go-ahead-lost |  | dispatch
+233-go-ahead-met |  | »
+234-go-ahead-once |  | priority? ⋯
+235-bad-dependency |  | depends_on? dispatch
+236-after |  | ⋯ dispatch
+237-after-abandoned |  | dep abandoned dispatch
+238-after-many |  | dep abandoned dispatch
+239-on-parent |  | dispatch
+311-in-flight |  |
+312-goal-full |  | ▮ dispatch
+313-goal-bad-cap |  | max_in_flight? dispatch
+`
+
+// The live view words each note as a PR mark, the user's words, a sign, or not
+// at all, leaving it to the strip.
+func TestLiveViewWordsEveryNote(t *testing.T) {
+	c, reads := everyNoteLedger(t)
+	var got []string
+	var walk func(lines []statusLine, depth int)
+	walk = func(lines []statusLine, depth int) {
+		for _, l := range lines {
+			if l.hasFields() {
+				f := l.fields
+				got = append(got, strings.TrimRight(strings.Repeat("  ", depth)+l.head+" | "+uncolored(f[prField].live)+" | "+uncolored(f[notesField].live), " "))
+			}
+			walk(l.kids, depth+1)
+		}
+	}
+	for _, project := range reportLines(buildReport(c, []string{"p"}, false, reads)) {
+		walk(project.kids, 0)
+	}
+	if got := "\n" + strings.Join(got, "\n") + "\n"; got != everyNoteLive {
+		t.Errorf("live rows:%s\nwant:%s", got, everyNoteLive)
+	}
+}
+
+// The user's words are bold, and a PR that can merge says so in green.
+func TestTheUsersWordsStandOut(t *testing.T) {
+	bold := lipgloss.NewStyle().Bold(true)
+	for _, tc := range []struct {
+		note wording
+		want string
+	}{
+		{questionsNote(2), bold.Render("2 questions")},
+		{lookNote(Task{docWith(t, "---\nrisk: high\n---\n")}), bold.Render("high")},
+		{mergeCheck{AwaitingUser: 1}.wording(), bold.Foreground(lipgloss.Green).Render("merge") + " " + bold.Render("1 finding")},
+	} {
+		if tc.note.live != tc.want {
+			t.Errorf("%q shows as %q, want %q", tc.note.text, tc.note.live, tc.want)
+		}
+	}
+}
+
 // Beside its checks, a PR shows what GitHub says of it: merged or closed, or
 // what's in its way and whether it's approved.
 func TestPRMarks(t *testing.T) {
