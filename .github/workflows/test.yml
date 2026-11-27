@@ -11,13 +11,14 @@ on:
 permissions:
   contents: read
 
+# Both jobs run only in the public repo: a private crew home is a copy of it
+# that pushes to its own GitHub repo.
 jobs:
   # One job for each suite, so a red check names the suite that failed. lint
-  # runs go test ./... too. It skips claude plugin validate and the fish syntax
-  # check here, since the runner has neither claude nor fish.
+  # runs go test ./... too. The runner has neither claude nor fish, so lint skips
+  # claude plugin validate and the fish syntax check, and still runs gofmt,
+  # go vet and shellcheck.
   linux:
-    # Only the public repo: a private crew home is a copy of it that pushes to
-    # its own GitHub repo.
     if: github.repository == 'isaacjwilliams/crew'
     runs-on: ubuntu-latest
     strategy:

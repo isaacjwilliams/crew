@@ -11,7 +11,8 @@ permissions:
   contents: write
 
 jobs:
-  # Every suite the pull requests run, on Linux and on a Mac.
+  # The checks every pull request gets: every suite, lint included, on Linux,
+  # and the Go tests on a Mac.
   test:
     uses: ./.github/workflows/test.yml
 
