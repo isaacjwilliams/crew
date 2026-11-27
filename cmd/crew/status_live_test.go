@@ -1008,6 +1008,196 @@ func TestLiveStatusMovesAWrappedRowAsOne(t *testing.T) {
 	}
 }
 
+// mouseLayouts are the sizes the mouse tests run at: the table, and the cards a
+// narrower screen shows instead, whose lines are taller.
+var mouseLayouts = map[string]tea.WindowSizeMsg{"table": {Width: 120, Height: 14}, "cards": {Width: 60, Height: 14}}
+
+// mouseOn is the live view at size, showing the varied report with every line
+// open.
+func mouseOn(t *testing.T, size tea.WindowSizeMsg) *liveStatus {
+	m := liveOn(variedReport(t))
+	openAll(m)
+	m.Update(size)
+	return m
+}
+
+// wheeled turns the mouse wheel n times, down or up.
+func wheeled(m *liveStatus, button tea.MouseButton, n int) {
+	for range n {
+		m.Update(tea.MouseWheelMsg{Button: button})
+	}
+}
+
+// clicked clicks the left button at column x of screen line y.
+func clicked(m *liveStatus, x, y int) {
+	m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+// startOf is the first screen line the shown line i is drawn on, counted from
+// the first shown line.
+func startOf(m *liveStatus, i int) int { return m.drawnHeight(0, i) }
+
+func TestLiveStatusAsksTheTerminalForTheMouse(t *testing.T) {
+	if got := liveOn(variedReport(t)).View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Errorf("the view asks for mouse mode %v, want clicks and the wheel", got)
+	}
+}
+
+func TestLiveStatusWheelMovesTheScreenAndNotTheHighlight(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		m.moveTo(m.lineAt(6))
+		cursor, top := m.cursor, m.top
+		for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
+			wheeled(m, button, 1)
+			if m.top == top {
+				t.Errorf("%s: the wheel (%v) leaves the same lines on screen", name, button)
+			}
+			if m.cursor != cursor {
+				t.Errorf("%s: the wheel (%v) moves the highlight from line %d to %d", name, button, cursor, m.cursor)
+			}
+			if !onScreen(m) {
+				t.Errorf("%s: the wheel (%v) leaves the highlighted line off screen", name, button)
+			}
+			top = m.top
+		}
+	}
+}
+
+func TestLiveStatusWheelMovesTheHighlightOnlyToKeepItOnScreen(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		wheeled(m, tea.MouseWheelDown, 1)
+		if m.cursor == 0 || !onScreen(m) {
+			t.Fatalf("%s: wheeling down from the top leaves the highlight on line %d, want the first line wholly on screen", name, m.cursor)
+		}
+		if start := startOf(m, m.cursor); start < m.top || (m.cursor > 0 && startOf(m, m.cursor-1) >= m.top) {
+			t.Errorf("%s: wheeling down puts the highlight on line %d, not the nearest on screen", name, m.cursor)
+		}
+
+		press(m, "end")
+		wheeled(m, tea.MouseWheelUp, 1)
+		last := len(m.shown) - 1
+		if m.cursor == last || !onScreen(m) {
+			t.Fatalf("%s: wheeling up from the bottom leaves the highlight on line %d, want the last line wholly on screen", name, m.cursor)
+		}
+		if end := startOf(m, m.cursor+1); end > m.top+m.bodyHeight() || startOf(m, m.cursor+2) <= m.top+m.bodyHeight() && m.cursor+1 < last {
+			t.Errorf("%s: wheeling up puts the highlight on line %d, not the nearest on screen", name, m.cursor)
+		}
+	}
+}
+
+func TestLiveStatusWheelStopsAtTheEnds(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		wheeled(m, tea.MouseWheelUp, 3)
+		if m.top != 0 || m.cursor != 0 {
+			t.Errorf("%s: wheeling up at the top moves to top %d, line %d", name, m.top, m.cursor)
+		}
+		wheeled(m, tea.MouseWheelDown, 100)
+		if want := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top != want {
+			t.Errorf("%s: wheeling down stops at top %d, want %d: the last line at the bottom", name, m.top, want)
+		}
+		if !onScreen(m) {
+			t.Errorf("%s: the highlight is off screen at the bottom", name)
+		}
+		wheeled(m, tea.MouseWheelDown, 3)
+		if want := m.drawnHeight(0, len(m.shown)) - m.bodyHeight(); m.top != want {
+			t.Errorf("%s: wheeling down at the bottom moves to top %d, want %d", name, m.top, want)
+		}
+	}
+}
+
+func TestLiveStatusKeepsTheWheelsPlaceAcrossReports(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := liveOn(variedReport(t))
+		m.Update(size)
+		wheeled(m, tea.MouseWheelDown, 2)
+		top, cursor, was := m.top, m.cursor, body(m)
+		m.Update(reportBuilt{report: variedReport(t)})
+		if m.top != top || m.cursor != cursor || !slices.Equal(body(m), was) {
+			t.Errorf("%s: a new report moves the screen from top %d, line %d to top %d, line %d", name, top, cursor, m.top, m.cursor)
+		}
+	}
+}
+
+func TestLiveStatusClickHighlightsAnyLineOfAShownLineAndKeepsTheScreen(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		wheeled(m, tea.MouseWheelDown, 1)
+		top := m.top
+		for i := range m.shown {
+			for row := range m.shown[i].drawn {
+				y := len(m.headings) + startOf(m, i) + row - m.top
+				if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() {
+					continue
+				}
+				clicked(m, m.width-1, y)
+				if m.cursor != i || m.top != top {
+					t.Errorf("%s: a click on line %d, row %d, puts the highlight on line %d at top %d, want top %d", name, i, row, m.cursor, m.top, top)
+				}
+			}
+		}
+	}
+}
+
+func TestLiveStatusClickOnAnythingButALineChangesNothing(t *testing.T) {
+	for name, size := range mouseLayouts {
+		size.Height = 100 // room below the last line
+		m := mouseOn(t, size)
+		m.moveTo(3)
+		before := screen(m)
+		rows := []int{len(m.headings) + m.drawnHeight(0, len(m.shown)), size.Height - 2, size.Height - 1}
+		if len(m.headings) > 0 {
+			rows = append(rows, 0)
+		}
+		for _, y := range rows {
+			clicked(m, 1, y)
+			if m.cursor != 3 || !slices.Equal(screen(m), before) {
+				t.Errorf("%s: a click on screen line %d changes the view", name, y)
+			}
+		}
+	}
+	clicked(newLiveStatus(statusFeed{}), 0, 0) // before the first report, there's no line
+}
+
+func TestLiveStatusClickOnTheMarkerFoldsAndOnlyThere(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		const goal = 1 // a line with others under it
+		row := len(m.headings) + startOf(m, goal)
+		marker := strings.Index(uncolored(m.shown[goal].drawn[0]), "▾")
+		x := lipgloss.Width(uncolored(m.shown[goal].drawn[0])[:marker])
+		count := len(m.shown)
+
+		clicked(m, x+2, row)
+		if m.cursor != goal || len(m.shown) != count {
+			t.Errorf("%s: a click beside the marker folds the line or misses it", name)
+		}
+		m.moveTo(0)
+		clicked(m, x, row)
+		if m.cursor != goal || m.shown[goal].open || len(m.shown) >= count {
+			t.Errorf("%s: a click on the marker doesn't highlight and close the line", name)
+		}
+		clicked(m, x, row)
+		if !m.shown[goal].open || len(m.shown) != count {
+			t.Errorf("%s: a second click on the marker doesn't open the line again", name)
+		}
+
+		leaf := slices.IndexFunc(m.shown, func(l shownLine) bool { return len(l.kids) == 0 && l.depth > 0 })
+		leafRow := len(m.headings) + startOf(m, leaf) - m.top
+		if leafRow < len(m.headings) || leafRow >= len(m.headings)+m.bodyHeight() {
+			m.moveTo(leaf)
+			leafRow = len(m.headings) + startOf(m, leaf) - m.top
+		}
+		m.moveTo(0)
+		clicked(m, indentWidth(m.shown[leaf].depth)-2, leafRow)
+		if m.cursor != leaf || len(m.shown) != count {
+			t.Errorf("%s: a click where a line with nothing under it has no marker does more than highlight it", name)
+		}
+	}
+}
+
 // TestLiveStatusReadsGitHubAndPullsTheLedgerWhenDue leaves the view open for two
 // minutes on a machine that doesn't run the crew, with a refresh asked for
 // along the way, and GitHub failing from 3 seconds on.
