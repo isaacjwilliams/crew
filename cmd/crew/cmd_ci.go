@@ -101,16 +101,10 @@ func rollup(checks []ciCheck) (ciState, []string) {
 // shortSHA is a commit's abbreviated hash, as the task file's CI lines name it.
 func shortSHA(sha string) string { return sha[:min(len(sha), 7)] }
 
-// redCI is a head commit whose checks failed, for a review round to report.
-type redCI struct {
-	head   string // short SHA
-	checks []string
-}
-
 // crew ci-fix TASK: when CI went red on the head of a task's open PR after its
 // worker handed the PR over, sends the worker the failure as a review round,
-// once for each head commit. After MAX_CI_FIXES rounds the branch caused
-// (Task.CIFixes), it asks the user under Open questions instead. Exits 3 when
+// once for each head commit, and records it. After MAX_CI_FIXES rounds the
+// branch caused (RoundReports.CIFixes), it asks the user under Open questions instead. Exits 3 when
 // there's nothing to do.
 func cmdCIFix(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
@@ -170,12 +164,22 @@ func cmdCIFix(c *Crew, args []string) error {
 	case st != PROpen:
 		return nothingToDo("%s is %s, and its CI is its worker's own business until the PR is handed over (pr-open)", t.ID(), st)
 	}
-	if t.CIReported(head) {
+	records, err := t.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	reports := roundReports(records)
+	if len(reports.CIOn(head)) > 0 || t.CIQuestionAsked(head) {
 		return nothingToDo("the red CI on %s is reported already", head)
 	}
 	checks := strings.Join(failed, ", ")
-	if fixes := t.CIFixes(); fixes < maxFixes {
-		n, _ := reviewRound{redCI: &redCI{head, failed}}.add(t, t.PRNumber())
+	if fixes := reports.CIFixes(); fixes < maxFixes {
+		r := newRecord("crew ci-fix", records)
+		r.RedCI = &RedCI{Head: head, Checks: failed}
+		if err := t.AddRecords(r); err != nil {
+			return err
+		}
+		n, _ := reviewRound{redCI: r.RedCI}.add(t, t.PRNumber())
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {
@@ -201,12 +205,12 @@ func ciSummaryMarker(head string) string {
 }
 
 // crew ci-summary [--not-the-branch] TASK SHA FILE: posts FILE on the task's PR
-// as the worker's account of the red CI the task file reports on commit SHA: why
-// it was red, and what was done. Each commit gets a comment of its own: when
-// this GitHub account's comment for SHA is there already, it is edited to FILE.
-// --not-the-branch says the branch didn't cause it, which the round's CI line
-// then records, so that round doesn't count toward MAX_CI_FIXES; without it,
-// the round counts.
+// as the worker's account of the red CI crew reported on commit SHA: why it was
+// red, and what was done. Each commit gets a comment of its own: when this
+// GitHub account's comment for SHA is there already, it is edited to FILE.
+// It records the worker's word on the cause as a ci_cause record: with
+// --not-the-branch, that the branch didn't cause it, so that round doesn't
+// count toward MAX_CI_FIXES; without it, that it did, so the round counts.
 func cmdCISummary(c *Crew, args []string) error {
 	if err := need("gh"); err != nil {
 		return err
@@ -236,8 +240,12 @@ func cmdCISummary(c *Crew, args []string) error {
 	if t.PR() == "" {
 		return fail("task has no PR")
 	}
-	if !t.CIReported(head) {
-		return fail("%s reports no red CI on %s (no '%s' or '%s' line names it)", t.ID(), head, strings.TrimSpace(ciFailedOn), strings.TrimSpace(ciStillRedOn))
+	reports, err := t.RoundReports()
+	if err != nil {
+		return fail("%v", err)
+	}
+	if len(reports.CIOn(head)) == 0 && !t.CIQuestionAsked(head) {
+		return fail("crew reported no red CI on %s for %s (crew show %s lists what it reported)", head, t.ID(), t.ID())
 	}
 	p, err := c.loadProject(t.Project())
 	if err != nil {
@@ -257,13 +265,29 @@ func cmdCISummary(c *Crew, args []string) error {
 	} else {
 		fmt.Printf("posted the CI summary for %s on PR #%s\n", head, num)
 	}
-	// The round's line records what the worker found, for crew ci-fix's count.
-	// If this fails after the post, running the command again edits the same
-	// comment and records it then.
+	// Record what the worker found, for crew ci-fix's count, unless it's what
+	// the worker said last. If this fails after the post, running the command
+	// again edits the same comment and records it then. Red CI only an open
+	// question reports (past MAX_CI_FIXES) has no report to record it on.
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if changed, err := t.RecordCICause(head, branchCaused); err != nil || !changed {
+	records, err := t.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	var causes []Record
+	for _, r := range roundReports(records).CIOn(head) {
+		if len(r.Causes) == 0 || r.BranchCaused() != branchCaused {
+			cause := newRecord("crew ci-summary", append(records, causes...))
+			cause.CICause = &CICause{RedCI: r.ID, BranchCaused: branchCaused}
+			causes = append(causes, cause)
+		}
+	}
+	if len(causes) == 0 {
+		return nil
+	}
+	if err := t.AddRecords(causes...); err != nil {
 		return err
 	}
 	t.Touch()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,11 +33,11 @@ func add(t *testing.T, task Task, r Record) Record {
 	t.Helper()
 	records, _ := task.Records()
 	n := newRecord("test", records)
-	n.ToLearn, n.Learned = r.ToLearn, r.Learned
-	if err := task.AddRecords(n); err != nil {
+	r.ID, r.At, r.By = n.ID, n.At, n.By
+	if err := task.AddRecords(r); err != nil {
 		t.Fatal(err)
 	}
-	return n
+	return r
 }
 
 func TestStillToLearnReadsRecordsAlone(t *testing.T) {
@@ -69,7 +70,11 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                          "needs its item and its answer",
 		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                        "needs an id, an at and a by",
 		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                            "already taken",
-		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "settles cccccccc, which no line adds",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "follows cccccccc, which no line adds as an item to learn",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","ci_cause":{"red_ci":"aaaaaaaa","branch_caused":false}}`:             "follows aaaaaaaa, which no line adds as red CI",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","red_ci":{"head":"","checks":["test"]}}`:                             "needs its head",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","ci_cause":{"red_ci":"","branch_caused":true}}`:                      "needs its red_ci",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","base_conflict":{"base":"main","at":""}}`:                            "needs its base and its at",
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}} {}`:                                         "more than one value",
 		`- [ ] typed by hand`: "not a record crew can read",
 		``:                    "not a record crew can read",
@@ -183,7 +188,8 @@ func TestLedgerFormat(t *testing.T) {
 	for content, want := range map[string]string{
 		"":    "p's ledger isn't migrated to this crew's records yet: run crew migrate",
 		"0\n": "run crew migrate",
-		"2\n": "p's ledger is from a newer crew: run crew upgrade",
+		"1\n": "run crew migrate",
+		"3\n": "p's ledger is from a newer crew: run crew upgrade",
 		"x\n": `holds "x", not a format number`,
 	} {
 		if content == "" {
@@ -333,6 +339,63 @@ Some prose that isn't an item.
 
 // A crew migrate stopped after writing a task's records, and before taking the
 // checkboxes out of its file, leaves both. Run again, it only takes them out.
+// Before format 2, the rounds' lines were what crew read: reportsTask's rounds
+// report red CI on aaa1111, which the branch didn't cause, and on bbb2222, and
+// conflicts at eee5555 and fff6666. Lines quoted in a comment, in the brief or
+// in an open question report nothing.
+func TestMigrateRoundReports(t *testing.T) {
+	task := learnTask(t, reportsTask)
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	redCI, conflicts, err := migrateRoundReports(task)
+	if err != nil || redCI != 2 || conflicts != 2 {
+		t.Fatalf("migrateRoundReports = %d, %d, %v; want 2 red CI and 2 conflicts", redCI, conflicts, err)
+	}
+	records, err := task.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := roundReports(records)
+	var heads []string
+	for _, r := range rr.RedCI {
+		heads = append(heads, fmt.Sprintf("%s %q %v", r.RedCI.Head, r.RedCI.Checks, r.BranchCaused()))
+	}
+	if want := []string{`aaa1111 ["test" "lint"] false`, `bbb2222 ["test"] true`}; !slices.Equal(heads, want) {
+		t.Errorf("red CI = %q, want %q", heads, want)
+	}
+	if rr.CIFixes() != 1 || !rr.ConflictAt("eee5555") || !rr.ConflictAt("fff6666") || len(rr.Conflicts) != 2 || rr.Conflicts[0].BaseConflict.Base != "main" {
+		t.Errorf("round reports = %+v; want 1 CI fix, and conflicts with main at eee5555 and fff6666", rr)
+	}
+	round1 := time.Date(2026, 11, 11, 10, 0, 0, 0, time.Local)
+	if !rr.RedCI[0].At.Equal(round1) || !rr.RedCI[0].Causes[0].At.Equal(round1) || rr.RedCI[0].By != "crew migrate" {
+		t.Errorf("aaa1111's records are dated %v and %v by %q; want round 1's time, by crew migrate", rr.RedCI[0].At, rr.RedCI[0].Causes[0].At, rr.RedCI[0].By)
+	}
+	if b, _ := os.ReadFile(task.Path); string(b) != reportsTask {
+		t.Errorf("the task file changed:\n%s", b)
+	}
+	// A second run, after one stopped before the project's format, records nothing more.
+	if redCI, conflicts, err := migrateRoundReports(task); err != nil || redCI+conflicts != 0 {
+		t.Errorf("a second run = %d, %d, %v; want nothing", redCI, conflicts, err)
+	}
+	if again, _ := task.readRecords(); len(again) != len(records) {
+		t.Errorf("a second run left %d records, want %d", len(again), len(records))
+	}
+	// Once migrated, the lines are only for the worker to read: taking the mark
+	// off one, or adding it to another, counts for nothing.
+	edited := strings.NewReplacer(
+		"aaa1111: test, lint (the branch didn't cause it)", "aaa1111: test, lint",
+		"bbb2222: test\n", "bbb2222: test (the branch didn't cause it)\n",
+	).Replace(reportsTask)
+	if err := os.WriteFile(task.Path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLedgerFormat(filepath.Dir(filepath.Dir(task.Path))); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := task.RoundReports(); err != nil || after.CIFixes() != 1 || after.RedCI[0].BranchCaused() || !after.RedCI[1].BranchCaused() {
+		t.Errorf("after editing the marks by hand: %+v, %v; want aaa1111 still not the branch's, and bbb2222 the branch's", after, err)
+	}
+}
+
 func TestMigrateStillToLearnAfterARunCutShort(t *testing.T) {
 	file := `---
 status: draft

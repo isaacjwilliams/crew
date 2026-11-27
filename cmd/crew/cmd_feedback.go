@@ -362,8 +362,8 @@ func isReviewRequest(cm ghComment) bool {
 type reviewRound struct {
 	reviews, inline, convo []ghComment
 	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
-	redCI                  *redCI
-	conflict               *baseConflict
+	redCI                  *RedCI
+	conflict               *BaseConflict
 }
 
 func (r reviewRound) empty() bool {
@@ -378,10 +378,10 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
-		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.head, strings.Join(r.redCI.checks, ", "))
+		fmt.Fprintf(&b, "- [ ] %s%s: %s\n\n", ciFailedOn, r.redCI.Head, strings.Join(r.redCI.Checks, ", "))
 	}
 	if r.conflict != nil {
-		fmt.Fprintf(&b, "- [ ] %s%s at %s\n\n", conflictsWith, r.conflict.base, r.conflict.at)
+		fmt.Fprintf(&b, "- [ ] %s%s at %s\n\n", conflictsWith, r.conflict.Base, r.conflict.At)
 	}
 	if len(r.reviews) > 0 {
 		b.WriteString("**Review summaries**\n")

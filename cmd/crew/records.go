@@ -34,8 +34,11 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn *ToLearn `json:"to_learn,omitempty"`
-	Learned *Learned `json:"learned,omitempty"`
+	ToLearn      *ToLearn      `json:"to_learn,omitempty"`
+	Learned      *Learned      `json:"learned,omitempty"`
+	RedCI        *RedCI        `json:"red_ci,omitempty"`
+	CICause      *CICause      `json:"ci_cause,omitempty"`
+	BaseConflict *BaseConflict `json:"base_conflict,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -48,6 +51,27 @@ type ToLearn struct {
 type Learned struct {
 	Item   string `json:"item"` // the ToLearn record's ID
 	Answer string `json:"answer"`
+}
+
+// RedCI is red CI on a PR's head commit, which crew ci-fix sent the worker in a
+// review round.
+type RedCI struct {
+	Head   string   `json:"head"`   // short SHA
+	Checks []string `json:"checks"` // the checks that failed
+}
+
+// CICause is the worker's word on red CI crew sent it: whether its branch caused
+// it, which crew ci-summary records. The latest one counts.
+type CICause struct {
+	RedCI        string `json:"red_ci"` // the RedCI record's ID
+	BranchCaused bool   `json:"branch_caused"`
+}
+
+// BaseConflict is a PR's conflict with its base branch at a commit of the base,
+// which crew catch-up sent the worker in a review round.
+type BaseConflict struct {
+	Base string `json:"base"` // the task's base branch
+	At   string `json:"at"`   // the base's commit, short SHA
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -89,25 +113,55 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	toLearn := map[string]bool{} // whether the record with each ID adds an item
+	kinds := map[string]string{} // the kind of the record with each ID
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if _, taken := toLearn[r.ID]; err == nil && taken {
+		if _, taken := kinds[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		toLearn[r.ID] = r.ToLearn != nil
+		kinds[r.ID] = r.kind()
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !toLearn[r.Learned.Item] {
-			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
+		if id, kind := r.follows(); id != "" && kinds[id] != kind {
+			return nil, fmt.Errorf("%s:%d: it follows %s, which no line adds as %s", name, i+1, id, kind)
 		}
 	}
 	return records, nil
+}
+
+// The kinds of record another record can follow. Each is also the words an
+// error names it by.
+const (
+	kindToLearn = "an item to learn"
+	kindRedCI   = "red CI"
+)
+
+// kind is the kind of record r is, when another record can follow it.
+func (r Record) kind() string {
+	switch {
+	case r.ToLearn != nil:
+		return kindToLearn
+	case r.RedCI != nil:
+		return kindRedCI
+	}
+	return ""
+}
+
+// follows is the ID of the record r follows, and the kind that record has to
+// be, or "" for a record that follows none.
+func (r Record) follows() (id, kind string) {
+	switch {
+	case r.Learned != nil:
+		return r.Learned.Item, kindToLearn
+	case r.CICause != nil:
+		return r.CICause.RedCI, kindRedCI
+	}
+	return "", ""
 }
 
 // parseRecord reads one line of a records file, refusing a field it doesn't
@@ -131,7 +185,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.RedCI != nil, r.CICause != nil, r.BaseConflict != nil} {
 		if set {
 			payloads++
 		}
@@ -144,6 +198,12 @@ func (r Record) check() error {
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.RedCI != nil && r.RedCI.Head == "":
+		return errors.New("a red_ci record needs its head")
+	case r.CICause != nil && r.CICause.RedCI == "":
+		return errors.New("a ci_cause record needs its red_ci")
+	case r.BaseConflict != nil && (r.BaseConflict.Base == "" || r.BaseConflict.At == ""):
+		return errors.New("a base_conflict record needs its base and its at")
 	}
 	return nil
 }
@@ -171,9 +231,11 @@ func (d Doc) AddRecords(rs ...Record) error {
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
-// records; before it they were checkboxes in the task file, which crew migrate
-// moves into records. crew project add writes the file for a new project.
-const ledgerFormat = 1
+// records, and format 2 the red CI and conflicts crew sent workers; before,
+// they were checkboxes in the task file, and lines in its review rounds, which
+// crew migrate moves into records. crew project add writes the file for a new
+// project.
+const ledgerFormat = 2
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

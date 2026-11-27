@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // crew migrate brings each project's ledger to the format this crew reads
@@ -14,6 +15,12 @@ import (
 // records: each item becomes a to_learn record and, once ticked, a learned
 // record with its answer. The section keeps any line that wasn't part of an
 // item, under the template's comment.
+//
+// Format 2 records the red CI and the conflicts with the base that crew sent
+// workers in review rounds, which the rounds' lines were the only record of:
+// each "CI failed on" line becomes a red_ci record, with a ci_cause record when
+// it ends "(the branch didn't cause it)", and each "Conflicts with" line a
+// base_conflict record. The task files are left as they are.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -45,18 +52,31 @@ func cmdMigrate(c *Crew, args []string) error {
 		if have == ledgerFormat {
 			continue
 		}
-		items := 0
-		for _, t := range c.tasks(p) {
-			n, err := migrateStillToLearn(t, comment)
-			if err != nil {
-				return fail("%s: %v", t.ID(), err)
+		if have < 1 {
+			items := 0
+			for _, t := range c.tasks(p) {
+				n, err := migrateStillToLearn(t, comment)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				items += n
 			}
-			items += n
+			fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
+		}
+		if have < 2 {
+			redCI, conflicts := 0, 0
+			for _, t := range c.tasks(p) {
+				r, k, err := migrateRoundReports(t)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				redCI, conflicts = redCI+r, conflicts+k
+			}
+			fmt.Printf("%s: recorded %d red CI report(s) and %d conflict(s) from review rounds\n", p, redCI, conflicts)
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
 		}
-		fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
 		migrated++
 	}
 	if migrated == 0 {
@@ -184,4 +204,69 @@ func answerFrom(under []string) string {
 		return strings.TrimPrefix(out[0], "- ")
 	}
 	return strings.Join(out, "\n")
+}
+
+// ciNotTheBranch ended a round's CI line, before format 2, once the worker had
+// said its branch didn't cause the red CI.
+const ciNotTheBranch = " (the branch didn't cause it)"
+
+// migrateRoundReports records the red CI and conflicts the task's review rounds
+// report, as crew read them from the rounds' lines before format 2, and says
+// how many of each it recorded. Each record is dated by its round's heading.
+//
+// It writes the task's records in one go. No command writes red_ci or
+// base_conflict records before format 2, so a task that has one has been
+// migrated already, by a run that stopped before the project's format.
+func migrateRoundReports(t Task) (redCI, conflicts int, err error) {
+	rounds := t.Section("## Review rounds")
+	if rounds == "" {
+		return 0, 0, nil
+	}
+	records, err := t.readRecords()
+	if err != nil {
+		return 0, 0, err
+	}
+	if slices.ContainsFunc(records, func(r Record) bool { return r.RedCI != nil || r.BaseConflict != nil }) {
+		return 0, 0, nil
+	}
+	var moved []Record
+	record := func(at time.Time, fill func(*Record)) {
+		r := newRecord("crew migrate", records)
+		if !at.IsZero() {
+			r.At = at
+		}
+		fill(&r)
+		records, moved = append(records, r), append(moved, r)
+	}
+	var roundAt time.Time
+	for _, l := range strings.Split(rounds, "\n") {
+		if rest, ok := strings.CutPrefix(l, "### Round "); ok {
+			_, roundAt = numberedHeading(rest)
+			continue
+		}
+		item, _ := checklistItem(l)
+		if rest, ok := strings.CutPrefix(item, ciFailedOn); ok {
+			head, checks, _ := strings.Cut(strings.TrimSuffix(rest, ciNotTheBranch), " ")
+			report := &RedCI{Head: strings.TrimSuffix(head, ":")}
+			if checks != "" {
+				report.Checks = strings.Split(checks, ", ")
+			}
+			record(roundAt, func(r *Record) { r.RedCI = report })
+			redCI++
+			if strings.HasSuffix(l, ciNotTheBranch) {
+				id := moved[len(moved)-1].ID
+				record(roundAt, func(r *Record) { r.CICause = &CICause{RedCI: id, BranchCaused: false} })
+			}
+		}
+		if rest, ok := strings.CutPrefix(item, conflictsWith); ok {
+			if base, at, _ := strings.Cut(rest, " at "); base != "" && at != "" {
+				record(roundAt, func(r *Record) { r.BaseConflict = &BaseConflict{Base: base, At: at} })
+				conflicts++
+			}
+		}
+	}
+	if len(moved) == 0 {
+		return 0, 0, nil
+	}
+	return redCI, conflicts, t.AddRecords(moved...)
 }

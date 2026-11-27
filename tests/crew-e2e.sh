@@ -1340,8 +1340,10 @@ echo 'MAX_CI_FIXES=3' >>"$PE"; ci dddd4444ffff test:FAILURE; crew ci-fix 13 >/de
 printf 'CI was red\n\nOlder round, written last.\n' >"$HOME/ci.md"
 out=$(crew ci-summary 13 bbbb222 "$HOME/ci.md" 2>&1)
 check "with a newer CI round recorded, a comment for an older one still goes to its own commit" '[[ $out == "updated the CI summary for bbbb222 on PR #12" && $(cat "$HOME/gh-summaries/120") == *"written last."* && ! -e $HOME/gh-summaries/122 ]]'
+check "ci-summary records the worker's word once while it stays the same, and none for red CI only a question reports" \
+  '[[ $(jq -sc "[.[] | select(.ci_cause) | .ci_cause.branch_caused]" "${F13%.md}.records.jsonl") == "[true]" ]]'
 rm -f "$HOME/gh-last-body"
-check "ci-summary refuses a commit the task reports no red CI on" '[[ $(crew ci-summary 13 eeee555 "$HOME/ci.md" 2>&1) == *"reports no red CI on eeee555"* && ! -e $HOME/gh-last-body ]]'
+check "ci-summary refuses a commit the task reports no red CI on" '[[ $(crew ci-summary 13 eeee555 "$HOME/ci.md" 2>&1) == *"crew reported no red CI on eeee555 for 013-tick-routing"* && ! -e $HOME/gh-last-body ]]'
 out=$(crew feedback 13 --since 1970-01-01T00:00:00Z)
 check "crew feedback doesn't read the CI summaries back" '[[ $out == *"comment 115"* && $out != *"comment 120"* && $out != *"comment 121"* ]]'
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set 13 last_round_sent "$(crew get 13 review_rounds)"
@@ -2489,13 +2491,19 @@ check "in a project not yet migrated, ready refuses a draft rather than count it
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+# Round lines as crew wrote them before records: red CI the worker said its branch didn't cause, and a conflict.
+sed -i '/^## Review rounds$/a ### Round 1 — 2026-11-11 10:00 (PR #12)\n\n- [x] CI failed on abcd123: test, lint (the branch didn'"'"'t cause it)\n\n### Round 2 — 2026-11-11 11:00 (PR #12)\n\n- [ ] Conflicts with main at bcde234\n' "$UT"
+cp "$UT" "$HOME/before-migrate.md"
 sh=$(shown "$UT")
 check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
-   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records"$'"'"'\n'"'"'"$LP: recorded 1 red CI report(s) and 1 conflict(s) from review rounds" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! section "$UT" "## Still to learn" | grep -q "^- \["'
+check "migrate records the red CI and conflicts review rounds report, with the worker's word, and leaves the round lines as they were" \
+  'diff <(sed -n "/^## Review rounds$/,\$p" "$HOME/before-migrate.md") <(sed -n "/^## Review rounds$/,\$p" "$UT") >/dev/null &&
+   [[ $(jq -sc "[.[] | select(.red_ci or .ci_cause or .base_conflict) | del(.id, .at)] | .[1].ci_cause.red_ci |= \"x\"" "${UT%.md}.records.jsonl") == "[{\"by\":\"crew migrate\",\"red_ci\":{\"head\":\"abcd123\",\"checks\":[\"test\",\"lint\"]}},{\"by\":\"crew migrate\",\"ci_cause\":{\"red_ci\":\"x\",\"branch_caused\":false}},{\"by\":\"crew migrate\",\"base_conflict\":{\"base\":\"main\",\"at\":\"bcde234\"}}]" ]]'
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 crew set "$UT" status abandoned
 
@@ -3329,7 +3337,8 @@ o1=$(ci_round 1111aaaffff0); answer_ci "$CO" 1111aaa --not-the-branch
 o2=$(ci_round 2222bbbffff0); answer_ci "$CO" 2222bbb --not-the-branch
 o3=$(ci_round 3333cccffff0); answer_ci "$CO" 3333ccc --not-the-branch
 check "three red heads the worker hands back as not its branch's each get a round and no question, and leave the task pr-open" '[[ $o1 == *"$TCO: CI round 1 recorded: red on 1111aaa"* && $o2 == *"$TCO: CI round 2 recorded: red on 2222bbb"* && $o3 == *"$TCO: CI round 3 recorded: red on 3333ccc"* && $o3 != *"for you"* && $(crew get "$CO" status) == pr-open ]] && ! grep -q "CI is still red" "$CO"'
-check "ci-summary --not-the-branch marks the head's round line, which the worker then ticks" '[[ $(round "$CO" 3) == "- [x] CI failed on 3333ccc: test (the branch didn'"'"'t cause it)" && $(cat "$HOME/gh-summaries/"*) == *"<!-- crew ci-summary: 3333ccc -->"* ]]'
+check "ci-summary --not-the-branch records the worker's word, and leaves the round's line, which the worker ticks, as it was" \
+  '[[ $(round "$CO" 3) == "- [x] CI failed on 3333ccc: test" && $(jq -s "[.[] | select(.ci_cause.branch_caused == false)] | length" "${CO%.md}.records.jsonl") == 3 && $(cat "$HOME/gh-summaries/"*) == *"<!-- crew ci-summary: 3333ccc -->"* ]]'
 o4=$(setstate "done" null; crew tick 2>/dev/null); o5=$(crew tick 2>/dev/null)
 check "a handed-back red head still gets exactly one round across repeated ticks" '[[ $o4 != *"$TCO"* && $o5 != *"$TCO"* && $(crew get "$CO" review_rounds) == 3 && $(grep -c "^- \[.\] CI failed on 3333ccc" "$CO") == 1 && $(crew get "$CO" status) == pr-open ]]'
 crew set "$CO" status abandoned
@@ -3361,7 +3370,42 @@ echo CONFLICTING >"$HOME/gh-pr-mergeable"; echo main >"$HOME/gh-pr-base-12"; bas
 hand_over "$RR"; setstate "done" null; o3=$(crew review "$RR" 2>&1)
 check "rounds crew ci-fix and crew catch-up make don't count toward MAX_REVIEW_ROUNDS, and a review request's does" \
   '[[ $o1 == *"$TRR: CI round 1 recorded"* && $o2 == *"$TRR: catch-up round 2 recorded"* && $o1$o2 != *"rounds of review"* && $o3 == *"$TRR has had 1 rounds of review (MAX_REVIEW_ROUNDS=0)"* ]]'
-sed -i '/^MAX_REVIEW_ROUNDS=0$/d' "$PE"; rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$RR" status abandoned
+sed -i '/^MAX_REVIEW_ROUNDS=0$/d' "$PE"; crew set "$RR" status abandoned
+# What crew sent the worker is in its records, so editing the rounds' lines by hand, as a worker
+# or the user might, changes none of its decisions.
+HE=$(pr_task "Round lines edited by hand"); THE=$(basename "$HE" .md); hand_over "$HE"
+ci_round 1313aaaffff0 >/dev/null; answer_ci "$HE" 1313aaa --not-the-branch
+ci_round 2424bbbffff0 >/dev/null; answer_ci "$HE" 2424bbb   # the first tick sent the conflict with main's tip too
+HB=$(base_moves)
+sed -i -e 's/^- \[ \] /- [x] /' \
+  -e "s/^\(- \[x\] CI failed on 2424bbb: test\)$/\1 (the branch didn't cause it), or so I thought/" \
+  -e "/^### Round 1 /a - [ ] CI failed on 3535ccc: test\n- [ ] Conflicts with main at $HB" "$HE"
+r=$(crew get "$HE" review_rounds); rm -f "$HOME/gh-last-body"
+o1=$(crew ci-summary "$HE" 3535ccc "$HOME/ci.md" 2>&1); c1=$?
+check "a CI line added by hand doesn't let ci-summary post for a head crew never reported" '((c1 == 1)) && [[ $o1 == *"crew reported no red CI on 3535ccc for $THE"* && ! -e $HOME/gh-last-body ]]'
+o2=$(crew catch-up "$HE")
+check "a conflict line added by hand doesn't stop catch-up sending that base commit" '[[ $o2 == "round $((r + 1)) recorded: conflicts with main at $HB; crew tick sends it to the worker" ]]'
+ci 2424bbbffff0 test:FAILURE; o3=$(crew ci-fix "$HE"); c3=$?
+ci 3535cccffff0 test:FAILURE; o4=$(crew ci-fix "$HE")
+check "ticking a CI line, or writing after it, doesn't make crew send its head again; a CI line added by hand doesn't stop it sending that head" \
+  '((c3 == 3)) && [[ $o3 == "nothing to do: the red CI on 2424bbb is reported already" && $o4 == "round $((r + 2)) recorded: CI failed on 3535ccc (test); crew tick sends it to the worker" ]]'
+ci 4646dddffff0 test:FAILURE; o5=$(crew ci-fix "$HE")
+check "marking a line the branch didn't cause by hand doesn't take its round out of MAX_CI_FIXES" '[[ $o5 == *"CI is still red on 4646ddd after 2 CI rounds the branch caused (MAX_CI_FIXES=2)"* ]]'
+crew set "$HE" status abandoned
+# A home upgraded to a crew that reads records, but not yet migrated, reads none: crew ci-fix and
+# crew catch-up refuse, rather than send what they sent already or count CI rounds from none.
+NM=$(pr_task "Upgraded, not yet migrated"); TNM=$(basename "$NM" .md); hand_over "$NM"
+ci_round 5757aaaffff0 >/dev/null; answer_ci "$NM" 5757aaa   # with a round for the conflict at main's tip
+ci_round 6868bbbffff0 >/dev/null; answer_ci "$NM" 6868bbb
+NMF=$(dirname "$(dirname "$NM")")/ledger-format; echo 1 >"$NMF"; r=$(crew get "$NM" review_rounds)
+o1=$(crew ci-fix "$NM" 2>&1); c1=$?; o2=$(crew catch-up "$NM" 2>&1); c2=$?
+ci 7979cccffff0 test:FAILURE; o3=$(crew ci-fix "$NM" 2>&1); c3=$?
+setstate "done" null; o4=$(crew tick 2>&1)
+check "before crew migrate, ci-fix and catch-up refuse, by hand and in a tick, and say to migrate" \
+  '((c1 == 1 && c2 == 1 && c3 == 1)) && [[ $o1$o2$o3 == *"run crew migrate"*"run crew migrate"*"run crew migrate"* && $o4 == *"run crew migrate"* && $o4 != *"$TNM: CI round"* && $o4 != *"$TNM: catch-up round"* && $(crew get "$NM" review_rounds) == "$r" ]] && ! grep -q 7979ccc "$NM"'
+crew migrate >/dev/null; o5=$(crew ci-fix "$NM")
+check "once migrated, ci-fix carries on its count where it was" '[[ $(cat "$NMF") == 2 && $o5 == *"CI is still red on 7979ccc after 2 CI rounds the branch caused (MAX_CI_FIXES=2)"* ]]'
+rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$NM" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 
 # End to end: dispatch still waits on exactly what it did, with a merged entry written beside an unmerged one.

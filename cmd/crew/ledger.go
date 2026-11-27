@@ -1429,25 +1429,18 @@ func (t Task) AwaitsSecurityReview() bool { return t.Risk() == RiskHigh && !t.Se
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the
-// user once the worker has had MAX_CI_FIXES rounds of them. They are the only
-// record of what was reported: crew ci-fix writes them, crew ci-summary marks a
-// round's (ciNotTheBranch), the Task methods below read them back, and the
-// worker ticks them, so their wording is a contract.
+// user once the worker has had MAX_CI_FIXES rounds of them. The worker ticks a
+// round's line, so its wording is a contract; what crew decides from comes from
+// records (RoundReports), and from the open question.
 const (
 	ciFailedOn   = "CI failed on "       // - [ ] CI failed on <sha>: <check>, <check>
 	ciStillRedOn = "CI is still red on " // - [ ] CI is still red on <sha> after …
 )
 
-// ciNotTheBranch ends a round's CI line once the worker has found that its
-// branch didn't cause the red CI (crew ci-summary --not-the-branch). Such a
-// round doesn't count toward MAX_CI_FIXES. lead.md quotes it, for the lead
-// reading a task file.
-const ciNotTheBranch = " (the branch didn't cause it)"
-
 // The line that reports a PR's conflict with its base branch, at a commit of
-// the base (its short SHA), in a review round that sends it to the worker. Like
-// the CI lines, it's the only record: crew catch-up writes it, ConflictReported
-// reads it back, and the worker ticks it once it has merged the base in.
+// the base (its short SHA), in a review round that sends it to the worker, who
+// ticks it once they have merged the base in. A base_conflict record is what
+// crew reads back.
 const conflictsWith = "Conflicts with " // - [ ] Conflicts with <base> at <sha>
 
 // crewReports are the kinds of line crew writes into a review round of its own,
@@ -1478,81 +1471,91 @@ func checklistItem(l string) (string, bool) {
 	return rest[3:], true
 }
 
-// CIFailures is the head commits the task's review rounds reported red CI on,
-// oldest first: one for each time its worker was sent a red build to fix.
-func (t Task) CIFailures() []string {
-	var heads []string
-	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		if head, ok := ciLineHead(l, ciFailedOn); ok {
-			heads = append(heads, head)
-		}
-	}
-	return heads
+// RoundReports are what crew sent a task's worker in review rounds of its own,
+// from its records alone, oldest first: red CI on the PR's head (crew ci-fix),
+// and conflicts with its base (crew catch-up), as base_conflict records.
+type RoundReports struct {
+	RedCI     []CIReport
+	Conflicts []Record
 }
 
-// CIFixes counts the CI rounds that count toward MAX_CI_FIXES: every one but
-// those the worker found its branch didn't cause (ciNotTheBranch).
-func (t Task) CIFixes() int {
+// A CIReport is red CI crew sent the worker: a red_ci record, and the ci_cause
+// records that give the worker's word on it, oldest first.
+type CIReport struct {
+	Record
+	Causes []Record
+}
+
+// BranchCaused: the worker's latest word is that its branch caused the red CI,
+// or it hasn't given one yet. Such a report counts toward MAX_CI_FIXES.
+func (r CIReport) BranchCaused() bool {
+	return len(r.Causes) == 0 || r.Causes[len(r.Causes)-1].CICause.BranchCaused
+}
+
+// RoundReports reads the task's round reports from its records.
+func (t Task) RoundReports() (RoundReports, error) {
+	records, err := t.Records()
+	if err != nil {
+		return RoundReports{}, err
+	}
+	return roundReports(records), nil
+}
+
+// roundReports are the round reports records add, with the worker's word on
+// each red CI. Records from readRecords name only red CI they add, which it
+// checks.
+func roundReports(records []Record) RoundReports {
+	var rr RoundReports
+	for _, r := range records {
+		switch {
+		case r.RedCI != nil:
+			rr.RedCI = append(rr.RedCI, CIReport{Record: r})
+		case r.BaseConflict != nil:
+			rr.Conflicts = append(rr.Conflicts, r)
+		}
+	}
+	for _, r := range records {
+		if r.CICause != nil {
+			i := slices.IndexFunc(rr.RedCI, func(c CIReport) bool { return c.ID == r.CICause.RedCI })
+			rr.RedCI[i].Causes = append(rr.RedCI[i].Causes, r)
+		}
+	}
+	return rr
+}
+
+// CIOn is the reports of red CI on head: one, unless crew migrate found the
+// same head in two rounds.
+func (rr RoundReports) CIOn(head string) []CIReport {
+	var on []CIReport
+	for _, r := range rr.RedCI {
+		if r.RedCI.Head == head {
+			on = append(on, r)
+		}
+	}
+	return on
+}
+
+// CIFixes counts the red CI reports that count toward MAX_CI_FIXES: every one
+// but those the worker last said its branch didn't cause.
+func (rr RoundReports) CIFixes() int {
 	n := 0
-	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		if _, ok := ciLineHead(l, ciFailedOn); ok && !strings.HasSuffix(l, ciNotTheBranch) {
+	for _, r := range rr.RedCI {
+		if r.BranchCaused() {
 			n++
 		}
 	}
 	return n
 }
 
-// RecordCICause marks the review round's CI line for head as not caused by the
-// branch, or takes the mark off when the branch caused it, so the worker's
-// latest account of that red CI is the one MAX_CI_FIXES counts. It reports
-// whether it changed the file: a head only an open question reports (past
-// MAX_CI_FIXES) has no round line to mark.
-func (t Task) RecordCICause(head string, branchCaused bool) (bool, error) {
-	ls, err := t.read()
-	if err != nil {
-		return false, err
-	}
-	changed, inRounds := false, false
-	for i, l := range ls {
-		if strings.HasPrefix(l, "## ") {
-			inRounds = l == "## Review rounds"
-		}
-		if h, ok := ciLineHead(l, ciFailedOn); !inRounds || !ok || h != head {
-			continue
-		}
-		// The line may carry the mark already, from an earlier account.
-		marked := strings.TrimSuffix(l, ciNotTheBranch)
-		if !branchCaused {
-			marked += ciNotTheBranch
-		}
-		changed = changed || marked != l
-		ls[i] = marked
-	}
-	if !changed {
-		return false, nil
-	}
-	return true, t.writeLines(ls)
+// ConflictAt: crew sent the worker the PR's conflict with its base at the base
+// commit sha.
+func (rr RoundReports) ConflictAt(sha string) bool {
+	return slices.ContainsFunc(rr.Conflicts, func(r Record) bool { return r.BaseConflict.At == sha })
 }
 
-// ConflictReported: a review round sent the worker the PR's conflict with
-// its base at the base commit sha.
-func (t Task) ConflictReported(sha string) bool {
-	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		item, _ := checklistItem(l)
-		rest, ok := strings.CutPrefix(item, conflictsWith)
-		if _, at, _ := strings.Cut(rest, " at "); ok && at == sha {
-			return true
-		}
-	}
-	return false
-}
-
-// CIReported: red CI on head was sent to the worker in a review round, or put
-// to the user under Open questions.
-func (t Task) CIReported(head string) bool {
-	if slices.Contains(t.CIFailures(), head) {
-		return true
-	}
+// CIQuestionAsked: red CI on head was put to the user under Open questions,
+// once the worker had had MAX_CI_FIXES rounds of it.
+func (t Task) CIQuestionAsked(head string) bool {
 	for _, l := range strings.Split(t.Section("## Open questions"), "\n") {
 		if h, ok := ciLineHead(l, ciStillRedOn); ok && h == head {
 			return true
