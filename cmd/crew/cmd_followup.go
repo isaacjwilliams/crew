@@ -508,7 +508,7 @@ const stallAfter = 8 * time.Minute
 
 // stalledNote is what crew nudge tells a worker whose turn ended mid-task: a
 // worker seen stalled had waited on a sub-agent, or just stopped after a step.
-const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
+const stalledNote = "Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, ask it with `crew ask` and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
 
 // stalled reports whether a task's worker a (nil when claude agents doesn't list
 // it) ended its turn by mistake. It did when:
@@ -571,7 +571,9 @@ func cmdNudge(c *Crew, args []string) error {
 		return nothingToDo("%s hasn't stalled", t.ID())
 	}
 	ask := func(question, log string) error {
-		t.AppendToSection("## Open questions", "- [ ] "+question+"\n")
+		if _, err := t.ask("crew nudge", Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: question}); err != nil {
+			return fail("%v", err)
+		}
 		t.Log(log)
 		t.Touch()
 		c.commit("nudge " + p.Name + "/" + t.ID())
@@ -603,8 +605,8 @@ func cmdNudge(c *Crew, args []string) error {
 }
 
 // crew settle TASK: when the worker of a task with an open nudge question has
-// moved on since crew nudge asked it (see Task.WorkerMovedOn), checks the
-// question off, saying what settled it. A task that waits on no other question
+// moved on since crew nudge asked it (see Task.WorkerMovedOn), settles the
+// question with what showed it, and checks it off. A task that waits on no other question
 // goes back to the status it had before needs-input. Exits 3 when there's
 // nothing to settle.
 func cmdSettle(c *Crew, args []string) error {
@@ -637,6 +639,21 @@ func cmdSettle(c *Crew, args []string) error {
 	by := t.WorkerMovedOn(head)
 	if by == "" {
 		return nothingToDo("%s's worker hasn't moved on since its nudge question", t.ID())
+	}
+	records, err := t.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	var answers []Record
+	for _, q := range questionItems(records) {
+		if q.Question.Kind == QuestionNudge && q.Open() {
+			r := newRecord("crew settle", append(records, answers...))
+			r.Answer = &Answer{Question: q.ID, Text: "The worker moved on: " + by + "."}
+			answers = append(answers, r)
+		}
+	}
+	if err := t.AddRecords(answers...); err != nil {
+		return err
 	}
 	if err := t.SettleNudgeQuestions(by); err != nil {
 		return err

@@ -1423,7 +1423,7 @@ rm -f "$HOME/.claude/projects/stub/$s13.jsonl"
 # it's being worked on, and asks the lead when that doesn't move the task. Task 13's
 # review rounds warn on every tick, so these checks read only what tick prints.
 WT13=$(crew get 13 worktree); STUB=$HOME/.claude/projects/stub
-NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, record it under Open questions and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
+NUDGE="Your last turn ended while this task's status still says you're working on it. If you're waiting on an answer, ask it with \`crew ask\` and set the task's status to needs-input. If you started a sub-agent or a background command, check whether it has finished before you rely on its result. Then carry on from your last step."
 head13() { git -C "$WT13" rev-parse HEAD | cut -c1-7; }
 answer13() { sed -i '/^## Open questions$/,/^## /s/^- \[ \]/- [x]/' "$F13"; }
 asked13() { section "$F13" "## Open questions" | grep '^- \[ \]'; }

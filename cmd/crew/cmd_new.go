@@ -587,7 +587,7 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	}
 	userChecks := t.UserChecks()
 	if notRun := evidencePlaces(task.NotRun(userChecks), pr.NotRun(userChecks)); notRun != "" {
-		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", notRun)
+		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask with crew ask, saying what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", notRun)
 	}
 	work, err := ownWork(t, repo)
 	if err != nil {
