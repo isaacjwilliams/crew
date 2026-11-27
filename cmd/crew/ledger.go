@@ -971,23 +971,68 @@ func (t Task) NewestReview() int {
 	return reviews[len(reviews)-1].Number
 }
 
-// An automated review in the task's record: its number and when it was
-// recorded, from its heading, the commits it reviewed, whether the Claude
-// reviewer reported, and each finding.
+// An automated review of the task's PR: its number and when it was recorded,
+// the commits it read, which reviewers didn't report, and its findings.
 type AutomatedReview struct {
 	Number int
-	At     time.Time
-	// Fork is the fork point of the PR it reviewed, and Head the commit its range
-	// ends at, so Fork..Head is the whole PR as it was then. Both are empty when
-	// the review has no Range line crew can read.
-	Fork, Head     string
-	ClaudeReported bool
-	Findings       []Finding
+	At     time.Time // from its heading
+	// It read From..Head. Fork is the fork point of the PR it reviewed, so
+	// Fork..Head is the whole PR as it was then. A review in the text leaves all
+	// three empty when crew can't read its Range line.
+	From string
+	Fork string
+	Head string
+	// Failed are the reviewers that didn't report. One that failed only in a
+	// round reported first. The text gives only whether the Claude reviewer
+	// failed.
+	Failed   []string
+	Findings []Finding
 }
 
-// A finding of an automated review: the rest of its "- Agreed severity:" and
-// "- Outcome:" lines in the record.
-type Finding struct{ severity, outcome string }
+// reviewerClaude names the Claude reviewer in Failed.
+const reviewerClaude = "claude"
+
+// A finding of an automated review: its number in the review, the severity the
+// review agreed on and how the reviewers stood on it, then what the worker did
+// about it and, for one left for the user, the user's decision.
+type Finding struct {
+	Number   int
+	Severity Severity
+	// Labels on a severity it's held at: one reviewer refutes it (Split), an
+	// earlier review settled it as not a defect (Flipped), or the same failure
+	// happens at the fork point (PreExisting).
+	Split       bool
+	Flipped     bool
+	PreExisting bool
+
+	Outcome  FindingOutcome // its Kind is OutcomeOpen until the worker gives one
+	Decision string         // the user's, once they decide a finding left for them
+}
+
+// The agreed severity of a finding, as pr-review's SKILL.md step 7 settles it:
+// one it's held at, or how it stands when no reviewer holds it (withdrawn) or
+// it's the user's to settle (disputed, uncertain).
+type Severity string
+
+const (
+	SeverityMustFix   Severity = "must fix"
+	SeverityShouldFix Severity = "should fix"
+	SeverityFixLater  Severity = "fix later"
+	SeverityNitpick   Severity = "nitpick"
+	SeverityWithdrawn Severity = "withdrawn"
+	SeverityDisputed  Severity = "disputed"
+	SeverityUncertain Severity = "uncertain"
+)
+
+var severities = []Severity{SeverityMustFix, SeverityShouldFix, SeverityFixLater, SeverityNitpick, SeverityWithdrawn, SeverityDisputed, SeverityUncertain}
+
+// FindingOutcome is what the worker did about a finding.
+type FindingOutcome struct {
+	Kind Outcome
+	// StillOpenFrom is the earlier review that left the finding for the user,
+	// when it repeats one the user hadn't decided yet.
+	StillOpenFrom int
+}
 
 // AutomatedReviews is the reviews under ## Automated reviews, oldest first, in
 // the record's format (pr-review's SKILL.md step 8, and LEDGER.md). A review's
@@ -1003,48 +1048,93 @@ func (t Task) AutomatedReviews() []AutomatedReview {
 		severity, isSeverity := strings.CutPrefix(l, "- Agreed severity:")
 		outcome, isOutcome := strings.CutPrefix(l, "- Outcome:")
 		heading, isHeading := strings.CutPrefix(l, "### Automated review ")
+		finding, isFinding := strings.CutPrefix(l, "#### ")
 		switch {
 		case isHeading:
 			n, at := numberedHeading(heading)
-			reviews = append(reviews, AutomatedReview{Number: n, At: at, ClaudeReported: true})
+			reviews = append(reviews, AutomatedReview{Number: n, At: at})
 			r, f = &reviews[len(reviews)-1], nil
 		case r == nil:
 		case isRange:
-			r.Fork, r.Head = reviewedRange(rng)
+			r.From, r.Fork, r.Head = reviewedRange(rng)
 		case isReviewers:
-			r.ClaudeReported = !strings.Contains(reviewers, "Claude reviewer (failed:")
-		case strings.HasPrefix(l, "#### "):
-			r.Findings = append(r.Findings, Finding{})
+			if strings.Contains(reviewers, "Claude reviewer (failed:") {
+				r.Failed = []string{reviewerClaude}
+			}
+		case isFinding:
+			n, _, _ := strings.Cut(finding, ".")
+			r.Findings = append(r.Findings, Finding{Number: atoiOr0(n)})
 			f = &r.Findings[len(r.Findings)-1]
 		case f == nil:
 		case isSeverity:
-			f.severity = strings.TrimSpace(severity)
+			f.readSeverity(strings.TrimSpace(severity))
 		case isOutcome:
-			f.outcome = strings.TrimSpace(outcome)
+			f.readOutcome(strings.TrimSpace(outcome))
 		}
 	}
 	return reviews
 }
 
-// reviewedRange reads the rest of a review's Range line: the fork point of the
-// PR it reviewed, and the head its range ends at. A review that read only the
-// commits since an earlier one starts its range there and names its fork point
-// at the end, "`<from>..<head>`, 2 commits on `b` since review 1 (fork point
-// `<fork>`)"; one that read the whole PR starts its range at the fork point,
-// and older records don't name it again. Both are empty for a line that has no
-// range in backticks.
-func reviewedRange(line string) (fork, head string) {
+// readSeverity takes the finding's severity and labels from the rest of its
+// "- Agreed severity:" line, whatever notes follow the severity ("should fix
+// (lowered from must fix: …)", "split: held at must fix, Codex refutes"). The
+// severity stays empty when the line starts with none crew knows.
+func (f *Finding) readSeverity(line string) {
+	line, f.Flipped = strings.CutPrefix(line, "flipped: ")
+	line, f.Split = strings.CutPrefix(line, "split: held at ")
+	line, f.PreExisting = strings.CutPrefix(line, "pre-existing: ")
+	for _, s := range severities {
+		if strings.HasPrefix(line, string(s)) {
+			f.Severity = s
+			return
+		}
+	}
+}
+
+// readOutcome takes the finding's outcome from the rest of its "- Outcome:"
+// line: its kind from the first words ("left for the user: pre-existing, …" is
+// OutcomeLeftForUser, say), the review it's still open from, and the user's
+// decision, which the worker adds after what it first wrote ("left for the
+// user; decided by the user: no change"), sometimes with what it did next.
+func (f *Finding) readOutcome(line string) {
+	f.Outcome.Kind = OutcomeOther
+	if line == "" {
+		f.Outcome.Kind = OutcomeOpen
+	}
+	for _, o := range outcomes {
+		if strings.HasPrefix(line, string(o)) {
+			f.Outcome.Kind = o
+			break
+		}
+	}
+	if from, ok := strings.CutPrefix(line, string(OutcomeLeftForUser)+": still open from review "); ok {
+		n, _, _ := strings.Cut(from, ";")
+		f.Outcome.StillOpenFrom = atoiOr0(n)
+	}
+	if _, decision, ok := strings.Cut(line, "; decided by the user"); ok {
+		f.Decision = "decided by the user" + decision
+	}
+}
+
+// reviewedRange reads the rest of a review's Range line: where its range
+// starts, the fork point of the PR it reviewed, and the head its range ends at.
+// A review that read only the commits since an earlier one starts its range
+// there and names its fork point at the end, "`<from>..<head>`, 2 commits on
+// `b` since review 1 (fork point `<fork>`)"; one that read the whole PR starts
+// its range at the fork point, and older records don't name it again. All
+// three are empty for a line that has no range in backticks.
+func reviewedRange(line string) (from, fork, head string) {
 	_, rest, _ := strings.Cut(line, "`")
 	rng, _, _ := strings.Cut(rest, "`")
 	from, head, ok := strings.Cut(rng, "..")
 	if !ok || from == "" || head == "" {
-		return "", ""
+		return "", "", ""
 	}
 	if _, named, ok := strings.Cut(line, "(fork point `"); ok {
 		fork, _, _ = strings.Cut(named, "`")
-		return fork, head
+		return from, fork, head
 	}
-	return from, head
+	return from, from, head
 }
 
 // numberedHeading reads what follows "### Round " or "### Automated review " in
@@ -1057,16 +1147,20 @@ func numberedHeading(rest string) (int, time.Time) {
 	return atoiOr0(num), at
 }
 
+// ClaudeReported: the Claude reviewer reported, if only before a round it
+// failed in.
+func (r AutomatedReview) ClaudeReported() bool { return !slices.Contains(r.Failed, reviewerClaude) }
+
 // Clean is the rule for a review that ends a pass, as implementer.md's
 // "Workflow: automated review" step 3 states it: the worker fixed nothing at
 // must fix or should fix for it, and the Claude reviewer reported.
 func (r AutomatedReview) Clean() bool {
 	for _, f := range r.Findings {
-		if f.Outcome() == OutcomeFixed && f.mustOrShouldFix() {
+		if f.Outcome.Kind == OutcomeFixed && f.mustOrShouldFix() {
 			return false
 		}
 	}
-	return r.ClaudeReported
+	return r.ClaudeReported()
 }
 
 // AwaitingUser counts the review's findings left for the user that the user
@@ -1074,7 +1168,7 @@ func (r AutomatedReview) Clean() bool {
 func (r AutomatedReview) AwaitingUser() int {
 	n := 0
 	for _, f := range r.Findings {
-		if f.Outcome() == OutcomeLeftForUser && !f.Decided() {
+		if f.Outcome.Kind == OutcomeLeftForUser && !f.Decided() {
 			n++
 		}
 	}
@@ -1082,18 +1176,14 @@ func (r AutomatedReview) AwaitingUser() int {
 }
 
 // mustOrShouldFix: the finding is held at must fix or should fix, whatever
-// labels come before that ("split: held at pre-existing: must fix, …") and
-// notes after it ("should fix (lowered from must fix: …)").
+// its labels.
 func (f Finding) mustOrShouldFix() bool {
-	s := f.severity
-	for _, label := range []string{"flipped: ", "split: held at ", "pre-existing: "} {
-		s = strings.TrimPrefix(s, label)
-	}
-	return strings.HasPrefix(s, "must fix") || strings.HasPrefix(s, "should fix")
+	return f.Severity == SeverityMustFix || f.Severity == SeverityShouldFix
 }
 
-// What the worker did about a finding, from the first words of its outcome:
-// "left for the user: pre-existing, …" is OutcomeLeftForUser, say.
+// What the worker did about a finding. In the text, it's the first words of the
+// finding's outcome: "left for the user: pre-existing, …" is
+// OutcomeLeftForUser, say.
 type Outcome string
 
 const (
@@ -1103,42 +1193,25 @@ const (
 	OutcomeWithdrawn   Outcome = "withdrawn"         // withdrawn in round <n>
 	OutcomeNotADefect  Outcome = "not a defect"      // not a defect: <evidence>
 	OutcomeLeftForUser Outcome = "left for the user" // left for the user[: <reason>]
-	OutcomeOpen        Outcome = "open"              // nothing yet (not a prefix)
-	OutcomeOther       Outcome = "other"             // a form crew doesn't know (not a prefix)
+	OutcomeOpen        Outcome = ""                  // nothing yet
+	OutcomeOther       Outcome = "other"             // a form crew doesn't know, in the text
 )
 
-func (f Finding) Outcome() Outcome {
-	if f.outcome == "" {
-		return OutcomeOpen
-	}
-	for _, o := range []Outcome{OutcomeFixed, OutcomeProposal, OutcomeRecorded, OutcomeWithdrawn, OutcomeNotADefect, OutcomeLeftForUser} {
-		if strings.HasPrefix(f.outcome, string(o)) {
-			return o
-		}
-	}
-	return OutcomeOther
-}
+// outcomes are the outcomes a worker can give.
+var outcomes = []Outcome{OutcomeFixed, OutcomeProposal, OutcomeRecorded, OutcomeWithdrawn, OutcomeNotADefect, OutcomeLeftForUser}
 
 // StillOpen: the finding repeats one an earlier review left for the user,
-// which the user hadn't decided when this review ran ("left for the user:
-// still open from review <N>"). It stays true once the user decides it: that's
-// Decided.
-func (f Finding) StillOpen() bool {
-	return strings.HasPrefix(f.outcome, string(OutcomeLeftForUser)+": still open from review")
-}
+// which the user hadn't decided when this review ran. It stays true once the
+// user decides it: that's Decided.
+func (f Finding) StillOpen() bool { return f.Outcome.StillOpenFrom > 0 }
 
-// Decided: the user has decided a finding left for them. The worker adds the
-// decision after what it first wrote, so the outcome still starts with that
-// ("left for the user: …; decided by the user: no change"). It may add what it
-// did next, "…, fixed in <sha>", so the decision isn't always last.
-func (f Finding) Decided() bool {
-	return strings.Contains(f.outcome, "; decided by the user")
-}
+// Decided: the user has decided a finding left for them.
+func (f Finding) Decided() bool { return f.Decision != "" }
 
 // SetAside: the worker judged the finding not a defect, either settling a
 // split that way or disputing a finding no reviewer refuted.
 func (f Finding) SetAside() bool {
-	return f.Outcome() == OutcomeNotADefect || strings.HasPrefix(f.severity, "disputed")
+	return f.Outcome.Kind == OutcomeNotADefect || f.Severity == SeverityDisputed
 }
 
 // AcceptanceCriteria is the first line of each of the task's criteria: the

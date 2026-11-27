@@ -170,10 +170,10 @@ func statsOf(t Task, h history) taskStats {
 			if f.StillOpen() {
 				continue // counted in the review that first left it for the user
 			}
-			if f.Outcome() == OutcomeFixed {
+			if f.Outcome.Kind == OutcomeFixed {
 				s.fixed++
 			}
-			if f.Outcome() == OutcomeLeftForUser {
+			if f.Outcome.Kind == OutcomeLeftForUser {
 				s.leftForUser++
 			}
 			if f.SetAside() {

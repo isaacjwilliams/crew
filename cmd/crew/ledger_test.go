@@ -239,13 +239,13 @@ func TestAutomatedReviews(t *testing.T) {
 	for i, r := range reviews {
 		var found []Outcome
 		for k, f := range r.Findings {
-			found = append(found, f.Outcome())
+			found = append(found, f.Outcome.Kind)
 			if f.SetAside() {
 				setAside = append(setAside, fmt.Sprintf("%d.%d", i+1, k+1))
 			}
 		}
 		outcomes = append(outcomes, found)
-		reported = append(reported, r.ClaudeReported)
+		reported = append(reported, r.ClaudeReported())
 		clean = append(clean, r.Clean())
 	}
 	want := [][]Outcome{
@@ -282,7 +282,7 @@ func TestReviewedRange(t *testing.T) {
 		"not a range":     {"", ""},
 		"`h1`, 2 commits": {"", ""},
 	} {
-		if fork, head := reviewedRange(line); fork != want[0] || head != want[1] {
+		if _, fork, head := reviewedRange(line); fork != want[0] || head != want[1] {
 			t.Errorf("reviewedRange(%q) = %q, %q; want %q, %q", line, fork, head, want[0], want[1])
 		}
 	}
@@ -306,14 +306,18 @@ func TestCleanReadsTheSeverityHeld(t *testing.T) {
 		"should fix (lowered from must fix: the pass still runs)": false, "should fix — lowered from must fix: it's rare": false,
 		"nitpick": true, "split: held at nitpick, Claude reviewer refutes": true, "fix later": true,
 	} {
-		r := AutomatedReview{ClaudeReported: true, Findings: []Finding{{severity, "fixed in abc1234"}}}
+		var f Finding
+		f.readSeverity(severity)
+		f.readOutcome("fixed in abc1234")
+		r := AutomatedReview{Findings: []Finding{f}}
 		if r.Clean() != clean {
 			t.Errorf("a fix at %q: Clean = %v, want %v", severity, r.Clean(), clean)
 		}
 	}
-	other := Finding{"nitpick", "acted on at nitpick: fixed in abc1234"}
-	if other.Outcome() != OutcomeOther {
-		t.Errorf("an outcome in no known form: %q", other.Outcome())
+	var other Finding
+	other.readOutcome("acted on at nitpick: fixed in abc1234")
+	if other.Outcome.Kind != OutcomeOther {
+		t.Errorf("an outcome in no known form: %q", other.Outcome.Kind)
 	}
 }
 

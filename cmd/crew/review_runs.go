@@ -62,7 +62,7 @@ func (t Task) ReviewRuns() []ReviewRun {
 	for _, r := range t.AutomatedReviews() {
 		run := ReviewRun{Step: stepAutomatedReview, At: r.At, Raised: len(r.Findings), Known: true}
 		for _, f := range r.Findings {
-			if f.Outcome() == OutcomeFixed {
+			if f.Outcome.Kind == OutcomeFixed {
 				run.Taken++
 			}
 		}
