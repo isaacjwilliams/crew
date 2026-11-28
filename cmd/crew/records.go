@@ -105,7 +105,8 @@ func (d Doc) Records() ([]Record, error) {
 
 // readRecords are the records in the file, whatever the project's format.
 // crew migrate calls it, to add records to a project that isn't in the format
-// yet; everything else calls Records.
+// yet, and so does addMissingRounds, since crew feedback adds rounds in such a
+// project; everything else calls Records.
 func (d Doc) readRecords() ([]Record, error) {
 	b, err := os.ReadFile(d.RecordsPath())
 	if errors.Is(err, os.ErrNotExist) {

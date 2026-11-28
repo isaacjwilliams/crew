@@ -348,11 +348,10 @@ func TestReportRecordedBeforeItsRound(t *testing.T) {
 		return r
 	}
 	task := learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
-	if err := os.Mkdir(task.RecordsPath(), 0o755); err != nil { // a records file crew can't write
-		t.Fatal(err)
-	}
-	if _, err := addReport(task, "12", report()); err == nil {
-		t.Error("addReport wrote a record into a records file it can't write")
+	unwritable := report()
+	unwritable.RedCI.Head = "" // the records file refuses it, after crew has read the file
+	if _, err := addReport(task, "12", unwritable); err == nil {
+		t.Error("addReport wrote a record the records file refuses")
 	}
 	if b, _ := os.ReadFile(task.Path); strings.Contains(string(b), "### Round") || task.Get("review_rounds") != "0" {
 		t.Errorf("a report crew couldn't record was sent:\n%s", b)
