@@ -166,6 +166,20 @@ func TestAskWritesNothingBeforeMigrate(t *testing.T) {
 	}
 }
 
+func TestSettleNudgeQuestionsChangesNothingBeforeMigrate(t *testing.T) {
+	task := learnTask(t, "## Open questions\n- [ ] "+nudgeQuestionStart+" again after a nudge, with no new commit.\n\n## Log\n")
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	before := contents(t, task.Doc)
+	if err := task.SettleNudgeQuestions("new commit bbb2222"); !errors.Is(err, errNotMigrated) {
+		t.Errorf("settling before migrate = %v, want it to say to run crew migrate", err)
+	}
+	if _, statErr := os.Stat(task.RecordsPath()); !errors.Is(statErr, os.ErrNotExist) || contents(t, task.Doc) != before {
+		t.Errorf("settling before migrate wrote something: %v\n%s", statErr, contents(t, task.Doc))
+	}
+}
+
 // crew migrate writes a task's records, then its file, then the project's
 // format. Each replaces the file whole, so a write that fails partway leaves the
 // old file, never part of the new one: a reader holding the old file open still
