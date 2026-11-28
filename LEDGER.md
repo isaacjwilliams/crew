@@ -27,7 +27,8 @@ The coordination state for the crew: the `lead`, `implementer` workers, `casual-
     goals/NNN-<slug>.md  one file per goal: a batch of items a goal lead works through
     proposals/*.md       ideas worth keeping that aren't tasks yet (see Proposals)
     memory.md            facts about the project the user approved (see Project memory)
-    memory-suggestions.md  facts suggested for memory.md, waiting on the user
+    memory-suggestions.md  a heading and a comment naming the commands; crew reads nothing typed into it
+    memory-suggestions.records.jsonl  facts suggested for memory.md, and how each was settled (see Records)
     gardener.last        last commit the gardener reviewed
     misses.last          newest merge time of the tasks the misses agent read
     review-eval/*.md     one report per crew review-eval run, named for when it started (see Review eval)
@@ -163,14 +164,16 @@ A report starts with `- Rubric:`, `- Reviewer:` and `- Claude Code:` lines namin
 
 `memory.md` holds durable facts about a project that the user approved and every agent working on it should know: mostly settled domain decisions that outlive the task that made them, and private working facts collaborators shouldn't see. It isn't status, work (tasks and proposals), conventions collaborators follow too (the repo's AGENTS.md) or the user's taste across projects (their `~/.claude/CLAUDE.md`). Agents load all of it at session start through a SessionStart hook, `crew memory --hook`; `crew memory --project <p>` prints it anywhere. Neither file has front matter.
 
-- **Suggestions.** Anyone suggests a fact with `crew remember "<fact>" --why "<reason>" [--source S]`, which appends a line to `memory-suggestions.md` and creates the file, with a heading, the first time. `source` is as for proposals: `lead` (the default), `user`, `gardener` or `worker:<task id>`. Only `crew remember` adds lines; only the lead ticks them.
+- **Suggestions.** Anyone suggests a fact with `crew remember "<fact>" --why "<reason>" [--source S]`, which adds a `suggested` record beside `memory-suggestions.md` (see [Records](#records)) and prints its ID. It creates the file the first time, with a heading and a comment naming the commands. `source` is as for proposals: `lead` (the default), `user`, `gardener` or `worker:<task id>`. Each suggestion waits on the user, like an open question, and `crew status` counts them. The lead settles each with the user: `crew keep <id>` or `crew decline <id> --why "<reason>"`. Both refuse an ID that isn't a suggestion or is already settled. `crew show memory-suggestions` lists every suggestion, the open ones unticked, each with its ID and under it how it was settled:
 
   ```
-  - [ ] **Dashboard columns are unlimited** The user chose it over a cap of 12. (worker:042-dashboard-columns, 2026-11-09)
+  - [ ] 3f9a1c2e **Dashboard columns are unlimited** The user chose it over a cap of 12. (worker:042-dashboard-columns, 2026-11-09)
+  - [x] 7b04d5aa **PR screenshots go in Dropbox** Collaborators can't see them. (lead, 2026-11-10)
+    - declined 2026-11-11 09:30 by crew decline: Screenshots go in the PR.
   ```
 
-  An unchecked item waits on the user, like an open question, and `crew status` counts them. The lead settles each with the user and ticks it with the outcome: `- [x] … → kept` or `- [x] … → declined: <reason>`.
-- **Entries.** Only the lead writes `memory.md`, and only on the user's say-so; `crew guard` blocks workers' and the gardener's edits of it. It's the heading `# Project memory: <project>`, then one `- ` item per fact. An approved suggestion's text after the checkbox moves into it unchanged: `- **<fact>** <reason>. (<source>, <date>)`. Keep it under 9,000 characters (`wc -m`): every agent loads all of it at session start, and Claude Code passes on at most 10,000 characters of a hook's output. Past that, `crew memory --hook` prints only its header and an instruction to read the file.
+  crew decides from the records alone: a line typed into `memory-suggestions.md`, ticked or not, counts for nothing, and `crew show` lists such lines apart, under a line that says so.
+- **Entries.** Only the lead writes `memory.md`, and only on the user's say-so; `crew guard` blocks workers' and the gardener's edits of it. It's the heading `# Project memory: <project>`, then one `- ` item per fact. An approved suggestion's text after its ID moves into it unchanged: `- **<fact>** <reason>. (<source>, <date>)`. Keep it under 9,000 characters (`wc -m`): every agent loads all of it at session start, and Claude Code passes on at most 10,000 characters of a hook's output. Past that, `crew memory --hook` prints only its header and an instruction to read the file.
 
 ## Pausing
 
@@ -203,14 +206,17 @@ A task whose `base` is another task's `branch` is stacked on that task, its pare
 
 ## Records
 
-A task's **records** are facts crew decides from, kept beside the task file in `tasks/<id>.records.jsonl`. Only crew commands write them: the guard refuses an edit of the file, for every role. Each record is one JSON line, appended under the ledger lock and never changed, with an `id`, the time it was written (`at`) and the command that wrote it (`by`), and one payload. A later fact is a new record that names the one it follows. Two clones that each add records merge without a conflict: `.gitattributes` has git keep both sides' lines. crew reads the file strictly: a line it can't read, from a newer crew or typed by hand, stops any decision that rests on the records, naming the file and line, rather than reading as fewer records.
+**Records** are facts crew decides from, kept beside the ledger file they belong to: a task's in `tasks/<id>.records.jsonl`, a project's memory suggestions in `memory-suggestions.records.jsonl`. Only crew commands write them: the guard refuses an edit of the file, for every role. Each record is one JSON line, appended under the ledger lock and never changed, with an `id`, the time it was written (`at`) and the command that wrote it (`by`), and one payload. A later fact is a new record that names the one it follows. Two clones that each add records merge without a conflict: `.gitattributes` has git keep both sides' lines. crew reads the file strictly: a line it can't read, from a newer crew or typed by hand, stops any decision that rests on the records, naming the file and line, rather than reading as fewer records.
 
 | Payload | Written by | What it says |
 |---|---|---|
 | `to_learn` (`text`) | `crew to-learn TASK "<item>"` | something a draft's objective or gates rest on that nobody has checked yet |
 | `learned` (`item`, `answer`) | `crew learned TASK ITEM "<answer>"` | the answer that settles the `to_learn` record `item`; two clones may each settle one, and both answers are kept |
+| `suggested` (`fact`, `why`, `source`) | `crew remember "<fact>" --why TEXT` | a fact suggested for the project's `memory.md`, waiting on the user |
+| `kept` (`suggestion`) | `crew keep ID` | the user kept the `suggested` record `suggestion`, and the lead wrote it into `memory.md` |
+| `declined` (`suggestion`, `reason`) | `crew decline ID --why TEXT` | the user turned the `suggested` record `suggestion` down, and why |
 
-A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project, and `crew upgrade` runs `crew migrate` after installing a release. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment.
+A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records, `2` once its memory suggestions are too. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project, and `crew upgrade` runs `crew migrate` after installing a release. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment. It moves each line of `memory-suggestions.md` into a `suggested` record, made on the line's date, and a ticked one into a `kept` or `declined` record after it, with its reason. The file keeps any other line, under the heading and comment `crew remember` writes. A line it can't read stops the migration, naming it, before it changes the suggestions.
 
 ## Decisions
 

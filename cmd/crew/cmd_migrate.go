@@ -1,9 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // crew migrate brings each project's ledger to the format this crew reads
@@ -14,6 +18,11 @@ import (
 // records: each item becomes a to_learn record and, once ticked, a learned
 // record with its answer. The section keeps any line that wasn't part of an
 // item, under the template's comment.
+//
+// Format 2 moves memory suggestions from checkboxes in memory-suggestions.md
+// into records: each becomes a suggested record and, once ticked, a kept or
+// declined record. The file keeps any line that wasn't a suggestion, under the
+// head crew remember writes.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -45,18 +54,27 @@ func cmdMigrate(c *Crew, args []string) error {
 		if have == ledgerFormat {
 			continue
 		}
-		items := 0
-		for _, t := range c.tasks(p) {
-			n, err := migrateStillToLearn(t, comment)
-			if err != nil {
-				return fail("%s: %v", t.ID(), err)
+		if have < 1 {
+			items := 0
+			for _, t := range c.tasks(p) {
+				n, err := migrateStillToLearn(t, comment)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				items += n
 			}
-			items += n
+			fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
+		}
+		if have < 2 {
+			n, err := migrateMemorySuggestions(c.suggestionsDoc(p), p)
+			if err != nil {
+				return fail("%s: %v", p, err)
+			}
+			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
 		}
-		fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
 		migrated++
 	}
 	if migrated == 0 {
@@ -184,4 +202,107 @@ func answerFrom(under []string) string {
 		return strings.TrimPrefix(out[0], "- ")
 	}
 	return strings.Join(out, "\n")
+}
+
+// migrateMemorySuggestions moves the suggestions in a project's
+// memory-suggestions.md into records, and gives the file the head crew remember
+// writes, keeping any line that wasn't a suggestion. It says how many it moved.
+//
+// Like migrateStillToLearn, it writes the records in one go before it changes
+// the file, so a run stopped in between is safe to run again: when crew migrate
+// has written records already, it only rewrites the file.
+func migrateMemorySuggestions(d Doc, project string) (int, error) {
+	ls, err := d.read()
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	// Every checkbox line is a suggestion, as crew counted them before records,
+	// read as it stands: crew remember wrote its text as given, "<!--" and all.
+	var found []oldSuggestion
+	others := slices.Clone(ls) // the file with its suggestions blanked out
+	for i, l := range ls {
+		l = strings.TrimRight(l, " \t")
+		if _, ok := checklistItem(l); !ok {
+			continue
+		}
+		o, err := readOldSuggestion(l)
+		if err != nil {
+			return 0, fmt.Errorf("%s:%d: %v", suggestionsFile, i+1, err)
+		}
+		found, others[i] = append(found, o), ""
+	}
+	// The other lines are kept, except the heading and comments. A comment is
+	// looked for without the suggestions, so one's "<!--" can't hide a line.
+	var rest []string
+	for i, l := range uncommented(others) {
+		if t := strings.TrimSpace(l); t != "" && t != "# Memory suggestions: "+project {
+			rest = append(rest, ls[i])
+		}
+	}
+	records, err := d.readRecords()
+	if err != nil {
+		return 0, err
+	}
+	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" }) {
+		found = nil
+	}
+	var moved []Record
+	for _, o := range found {
+		r := newRecord("crew migrate", records)
+		r.At, r.Suggested = o.made, &o.Suggested
+		records, moved = append(records, r), append(moved, r)
+		if !o.kept && o.declined == "" {
+			continue
+		}
+		settled := newRecord("crew migrate", records)
+		if o.kept {
+			settled.Kept = &Kept{Suggestion: r.ID}
+		} else {
+			settled.Declined = &Declined{Suggestion: r.ID, Reason: o.declined}
+		}
+		records, moved = append(records, settled), append(moved, settled)
+	}
+	if len(moved) > 0 {
+		if err := d.AddRecords(moved...); err != nil {
+			return 0, err
+		}
+	}
+	body := suggestionsHead(project)
+	if len(rest) > 0 {
+		body += "\n" + strings.Join(rest, "\n") + "\n"
+	}
+	return len(found), replaceFile(d.Path, []byte(body))
+}
+
+// An oldSuggestion is a suggestion as memory-suggestions.md kept it before
+// records: "- [ ] **<fact>** <why>. (<source>, <date>)", as crew remember wrote
+// it, which the lead ticked "- [x]" with " → kept" or " → declined: <reason>"
+// after it.
+type oldSuggestion struct {
+	Suggested
+	made     time.Time // the date on the line
+	kept     bool
+	declined string // the reason, for one declined
+}
+
+var oldSuggestionLine = regexp.MustCompile(`^- \[([ xX])\] \*\*(.+?)\*\* (.+?)\. \(([^(),]+), (\d{4}-\d{2}-\d{2})\)(?: → (?:(kept)|declined: (.+)))?$`)
+
+// readOldSuggestion reads a suggestion's line from before records.
+func readOldSuggestion(line string) (oldSuggestion, error) {
+	m := oldSuggestionLine.FindStringSubmatch(line)
+	if m == nil {
+		return oldSuggestion{}, fmt.Errorf("not a suggestion crew can read: %s", line)
+	}
+	o := oldSuggestion{Suggested: Suggested{Fact: m[2], Why: m[3], Source: m[4]}, kept: m[6] != "", declined: m[7]}
+	if ticked := m[1] != " "; ticked != (o.kept || o.declined != "") {
+		return o, fmt.Errorf("a ticked suggestion, and only a ticked one, ends \"→ kept\" or \"→ declined: <reason>\": %s", line)
+	}
+	var err error
+	if o.made, err = time.ParseInLocation("2006-01-02", m[5], time.Local); err != nil {
+		return o, fmt.Errorf("%v: %s", err, line)
+	}
+	return o, nil
 }

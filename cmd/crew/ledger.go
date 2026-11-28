@@ -736,19 +736,10 @@ func (t Task) rules() (kindRules, error) {
 	return r, nil
 }
 
-// A LearnItem is something a draft's objective or gates rest on that nobody had
-// checked when it was added: a to_learn record, and the learned records that
-// answer it, oldest first. It's open until it has an answer.
-type LearnItem struct {
-	Record
-	Answers []Record
-}
-
-func (i LearnItem) Open() bool { return len(i.Answers) == 0 }
-
 // StillToLearn are the task's still-to-learn items, from its records alone, in
-// the order they were added. crew ready refuses a draft while one is open.
-func (t Task) StillToLearn() ([]LearnItem, error) {
+// the order they were added: each to_learn record with the learned records that
+// answer it. crew ready refuses a draft while one is open.
+func (t Task) StillToLearn() ([]Item, error) {
 	records, err := t.Records()
 	if err != nil {
 		return nil, err
@@ -757,32 +748,8 @@ func (t Task) StillToLearn() ([]LearnItem, error) {
 }
 
 // learnItems are the still-to-learn items records add, with their answers.
-// Records from readRecords name only items they add, which it checks.
-func learnItems(records []Record) []LearnItem {
-	var items []LearnItem
-	for _, r := range records {
-		if r.ToLearn != nil {
-			items = append(items, LearnItem{Record: r})
-		}
-	}
-	for _, r := range records {
-		if r.Learned != nil {
-			i := slices.IndexFunc(items, func(i LearnItem) bool { return i.ID == r.Learned.Item })
-			items[i].Answers = append(items[i].Answers, r)
-		}
-	}
-	return items
-}
-
-// openItems counts the items that are still open.
-func openItems(items []LearnItem) int {
-	n := 0
-	for _, i := range items {
-		if i.Open() {
-			n++
-		}
-	}
-	return n
+func learnItems(records []Record) []Item {
+	return items(records, kindToLearn)
 }
 
 // DesignInBrief is an error when the brief says how to meet its objective, in

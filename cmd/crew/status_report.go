@@ -41,6 +41,7 @@ type projectReport struct {
 // questions, PRs to review, and memory suggestions.
 type waitingOnUser struct {
 	Questions, PRs, MemorySuggestions int
+	MemoryUnread                      error // why the suggestions couldn't be counted, if they couldn't
 }
 
 // waitingOf is one task's share of what waits on the user: 1 in Questions when
@@ -75,7 +76,9 @@ func (w waitingOnUser) String() string {
 	if w.PRs > 0 {
 		parts = append(parts, fmt.Sprintf("%d PR(s) to review", w.PRs))
 	}
-	if w.MemorySuggestions > 0 {
+	if w.MemoryUnread != nil {
+		parts = append(parts, "memory suggestions not counted: "+w.MemoryUnread.Error())
+	} else if w.MemorySuggestions > 0 {
 		parts = append(parts, fmt.Sprintf("%d memory suggestion(s)", w.MemorySuggestions))
 	}
 	return strings.Join(parts, ", ")
@@ -311,7 +314,8 @@ func (s *statusView) settingsOf(project string) Settings {
 
 // waiting is what waits on the user in a project, from its tasks.
 func (s *statusView) waiting(project string, tasks []Task) waitingOnUser {
-	w := waitingOnUser{MemorySuggestions: s.memorySuggestions(project)}
+	memory, err := s.memorySuggestions(project)
+	w := waitingOnUser{MemorySuggestions: openItems(memory), MemoryUnread: err}
 	for _, t := range tasks {
 		tw := waitingOf(t)
 		w.Questions += tw.Questions

@@ -82,11 +82,14 @@ func TestGuard(t *testing.T) {
 	// No role edits records or the ledger's format, whatever the case of the name,
 	// and the message names the commands that write them.
 	for _, role := range []string{"lead", "worker", "gardener"} {
-		for _, f := range []string{"tasks/001-x.records.jsonl", "tasks/001-x.Records.JSONL", "goals/001-g.records.jsonl", "ledger-format"} {
+		for _, f := range []string{"tasks/001-x.records.jsonl", "tasks/001-x.Records.JSONL", "goals/001-g.records.jsonl", "memory-suggestions.records.jsonl", "Memory-Suggestions.Records.jsonl", "ledger-format"} {
 			err := (guard{role: role, home: home, projectDir: wt}).check(hookInput(main, home+"/projects/p/"+f))
 			want := "crew to-learn TASK"
-			if f == "ledger-format" {
+			switch strings.ToLower(f) {
+			case "ledger-format":
 				want = "only crew migrate changes it"
+			case "memory-suggestions.records.jsonl":
+				want = "crew keep ID"
 			}
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s editing %s: %v; want it blocked, saying %q", role, f, err, want)

@@ -263,9 +263,14 @@ Review and proposals  (PROPOSAL = id, unique substring, or file path)
 
 Project memory  (facts about a project you approved, which its agents load)
   crew remember "<fact>" --why TEXT [--source S] [--project P]
-                                   Suggest a fact for the project's memory; it waits
-                                   on you in memory-suggestions.md. S is lead (the
-                                   default), user, gardener, misses or worker:TASK
+                                   Suggest a fact for the project's memory, and print
+                                   its ID; it waits on you until it's kept or
+                                   declined. S is lead (the default), user,
+                                   gardener, misses or worker:TASK
+  crew keep ID [--project P]       Settle a suggestion you kept (the lead writes it
+                                   into memory.md)
+  crew decline ID --why TEXT [--project P]
+                                   Settle a suggestion you turned down, with why
   crew memory [--project P]        Print the project's memory, after the rule for
                                    weighing it
   crew memory --hook               The same for CREW_PROJECT, from a SessionStart
@@ -279,7 +284,8 @@ Reading the ledger  (with no type word, the argument is a task, as for any TASK)
   crew show goal GOAL              Print a goal
   crew show memory [--project P]   Print the project's memory.md as it is on disk
   crew show memory-suggestions [--project P]
-                                   Print the project's memory-suggestions.md
+                                   Print the project's memory suggestions, each with
+                                   its ID and whether it was kept or declined, and why
   crew show file NAME [--project P]
                                    Print a file in the home's reports/ or logs/, a
                                    news/<date>.log, or a project's review-eval

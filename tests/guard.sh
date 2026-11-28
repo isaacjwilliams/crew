@@ -132,9 +132,11 @@ for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json"; do
     "jq -e >/dev/null '.hooks.SessionStart | length == 1 and (.[0] | has(\"matcher\") | not) and .[0].hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" memory --hook\"' $f"
 done
 check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '.hooks == null' $C/readonly-settings.json"
-check "the gardener may suggest project memory" "jq -e >/dev/null '.permissions.allow | index(\"Bash(crew remember *)\")' $C/gardener-settings.json"
-check "the gardener's allow list is the read-only one, plus crew remember" \
-  "[[ \$(jq -c '.permissions.allow - [\"Bash(crew remember *)\"]' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
+GARDENER_CREW='["Bash(crew remember *)","Bash(crew show memory-suggestions)","Bash(crew show memory-suggestions *)"]'
+check "the gardener may suggest project memory, and read the suggestions" \
+  "jq -e >/dev/null --argjson g '$GARDENER_CREW' '.permissions.allow | contains(\$g)' $C/gardener-settings.json"
+check "the gardener's allow list is the read-only one, plus crew remember and crew show memory-suggestions" \
+  "[[ \$(jq -c --argjson g '$GARDENER_CREW' '.permissions.allow - \$g' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
 # --- the misses agent: the gardener's powers, its own job
 MS=$A/misses.md
 check "misses.md runs crew-guard as the gardener" "grep -q 'bin/crew-guard\" gardener.\$' $MS"
@@ -525,11 +527,11 @@ check "the rule for weighing project memory is written once, in crew, and in no 
 for f in implementer:'--source worker:<task>' gardener:'--source gardener' goal-lead:'crew remember "<fact>" --why "<reason>"`' lead:'--source user'; do
   a=${f%%:*} src=${f#*:}
   check "$a suggests project memory with crew remember ($src), and checks the suggestions first" \
-    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'memory-suggestions.md' $A/$a.md"
+    "grep -qF -- '$src' $A/$a.md && grep -q 'crew remember' $A/$a.md && grep -q 'crew show memory-suggestions' $A/$a.md"
 done
 check "the brief reviewer reads the project's memory, which isn't loaded for a subagent" "grep -q 'crew memory --project <project>' $A/brief-reviewer.md"
 check "the casual observer knows nothing of project memory" "! grep -qi 'memory' $A/casual-observer.md"
-check "the lead copies an approved suggestion into memory.md unchanged and ticks it with the outcome" \
-  "grep -q 'copy the text after the checkbox into .memory.md. unchanged' $A/lead.md && grep -q '→ kept' $A/lead.md && grep -q '→ declined: <reason>' $A/lead.md"
+check "the lead copies an approved suggestion into memory.md unchanged and settles each with crew keep or crew decline" \
+  "grep -q 'copy the suggestion.s text after its ID into .memory.md. unchanged' $A/lead.md && grep -q 'crew keep <id>' $A/lead.md && grep -q 'crew decline <id> --why' $A/lead.md"
 
 summary guard

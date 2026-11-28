@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade migrate install project checkout host lead doctor config new ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember memory mcp goal
+set -l crew_cmds help version setup upgrade migrate install project checkout host lead doctor config new ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember keep decline memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -35,7 +35,7 @@ complete -c crew -n "__crew_showing memory memory-suggestions file" -l project -
 complete -c crew -n "__fish_seen_subcommand_from evidence" -F
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
-complete -c crew -n "__crew_command new propose proposals remember memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
+complete -c crew -n "__crew_command new propose proposals remember keep decline memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null) all"
 complete -c crew -n "__fish_seen_subcommand_from config" -l task -x -d 'With this task\'s overrides too' \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -43,6 +43,24 @@ complete -c crew -n "__fish_seen_subcommand_from propose" -l why -r -d 'The idea
 complete -c crew -n "__fish_seen_subcommand_from propose" -l revisit-when -r -d 'What would make it worth acting on'
 complete -c crew -n "__fish_seen_subcommand_from propose remember" -l source -x -a 'lead user gardener misses worker:' -d 'Who wrote it'
 complete -c crew -n "__fish_seen_subcommand_from remember" -l why -r -d 'Why the fact is worth remembering'
+# The open memory suggestions, from crew show, up to the lines typed into the file:
+# those of the project --project names, if it's typed.
+function __crew_open_suggestions
+    # Expanded, so a variable typed after --project gives its value. This comes
+    # first, before any local could hide the user's variable of that name.
+    # Fish before 4.0 can't expand them, and reads them as typed.
+    set -l words (commandline -xpc 2>/dev/null; or commandline -opc)
+    set -l project
+    if set -l i (contains -i -- --project $words)
+        set project --project $words[(math $i + 1)]
+    end
+    for l in (crew show memory-suggestions $project 2>/dev/null)
+        string match -q 'Typed into the file*' -- $l; and return
+        string replace -rf '^- \[ \] (\S+) \*\*(.*?)\*\*.*' '$1\t$2' -- $l
+    end
+end
+complete -c crew -n "__crew_command keep decline" -a "(__crew_open_suggestions)"
+complete -c crew -n "__crew_command decline" -l why -r -d 'Why the user turned it down'
 complete -c crew -n "__crew_command memory" -l hook -d 'For a SessionStart hook: the memory of CREW_PROJECT'
 complete -c crew -n "__fish_seen_subcommand_from new" -l kind -x -a 'build spike fix refine' -d 'What the task makes'
 complete -c crew -n "__fish_seen_subcommand_from new" -l informs -x -d 'The draft whose question this spike answers' \

@@ -1,2 +1,4 @@
-# Records files only ever gain lines (records.go), so a merge keeps both sides'.
+# Records files, a project's memory suggestions' and its tasks', only ever gain
+# lines (records.go), so a merge keeps both sides'.
+projects/*/*.records.jsonl merge=union
 projects/*/*/*.records.jsonl merge=union
