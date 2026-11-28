@@ -24,8 +24,8 @@ Setup
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
-                                   moving still-to-learn checkboxes into records;
-                                   crew upgrade runs it
+                                   moving still-to-learn checkboxes and spikes'
+                                   answers into records; crew upgrade runs it
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
                                    to crew and lead in ~/.local/bin, fish
@@ -78,6 +78,9 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    on that nobody has checked yet; prints its ID
   crew learned TASK ITEM "<answer>"
                                    Settle an item still to learn with its answer
+  crew answer TASK "<answer>"      Record a spike's answer, in a line, before its
+                                   hand-over; the last one recorded stands
+                                   (used by workers)
   crew dispatch TASK [--force|--tick]
                                    Create worktree + branch and start an implementer.
                                    --force dispatches a task that isn't ready; a
@@ -111,8 +114,8 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    saying its check ran, unless it's a user check, and
                                    a high-risk task a security review; a branch that
                                    touches SENSITIVE_PATHS makes it high risk. Mark a
-                                   spike done once its ## Report starts with "Answer:"
-                                   (used by workers)
+                                   spike done once its answer is recorded (crew
+                                   answer) (used by workers)
   crew check-base TASK             Before a task's first hand-over: say whether its
                                    branch holds its parent's latest commit and its PR
                                    targets its base, and if not, give the commands

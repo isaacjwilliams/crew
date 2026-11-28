@@ -23,6 +23,9 @@ import (
 // into records: each becomes a suggested record and, once ticked, a kept or
 // declined record. The file keeps any line that wasn't a suggestion, under the
 // head crew remember writes.
+//
+// Format 3 records each spike's answer, as crew read it from the spike's report
+// before, in an answered record. It leaves the report as it is.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -71,6 +74,19 @@ func cmdMigrate(c *Crew, args []string) error {
 				return fail("%s: %v", p, err)
 			}
 			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
+		}
+		if have < 3 {
+			answers := 0
+			for _, t := range c.tasks(p) {
+				moved, err := migrateSpikeAnswer(t)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				if moved {
+					answers++
+				}
+			}
+			fmt.Printf("%s: recorded %d spike answer(s) from their reports\n", p, answers)
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
@@ -305,4 +321,40 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 		return o, fmt.Errorf("%v: %s", err, line)
 	}
 	return o, nil
+}
+
+// migrateSpikeAnswer records a spike's answer as crew read it before records
+// (reportAnswer), and says whether it did. It leaves a spike that has an answer
+// recorded already, by a run cut short or by crew answer, and never changes the
+// task file.
+func migrateSpikeAnswer(t Task) (bool, error) {
+	if t.Kind() != KindSpike {
+		return false, nil
+	}
+	answer := reportAnswer(t)
+	if answer == "" {
+		return false, nil
+	}
+	records, err := t.readRecords()
+	if err != nil {
+		return false, err
+	}
+	if _, ok := lastAnswer(records); ok {
+		return false, nil
+	}
+	r := newRecord("crew migrate", records)
+	r.Answered = &Answered{Answer: answer}
+	return true, t.AddRecords(r)
+}
+
+// reportAnswer is a spike's answer as crew read it before records: the first
+// line of its ## Report, after "Answer:", or nothing when the report doesn't
+// start with one.
+func reportAnswer(t Task) string {
+	first, _, _ := strings.Cut(t.Section("## Report"), "\n")
+	answer, ok := strings.CutPrefix(first, "Answer:")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(answer)
 }

@@ -51,7 +51,7 @@ for role in worker gardener lead; do
   w block $role "$M" "$L/projects/p/ledger-format"
 done
 out=$(jq -n --arg p "$L/projects/p/tasks/001-x.records.jsonl" --arg d "$M" '{cwd:$d,tool_input:{file_path:$p}}' | CREW_HOME=$L "$G" worker 2>&1)
-check "the guard names the crew commands that write still-to-learn records" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"* ]]'
+check "the guard names the crew commands that write a task's records" '[[ $out == *"crew to-learn TASK"*"crew learned TASK ITEM"*"crew answer TASK"* ]]'
 # --- a path is judged by where it leads, and one that can't be worked out is blocked
 ln -s "$L/bin" "$W/into-home"; ln -s "$L/projects" "$SB/ledger-link"; ln -s loop "$W/loop"
 w block worker "$W" "$W/into-home/crew"
@@ -245,8 +245,8 @@ check "the PR body's Risk section opens with the tier and its look" \
 spike_workflow() { awk '/^## Workflow: spike/ {on=1; next} on && /^## / {exit} on' "$A/implementer.md"; }
 check "a spike leaves first run after step 3 for Workflow: spike" \
   "awk '/^## Workflow: first run/ {w=1} w && /^3\\. / && !t {t=NR} w && /If your task is a spike .*follow .Workflow: spike. from here instead of the steps below/ && !s {s=NR} w && /^4\\. / && !f {f=NR} END {exit !(t && s && f && t < s && s < f)}' $A/implementer.md"
-check "Workflow: spike commits locally and never pushes, writes a report that starts with its answer, and hands over" \
-  "spike_workflow | grep -q 'only locally: never push' && spike_workflow | grep -q 'a .## Report. section in your task file.*Its first line is .Answer: <the answer, in a line>.' && spike_workflow | grep -q '^3\\. \\*\\*Hand over\\*\\*, last: .crew hand-over <task>.' && ! spike_workflow | grep -q '^4\\. '"
+check "Workflow: spike commits locally and never pushes, writes a report that starts with its answer, records the answer with crew answer, and hands over" \
+  "spike_workflow | grep -q 'only locally: never push' && spike_workflow | grep -q 'a .## Report. section in your task file.*Its first line is .Answer: <the answer, in a line>.' && spike_workflow | grep -q '^3\\. \\*\\*Record the answer\\*\\*.*.crew answer <task> \"<the answer, in a line>\".' && spike_workflow | grep -q '^4\\. \\*\\*Hand over\\*\\*, last: .crew hand-over <task>.' && ! spike_workflow | grep -q '^5\\. '"
 check "Workflow: spike opens no PR and runs no observer, automated review or evidence" \
   "! spike_workflow | grep -qE 'gh pr create|git push -u|casual-observer|/pr-review|crew review-summary' && spike_workflow | grep -q 'Tests, the observer, a PR, automated review and .## Evidence. are for builds, so skip them'"
 check "the lead lists what's still to learn and opens a spike for each approach, then puts the answers side by side" \
@@ -256,7 +256,7 @@ check "the goal lead opens and readies spikes without parking, and hears when on
 check "leads start a brief review with the task file's path alone, which crew costs reads to charge the review to its task" \
   "grep -q 'Spawn the .brief-reviewer. subagent with the task file.s path and nothing else' $A/lead.md && grep -q 'spawning .brief-reviewer. with the task file.s path and nothing else' $A/goal-lead.md && grep -qF '/projects/([^/\\s]+)/tasks/([^/\\s]+)\\.md' <<<\"\$SRC\""
 check "crew tells the goal lead a spike reported in the words its workflow names" \
-  "grep -qF '\"%s reported: %s\", t.ID(), t.Answer()' <<<\"\$SRC\""
+  "grep -qF '\"%s reported: %s\", t.ID(), answer' <<<\"\$SRC\""
 # --- fixes: a defect live in production, proved by a failing test and traced to its cause
 check "a fix's worker commits a failing test that reproduces the defect before the fix, in step 4, and its evidence shows both runs" \
   "awk '/^## Workflow: first run/ {w=1} w && /^4\\. / && !f {f=NR} w && /^   If your task is a fix .*prove the defect before you fix it/ && !x {x=NR} w && /^5\\. / && !p {p=NR} END {exit !(f && x && p && f < x && x < p)}' $A/implementer.md && grep -q 'Commit a test that reproduces the defect and fails on the code as it is, before the fix commit' $A/implementer.md && grep -q 'shows both runs: the test failing before the fix, and passing after' $A/implementer.md"

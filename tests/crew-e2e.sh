@@ -2368,18 +2368,33 @@ commit_in "$KWT" spike/paging.ts
 echo 'SENSITIVE_PATHS="spike"' >>"$PE"; out=$(crew sync 2>&1); sed -i '/^SENSITIVE_PATHS=/d' "$PE"
 check "sync leaves a spike that touches a sensitive path without a risk tier: it has none to raise" '[[ $out != *"risk →"* && -z $(crew get "$KS" risk) ]]'
 check "sync looks for no PR for a spike: one under its branch's name is someone else's" '[[ $out != *"$KSI: found PR"* && -z $(crew get "$KS" pr) ]]'   # the gh stub finds a PR for any branch
-check "set refuses done: only hand-over sets it, once the report is in" \
-  '[[ $(crew set "$KS" status done 2>&1) == *"only crew hand-over sets done, once the report is in: crew hand-over $KSI"* && $(crew get "$KS" status) == working ]]'
-check "hand-over refuses a spike without a report" '[[ $(crew hand-over "$KS" 2>&1) == *"## Report must start with a line '"'"'Answer: <the answer, in a line>'"'"'"* && $(crew get "$KS" status) == working ]]'
-sed -i '/^## Automated reviews$/i ## Report\nTried: paging by cursor.\nAnswer: yes\n' "$KS"
-check "hand-over refuses a spike whose report doesn't start with its answer" '! crew hand-over "$KS" 2>/dev/null && [[ $(crew get "$KS" status) == working ]]'
-sed -i -e '/^Tried: paging by cursor.$/d' -e 's/^Answer: yes$/Answer: yes, 100 rows a page by cursor\nTried: paging by cursor./' "$KS"
-touch "$KWT/scratch.log"
-check "hand-over refuses a spike whose worktree has changes it didn't commit, which cleanup would leave behind" \
-  '[[ $(crew hand-over "$KS" 2>&1) == *"$KWT has changes that aren'"'"'t committed: commit or delete them"* && $(crew get "$KS" status) == working ]]'
+check "set refuses done: only hand-over sets it, once the answer is recorded" \
+  '[[ $(crew set "$KS" status done 2>&1) == *"only crew hand-over sets done, once the spike'"'"'s answer is recorded: crew hand-over $KSI"* && $(crew get "$KS" status) == working ]]'
+check "hand-over refuses a spike with no answer recorded, naming the command that records one" \
+  '[[ $(crew hand-over "$KS" 2>&1) == "crew: $KSI has no answer recorded: record it with crew answer $KSI \"<the answer, in a line>\", then hand over again" && $(crew get "$KS" status) == working ]]'
+# The report is prose for people: crew reads the answer from its record alone.
+sed -i '/^## Automated reviews$/i ## Report\nAnswer: yes, from the report\nTried: paging by cursor.\n' "$KS"
+check "hand-over refuses a spike whose report starts with an answer, but has none recorded" \
+  '[[ $(crew hand-over "$KS" 2>&1) == *"$KSI has no answer recorded"* && $(crew get "$KS" status) == working ]]'
+KR=${KS%.md}.records.jsonl; head=$(git -C "$L" rev-parse HEAD)
+o1=$(crew answer "$KS" "  " 2>&1); r1=$?; o2=$(crew answer "$KA" "yes" 2>&1); r2=$?
+check "answer refuses an empty answer, and a task that isn't a spike, saying why and changing nothing" \
+  '((r1 == 1 && r2 == 1)) && [[ $o1 == "crew: give $KSI'"'"'s answer, in a line: an empty one tells whoever reads it nothing" && $o2 == "crew: $KAI is a build: only a spike records an answer" && ! -e $KR && ! -e ${KA%.md}.records.jsonl && $(git -C "$L" rev-parse HEAD) == "$head" ]]'
+sed -i 's/^Answer: yes, from the report$/We tried paging by cursor./' "$KS"
+out=$(crew answer "$KS" "no, it pages by offset"); crew answer "$KS" $'yes, 100 rows a page\n  by cursor' >/dev/null
+check "answer records a spike's answer beside the task, in a line, and commits it, leaving the task file be" \
+  '[[ $out == "recorded $KSI'"'"'s answer; hand it over with crew hand-over $KSI" && $(wc -l <"$KR") == 2 && $(git -C "$L" log -1 --format=%s) == "answer $KSI" && -z $(git -C "$L" status --porcelain -- projects) && $(section "$KS" "## Report") != *"100 rows"* ]]'
+check "show gives the last answer recorded, under ## Answer after the report, and not the one it replaced" \
+  '[[ $(crew show "$KS" | section /dev/stdin "## Answer") =~ ^"yes, 100 rows a page by cursor (recorded "[0-9-]{10}" "[0-9:]{5}" by crew answer)"$ && $(crew show "$KS") != *"offset"* && $(crew show "$KS" | grep -n "^## " | grep -A1 ":## Report$") == *":## Answer" ]]'
+touch "$KWT/scratch.log"; head=$(git -C "$L" rev-parse HEAD); sum=$(cksum <"$KS")
+check "hand-over refuses a spike whose worktree has changes it didn't commit, which cleanup would leave behind, with its answer recorded and the ledger left as it was" \
+  '[[ $(crew hand-over "$KS" 2>&1) == *"$KWT has changes that aren'"'"'t committed: commit or delete them"* && $(crew get "$KS" status) == working && $(git -C "$L" rev-parse HEAD) == "$head" && $(cksum <"$KS") == "$sum" ]]'
 rm "$KWT/scratch.log"
-check "hand-over moves a spike whose report starts with its answer to done, without a PR or evidence, and logs it" \
+check "hand-over moves a spike with its answer recorded to done, whatever its report starts with, without a PR or evidence, and logs it" \
   '[[ $(crew hand-over "$KS") == "handed over: $KSI (done)" && $(crew get "$KS" status) == done && $(section "$KS" "## Log" | tail -1) == *" — handed over" ]]'
+sum=$(cksum <"$KR"); out=$(crew answer "$KS" "no, after all" 2>&1); rc=$?
+check "answer refuses a done spike, whose answer has gone out, and records nothing" \
+  '((rc == 1)) && [[ $out == "crew: $KSI is done, so its answer has gone to whoever reads its report, and can'"'"'t change now" && $(cksum <"$KR") == "$sum" ]]'
 st=$(crew status)
 check "a done spike doesn't hold its goal's slot, and is listed only with --done" \
   '[[ $(row "goal $G8") == *"0/1 in flight" && $(row "$KDI") == *"2 to learn; $(num "$KS") done, $(num "$KT") draft" && $st != *"$KSI"* && $(crew status --done) == *"$KSI"*done* ]]'
@@ -2399,6 +2414,24 @@ check "tick sends a goal's done spike's report to its goal lead, with its answer
 setstate "done" null
 out=$(crew tick 2>&1)
 check "a report the goal lead has been sent isn't sent again" '[[ $out != *"goal $G8"* && $(resumes) == $((n + 1)) ]]'
+# In a home that upgraded, but hasn't run crew migrate yet, crew can't read a
+# spike's answer: hand-over leaves the spike in flight, and the goal lead isn't
+# sent a report without its answer. crew migrate records the answers the reports
+# start with, and both go on.
+KW=$(crew new "Try an index" --kind spike --informs "$KD" --goal "$GF8"); KWI=$(basename "$KW" .md)
+KX=$(crew new "Try a cache" --kind spike --informs "$KD" --goal "$GF8"); KXI=$(basename "$KX" .md)
+sed -i -e "s/^status: .*/status: working/" -e '/^## Automated reviews$/i ## Report\nAnswer: no, the index is too big\n' "$KW"
+sed -i -e "s/^status: .*/status: done/" -e '/^## Automated reviews$/i ## Report\nAnswer: yes, a cache halves it\n' "$KX"
+crew commit "spikes from before the upgrade" >/dev/null; echo 2 >"$PD/ledger-format"
+o1=$(crew hand-over "$KW" 2>&1); r1=$?; setstate "done" null; n=$(resumes); o2=$(crew goal followup "$GF8" 2>&1); r2=$?
+check "before crew migrate, hand-over leaves a spike in flight, and the goal lead isn't sent a report without its answer, each saying to migrate" \
+  '((r1 == 1 && r2 == 3)) && [[ $o1 == "crew: can'"'"'t read $KWI'"'"'s answer: $(basename "$PD")'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$KW" status) == working && $o2 == *"goal $G8: can'"'"'t read $KXI'"'"'s answer: "*"run crew migrate; its report is sent once crew can read it"* && $o2 == *"nothing new for goal $G8"* && -z $(crew get "$KX" report_sent) && $(resumes) == "$n" ]]'
+out=$(crew migrate)
+check "migrate records the answers the spikes' reports start with, and leaves a spike with an answer recorded be" \
+  '[[ $out == "$(basename "$PD"): recorded 2 spike answer(s) from their reports" && $(cat "$PD/ledger-format") == 3 && $(wc -l <"$KR") == 2 && $(crew show "$KX" | section /dev/stdin "## Answer") == "yes, a cache halves it (recorded "*" by crew migrate)" ]]'
+crew hand-over "$KW" >/dev/null; setstate "done" null; crew goal followup "$GF8" >/dev/null
+check "once migrated, hand-over marks the spike done, and the goal lead is sent both reports with their answers" \
+  '[[ $(crew get "$KW" status) == done && $(last_launch) == *"- $KWI reported: no, the index is too big; it informs $KDI"*"- $KXI reported: yes, a cache halves it; it informs $KDI"* && $(crew get "$KW" report_sent) == yes && $(crew get "$KX" report_sent) == yes && $(resumes) == $((n + 1)) ]]'
 KO=$(crew new "Outside learning"); crew to-learn "$KO" "Will it fit?" >/dev/null
 check "status lists a draft outside a goal that has something to learn, rather than fold it into the count" '[[ $(crew status | grep "$(basename "$KO" .md)") == *"draft"*"1 to learn" ]]'
 # A stack of three drafts outside a goal, the middle one informed by spikes: it folds
@@ -2449,9 +2482,9 @@ head=$(git -C "$L" rev-parse HEAD); sum=$(cksum <"$LR")
 o1=$(crew learned "$LT" deadbeef "Maybe." 2>&1); r1=$?; o2=$(crew learned "$LT" "$L1" "Yes, again." 2>&1); r2=$?
 check "learned refuses an item the task doesn't have, and one already settled, saying why and changing nothing" \
   '((r1 == 1 && r2 == 1)) && [[ $o1 == "crew: $LTI has no item deadbeef still to learn (crew show $LTI lists them)" && $o2 == "crew: $L1 is already settled, on $(date +%F) "* && $(git -C "$L" rev-parse HEAD) == "$head" && $(cksum <"$LR") == "$sum" ]]'
-o1=$(crew to-learn "$KS" "Too late?" 2>&1); r1=$?; o2=$(crew learned "$LT" "$L2" " " 2>&1); r2=$?
+o1=$(crew to-learn "$KA" "Too late?" 2>&1); r1=$?; o2=$(crew learned "$LT" "$L2" " " 2>&1); r2=$?
 check "to-learn refuses a task that isn't a draft, and learned an empty answer" \
-  '((r1 == 1 && r2 == 1)) && [[ $o1 == *"only a draft has things still to learn"* && $o2 == *"give the answer that settles $L2"* && ! -e ${KS%.md}.records.jsonl && $(cksum <"$LR") == "$sum" ]]'
+  '((r1 == 1 && r2 == 1)) && [[ $o1 == *"only a draft has things still to learn"* && $o2 == *"give the answer that settles $L2"* && ! -e ${KA%.md}.records.jsonl && $(cksum <"$LR") == "$sum" ]]'
 # Checkboxes typed into the task file aren't items: crew neither counts them nor
 # shows them as its own.
 sed -i '/^## Still to learn$/a - [ ] Typed by hand?\n- [x] Ticked by hand' "$LT"
@@ -2505,7 +2538,7 @@ check "before the migration, show gives the section as it is under why crew can'
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records$NL$LP: recorded 0 spike answer(s) from their reports" && $(cat "$PD/ledger-format") == 3 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 3" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
 sh=$(crew show memory-suggestions)
 check "migrate moves the memory suggestions into records, each kept or declined as its line said, and leaves the file only its head" \

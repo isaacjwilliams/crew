@@ -620,7 +620,7 @@ crew status              # a stack is listed bottom first, each task under its p
 
 ### Spikes: try a path before planning on it
 
-Some objectives rest on something nobody has checked: whether an API pages, whether a query can be fast enough at all. Rather than guess, the lead adds each question as an item still to learn (`crew to-learn 040 "Does the API page by cursor?"`), and `crew ready` refuses the draft until every item is settled (`crew learned 040 <item> "<answer>"`). crew keeps the items as records beside the task file, and `crew show 040` lists them under `## Still to learn`, each with its answer; a checkbox typed into the file isn't an item. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, and writes a report in its task file that starts with `Answer:`. It opens no PR, so there's nothing for you to review.
+Some objectives rest on something nobody has checked: whether an API pages, whether a query can be fast enough at all. Rather than guess, the lead adds each question as an item still to learn (`crew to-learn 040 "Does the API page by cursor?"`), and `crew ready` refuses the draft until every item is settled (`crew learned 040 <item> "<answer>"`). crew keeps the items as records beside the task file, and `crew show 040` lists them under `## Still to learn`, each with its answer; a checkbox typed into the file isn't an item. A **spike** answers one by trying it: its worker tries the path on a branch nobody merges, never pushes it, writes a report in its task file, and records its answer in a line with `crew answer`. It opens no PR, so there's nothing for you to review.
 
 ```sh
 crew new "Try cursor paging" --kind spike --informs 040   # 040 is the draft whose question it answers
@@ -630,7 +630,7 @@ crew status                             # 040's row: "2 to learn; 041 working, 0
 ```
 
 - **The lead asks you first**, as for any task, but runs no brief review on a spike: it adds nothing anyone merges. Several spikes can answer one question, one per approach.
-- **When a spike reports**, its worker runs `crew hand-over`, which checks the report starts with its answer and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer with `crew show 041`, or ask the lead, which settles the question with the spikes' answers side by side and finishes the brief from them.
+- **When a spike reports**, its worker runs `crew hand-over`, which checks its answer is recorded and nothing is left uncommitted, and sets it `done`. `crew tick` then removes its worktree and local branch. Read the answer and the report with `crew show 041`, or ask the lead, which settles the question with the spikes' answers side by side and finishes the brief from them.
 - **In a goal**, the goal lead opens and readies spikes without parking, and `crew tick` dispatches them like its other tasks and sends the goal lead each report once. A running spike counts toward the goal's `max_in_flight`, and a done one doesn't.
 - **A spike stays out of stacks**: its branch never reaches GitHub, so it can't be stacked, and nothing can stack on it: `crew new --on` and `crew set … base` refuse either. A task that `depends_on` a spike waits until it's done.
 

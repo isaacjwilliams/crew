@@ -290,21 +290,31 @@ func unroutedQuestions(t Task) (string, bool) {
 	return sum, sum != t.Get("questions_routed")
 }
 
-// unsentReport: a task of the goal is done, so its report is in, and the goal
-// lead hasn't been sent it. Only a spike's hand-over sets done, after checking
-// the report starts with its answer. report_sent records that it was sent.
+// unsentReport: a spike of the goal is done, and the goal lead hasn't been sent
+// its report. Only a spike's hand-over sets done. report_sent records that it
+// was sent.
 func unsentReport(t Task) bool {
 	return t.Status() == Done && t.Get("report_sent") != "yes"
 }
 
-// reportLine is what the goal lead is told of a done spike: its answer, and the
-// draft it informs.
-func reportLine(t Task) string {
-	line := fmt.Sprintf("%s reported: %s", t.ID(), t.Answer())
+// reportLine is what the goal lead is told of a done spike: its recorded
+// answer, and the draft it informs. Hand-over needs an answer recorded, so a
+// done spike has one unless its ledger was edited by hand: its records since,
+// or its report before crew migrate. Then it's reported without one, never
+// with an empty one. It fails when crew can't read the answer.
+func reportLine(t Task) (string, error) {
+	answer, err := t.Answer()
+	if err != nil {
+		return "", err
+	}
+	line := fmt.Sprintf("%s reported: %s", t.ID(), answer)
+	if answer == "" {
+		line = t.ID() + " reported, with no answer recorded: read its report"
+	}
 	if d := t.Get("informs"); d != "" {
 		line += "; it informs " + d
 	}
-	return line + " (task file: " + t.Path + ")"
+	return line + " (task file: " + t.Path + ")", nil
 }
 
 // crew goal followup GOAL: resumes the goal lead with what's waiting for it: the
@@ -346,8 +356,13 @@ func (c *Crew) goalFollowup(g Goal) error {
 			routed = append(routed, asked{t, sum})
 		}
 		if unsentReport(t) {
-			input += "\n- " + reportLine(t)
-			reported = append(reported, t)
+			// Sent with its answer or not at all: before crew migrate, it waits.
+			if line, err := reportLine(t); err != nil {
+				warn("goal %s: %v; its report is sent once crew can read it", g.ID(), err)
+			} else {
+				input += "\n- " + line
+				reported = append(reported, t)
+			}
 		}
 	}
 	if input == "" {
