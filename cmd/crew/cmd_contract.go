@@ -191,7 +191,7 @@ func (check *contractCheck) problem(format string, a ...any) {
 
 // print lists each obligation with the files tagged for it, then the problems.
 func (check *contractCheck) print() {
-	if len(check.obligations) == 0 && len(check.problems) == 0 {
+	if len(check.components) == 0 && len(check.problems) == 0 {
 		fmt.Println("No Contract here: no contract/<component>/README.md.")
 		return
 	}

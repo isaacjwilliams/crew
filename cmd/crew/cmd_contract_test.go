@@ -229,6 +229,11 @@ func TestContractAllowsCodeWithNoContract(t *testing.T) {
 			"No Contract here: no contract/<component>/README.md.\n",
 		},
 		{
+			"a Contract that lists no obligations yet",
+			map[string]string{"contract/guard/README.md": "# Guard\n\nObligations to come.\n"},
+			"0 of 0 obligations have a test.\n",
+		},
+		{
 			"a repo where only one of two components has a Contract",
 			map[string]string{
 				"contract/guard/README.md": guardReadme,
