@@ -140,6 +140,14 @@ func TestContractFailsOnEachProblem(t *testing.T) {
 			[]string{fmt.Sprintf(badObligation, 9)},
 		},
 		{
+			"obligations in bold made with underscores",
+			map[string]string{
+				"contract/guard/README.md": guardReadme + "- __G3__ A path it can't resolve blocks.\n* __G4__ Input that isn't JSON blocks.\n",
+				"guard_test.go":            "// Contract: guard/G1\n// Contract: guard/G2\n",
+			},
+			[]string{fmt.Sprintf(badObligation, 9), fmt.Sprintf(badObligation, 10)},
+		},
+		{
 			"obligations numbered, in lowercase, or with a colon",
 			map[string]string{
 				"contract/guard/README.md": guardReadme + "1. **G3** Input that isn't JSON blocks.\n- **g4** It checks file_path.\n- **G5**: It checks notebook_path.\n",

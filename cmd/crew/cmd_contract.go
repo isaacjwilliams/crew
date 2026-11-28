@@ -20,9 +20,9 @@ import (
 )
 
 var (
-	// A list item in a component's README that starts in bold is meant as an
-	// obligation, and obligationLine is the one form it may take.
-	obligationLike = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+\*\*`)
+	// A list item in a component's README that starts in bold, ** or __, is meant
+	// as an obligation, and obligationLine is the one form it may take.
+	obligationLike = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*|__)`)
 	obligationLine = regexp.MustCompile(`^- \*\*([A-Z]+[0-9]+)\*\* +\S`)
 	// A comment line that starts with "Contract:", in any case, is meant as a tag,
 	// and tagLine is the one form it may take.

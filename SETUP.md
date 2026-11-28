@@ -675,7 +675,7 @@ A component's **Contract** lists what it promises whoever uses it, one **obligat
 - **What it says**: each obligation with the files that hold a tag for it, then each problem as `<file>:<line>: <what's wrong>`. It exits 1 when there's a problem:
   - an obligation with no tag;
   - a tag that names an obligation or a component that doesn't exist;
-  - a line meant as an obligation that isn't in its form. Any list item in a component's README that starts in bold is meant as one, so `* **G7** …`, `1. **G7** …`, `- **g7** …` and `- **G7**: …` are each a problem, never skipped;
+  - a line meant as an obligation that isn't in its form. Any list item in a component's README that starts in bold is meant as one, so `* **G7** …`, `1. **G7** …`, `- __G7__ …`, `- **g7** …` and `- **G7**: …` are each a problem, never skipped;
   - a line meant as a tag that isn't in its form. Any comment line that starts with `Contract:`, in any case, is meant as one, so `// Contract: Guard/G7` and `# Contract: guard/G7, guard/G8` are each a problem;
   - two obligations with the same ID in one component;
   - a directory in `contract/` with no `README.md`, or with a name that isn't lowercase.
