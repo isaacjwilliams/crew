@@ -260,19 +260,67 @@ func (m *liveStatus) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // show puts a new report on screen, with the cursor on the line it was on, or
-// as near to where it was as there's a line, when that one's gone.
-func (m *liveStatus) show(r statusReport, at time.Time) {
+// as near to where it was as there's a line, when that one's gone. The screen
+// doesn't move: the first line on it that's still in the report stays at the
+// same screen line, as far as the report's end allows, wherever the cursor is.
+func (m *liveStatus) show(r statusReport, at time.Time) { m.showLines(reportLines(r), at) }
+
+// showLines is show for a report that's already lines, so a test can change
+// the lines on show and put them back.
+func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 	var key string
 	if l, ok := m.current(); ok {
 		key = l.key
 	}
-	m.lines, m.builtAt = reportLines(r), at
+	onScreen := m.rows()
+	m.lines, m.builtAt = lines, at
 	m.layOut()
-	i := slices.IndexFunc(m.shown, func(l shownLine) bool { return l.key == key })
+	i := m.indexOf(key)
 	if i < 0 {
 		i = m.cursor
 	}
-	m.moveTo(i)
+	m.setCursor(i)
+	// Put the first old row that's still in the report back at its screen line,
+	// and the screen no further than the report's end.
+	for _, row := range onScreen {
+		if j := m.indexOf(row.key); j >= 0 {
+			m.top = m.drawnHeight(0, j) - row.at
+			break
+		}
+	}
+	m.top = max(0, min(m.top, m.lastTop()))
+}
+
+// screenRow is a line on the screen, with the screen line it starts on,
+// counted from the top of the screen: negative when it starts above it.
+type screenRow struct {
+	key string
+	at  int
+}
+
+// rows are the lines on the screen, in order.
+func (m *liveStatus) rows() []screenRow {
+	var rows []screenRow
+	start, bottom := 0, m.top+m.bodyHeight()
+	for _, l := range m.shown {
+		end := start + len(l.drawn)
+		if end > m.top && start < bottom {
+			rows = append(rows, screenRow{l.key, start - m.top})
+		}
+		start = end
+	}
+	return rows
+}
+
+// lastTop is the top of the last screenful: the screen that ends with the
+// report's last line, or at 0 when the report fits.
+func (m *liveStatus) lastTop() int {
+	return max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
+}
+
+// indexOf is where the line with this key is in shown, or -1.
+func (m *liveStatus) indexOf(key string) int {
+	return slices.IndexFunc(m.shown, func(l shownLine) bool { return l.key == key })
 }
 
 func (m *liveStatus) press(key string) tea.Cmd {
@@ -333,15 +381,24 @@ func (m *liveStatus) setCursor(i int) {
 	}
 }
 
-// setOpen opens or closes the line the cursor is on, if it has lines under it.
+// setOpen opens or closes the line the cursor is on, if it has lines under it,
+// and keeps the cursor's line on the screen.
 func (m *liveStatus) setOpen(open bool) {
+	if m.fold(open) {
+		m.scroll()
+	}
+}
+
+// fold opens or closes the line the cursor is on, if it has lines under it,
+// and says whether it did. The screen stays where it is.
+func (m *liveStatus) fold(open bool) bool {
 	l, ok := m.current()
 	if !ok || len(l.kids) == 0 {
-		return
+		return false
 	}
 	m.open[l.key] = open
 	m.layOut()
-	m.scroll()
+	return true
 }
 
 // closeOrUp closes the line the cursor is on or, when it's closed already or
@@ -493,12 +550,17 @@ func (m *liveStatus) lineAt(n int) int {
 	return len(m.shown) - 1
 }
 
-// step moves the cursor one line up or down. Going down, it first scrolls
-// through a line taller than the screen, then through notes too long for the
-// strip; going up, it scrolls back through them the other way round.
+// step moves the cursor one line up or down, and shows it. If none of the
+// cursor's line is on the screen (the wheel took it off, or a click left its
+// strip over it), that's all it does. Otherwise, going down, it first scrolls through a
+// line taller than the screen, then through notes too long for the strip; going
+// up, it scrolls back through them the other way round.
 func (m *liveStatus) step(by int) {
 	start, end := m.cursorSpan()
 	switch {
+	case !m.shows(start, end):
+		m.moveTo(m.cursor + by)
+		return
 	case by > 0 && end > m.top+m.bodyHeight():
 		m.top++
 	case by > 0 && m.stripRoom() > 0 && m.notesTop()+m.stripRoom() < len(m.notes()):
@@ -536,78 +598,31 @@ func (m *liveStatus) page(by int) {
 const wheelStep = 3
 
 // wheel scrolls the screen a turn up or down (by is -1 or 1), and not past
-// either end. A turn is wheelStep lines, or the whole screen when that's less.
-// The cursor stays on its line while that's still all on the screen. A line
-// taller than the screen shows each of its rows before the cursor leaves it.
-// Otherwise the cursor goes to the nearest line that's all on the screen.
+// either end. A turn is wheelStep lines, or the whole screen when that's less,
+// so no line goes by unseen. The cursor and the strip stay as they are, even
+// when the cursor's line goes off the screen.
 func (m *liveStatus) wheel(by int) {
-	n := by * min(wheelStep, m.bodyHeight())
-	was := m.top
-	m.top = max(0, min(m.top+n, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
-	target := m.top
-	start, end := m.cursorSpan()
-	if m.wholly(start, end) {
-		return
-	}
-	if end-start > m.bodyHeight() {
-		if m.scroll(); (m.top-was)*by > 0 {
-			return
-		}
-		m.top = target
-	}
-	m.setCursor(m.nearestWhole(n))
-	m.scroll()
-}
-
-// nearestWhole is the shown line nearest the cursor that's wholly on the
-// screen. When none is, none fits between the screen's edges, so it's the next
-// line in the direction of the wheel (n is its turn, up or down), and the
-// screen follows it there.
-func (m *liveStatus) nearestWhole(n int) int {
-	nearest, start := -1, 0
-	for i, l := range m.shown {
-		end := start + len(l.drawn)
-		if m.wholly(start, end) && (nearest < 0 || away(i, m.cursor) < away(nearest, m.cursor)) {
-			nearest = i
-		}
-		start = end
-	}
-	switch {
-	case nearest >= 0:
-		return nearest
-	case n > 0:
-		return min(m.lineAt(m.top)+1, len(m.shown)-1)
-	}
-	return max(m.lineAt(m.top+m.bodyHeight()-1)-1, 0)
+	m.top = max(0, min(m.top+by*min(wheelStep, m.bodyHeight()), m.lastTop()))
 }
 
 // click puts the cursor on the line drawn at column x of screen line y, and
 // opens or closes it when x is on its marker. Anything else on the screen,
 // the headings, the strip, the bar and the room below the last line, is not
-// a line, and does nothing. The screen stays where it is, unless the new
-// line's strip leaves less room and cuts off a line that was whole or hides
-// the line, or leaves more and the report ends higher.
+// a line, and does nothing. The screen stays where it is, whatever the new
+// line's strip covers, except that it moves up to the report's end when a
+// shorter strip or a folded line would leave room empty under the last line.
 func (m *liveStatus) click(x, y int) {
 	n := m.top + y - len(m.headings) // the screen line y, counted from the first shown line
 	if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() || n >= m.drawnHeight(0, len(m.shown)) {
 		return
 	}
 	i := m.lineAt(n)
-	start := m.drawnHeight(0, i)
-	end := start + len(m.shown[i].drawn)
-	wasWhole := m.wholly(start, end)
 	m.setCursor(i)
-	// A line cut off by the screen's edge stays as it is. A whole one that the
-	// new strip cuts off, and one it leaves no room for, come into view. Either
-	// way, a shorter strip never leaves empty room under the last line.
-	if !m.wholly(start, end) && (wasWhole || end <= m.top || start >= m.top+m.bodyHeight()) {
-		m.scroll()
-	}
-	m.top = min(m.top, max(0, m.drawnHeight(0, len(m.shown))-m.bodyHeight()))
 	// Only a line's first row has its marker.
-	if n == start && x == m.markerColumn() {
-		m.setOpen(!m.shown[i].open)
+	if n == m.drawnHeight(0, i) && x == m.markerColumn() {
+		m.fold(!m.shown[i].open)
 	}
+	m.top = min(m.top, m.lastTop())
 }
 
 // markerColumn is the screen column of the cursor's line's fold marker, or -1
@@ -627,11 +642,10 @@ func (m *liveStatus) markerColumn() int {
 	return column
 }
 
-// wholly is whether the screen lines from start to end, counted from the first
-// shown line, are all on the screen, or fill it when they're too tall for it.
-func (m *liveStatus) wholly(start, end int) bool {
-	top, bottom := m.top, m.top+m.bodyHeight()
-	return start >= top && end <= bottom || start <= top && end >= bottom
+// shows is whether any of the screen lines from start to end, counted from the
+// first shown line, is on the screen.
+func (m *liveStatus) shows(start, end int) bool {
+	return end > m.top && start < m.top+m.bodyHeight()
 }
 
 // scroll moves the screen as little as keeps the cursor's line on it: all of
@@ -639,7 +653,7 @@ func (m *liveStatus) wholly(start, end int) bool {
 // The screen never leaves room empty at the bottom while lines are above it.
 func (m *liveStatus) scroll() {
 	body := m.bodyHeight()
-	m.top = max(0, min(m.top, m.drawnHeight(0, len(m.shown))-body))
+	m.top = max(0, min(m.top, m.lastTop()))
 	// A cursor's line that fits stays all on screen: the screen starts between
 	// end-body and start. One taller than the screen fills it: the screen
 	// starts between start and end-body.
@@ -730,6 +744,3 @@ func (m *liveStatus) bar() string {
 func fit(line string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }
-
-// away is how many lines apart two lines are.
-func away(i, j int) int { return max(i-j, j-i) }
