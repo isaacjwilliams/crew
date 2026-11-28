@@ -788,7 +788,7 @@ func (t Task) Answer() (string, error) {
 
 // lastAnswer is the answered record that stands, if there is one: the last one
 // made. A merge of two clones' records may put a later one first, so it goes by
-// when each was made, and by the order of the lines only within a second.
+// when each was made. That's to the second, and on a tie the later line wins.
 func lastAnswer(records []Record) (last Record, ok bool) {
 	for _, r := range records {
 		if r.Answered != nil && !r.At.Before(last.At) {

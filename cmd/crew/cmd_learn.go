@@ -85,8 +85,8 @@ func cmdLearned(c *Crew, args []string) error {
 	return nil
 }
 
-// crew answer TASK "<answer>": records a spike's answer, in a line, for whoever
-// reads its report next. crew hand-over marks the spike done only once it has
+// crew answer TASK "<answer>": records a spike's answer, in a line, for the
+// lead or goal lead who owns the draft it informs. crew hand-over marks the spike done only once it has
 // one. Until then the worker may record a better one, and the last one stands;
 // once the spike is done, its answer has gone out, so this refuses.
 func cmdAnswer(c *Crew, args []string) error {
@@ -104,6 +104,7 @@ func cmdAnswer(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
+	// Read under the lock, so a hand-over that ran meanwhile is seen.
 	if t.Kind() != KindSpike {
 		return fail("%s is a %s: only a spike records an answer", t.ID(), t.Kind())
 	}

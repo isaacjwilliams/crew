@@ -625,3 +625,17 @@ func TestMigrateSpikeAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestReportLine(t *testing.T) {
+	task := spikeTask(t, "done", "## Report\nTried paging.\n\n")
+	task.Set("informs", "002-b")
+	if line, err := reportLine(task); err != nil || line != "001-a reported, with no answer recorded: read its report; it informs 002-b (task file: "+task.Path+")" {
+		t.Errorf("reportLine of a spike with no answer recorded = %q, %v; want it to say so, not send an empty answer", line, err)
+	}
+	if err := task.AddRecords(Record{ID: "aaaaaaaa", At: time.Now(), By: "crew answer", Answered: &Answered{"yes, by cursor"}}); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := reportLine(task); err != nil || line != "001-a reported: yes, by cursor; it informs 002-b (task file: "+task.Path+")" {
+		t.Errorf("reportLine = %q, %v; want the recorded answer", line, err)
+	}
+}
