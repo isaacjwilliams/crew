@@ -9,9 +9,14 @@ import (
 	"testing"
 )
 
-// runsText is each run as "<time> <step> <raised>/<taken>", or "?" for a run of
-// unknown value.
-func runsText(runs []ReviewRun) []string {
+// runsText is each of the task's review runs as "<time> <step>
+// <raised>/<taken>", or "?" for a run of unknown value.
+func runsText(t *testing.T, task Task) []string {
+	t.Helper()
+	runs, err := task.ReviewRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out []string
 	for _, r := range runs {
 		value := "?"
@@ -24,7 +29,7 @@ func runsText(runs []ReviewRun) []string {
 }
 
 func TestReviewRuns(t *testing.T) {
-	recorded := Task{docWith(t, "## Evidence\n### Security review\nNo findings.\n\n"+reviewedTask+
+	recorded := migratedTask(t, "001-a", "## Evidence\n### Security review\nNo findings.\n\n"+reviewedTask+
 		// An old record from before the step's first counted one is a run.
 		"- 2026-11-09 07:00 — Plan review: 3 of 4 taken.\n"+
 		// Records in the form the agent files give, a rerun's label included.
@@ -36,7 +41,7 @@ func TestReviewRuns(t *testing.T) {
 		"- 2026-11-10 09:30 — Security review: 0 raised, 0 taken\n"+
 		// Later entries that name a step in an old form don't add a run to it,
 		// and nor does the Evidence's security review.
-		"- 2026-11-10 09:40 — PR #70 opened. Pre-PR review (casual-observer, test-review): declined (3) …\n")}
+		"- 2026-11-10 09:40 — PR #70 opened. Pre-PR review (casual-observer, test-review): declined (3) …\n")
 	want := []string{
 		"2026-11-09 07:00 Brief review ?",
 		"2026-11-09 08:00 Brief review 5/3",
@@ -51,11 +56,11 @@ func TestReviewRuns(t *testing.T) {
 		"2026-11-10 12:00 Automated review 4/0",
 		"2026-11-11 09:00 Automated review 0/0",
 	}
-	if got := runsText(recorded.ReviewRuns()); !slices.Equal(got, want) {
+	if got := runsText(t, recorded); !slices.Equal(got, want) {
 		t.Errorf("ReviewRuns =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	old := Task{docWith(t, "## Evidence\n### Security review\nNo findings.\n\n## Log\n"+
+	old := taskWithHistory(t, "001-a", "## Evidence\n### Security review\nNo findings.\n\n## Log\n"+
 		// The old forms: each counts as a run, of unknown value.
 		"- 2026-11-11 08:00 — Plan review: 3 of 4 taken. Rewritten as objective + gates.\n"+
 		"- 2026-11-11 08:01 — Plan review 2: (1) Raise, taken: …\n"+
@@ -70,7 +75,7 @@ func TestReviewRuns(t *testing.T) {
 		"- 2026-11-11 08:08 — Plan review 3 settled with the user: (1) …\n"+
 		"- 2026-11-11 08:09 — Plan review of 057 changed this brief too: …\n"+
 		"- 2026-11-11 08:10 — Pre-PR review findings declined: see the entry above. No re-review: …\n"+
-		"- 2026-11-11 08:11 — status → pr-open\n")}
+		"- 2026-11-11 08:11 — status → pr-open\n")
 	want = []string{
 		"2026-11-11 08:00 Brief review ?",
 		"2026-11-11 08:01 Brief review ?",
@@ -88,12 +93,12 @@ func TestReviewRuns(t *testing.T) {
 		// The Evidence's security review, by the hand-over it let through.
 		"2026-11-11 08:11 Security review ?",
 	}
-	if got := runsText(old.ReviewRuns()); !slices.Equal(got, want) {
+	if got := runsText(t, old); !slices.Equal(got, want) {
 		t.Errorf("old records: ReviewRuns =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	if got := (Task{docWith(t, sampleTask)}).ReviewRuns(); got != nil {
-		t.Errorf("a task with no review step: %v", runsText(got))
+	if got := runsText(t, learnTask(t, sampleTask)); got != nil {
+		t.Errorf("a task with no review step: %v", got)
 	}
 }
 

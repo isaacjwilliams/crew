@@ -33,10 +33,9 @@ type ReviewRun struct {
 // ReviewRuns is every run of a review step the task records, oldest first: the
 // Log's records (reviewRecord), each automated review, whose findings are
 // raised and whose fixed ones are taken, and the runs old records name.
-func (t Task) ReviewRuns() []ReviewRun {
+func (t Task) ReviewRuns() ([]ReviewRun, error) {
 	var runs, old []ReviewRun
-	entries := t.LogEntries()
-	for _, e := range entries {
+	for _, e := range t.LogEntries() {
 		if run, ok := recordedRun(e); ok {
 			runs = append(runs, run)
 		} else {
@@ -44,7 +43,13 @@ func (t Task) ReviewRuns() []ReviewRun {
 		}
 	}
 	if t.SecurityReviewed() {
-		old = append(old, ReviewRun{Step: stepSecurityReview, At: firstHandOver(entries)})
+		// A high-risk task can't be handed over before its security review is
+		// recorded, so the review ran by its first hand-over.
+		h, err := t.StatusHistory()
+		if err != nil {
+			return nil, err
+		}
+		old = append(old, ReviewRun{Step: stepSecurityReview, At: h.First(PROpen)})
 	}
 	// An old record counts unless a counted record of its step comes at or
 	// before it: from then on the step's runs are counted, so an old-form line
@@ -69,7 +74,7 @@ func (t Task) ReviewRuns() []ReviewRun {
 		runs = append(runs, run)
 	}
 	slices.SortStableFunc(runs, func(a, b ReviewRun) int { return a.At.Compare(b.At) })
-	return runs
+	return runs, nil
 }
 
 // rerunLabel is what a lead adds to a step's name for its second run: "Brief
@@ -147,16 +152,4 @@ func oldRunsIn(e logEntry) []ReviewRun {
 		}
 	}
 	return runs
-}
-
-// firstHandOver is when the task first went to pr-open, which a high-risk task
-// can't do before its security review is recorded. It's the zero time when the
-// task hasn't been handed over.
-func firstHandOver(entries []logEntry) time.Time {
-	for _, e := range entries {
-		if s, ok := e.status(); ok && s == PROpen {
-			return e.at
-		}
-	}
-	return time.Time{}
 }

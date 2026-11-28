@@ -24,8 +24,9 @@ Setup
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
-                                   moving still-to-learn checkboxes into records;
-                                   crew upgrade runs it
+                                   moving still-to-learn checkboxes, memory
+                                   suggestions and each task's status history into
+                                   records; crew upgrade runs it
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
                                    to crew and lead in ~/.local/bin, fish

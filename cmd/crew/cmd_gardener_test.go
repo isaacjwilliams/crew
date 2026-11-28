@@ -17,10 +17,11 @@ func TestTasksToSort(t *testing.T) {
 	// A task with status st, an automated review at 10:00 and a round at 11:00
 	// holding round, merged at merged.
 	task := func(st Status, round, merged string) Task {
-		return Task{docWith(t, "---\nstatus: "+string(st)+"\n---\n"+
+		task := migratedTask(t, "001-a", "---\nstatus: "+string(st)+"\n---\n"+
 			"## Automated reviews\n### Automated review 1 — 2026-11-06 10:00\n- Reviewers: Claude reviewer\nNo findings.\n\n"+
-			"## Review rounds\n### Round 1 — 2026-11-06 11:00 (PR #3)\n"+round+"\n\n"+
-			"## Log\n- "+merged+" — status → merged\n")}
+			"## Review rounds\n### Round 1 — 2026-11-06 11:00 (PR #3)\n"+round+"\n\n## Log\n")
+		changed(t, task, "crew sync", at(merged), Merged)
+		return task
 	}
 	comment := "**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > rename it"
 	tasks := []Task{
@@ -30,7 +31,10 @@ func TestTasksToSort(t *testing.T) {
 		task(PROpen, comment, "2026-11-06 12:00"),                            // not merged any more
 		task(Merged, "- [x] CI failed on aaa1111: test", "2026-11-06 13:00"), // no comment after the review
 	}
-	picked, newest := tasksToSort(tasks, at("2026-11-05 00:00"), at("2026-11-06 16:00").Add(30*time.Second))
+	picked, newest, err := tasksToSort(tasks, at("2026-11-05 00:00"), at("2026-11-06 16:00").Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got []string
 	for _, p := range picked {
 		got = append(got, p.task.Path)
@@ -45,7 +49,7 @@ func TestTasksToSort(t *testing.T) {
 		t.Errorf("newest = %v, want the picked task's merge time", newest)
 	}
 	// A minute later, the task merged at 16:00 is picked.
-	if picked, _ := tasksToSort(tasks, at("2026-11-06 12:00"), at("2026-11-06 16:01")); len(picked) != 1 || picked[0].task.Path != tasks[1].Path {
+	if picked, _, _ := tasksToSort(tasks, at("2026-11-06 12:00"), at("2026-11-06 16:01")); len(picked) != 1 || picked[0].task.Path != tasks[1].Path {
 		t.Errorf("a minute later, picked %v", picked)
 	}
 }

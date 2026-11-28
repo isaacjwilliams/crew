@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,10 @@ func TestCostsCountEachMessageInTheRangeOnce(t *testing.T) {
 	if len(ts.charges) != 5 || ts.unread != 1 {
 		t.Errorf("got %d charges and %d lines unread; want msg_1 and msg_3 to msg_6 charged, and the cut-off line unread", len(ts.charges), ts.unread)
 	}
-	r := costsIn(ts, nil, nil, from, to)
+	r, err := costsIn(ts, nil, nil, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if r.total != 60 || r.steps[stepLead] != 60 {
 		t.Errorf("total = $%v, lead = $%v; want $60 for msg_1, msg_4 and msg_5", r.total, r.steps[stepLead])
 	}
@@ -105,7 +109,10 @@ func TestCostsPriceEachMessageAtItsModelsRates(t *testing.T) {
 		{owner{step: stepLead}, &message{"claude-haiku-5-5", at, u}},
 		{owner{step: stepLead}, &message{"claude-mystery-1", at, u}},
 	}
-	r := costsIn(transcripts{charges: charges}, nil, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
+	r, err := costsIn(transcripts{charges: charges}, nil, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out strings.Builder
 	r.print(&out)
 	for _, want := range []string{
@@ -288,7 +295,7 @@ func TestCostsSayFromWhenTheTranscriptsAreComplete(t *testing.T) {
 		want bool
 	}{{"2026-11-09", true}, {"2026-11-11", false}} {
 		var out strings.Builder
-		costsIn(ts, nil, nil, costsDay(t, c.from+" 00:00"), costsDay(t, "2026-11-15 00:00")).print(&out)
+		printCosts(t, &out, ts, nil, nil, costsDay(t, c.from+" 00:00"), costsDay(t, "2026-11-15 00:00"))
 		const note = "This machine's transcripts are complete only from 2026-11-10 09:00: older sessions may have been deleted.\n"
 		if got := strings.Contains(out.String(), note); got != c.want {
 			t.Errorf("from %s: report says the transcripts are incomplete = %v; want %v:\n%s", c.from, got, c.want, out.String())
@@ -297,11 +304,22 @@ func TestCostsSayFromWhenTheTranscriptsAreComplete(t *testing.T) {
 }
 
 // finishedTask is a task that was created and merged at the local times given,
-// as "YYYY-MM-DD HH:MM".
+// as "YYYY-MM-DD HH:MM", the merge recorded by crew sync.
 func finishedTask(t *testing.T, id, created, merged string) Task {
 	t.Helper()
-	return taskFile(t, id, "---\nstatus: merged\ncreated: "+costsDay(t, created).Format(time.RFC3339)+
-		"\n---\n## Log\n- "+merged+" — status → merged\n")
+	task := migratedTask(t, id, "---\nstatus: merged\ncreated: "+costsDay(t, created).Format(time.RFC3339)+"\n---\n## Log\n")
+	changed(t, task, "crew sync", costsDay(t, merged), Merged)
+	return task
+}
+
+// printCosts prints the report costsIn makes from what it's given to out.
+func printCosts(t *testing.T, out io.Writer, ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) {
+	t.Helper()
+	r, err := costsIn(ts, tasks, elsewhere, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.print(out)
 }
 
 // dollarsLine is an assistant line from a session run by claude whose message
@@ -362,7 +380,7 @@ func TestCostsMedianOverTasksThatFinishedInTheRange(t *testing.T) {
 	ts.completeFrom = at("2026-11-01 09:00") // the sessions were written just now
 
 	var out strings.Builder
-	costsIn(ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	printCosts(t, &out, ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00"))
 	want := `Spend from 2026-11-16 to 2026-11-22, at API rates, from this machine's transcripts:
 
                                           median
@@ -443,7 +461,7 @@ func TestCostsLeaveOutTasksBegunBeforeTheTranscriptsAreComplete(t *testing.T) {
 				"p/early": finishedTask(t, "early", "2026-11-09 12:00", "2026-11-18 12:00"),
 			}
 			var out strings.Builder
-			costsIn(ts, tasks, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00")).print(&out)
+			printCosts(t, &out, ts, tasks, nil, costsDay(t, "2026-11-16 00:00"), costsDay(t, "2026-11-22 00:00"))
 			for _, want := range []string{
 				"  All                $40   100%      1       $10\n",
 				"those begun since 2026-11-10 09:00, from when they're complete, and not under way while another machine ran the crew. Left out: 1 begun before then.\n",
@@ -479,7 +497,7 @@ func TestCostsLeaveOutTasksUnderWayWhileAnotherMachineRanTheCrew(t *testing.T) {
 		{holder: "laptop", from: at("2026-11-25 09:00")},
 	}
 	var out strings.Builder
-	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	printCosts(t, &out, ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00"))
 	for _, want := range []string{
 		"  All               $100   100%      1       $10\n",
 		"Left out: 3 under way while desk or laptop ran the crew.\n",
@@ -507,7 +525,7 @@ func TestCostsLeaveOutTasksWhoseCostIsUnknown(t *testing.T) {
 		spent("p/rated", "claude-opus-5-5"), spent("p/unrated", "claude-opus-5-5"), spent("p/unrated", "claude-mystery-1"),
 	}}
 	var out strings.Builder
-	costsIn(ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	printCosts(t, &out, ts, tasks, nil, at("2026-11-16 00:00"), at("2026-11-22 00:00"))
 	for _, want := range []string{
 		"  All                $20   100%      1       $10\n",
 		"Left out: 1 with a message there's no rate for and 1 with nothing spent in this machine's transcripts.\n",
@@ -518,24 +536,33 @@ func TestCostsLeaveOutTasksWhoseCostIsUnknown(t *testing.T) {
 	}
 }
 
-// A Log line's time is the clock of the machine that wrote it, with no zone.
-// Here, in New York, a task merged on a laptop in Los Angeles at 06:30 its
-// time, after the laptop took over at 04:00 there: 06:30 read in New York
-// would be before that.
+// crew migrate read a finish from its Log line, whose time is the clock of the
+// machine that wrote it, with no zone. Here, in New York, a task merged on a
+// laptop in Los Angeles at 06:30 its time, after the laptop took over at 04:00
+// there: 06:30 read in New York would be before that. A finish recorded since
+// has its zone, so the same record by crew sync was before the laptop took
+// over, at 07:00 in New York.
 func TestCostsLeaveOutATaskThatFinishedOnAnotherMachinesClock(t *testing.T) {
 	local := time.Local
 	time.Local = time.FixedZone("EST", -5*60*60)
 	t.Cleanup(func() { time.Local = local })
 	at := func(s string) time.Time { return costsDay(t, s) }
-	tasks := map[string]Task{"p/west": finishedTask(t, "west", "2026-11-13 10:00", "2026-11-18 06:30")}
-	ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
-		{owner{stepWorker, "p/west"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
-	}}
-	elsewhere := []tenure{{holder: "laptop", from: time.Date(2026, 11, 18, 4, 0, 0, 0, time.FixedZone("PST", -8*60*60))}}
-	var out strings.Builder
-	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
-	if want := "Left out: 1 under way while laptop ran the crew.\n"; !strings.Contains(out.String(), want) {
-		t.Errorf("report doesn't say %q:\n%s", want, out.String())
+	for _, c := range []struct {
+		by      string
+		leftOut bool
+	}{{"crew migrate", true}, {"crew sync", false}} {
+		west := migratedTask(t, "west", "---\nstatus: merged\ncreated: "+at("2026-11-13 10:00").Format(time.RFC3339)+"\n---\n## Log\n")
+		changed(t, west, c.by, at("2026-11-18 06:30"), Merged)
+		ts := transcripts{completeFrom: at("2026-11-01 09:00"), charges: []*charge{
+			{owner{stepWorker, "p/west"}, &message{"claude-opus-5-5", at("2026-11-17 09:00"), claudeUsage{Output: 500_000}}},
+		}}
+		elsewhere := []tenure{{holder: "laptop", from: time.Date(2026, 11, 18, 4, 0, 0, 0, time.FixedZone("PST", -8*60*60))}}
+		var out strings.Builder
+		printCosts(t, &out, ts, map[string]Task{"p/west": west}, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00"))
+		const want = "Left out: 1 under way while laptop ran the crew.\n"
+		if got := strings.Contains(out.String(), want); got != c.leftOut {
+			t.Errorf("finish by %s: report leaves the task out = %v; want %v:\n%s", c.by, got, c.leftOut, out.String())
+		}
 	}
 }
 
@@ -552,7 +579,7 @@ func TestCostsKeepATaskThatFinishedBeforeAnotherMachineTookOver(t *testing.T) {
 	}}
 	elsewhere := []tenure{{holder: "laptop", from: at("2026-11-18 12:00")}}
 	var out strings.Builder
-	costsIn(ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00")).print(&out)
+	printCosts(t, &out, ts, tasks, elsewhere, at("2026-11-16 00:00"), at("2026-11-22 00:00"))
 	if strings.Contains(out.String(), "Left out") {
 		t.Errorf("report leaves out a task that finished before the laptop took over:\n%s", out.String())
 	}

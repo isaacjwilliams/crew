@@ -299,9 +299,9 @@ func cmdSet(c *Crew, args []string) error {
 	}
 	switch {
 	case key == "status" && isProposal(f): // a proposal has no go-ahead to end
-		err = d.setStatus(value)
+		err = Proposal{d}.SetStatus(value)
 	case key == "status":
-		err = Task{d}.SetStatus(Status(value))
+		err = Task{d}.SetStatus(Status(value), "crew set")
 	default:
 		err = d.Set(key, value)
 	}

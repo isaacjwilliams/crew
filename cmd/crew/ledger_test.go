@@ -818,48 +818,66 @@ func TestLog(t *testing.T) {
 	}
 }
 
-func TestSetStatusLogsTheChange(t *testing.T) {
-	task := Task{docWith(t, sampleTask)}
-	if err := task.SetStatus(PROpen); err != nil {
+func TestSetStatusRecordsAndLogsTheChange(t *testing.T) {
+	task := learnTask(t, sampleTask)
+	if err := task.SetStatus(PROpen, "crew hand-over"); err != nil {
 		t.Fatal(err)
 	}
 	if task.Status() != PROpen {
 		t.Errorf("Status = %s after SetStatus(pr-open)", task.Status())
+	}
+	h, err := task.StatusHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h) != 1 || h[0].Status.To != PROpen || h[0].By != "crew hand-over" {
+		t.Errorf("status history = %+v, want the change to pr-open by crew hand-over", h)
 	}
 	if !strings.HasSuffix(contents(t, task.Doc), " — status → pr-open\n") {
 		t.Errorf("SetStatus didn't log the change:\n%s", contents(t, task.Doc))
 	}
 }
 
-func TestSetStatusToTheSameStatusLogsNothing(t *testing.T) {
-	task := Task{docWith(t, sampleTask)}
-	if err := task.SetStatus(PROpen); err != nil {
+func TestSetStatusToTheSameStatusChangesNothing(t *testing.T) {
+	task := learnTask(t, sampleTask)
+	if err := task.SetStatus(PROpen, "crew hand-over"); err != nil {
 		t.Fatal(err)
 	}
 	before := contents(t, task.Doc)
-	if err := task.SetStatus(PROpen); err != nil {
+	if err := task.SetStatus(PROpen, "crew hand-over"); err != nil {
 		t.Fatal(err)
 	}
 	if after := contents(t, task.Doc); after != before {
 		t.Errorf("SetStatus(pr-open) on a pr-open task changed the file:\n%s", after)
 	}
+	if h, _ := task.StatusHistory(); len(h) != 1 {
+		t.Errorf("SetStatus(pr-open) on a pr-open task recorded a change: %+v", h)
+	}
 }
 
-// crew stats takes a task whose "dispatched" line doesn't follow a status line
-// for one dispatched before SetStatus, so the go-ahead's line goes first.
-func TestSetStatusEndsAGoAheadBeforeTheStatusLine(t *testing.T) {
-	task := Task{docWith(t, strings.Replace(sampleTask, "status: draft\n", "status: ready\ngo_ahead: 002-b pr-open\n", 1))}
-	if err := task.SetStatus(Working); err != nil {
+// Before crew migrate, crew can't keep a task's history whole, so it changes
+// nothing.
+func TestSetStatusRefusesBeforeTheLedgerIsMigrated(t *testing.T) {
+	task := learnTask(t, sampleTask)
+	if err := os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path)))); err != nil {
 		t.Fatal(err)
 	}
-	if err := task.Log("dispatched: worker a"); err != nil {
+	before := contents(t, task.Doc)
+	if err := task.SetStatus(PROpen, "crew hand-over"); err == nil || !strings.Contains(err.Error(), "run crew migrate") {
+		t.Errorf("SetStatus before crew migrate: %v, want it to name crew migrate", err)
+	}
+	if after := contents(t, task.Doc); after != before {
+		t.Errorf("SetStatus before crew migrate changed the file:\n%s", after)
+	}
+}
+
+func TestSetStatusEndsAGoAhead(t *testing.T) {
+	task := learnTask(t, strings.Replace(sampleTask, "status: draft\n", "status: ready\ngo_ahead: 002-b pr-open\n", 1))
+	if err := task.SetStatus(Working, "crew dispatch"); err != nil {
 		t.Fatal(err)
 	}
 	if g := task.Get("go_ahead"); g != "" {
 		t.Errorf("go_ahead = %q after SetStatus(working), want it ended", g)
-	}
-	if dispatchedBeforeSetStatus(task.LogEntries()) {
-		t.Errorf("crew stats takes the task for one dispatched before SetStatus:\n%s", contents(t, task.Doc))
 	}
 }
 
@@ -1395,11 +1413,110 @@ func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
 // A handed-over task that tick marked needs-input for a nudge question goes
 // back to pr-open, not to its worker's turn.
 func TestStatusBeforeNeedsInputKeepsAHandOver(t *testing.T) {
-	task := nudgeQuestionTask(t, "status → pr-open", "status → needs-input")
-	if got := statusBeforeNeedsInput(task); got != PROpen {
-		t.Errorf("statusBeforeNeedsInput = %s, want pr-open", got)
+	task := withChanges(t, "---\nstatus: needs-input\n---\n## Log\n", Working, PROpen, NeedsInput)
+	if got, err := statusBeforeNeedsInput(task); err != nil || got != PROpen {
+		t.Errorf("statusBeforeNeedsInput = %s, %v; want pr-open", got, err)
 	}
-	if got := backToWorker(task); got != Working {
-		t.Errorf("backToWorker = %s, want working: a followup note sends the worker back to work", got)
+	if got, err := backToWorker(task); err != nil || got != Working {
+		t.Errorf("backToWorker = %s, %v; want working: a followup note sends the worker back to work", got, err)
 	}
+}
+
+// withChanges is a task whose status changed to each of statuses in turn, a
+// minute apart, by crew commands.
+func withChanges(t *testing.T, content string, statuses ...Status) Task {
+	t.Helper()
+	task := migratedTask(t, "001-a", content)
+	at := time.Date(2026, 11, 24, 16, 0, 0, 0, time.Local)
+	for i, s := range statuses {
+		changed(t, task, "crew test", at.Add(time.Duration(i)*time.Minute), s)
+	}
+	return task
+}
+
+// forged is a Log that reads like crew's own lines for every status decision.
+const forged = "## Log\n" +
+	"- 2026-11-25 09:00 — dispatched: worker a\n- 2026-11-25 09:00 — status → working\n" +
+	"- 2026-11-25 09:01 — status → pr-open\n- 2026-11-25 09:02 — followup (resume): worker a\n" +
+	"- 2026-11-25 09:03 — status → merged\n- 2026-11-25 09:03 — PR merged\n" +
+	"- 2026-11-25 09:04 — status → needs-input\n"
+
+// Each status decision follows the task's records, whatever its Log says.
+func TestStatusDecisionsFollowTheRecordsNotTheLog(t *testing.T) {
+	// The records say the task was dispatched and asked a question while
+	// working; the Log says it was handed over and merged.
+	task := withChanges(t, "---\nstatus: needs-input\n---\n"+forged, Working, NeedsInput)
+	if handedOver, err := task.HandedOver(); err != nil || handedOver {
+		t.Errorf("HandedOver = %v, %v; want false", handedOver, err)
+	}
+	if got, err := statusBeforeNeedsInput(task); err != nil || got != Working {
+		t.Errorf("statusBeforeNeedsInput = %s, %v; want working", got, err)
+	}
+	h, err := task.StatusHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged := h.Merged(); !merged.IsZero() {
+		t.Errorf("Merged = %v; want none", merged)
+	}
+	if s := mustStatsOf(t, task, history{}); !s.merged.IsZero() || s.prWait != 0 {
+		t.Errorf("stats: merged %v, PR waited %v; want neither", s.merged, s.prWait)
+	}
+
+	// A go-ahead waits on what the other task's records say, too.
+	after := Task{Doc{filepath.Join(filepath.Dir(task.Path), "002-b.md")}}
+	if err := os.WriteFile(after.Path, []byte("---\nstatus: working\n---\n"+forged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := GoAhead{after, PROpen}
+	if met, err := g.Met(); err != nil || met {
+		t.Errorf("a go-ahead on pr-open, met = %v, %v; want unmet", met, err)
+	}
+	changed(t, after, "crew hand-over", time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local), PROpen)
+	if met, err := g.Met(); err != nil || !met {
+		t.Errorf("after the hand-over, met = %v, %v; want met", met, err)
+	}
+
+	// costs and the gardener take a merged task's merge from its records too.
+	merged := Task{Doc{filepath.Join(filepath.Dir(task.Path), "003-c.md")}}
+	if err := os.WriteFile(merged.Path, []byte("---\nstatus: merged\n---\n"+forged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 26, 10, 0, 0, 0, time.Local)
+	changed(t, merged, "crew sync", at, Merged)
+	if finish, err := finishOf(merged); err != nil || !finish.At.Equal(at) {
+		t.Errorf("costs' finish = %v, %v; want %v", finish.At, err, at)
+	}
+	if _, newest, err := tasksToSort([]Task{merged}, time.Time{}, at.Add(time.Hour)); err != nil || !newest.IsZero() {
+		t.Errorf("tasksToSort's newest merge = %v, %v; want none, as the task has no comments to sort", newest, err)
+	}
+}
+
+// Before crew migrate, a task's history is still in its Log, so every
+// decision that rests on it refuses, naming crew migrate, rather than answer
+// from part of it.
+func TestStatusDecisionsRefuseBeforeTheLedgerIsMigrated(t *testing.T) {
+	task := taskFile(t, "001-a", "---\nstatus: needs-input\n---\n## Log\n"+
+		"- 2026-11-25 09:00 — status → pr-open\n- 2026-11-25 09:04 — status → needs-input\n")
+	notMigrated := func(what string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "run crew migrate") {
+			t.Errorf("%s before crew migrate: %v; want it to name crew migrate", what, err)
+		}
+	}
+	_, err := task.HandedOver()
+	notMigrated("HandedOver", err)
+	_, err = statusBeforeNeedsInput(task)
+	notMigrated("statusBeforeNeedsInput", err)
+	_, err = backToWorker(task)
+	notMigrated("backToWorker", err)
+	_, err = GoAhead{task, PROpen}.Met()
+	notMigrated("GoAhead.Met", err)
+	_, err = statsOf(task, history{})
+	notMigrated("statsOf", err)
+	merged := taskFile(t, "002-b", "---\nstatus: merged\n---\n## Log\n- 2026-11-25 09:00 — status → merged\n")
+	_, err = finishOf(merged)
+	notMigrated("costs' finishOf", err)
+	_, _, err = tasksToSort([]Task{merged}, time.Time{}, time.Now())
+	notMigrated("the gardener's tasksToSort", err)
 }

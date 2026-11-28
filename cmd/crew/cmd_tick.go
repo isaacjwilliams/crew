@@ -282,7 +282,11 @@ func (c *Crew) forWorker(p *Project, idx Branches, t Task, a *Agent) (send *work
 	repo, st := p.Repo(), t.Status()
 	restack := func(reason string) (*workerSend, string) {
 		if st != PROpen {
-			if !t.HandedOver() {
+			handedOver, err := t.HandedOver()
+			switch {
+			case err != nil:
+				return nil, fmt.Sprintf("restack (%s) held back: %v", reason, err)
+			case !handedOver:
 				return nil, fmt.Sprintf("restack (%s) isn't crew's to send: %s", reason, movesBeforeHandOver)
 			}
 			return nil, fmt.Sprintf("restack (%s) waits until the task is %s; it's %s", reason, PROpen, st)
@@ -333,8 +337,11 @@ func (c *Crew) dispatchReady(news *tickNews) {
 			continue
 		}
 		for _, t := range c.tasks(name) {
+			dispatches, err := c.tickDispatches(t)
 			switch {
-			case !c.tickDispatches(t):
+			case err != nil:
+				news.heldBack(name, "%s: dispatch held back: %v", t.ID(), err)
+			case !dispatches:
 			case p.Paused():
 				news.heldBack(name, "%s: dispatch waits: %s is paused", t.ID(), name)
 			default:
@@ -345,7 +352,7 @@ func (c *Crew) dispatchReady(news *tickNews) {
 	sortForDispatch(ready)
 	idx := c.branches("")
 	for _, t := range ready {
-		if !c.tickDispatches(t) {
+		if dispatches, _ := c.tickDispatches(t); !dispatches {
 			continue
 		}
 		project := taskProjectDir(t)
@@ -403,16 +410,25 @@ func sortForDispatch(ts []Task) {
 
 // tickDispatches: the task is ready, and crew tick dispatches it: its goal is
 // running (the goal lead marked it ready, which is the go-ahead), or outside a
-// goal, the user's go-ahead is met.
-func (c *Crew) tickDispatches(t Task) bool {
+// goal, the user's go-ahead is met. A go-ahead crew can't tell is met, before
+// crew migrate say, is an error. One crew set wouldn't have written isn't:
+// crew status shows it, and tick dispatches by hand.
+func (c *Crew) tickDispatches(t Task) (bool, error) {
 	if t.Status() != Ready {
-		return false
+		return false, nil
 	}
 	if g, ok := c.taskGoal(t); ok {
-		return g.Status() == GoalRunning
+		return g.Status() == GoalRunning, nil
 	}
 	g, err := t.GoAhead()
-	return err == nil && g != nil && g.Met()
+	if err != nil || g == nil {
+		return false, nil
+	}
+	met, err := g.Met()
+	if err != nil {
+		return false, fmt.Errorf("can't tell whether %s's go-ahead is met: %w", t.ID(), err)
+	}
+	return met, nil
 }
 
 // prMayHaveNewComments: GitHub moves a PR's updatedAt (recorded as pr_updated by

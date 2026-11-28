@@ -129,6 +129,8 @@ func (d Doc) LogEntries() []logEntry {
 
 // status is the status the entry changed the task to, when SetStatus wrote it.
 // A message that only starts like one, with no status after it, isn't one.
+// crew decides from status records (StatusHistory), not these lines: only crew
+// migrate and crew nudge's checks read them.
 func (e logEntry) status() (Status, bool) {
 	s, ok := strings.CutPrefix(e.msg, statusLogged)
 	return Status(s), ok && slices.Contains(taskStatuses, Status(s))
@@ -785,8 +787,8 @@ func (t Task) Answer() string {
 }
 
 // statusLogged begins the Log line of every change to a task's or a proposal's
-// status: "status → pr-open", say. crew stats reads a task's waits on the user
-// from them.
+// status: "status → pr-open", say. The line is for people: crew reads a task's
+// history from its records (StatusHistory).
 const statusLogged = "status → "
 
 // recordedForTheUser ends the Log line crew feedback and crew ci-fix write when
@@ -794,12 +796,28 @@ const statusLogged = "status → "
 // comment, or red CI past MAX_CI_FIXES. crew stats reads it.
 const recordedForTheUser = "recorded under Open questions for the user"
 
-// SetStatus writes the task's status and logs the change. Every change of a
-// task's status goes through it, so the Log has a line for each. A go-ahead
-// lasts only while the task is ready, so any other status ends it. Its line
-// goes before the status line, which crew stats looks for just before
-// "dispatched" (dispatchedBeforeSetStatus).
-func (t Task) SetStatus(s Status) error {
+// SetStatus changes the task's status, as the crew command by does. Every
+// change of a task's status goes through it, so its records hold the task's
+// whole history: it records the change, writes status, and logs a line for
+// people. A go-ahead lasts only while the task is ready, so any other status
+// ends it. Setting the status the task has changes nothing.
+//
+// The record goes first, so a run cut short leaves the change in the history,
+// where crew decides from it, and status behind it until the next change.
+// Before crew migrate it changes nothing and says why.
+func (t Task) SetStatus(s Status, by string) error {
+	if t.Status() == s {
+		return nil
+	}
+	records, err := t.Records()
+	if err != nil {
+		return err
+	}
+	r := newRecord(by, records)
+	r.Status = &StatusChanged{To: s}
+	if err := t.AddRecords(r); err != nil {
+		return err
+	}
 	if g := t.Get("go_ahead"); g != "" && s != Ready {
 		if err := t.Set("go_ahead", ""); err != nil {
 			return err
@@ -808,21 +826,58 @@ func (t Task) SetStatus(s Status) error {
 			return err
 		}
 	}
-	return t.setStatus(string(s))
-}
-
-// setStatus writes the file's status and logs the change: a task's, or a
-// proposal's through crew set. It takes a string, since a proposal's statuses
-// aren't a task's. Setting the status a file already has logs nothing, so a
-// status line always means the status changed.
-func (d Doc) setStatus(s string) error {
-	if d.Get("status") == s {
-		return nil
-	}
-	if err := d.Set("status", s); err != nil {
+	if err := t.Set("status", string(s)); err != nil {
 		return err
 	}
-	return d.Log(statusLogged + s)
+	return t.Log(statusLogged + string(s))
+}
+
+// StatusHistory is a task's changes of status, oldest first: its records with
+// a StatusChanged.
+type StatusHistory []Record
+
+// StatusHistory is the task's changes of status, read from its records. Before
+// crew migrate it's an error: an older task's history is in its Log until then.
+func (t Task) StatusHistory() (StatusHistory, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
+	}
+	var h StatusHistory
+	for _, r := range records {
+		if r.Status != nil {
+			h = append(h, r)
+		}
+	}
+	// A merge of two clones' records may put a change before an earlier one.
+	slices.SortStableFunc(h, func(a, b Record) int { return a.At.Compare(b.At) })
+	return h, nil
+}
+
+// First is when the task first changed to s, or zero when it never has.
+func (h StatusHistory) First(s Status) time.Time {
+	for _, r := range h {
+		if r.Status.To == s {
+			return r.At
+		}
+	}
+	return time.Time{}
+}
+
+// Last is the task's last change to a status that is, or a zero Record when
+// it never has: h.Last(Status.Delivered), say.
+func (h StatusHistory) Last(is func(Status) bool) Record {
+	for _, r := range slices.Backward(h) {
+		if is(r.Status.To) {
+			return r
+		}
+	}
+	return Record{}
+}
+
+// Merged is when the task last merged, or zero when it never has.
+func (h StatusHistory) Merged() time.Time {
+	return h.Last(func(s Status) bool { return s == Merged }).At
 }
 
 // Priority orders crew tick's dispatch of the ready tasks it dispatches (a
@@ -892,16 +947,20 @@ func (t Task) GoAhead() (*GoAhead, error) {
 }
 
 // Met: the task the go-ahead waits on has reached its status at some point. Its
-// Log shows the change, or it's merged or done (Delivered), which comes after
-// every status a go-ahead can wait for. An abandoned task never meets one.
-func (g GoAhead) Met() bool {
+// history shows the change, or it's merged or done (Delivered), which comes
+// after every status a go-ahead can wait for. An abandoned task never meets one.
+func (g GoAhead) Met() (bool, error) {
 	switch st := g.After.Status(); {
 	case st == Abandoned:
-		return false
+		return false, nil
 	case st.Delivered():
-		return true
+		return true, nil
 	}
-	return slices.ContainsFunc(g.After.LogEntries(), changedTo(g.Status))
+	h, err := g.After.StatusHistory()
+	if err != nil {
+		return false, err
+	}
+	return !h.First(g.Status).IsZero(), nil
 }
 
 // String is the go-ahead as go_ahead records it.
@@ -917,10 +976,16 @@ func (t Task) PRNumber() string {
 func (t Task) Dispatched() bool { return t.WorkerJob() != "" || t.Worktree() != "" }
 
 // HandedOver: the task has been in pr-open, which only crew hand-over moves it
-// to. Until then, its first run is still making the branch. It reads the Log's
-// first "status → pr-open", not the status: a task back at work on a review
-// round, or waiting on an answer after one, was handed over all the same.
-func (t Task) HandedOver() bool { return !firstHandOver(t.LogEntries()).IsZero() }
+// to. Until then, its first run is still making the branch. It reads the
+// task's history, not its status: a task back at work on a review round, or
+// waiting on an answer after one, was handed over all the same.
+func (t Task) HandedOver() (bool, error) {
+	h, err := t.StatusHistory()
+	if err != nil {
+		return false, err
+	}
+	return !h.First(PROpen).IsZero(), nil
+}
 
 // HasOpenPR: the task is in flight and has a PR that wasn't closed unmerged.
 // crew sync leaves the status of a task whose PR was closed as it was.
@@ -1746,6 +1811,19 @@ func (g Goal) Project() string    { return g.Get("project") }
 func (g Goal) LeadJob() string    { return g.Get("lead_job") }
 
 type Proposal struct{ Doc }
+
+// SetStatus writes the proposal's status and logs the change. Nothing reads a
+// proposal's history, so it has no records. Setting the status it has logs
+// nothing.
+func (p Proposal) SetStatus(s string) error {
+	if p.Get("status") == s {
+		return nil
+	}
+	if err := p.Set("status", s); err != nil {
+		return err
+	}
+	return p.Log(statusLogged + s)
+}
 
 // CheckSet refuses a crew set that would take an accepted proposal away from
 // the task that took up its work: a new or empty task, or another status. It

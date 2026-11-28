@@ -121,7 +121,9 @@ func cmdDispatch(c *Crew, args []string) error {
 		return err
 	}
 	l.record(t.Doc)
-	t.SetStatus(Working)
+	if err := t.SetStatus(Working, "crew dispatch"); err != nil {
+		warn("%s: the worker is started, but its status is still %s: %v", t.ID(), t.Status(), err)
+	}
 	t.Touch()
 	t.Log(fmt.Sprintf("dispatched: worker %s (session %s) in %s on %s", l.job, orUnknown(l.session), wt, branch))
 	c.commit("dispatch " + p.Name + "/" + t.ID())
@@ -147,8 +149,9 @@ const (
 	byTick                    // crew dispatch --tick: crew tick must still dispatch it
 )
 
-// dispatchChecks refuses a dispatch the user hasn't readied, one whose brief
-// says how to meet its objective (with --force too), or one stacked on an
+// dispatchChecks refuses a dispatch the user hasn't readied, one crew can't
+// record the task's change to working for (before crew migrate), one whose
+// brief says how to meet its objective (with --force too), or one stacked on an
 // abandoned task, and holds back (notYet) one for a paused project, one crew
 // tick no longer dispatches, one whose dependencies haven't merged, or one that
 // would go over MAX_WORKERS or its goal's max_in_flight. The caps are counted
@@ -161,13 +164,22 @@ func (c *Crew) dispatchChecks(p *Project, t Task, by dispatchBy) error {
 	if st := t.Status(); st != Ready && by != byForce {
 		return fail("%s is '%s'; run 'crew ready %s' first", t.ID(), st, t.ID())
 	}
+	if _, err := t.StatusHistory(); err != nil {
+		return fail("not dispatching %s, since crew can't record that it's working: %v", t.ID(), err)
+	}
 	// Its goal or go-ahead may have changed since tick chose it, while its
 	// worktree was set up, say.
-	if by == byTick && !c.tickDispatches(t) {
-		if g, ok := c.taskGoal(t); ok {
-			return notYet("goal %s is %s now; leaving %s ready", g.ID(), g.Status(), t.ID())
+	if by == byTick {
+		dispatches, err := c.tickDispatches(t)
+		if err != nil {
+			return fail("%v", err)
 		}
-		return notYet("its go-ahead was withdrawn, or isn't met any more; leaving %s ready", t.ID())
+		if !dispatches {
+			if g, ok := c.taskGoal(t); ok {
+				return notYet("goal %s is %s now; leaving %s ready", g.ID(), g.Status(), t.ID())
+			}
+			return notYet("its go-ahead was withdrawn, or isn't met any more; leaving %s ready", t.ID())
+		}
 	}
 	// --force or not: a ready task's brief may say how to meet its objective,
 	// having been readied before crew ready refused that, or edited since, and

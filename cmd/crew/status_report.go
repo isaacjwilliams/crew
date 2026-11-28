@@ -712,10 +712,13 @@ func goAheadNotes(t Task) []wording {
 		return []wording{byHand}
 	}
 	after := taskNumber(g.After)
+	met, err := g.Met()
 	switch {
 	case g.After.Status() == Abandoned:
 		return []wording{stripOnly("go-ahead never met: " + after + " abandoned"), byHand}
-	case g.Met():
+	case err != nil:
+		return []wording{forUser("go-ahead: "+err.Error(), "go_ahead?"), byHand}
+	case met:
 		return []wording{standing("go-ahead met: "+after+" reached "+string(g.Status), goAheadSign)}
 	}
 	return []wording{standing("go-ahead once "+after+" is "+string(g.Status), waitingSign)}

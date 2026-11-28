@@ -35,11 +35,12 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn   *ToLearn   `json:"to_learn,omitempty"`
-	Learned   *Learned   `json:"learned,omitempty"`
-	Suggested *Suggested `json:"suggested,omitempty"`
-	Kept      *Kept      `json:"kept,omitempty"`
-	Declined  *Declined  `json:"declined,omitempty"`
+	ToLearn   *ToLearn       `json:"to_learn,omitempty"`
+	Learned   *Learned       `json:"learned,omitempty"`
+	Suggested *Suggested     `json:"suggested,omitempty"`
+	Kept      *Kept          `json:"kept,omitempty"`
+	Declined  *Declined      `json:"declined,omitempty"`
+	Status    *StatusChanged `json:"status,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -71,6 +72,13 @@ type Kept struct {
 type Declined struct {
 	Suggestion string `json:"suggestion"` // the Suggested record's ID
 	Reason     string `json:"reason"`
+}
+
+// StatusChanged records that a task's status changed to To. Task.SetStatus
+// writes one for every change, and crew reads a task's history from them
+// (StatusHistory): whether it was handed over, when it merged, and so on.
+type StatusChanged struct {
+	To Status `json:"to"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -236,7 +244,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil, r.Status != nil} {
 		if set {
 			payloads++
 		}
@@ -255,6 +263,8 @@ func (r Record) check() error {
 		return errors.New("a kept record needs its suggestion")
 	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
 		return errors.New("a declined record needs its suggestion and its reason")
+	case r.Status != nil && !slices.Contains(taskStatuses, r.Status.To):
+		return fmt.Errorf("a status record needs a task's status, not %q", r.Status.To)
 	}
 	return nil
 }
@@ -282,10 +292,12 @@ func (d Doc) AddRecords(rs ...Record) error {
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
-// records, and format 2 memory suggestions; before, they were checkboxes in the
-// task file and in memory-suggestions.md, which crew migrate moves into records.
-// crew project add writes the file for a new project.
-const ledgerFormat = 2
+// records, format 2 memory suggestions and format 3 each task's status history.
+// Before, the items and suggestions were checkboxes in the task file and in
+// memory-suggestions.md, and the history was told only by the task's Log; crew
+// migrate moves them into records. crew project add writes the file for a new
+// project.
+const ledgerFormat = 3
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

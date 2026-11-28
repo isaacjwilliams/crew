@@ -50,6 +50,12 @@ func TestStatsOfWaits(t *testing.T) {
 				"- 2026-11-10 11:00 — status → addressing-feedback\n- 2026-11-10 12:00 — status → pr-open\n" +
 				"- 2026-11-10 12:03 — status → needs-input\n- 2026-11-10 15:00 — status → pr-open\n- 2026-11-10 16:00 — status → merged\n",
 			at("2026-11-10 16:00"), 2*time.Hour + 3*time.Minute, 4 * time.Hour},
+		{"a goal task's question logged in the minute its status changed comes after the change",
+			"---\ngoal: 001-g\n---\n## Log\n" +
+				"- 2026-11-10 10:00 — status → needs-input\n- 2026-11-10 10:01 — status → addressing-feedback\n" +
+				"- 2026-11-10 10:01 — For the user: which name?\n- 2026-11-10 11:00 — status → pr-open\n" +
+				"- 2026-11-10 13:01 — status → merged\n",
+			at("2026-11-10 13:01"), 2*time.Hour + time.Minute, 3 * time.Hour},
 		{"so does a goal task's red CI past MAX_CI_FIXES",
 			"---\ngoal: 001-g\n---\n## Log\n" +
 				"- 2026-11-10 10:00 — status → pr-open\n- 2026-11-10 11:00 — CI still red on abc1234 after 2 CI rounds; " + recordedForTheUser + "\n" +
@@ -74,7 +80,10 @@ func TestStatsOfWaits(t *testing.T) {
 		{"a wait the merge didn't end isn't counted", "---\ngoal:\n---\n## Log\n- 2026-11-01 10:00 — status → needs-input\n",
 			time.Time{}, 0, 0},
 	} {
-		s := statsOf(Task{docWith(t, c.task)}, history{})
+		s, err := statsOf(taskWithHistory(t, "001-a", c.task), history{})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !s.merged.Equal(c.merged) || s.prWait != c.prWait || s.questionWait != c.questionWait {
 			t.Errorf("%s: merged %v, PR waited %v, questions waited %v; want %v, %v, %v",
 				c.name, s.merged, s.prWait, s.questionWait, c.merged, c.prWait, c.questionWait)
@@ -93,7 +102,7 @@ func TestStatsOfReview(t *testing.T) {
 	reviews += "### Automated review 5 — 2026-11-12 09:00\n\n- Reviewers: Claude reviewer\n\n" +
 		"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n" +
 		"#### 2. [must fix] g — `g.go:7`\n- Earlier: repeat of review 3 #1\n- Agreed severity: disputed\n- Outcome: left for the user: still open from review 3\n\n"
-	s := statsOf(Task{docWith(t, reviews+round)}, history{})
+	s := mustStatsOf(t, migratedTask(t, "001-a", reviews+round), history{})
 	got := []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
 		t.Errorf("rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
@@ -108,7 +117,7 @@ func TestStatsOfReview(t *testing.T) {
 	if n := strings.Count(decided, "; decided by the user"); n != 4 {
 		t.Fatalf("decided %d findings, want 4", n)
 	}
-	s = statsOf(Task{docWith(t, decided)}, history{})
+	s = mustStatsOf(t, migratedTask(t, "001-a", decided), history{})
 	got = []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
 		t.Errorf("with the findings decided: rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
@@ -116,7 +125,7 @@ func TestStatsOfReview(t *testing.T) {
 
 	// Only the first review, which needed fixes: it never came back clean.
 	first, _, _ := strings.Cut(reviewedTask, "### Automated review 2")
-	if s := statsOf(Task{docWith(t, first+"## Log\n")}, history{}); s.reviews != 1 || s.cleanAfter != 0 {
+	if s := mustStatsOf(t, migratedTask(t, "001-a", first+"## Log\n"), history{}); s.reviews != 1 || s.cleanAfter != 0 {
 		t.Errorf("a task never clean: reviews %d, clean after %d", s.reviews, s.cleanAfter)
 	}
 }
@@ -142,6 +151,28 @@ func TestMedian(t *testing.T) {
 			t.Errorf("median(%v) = %v, want %v", c.ds, got, c.want)
 		}
 	}
+}
+
+// taskWithHistory is the task with the given ID and file, in a project whose
+// ledger is in this crew's format, with the status history crew migrate
+// records from its Log.
+func taskWithHistory(t *testing.T, id, content string) Task {
+	t.Helper()
+	task := migratedTask(t, id, content)
+	if _, err := migrateStatusHistory(task); err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
+// mustStatsOf is statsOf, failing the test on an error.
+func mustStatsOf(t *testing.T, task Task, h history) taskStats {
+	t.Helper()
+	s, err := statsOf(task, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 // taskFile is a task with the given ID and file.
@@ -205,12 +236,15 @@ func TestRevertedPRs(t *testing.T) {
 
 func TestHistoryTracesFixesToTheirTask(t *testing.T) {
 	merged := "## Log\n- 2026-09-06 12:00 — status → merged\n"
-	cause := taskFile(t, "031-cause", "---\nrisk: low\npr: https://github.com/o/r/pull/35\n---\n"+merged)
-	fix := taskFile(t, "040-fix", "---\nkind: fix\nfixes: 031-cause\nmissed_by: tests\nstatus: merged\n---\n"+
+	cause := taskWithHistory(t, "031-cause", "---\nrisk: low\npr: https://github.com/o/r/pull/35\n---\n"+merged)
+	fix := taskWithHistory(t, "040-fix", "---\nkind: fix\nfixes: 031-cause\nmissed_by: tests\nstatus: merged\n---\n"+
 		"## Log\n- 2026-11-07 12:00 — status → merged\n")
-	untraced := taskFile(t, "041-fix", "---\nkind: fix\nfixes: unknown\nmissed_by: ci\nstatus: merged\n---\n"+merged)
-	unmerged := taskFile(t, "042-fix", "---\nkind: fix\nfixes: 031-cause\nstatus: working\n---\n## Log\n")
-	h := historyOf(&Project{Name: "p", Settings: Settings{}}, []Task{cause, fix, untraced, unmerged})
+	untraced := taskWithHistory(t, "041-fix", "---\nkind: fix\nfixes: unknown\nmissed_by: ci\nstatus: merged\n---\n"+merged)
+	unmerged := taskWithHistory(t, "042-fix", "---\nkind: fix\nfixes: 031-cause\nstatus: working\n---\n## Log\n")
+	h, err := historyOf(&Project{Name: "p", Settings: Settings{}}, []Task{cause, fix, untraced, unmerged})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var lines []string
 	for _, c := range h.corrections {
@@ -224,10 +258,10 @@ func TestHistoryTracesFixesToTheirTask(t *testing.T) {
 	}
 
 	h.corrections = append(h.corrections, correction{pr: "35", cause: &cause})
-	if s := statsOf(cause, h); s.laterFixes != 1 || s.reverts != 1 {
+	if s := mustStatsOf(t, cause, h); s.laterFixes != 1 || s.reverts != 1 {
 		t.Errorf("the cause's later fixes, reverts = %d, %d; want 1, 1", s.laterFixes, s.reverts)
 	}
-	if s := statsOf(fix, h); s.laterFixes != 0 || s.reverts != 0 {
+	if s := mustStatsOf(t, fix, h); s.laterFixes != 0 || s.reverts != 0 {
 		t.Errorf("the fix's later fixes, reverts = %d, %d; want none", s.laterFixes, s.reverts)
 	}
 	if got := h.corrections[2].String(); got != "revert of #35 → 031-cause (low risk)" {

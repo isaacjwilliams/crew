@@ -274,7 +274,9 @@ func cmdReady(c *Crew, args []string) error {
 	if st := t.Status(); st != Draft && st != Ready {
 		return fail("task is '%s', not draft", st)
 	}
-	t.SetStatus(Ready)
+	if err := t.SetStatus(Ready, "crew ready"); err != nil {
+		return fail("%v", err)
+	}
 	t.Touch()
 	c.commit("ready " + t.ID())
 	fmt.Println("ready: " + t.ID())
@@ -315,7 +317,9 @@ func cmdHandOver(c *Crew, args []string) error {
 	if err := check(); err != nil {
 		return err
 	}
-	t.SetStatus(rules.handedOver)
+	if err := t.SetStatus(rules.handedOver, "crew hand-over"); err != nil {
+		return fail("%v", err)
+	}
 	t.Touch()
 	t.Log("handed over")
 	if inWorkerOrGoalLead() {
@@ -340,7 +344,11 @@ func cmdCheckBase(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	if t.HandedOver() {
+	handedOver, err := t.HandedOver()
+	if err != nil {
+		return fail("%v", err)
+	}
+	if handedOver {
 		return fail("%s has been handed over: crew restacks it when its base moves", t.ID())
 	}
 	p, err := c.loadProject(t.Project())
@@ -357,7 +365,7 @@ func cmdCheckBase(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "carry on"); err != nil {
+	if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "crew check-base", "carry on"); err != nil {
 		return err
 	}
 	fmt.Println("nothing to move: carry on")
@@ -386,7 +394,11 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		}
 		pr = PREvidence(string(body))
 	}
-	first := !t.HandedOver()
+	handedOver, err := t.HandedOver()
+	if err != nil {
+		return nil, fail("%v", err)
+	}
+	first := !handedOver
 	var onGitHub, parentOnGitHub *gitHubPR
 	if first {
 		if onGitHub, parentOnGitHub, err = c.readTaskPRs(p, t); err != nil {
@@ -404,7 +416,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 		// Before the PR check: a worker whose parent merged can't open its PR on
 		// the parent's branch once GitHub has deleted it.
 		if first {
-			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "hand over again"); err != nil {
+			if err := c.refuseOffBase(p, t, onGitHub, parentOnGitHub, "crew hand-over", "hand over again"); err != nil {
 				return err
 			}
 		}
@@ -486,10 +498,11 @@ func fetchOrigin(repo string) error {
 //
 // It first records what onGitHub and parentOnGitHub say, as crew sync would:
 // the PRs of the task and its parent, read before the lock (readTaskPRs), or
-// nil when there was none to read. afterRetarget is what the worker does once a
+// nil when there was none to read. by is the crew command that calls it, which
+// records a merge it notes. afterRetarget is what the worker does once a
 // retarget is all it had to run, such as "hand over again". Call it with the
 // lock held.
-func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, afterRetarget string) error {
+func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHubPR, by, afterRetarget string) error {
 	idx, repo := c.branches(p.Name), p.Repo()
 	parent, stacked := idx.parentOf(t)
 	// crew sync may not have looked since the worker opened or moved its PR,
@@ -497,7 +510,11 @@ func (c *Crew) refuseOffBase(p *Project, t Task, onGitHub, parentOnGitHub *gitHu
 	// branch off base_sha.
 	changed := onGitHub != nil && onGitHub.record(t)
 	if stacked && parentOnGitHub != nil {
-		recorded, merged := parentOnGitHub.record(parent), parentOnGitHub.noteMerge(parent)
+		recorded := parentOnGitHub.record(parent)
+		merged, err := parentOnGitHub.noteMerge(parent, by)
+		if err != nil {
+			return fail("%s merged, but crew can't record it: %v", parent.ID(), err)
+		}
 		changed = changed || recorded || merged
 	}
 	if stacked && noteBaseSHA(t, parent, repo) {

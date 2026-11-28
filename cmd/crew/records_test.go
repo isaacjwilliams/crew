@@ -15,6 +15,13 @@ import (
 // learnTask is a task file in a project whose ledger is in this crew's format.
 func learnTask(t *testing.T, content string) Task {
 	t.Helper()
+	return migratedTask(t, "001-a", content)
+}
+
+// migratedTask is the task with the given ID and file, in a project whose
+// ledger is in this crew's format.
+func migratedTask(t *testing.T, id, content string) Task {
+	t.Helper()
 	dir := filepath.Join(t.TempDir(), "projects", "p")
 	if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0o755); err != nil {
 		t.Fatal(err)
@@ -22,11 +29,26 @@ func learnTask(t *testing.T, content string) Task {
 	if err := writeLedgerFormat(dir); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(dir, "tasks", "001-a.md")
+	p := filepath.Join(dir, "tasks", id+".md")
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return Task{Doc{p}}
+}
+
+// changed records that the task's status changed to s at the time given, as
+// the crew command by would.
+func changed(t *testing.T, task Task, by string, at time.Time, s Status) {
+	t.Helper()
+	records, err := task.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRecord(by, records)
+	r.At, r.Status = at, &StatusChanged{To: s}
+	if err := task.AddRecords(r); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // add appends a record, as crew to-learn or crew learned does, and returns it.

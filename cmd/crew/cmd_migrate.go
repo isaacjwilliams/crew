@@ -23,6 +23,9 @@ import (
 // into records: each becomes a suggested record and, once ticked, a kept or
 // declined record. The file keeps any line that wasn't a suggestion, under the
 // head crew remember writes.
+//
+// Format 3 records each task's status history: a status record for each
+// change its Log tells (migrateStatusHistory).
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -72,6 +75,19 @@ func cmdMigrate(c *Crew, args []string) error {
 			}
 			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
 		}
+		if have < 3 {
+			histories := 0
+			for _, t := range c.tasks(p) {
+				recorded, err := migrateStatusHistory(t)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				if recorded {
+					histories++
+				}
+			}
+			fmt.Printf("%s: recorded the status history of %d task(s)\n", p, histories)
+		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
 		}
@@ -88,8 +104,8 @@ func cmdMigrate(c *Crew, args []string) error {
 // wasn't part of an item. It says how many items it moved.
 //
 // It writes the task's records in one go, and only then changes its file. A run
-// stopped in between leaves both, so a task that has records crew migrate wrote
-// has had its items moved already, and a second run only changes its file.
+// stopped in between leaves both, so a task that has items crew migrate
+// recorded has had them moved already, and a second run only changes its file.
 func migrateStillToLearn(t Task, comment []string) (int, error) {
 	ls, err := t.read()
 	if err != nil || !slices.Contains(ls, learnHeading) {
@@ -102,7 +118,7 @@ func migrateStillToLearn(t Task, comment []string) (int, error) {
 			return 0, err
 		}
 	}
-	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" }) {
+	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" && (r.ToLearn != nil || r.Learned != nil) }) {
 		items = nil
 	}
 	var moved []Record
@@ -305,4 +321,79 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 		return o, fmt.Errorf("%v: %s", err, line)
 	}
 	return o, nil
+}
+
+// migrateStatusHistory records the task's status history from its Log: a
+// status record for each "status → " line, at the line's time. It says whether
+// it recorded any. A task that has status records already has its history, so
+// a second run, after one cut short, leaves it as it is.
+//
+// A task dispatched before Task.SetStatus existed has status lines for some
+// changes only: crew dispatch, crew followup and crew sync changed its status
+// without one. So for such a task, each of their lines stands for the change
+// it made too (statusLinesBeforeSetStatus).
+func migrateStatusHistory(t Task) (bool, error) {
+	var changes []logEntry
+	for _, e := range statusLinesBeforeSetStatus(t.LogEntries()) {
+		if _, ok := e.status(); ok {
+			changes = append(changes, e)
+		}
+	}
+	if len(changes) == 0 {
+		return false, nil
+	}
+	records, err := t.readRecords()
+	if err != nil || slices.ContainsFunc(records, func(r Record) bool { return r.Status != nil }) {
+		return false, err
+	}
+	var history []Record
+	for _, e := range changes {
+		s, _ := e.status()
+		r := newRecord("crew migrate", slices.Concat(records, history))
+		r.At, r.Status = e.at, &StatusChanged{To: s}
+		history = append(history, r)
+	}
+	return true, t.AddRecords(history...)
+}
+
+// statusLinesBeforeSetStatus adds the status lines a task dispatched before
+// Task.SetStatus lacks, each after the line of the change it stands for: a
+// "dispatched" line moved the task to working, a "followup (" line to its
+// worker's turn, and "PR merged" to merged. Any other task's Log is returned
+// as it is.
+func statusLinesBeforeSetStatus(log []logEntry) []logEntry {
+	if !dispatchedBeforeSetStatus(log) {
+		return log
+	}
+	var out []logEntry
+	for _, e := range log {
+		out = append(out, e)
+		var status Status
+		switch {
+		case strings.HasPrefix(e.msg, "dispatched"):
+			status = Working
+		case strings.HasPrefix(e.msg, "followup ("):
+			status = AddressingFeedback // or working, after a note: the worker's turn either way
+		case e.msg == "PR merged":
+			status = Merged
+		}
+		if status != "" {
+			out = append(out, logEntry{e.at, statusLogged + string(status)})
+		}
+	}
+	return out
+}
+
+// dispatchedBeforeSetStatus: the task's "dispatched" line has no status line
+// just before it, as crew dispatch writes one now.
+func dispatchedBeforeSetStatus(log []logEntry) bool {
+	i := slices.IndexFunc(log, func(e logEntry) bool { return strings.HasPrefix(e.msg, "dispatched") })
+	if i < 0 {
+		return false
+	}
+	if i == 0 {
+		return true
+	}
+	s, ok := log[i-1].status()
+	return !ok || s != Working
 }

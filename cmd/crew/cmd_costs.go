@@ -119,7 +119,11 @@ func cmdCosts(c *Crew, args []string) error {
 	if ts.unread > 0 {
 		warn("%d transcript lines didn't read, and aren't counted: a session may be writing them", ts.unread)
 	}
-	costsIn(ts, tasks, elsewhere, from, to).print(os.Stdout)
+	r, err := costsIn(ts, tasks, elsewhere, from, to)
+	if err != nil {
+		return fail("%v", err)
+	}
+	r.print(os.Stdout)
 	return nil
 }
 
@@ -475,7 +479,7 @@ type leftOut struct {
 // costsIn is the report on the transcripts from the first day to the last,
 // both included. Its totals count what was sent in the range. Its medians count
 // all that each of the wholeTasks spent, whenever it was sent.
-func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) costReport {
+func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to time.Time) (costReport, error) {
 	end := to.AddDate(0, 0, 1)
 	r := costReport{from: from, to: to, completeFrom: ts.completeFrom,
 		steps: map[string]float64{}, unpriced: map[string]int{}, perTask: map[string][]float64{}}
@@ -490,7 +494,10 @@ func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to
 			r.unpriced[c.model] += c.usage.total()
 		}
 	}
-	whole, leftOut := wholeTasks(tasks, elsewhere, ts.completeFrom, from, end)
+	whole, leftOut, err := wholeTasks(tasks, elsewhere, ts.completeFrom, from, end)
+	if err != nil {
+		return costReport{}, err
+	}
 	for _, c := range ts.charges {
 		if spend := whole[c.task]; spend != nil {
 			if cost, ok := r.price(c); ok {
@@ -517,7 +524,7 @@ func costsIn(ts transcripts, tasks map[string]Task, elsewhere []tenure, from, to
 	}
 	r.leftOut = leftOut
 	slices.Sort(r.rated)
-	return r
+	return r, nil
 }
 
 // price is what a message cost, at its model's rate, which the report then
@@ -546,10 +553,14 @@ type taskSpend struct {
 // A task begun before the transcripts are complete may have lost sessions to
 // Claude Code's age cleanup, and one under way while another machine ran the
 // crew has sessions there.
-func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, to time.Time) (map[string]*taskSpend, leftOut) {
+func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, to time.Time) (map[string]*taskSpend, leftOut, error) {
 	whole, left := map[string]*taskSpend{}, leftOut{}
 	for id, t := range tasks {
-		finished := finishedAt(t)
+		finish, err := finishOf(t)
+		if err != nil {
+			return nil, leftOut{}, fmt.Errorf("%s: %w", id, err)
+		}
+		finished := finish.At
 		if finished.Before(from) || !finished.Before(to) {
 			continue
 		}
@@ -558,7 +569,7 @@ func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, t
 		// The machines that ran the crew while the task was under way.
 		var during []string
 		for _, e := range elsewhere {
-			if e.during(created, latestFinish(finished, e)) {
+			if e.during(created, latestFinish(finish, e)) {
 				during = append(during, e.holder)
 			}
 		}
@@ -572,15 +583,20 @@ func wholeTasks(tasks map[string]Task, elsewhere []tenure, completeFrom, from, t
 			whole[id] = &taskSpend{steps: map[string]float64{}}
 		}
 	}
-	return whole, left
+	return whole, left, nil
 }
 
 // latestFinish is the latest a task's finish can be, as another machine's
-// tenure sees it. The finish's Log line gives the clock of the machine that
-// held the lease, with no zone, and LogEntries reads it on this machine's
-// clock. If the other machine wrote it, it's the same clock time in that
-// machine's zone, which its tenure's start carries.
-func latestFinish(logged time.Time, other tenure) time.Time {
+// tenure sees it. A record has its zone, but crew migrate read older finishes
+// from the Log, whose times are the clock of the machine that held the lease,
+// with no zone, read on the migrating machine's clock. If the other machine
+// wrote it, it's the same clock time in that machine's zone, which its
+// tenure's start carries.
+func latestFinish(finish Record, other tenure) time.Time {
+	logged := finish.At
+	if finish.By != "crew migrate" {
+		return logged
+	}
 	y, mo, d := logged.Date()
 	there := time.Date(y, mo, d, logged.Hour(), logged.Minute(), 0, 0, other.from.Location())
 	if there.After(logged) {
@@ -589,19 +605,17 @@ func latestFinish(logged time.Time, other tenure) time.Time {
 	return logged
 }
 
-// finishedAt is when the task last merged or was done, or zero if it isn't
-// merged or done. Its Log runs oldest first, so the last change wins.
-func finishedAt(t Task) time.Time {
-	var at time.Time
+// finishOf is the task's last change to merged or done, or a zero Record if it
+// isn't merged or done.
+func finishOf(t Task) (Record, error) {
 	if !t.Status().Delivered() {
-		return at
+		return Record{}, nil
 	}
-	for _, e := range withStatusLines(t.LogEntries()) {
-		if s, ok := e.status(); ok && s.Delivered() {
-			at = e.at
-		}
+	h, err := t.StatusHistory()
+	if err != nil {
+		return Record{}, err
 	}
-	return at
+	return h.Last(Status.Delivered), nil
 }
 
 // print writes the report: a row for each step, with its total, its share of

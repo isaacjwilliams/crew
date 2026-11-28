@@ -73,6 +73,15 @@ runs_on() {
   local launch; launch=$(last_launch)
   [[ $launch == *" --model $2 "* || ($launch == "claude --resume $(crew get "$1" worker_session) --bg "* && $(crew get "$1" worker_model) == "$2") ]]
 }
+status_record() {  # task-file "YYYY-MM-DD HH:MM" status: records a change of status, as crew does
+  printf '{"id":"%08x","at":"%s","by":"crew test","status":{"to":"%s"}}\n' "$((RANDOM * 32768 + RANDOM))" "$(date -d "$2" --iso-8601=seconds)" "$3" >>"${1%.md}.records.jsonl"
+}
+unhand() {  # task-file: as if it had never handed over, until rehand
+  local r=${1%.md}.records.jsonl h
+  h=$HOME/hidden-$(basename "$1" .md).jsonl
+  grep '"to":"pr-open"' "$r" >"$h"; sed -i '/"to":"pr-open"/d' "$r"
+}
+rehand() { cat "$HOME/hidden-$(basename "$1" .md).jsonl" >>"${1%.md}.records.jsonl"; }
 fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^## Size$/a About 10 lines.' -e 's/^risk:$/risk: low/' "$1"; }
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n${3:+$3\\n}" "$1"; }   # task-file review-number [record-line]
 clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
@@ -479,10 +488,10 @@ check "hand-over after a review round raises the risk of a branch whose own comm
 check "a raise at the hand-over turns the task's automated review back on, and logs why" \
   '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
 # A task that makes no PR has no pr to tell its hand-over raise from a raise before its passes.
-sed -i 's/status → pr-open/status → xpr-open/' "$F1"   # as if it hadn't handed over before
+unhand "$F1"
 crew set 1 risk low; crew set 1 pre_pr_review no; crew set 1 pr_mode none; crew set 1 pr ""
 out=$(crew hand-over 1 2>&1)
-sed -i 's/status → xpr-open/status → pr-open/' "$F1"; crew set 1 pre_pr_review yes; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
+rehand "$F1"; crew set 1 pre_pr_review yes; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
 check "a raise at the hand-over of a task that makes no PR says nothing of the pre-PR passes: they're behind it" \
   '[[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out != *"pre-PR passes"* ]]'
 sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
@@ -584,7 +593,8 @@ setstate "done" null
 check "note-only followup doesn't resend the old round" 'crew followup 1 --note "use defaults" >/dev/null && grep -- "--resume" "$HOME/claude-calls.log" | tail -1 | grep -v "round 1 under" | grep -q "use defaults"'
 check "note-only followup leaves a task in its review round addressing-feedback" '[[ $(crew get 1 status) == addressing-feedback ]]'
 crew set 1 status working; crew set 1 status needs-input; setstate "done" null
-check "note-only followup moves a needs-input task asked while working back to working" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
+crew log 1 "status → pr-open" >/dev/null; crew log 1 "followup (resume): x" >/dev/null; crew log 1 "status → needs-input" >/dev/null
+check "note-only followup moves a needs-input task asked while working back to working, whatever Log lines say came before" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == working ]]'
 crew set 1 status addressing-feedback; crew set 1 status needs-input; setstate "done" null
 check "note-only followup moves a needs-input task asked in a review round back to addressing-feedback" 'crew followup 1 --note "over to you" >/dev/null && [[ $(crew get 1 status) == addressing-feedback ]]'
 sed -i "s/^status: .*/status: pr-open/" "$F1"; setstate "done" null  # crew set refuses pr-open
@@ -1136,7 +1146,7 @@ check "a raise by sync turns the task's automated review back on, and logs why" 
 # (nothing for sync to find), then with pr_mode none, handed over, and with pre_pr_review yes.
 check "a raise after the PR is open turns pre_pr_review's passes back on for the worker, and says nothing of them" \
   '[[ $(crew config PRE_PR_REVIEW --task 10) == yes && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
-sed -i 's/status → pr-open/status → xpr-open/' "$F10"; crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
+unhand "$F10"; crew set 10 risk low; crew set 10 pr ""; touch "$HOME/gh-no-pr"; out=$(crew sync 2>&1)
 check "a raise before the PR is open logs that the pre-PR passes are back on" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt; automated review back on; pre-PR passes back on"* && $(crew config PRE_PR_REVIEW --task 10) == yes ]]'
 crew set 10 risk low; crew set 10 pr_mode none; out=$(crew sync 2>&1)
@@ -1145,7 +1155,7 @@ check "a raise of a task that makes no PR, before it hands over, logs that the p
 crew set 10 risk low; crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; out=$(crew sync 2>&1)
 check "a raise of a task with pre_pr_review yes says nothing of the pre-PR passes, even before its PR is open" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
-sed -i 's/status → xpr-open/status → pr-open/' "$F10"
+rehand "$F10"
 crew set 10 risk low; crew set 10 pre_pr_review no; crew set 10 pr_mode none; out=$(crew sync 2>&1); crew set 10 pr_mode draft; crew set 10 pre_pr_review yes; rm "$HOME/gh-no-pr"; crew set 10 pr https://github.com/isaac/webapp/pull/22
 check "a raise of a task that makes no PR, after it hands over, says nothing of the pre-PR passes" \
   '[[ $out == *"010-season-admin: risk → high: touches admin.txt"* && $(tail -1 "$F10") != *"pre-PR passes"* ]]'
@@ -1834,8 +1844,8 @@ crew set "$FG" status abandoned >/dev/null
 FL=$(crew new "Checks its base" --branch checking-child --on "$(tid "$FP")"); fill "$FL"; crew ready "$FL" >/dev/null; setstate "done" null; crew dispatch "$FL" >/dev/null
 WTL=$(crew get "$FL" worktree); work "$WTL" "$(tid "$FL").txt"; out=$(crew check-base "$FL" 2>&1); st=$?
 check "check-base lets a first run whose branch holds its parent's latest commit carry on" '((st == 0)) && [[ $out == "nothing to move: carry on" ]]'
-work "$WTP" p5.txt; out=$(crew check-base "$FL" 2>&1); st=$?
-check "check-base gives a first run whose parent moved the rebase hand-over would give, and changes no status" \
+crew log "$FL" "status → pr-open" >/dev/null; work "$WTP" p5.txt; out=$(crew check-base "$FL" 2>&1); st=$?
+check "check-base gives a first run whose parent moved the rebase hand-over would give, though a Log line says it was handed over, and changes no status" \
   '((st == 1)) && [[ $out == *"your branch has to move before its first hand-over ($(tid "$FP") moved): rebase your branch with \`git fetch origin && git rebase --onto $(tip first-parent) $(crew get "$FL" base_sha)\`"*"\`git push --force-with-lease=agent/checking-child:$(git rev-parse origin/agent/checking-child) origin agent/checking-child\`"* && $(crew get "$FL" status) == working ]]'
 run_given "$WTL" "$out"; crew check-base "$FL" >/dev/null && record_evidence "$FL"; crew set "$FL" pr https://github.com/isaac/webapp/pull/72; pr_body "$FL"
 work "$WTP" p6.txt; out=$(crew check-base "$FL" 2>&1); run_given "$WTL" "$out"; crew check-base "$FL" >/dev/null && ranged_review "$FL" 1
@@ -2233,8 +2243,8 @@ crew set "$WB" priority 2; crew set "$WA" priority 2
 st=$(crew status)
 check "status says what a ready task's go-ahead waits for, where it said dispatch by hand" '[[ $(row "$TWB") == *"ready"*"  go-ahead once $(num "$WA") is pr-open" && $(row "$TWB") != *"by hand"* ]]'
 check "status shows the priority of a task with a go-ahead, which orders tick's dispatch, and not of one dispatched by hand" '[[ $(row "$TWB") == *"  priority 2"* && $(row "$TWA") != *priority* ]]'
-out=$(crew tick 2>&1)
-check "tick doesn't dispatch a task whose go-ahead isn't met yet" '[[ $out != *"$TWB: dispatched"* && $(crew get "$WB" status) == ready && $(crew get "$WA" status) == ready ]]'
+crew log "$WA" "status → pr-open" >/dev/null; out=$(crew tick 2>&1)
+check "tick doesn't dispatch a task whose go-ahead isn't met yet, though a Log line says the task it waits on reached the status" '[[ $out != *"$TWB: dispatched"* && $(crew get "$WB" status) == ready && $(crew get "$WA" status) == ready ]]'
 setstate "done" null; crew dispatch "$WA" >/dev/null 2>&1
 crew set "$WA" pr https://github.com/isaac/webapp/pull/12; crew set "$WA" feedback_since 2099-01-01T00:00:00Z; hand_over "$WA"
 echo "MAX_WORKERS=0" >>"$L/config/crew.env"; setstate "done" null
@@ -2451,7 +2461,7 @@ check "learned refuses an item the task doesn't have, and one already settled, s
   '((r1 == 1 && r2 == 1)) && [[ $o1 == "crew: $LTI has no item deadbeef still to learn (crew show $LTI lists them)" && $o2 == "crew: $L1 is already settled, on $(date +%F) "* && $(git -C "$L" rev-parse HEAD) == "$head" && $(cksum <"$LR") == "$sum" ]]'
 o1=$(crew to-learn "$KS" "Too late?" 2>&1); r1=$?; o2=$(crew learned "$LT" "$L2" " " 2>&1); r2=$?
 check "to-learn refuses a task that isn't a draft, and learned an empty answer" \
-  '((r1 == 1 && r2 == 1)) && [[ $o1 == *"only a draft has things still to learn"* && $o2 == *"give the answer that settles $L2"* && ! -e ${KS%.md}.records.jsonl && $(cksum <"$LR") == "$sum" ]]'
+  '((r1 == 1 && r2 == 1)) && [[ $o1 == *"only a draft has things still to learn"* && $o2 == *"give the answer that settles $L2"* && $(cksum <"$LR") == "$sum" ]] && ! grep -qs to_learn "${KS%.md}.records.jsonl"'
 # Checkboxes typed into the task file aren't items: crew neither counts them nor
 # shows them as its own.
 sed -i '/^## Still to learn$/a - [ ] Typed by hand?\n- [x] Ticked by hand' "$LT"
@@ -2490,6 +2500,11 @@ printf '%s\n' "# Memory suggestions: $LP" "" "<!-- Tick each one. -->" \
   "- [x] **Specs run in parallel** It's faster. (gardener, 2026-11-10) → declined: Not on CI." \
   "- [x] **Screenshots go in Dropbox** Collaborators can't see them. (worker:7, 2026-11-11) → kept" >"$OMS"
 crew commit "old memory suggestions" >/dev/null
+# Nor does it decide from a task's status history before its records hold it: a
+# ready task's go-ahead on a task handed over, and that task waiting on the user.
+WX=$(pr_task "Handed over before the migration"); TWX=$(basename "$WX" .md)
+crew set "$WX" pr https://github.com/isaac/webapp/pull/141; echo OPEN >"$HOME/gh-pr-state-141"; hand_over "$WX"; crew set "$WX" status needs-input
+WW=$(ready_task "Waits out the migration"); TWW=$(basename "$WW" .md); crew set "$WW" go_ahead "$(num "$WX") pr-open"; no_feedback "$WW"
 mv "$PD/ledger-format" "$HOME/ledger-format"
 out=$(crew ready "$UT" 2>&1); r1=$?; st=$(crew status)
 check "in a project not yet migrated, ready refuses a draft rather than count its items as none, and status says to migrate" \
@@ -2498,6 +2513,12 @@ check "in a project not yet migrated, status says it can't count the memory sugg
   '[[ $st == *"memory suggestions: can'"'"'t count them: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate"* && $st != *"memory suggestions: 0"* ]]'
 check "in a project not yet migrated, show gives the suggestions file as it is, under why crew can't read it, and remember refuses" \
   '[[ $(crew show memory-suggestions) == "$(cat "$OMS")$NL${NL}crew can'"'"'t read the memory suggestions: $LP'"'"'s ledger isn'"'"'t migrated"* ]] && ! crew remember "X" --why "Y" 2>/dev/null'
+setstate "done" null; n=$(resumes); out=$(crew tick 2>&1)
+o1=$(crew followup "$WX" --note "over to you" 2>&1); r1=$?; o2=$(crew check-base "$WX" 2>&1); r2=$?; o3=$(crew set "$WX" status working 2>&1); r3=$?
+check "in a project not yet migrated, tick holds back a go-ahead it can't tell is met, saying why, and runs its other steps" \
+  '[[ $out == *"$TWW: dispatch held back: can'"'"'t tell whether $TWW'"'"'s go-ahead is met: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate"* && $(crew get "$WW" status) == ready ]]'
+check "and followup --note, check-base and set refuse a handed-over task waiting on the user, naming crew migrate, sending nothing and changing nothing" \
+  '((r1 == 1 && r2 == 1 && r3 == 1)) && [[ $o1 == *"run crew migrate"* && $o2 == *"run crew migrate"* && $o3 == *"run crew migrate"* && $(crew get "$WX" status) == needs-input && $(resumes) == "$n" ]]'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
 sh=$(shown "$UT")
@@ -2505,7 +2526,7 @@ check "before the migration, show gives the section as it is under why crew can'
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records$NL$LP: recorded the status history of 0 task(s)" && $(cat "$PD/ledger-format") == 3 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 3" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
 sh=$(crew show memory-suggestions)
 check "migrate moves the memory suggestions into records, each kept or declined as its line said, and leaves the file only its head" \
@@ -2517,6 +2538,12 @@ check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every projec
 # The memory suggestions below start from none.
 git -C "$L" rm -q "$OMS" "${OMS%.md}.records.jsonl" && git -C "$L" commit -qm "no memory suggestions"
 crew set "$UT" status abandoned
+setstate "done" null; out=$(crew tick 2>&1)
+check "once migrated, tick dispatches the task on its go-ahead, once" '[[ $(grep -c "$TWW: dispatched on its go-ahead: $TWX reached pr-open" <<<"$out") == 1 && $(crew get "$WW" status) == working ]]'
+setstate "done" null
+check "and followup --note sends the handed-over task back to its worker, as it would have" \
+  'crew followup "$WX" --note "over to you" >/dev/null && [[ $(crew get "$WX" status) == working ]]'
+crew set "$WW" status abandoned; crew set "$WX" status abandoned; rm "$HOME/gh-pr-state-141"
 
 # Two crew processes at once on one machine both get the ledger lock in turn, so
 # neither loses a record.
@@ -3114,7 +3141,7 @@ mv "$HOME/local.env.saved" "$L/projects/$P2/local.env"
 # comment, and came back clean on its second automated review; the second,
 # medium risk, had its question wait 2h, and its PR (#35) was reverted in the
 # project's clone. 005 is a fix of 004, a low-risk task merged 60 days before.
-SP=$L/projects/stats; mkdir -p "$SP/tasks"; echo "DEFAULT_BRANCH=main" >"$SP/project.env"
+SP=$L/projects/stats; mkdir -p "$SP/tasks"; echo "DEFAULT_BRANCH=main" >"$SP/project.env"; cp "$PD/ledger-format" "$SP/"
 for t in 001-stats-one 002-stats-two 003-stats-old 004-stats-cause 005-stats-fix; do
   sed -e 's/^status: .*/status: merged/' -e 's/^kind: .*/kind: build/' "$L/templates/task.md" >"$SP/tasks/$t.md"
 done
@@ -3123,11 +3150,16 @@ sed -i -e '/^## Automated reviews$/a ### Automated review 1 — 2026-11-06 11:00
 sed -i 's/^risk:$/risk: low/' "$SP/tasks/001-stats-one.md" "$SP/tasks/004-stats-cause.md" "$SP/tasks/005-stats-fix.md"
 sed -i -e 's/^risk:$/risk: medium/' -e 's|^pr:$|pr: https://github.com/o/stats/pull/35|' "$SP/tasks/002-stats-two.md"
 sed -i -e 's/^kind: .*/kind: fix/' -e 's/^fixes:$/fixes: 004-stats-cause/' -e 's/^missed_by:$/missed_by: tests/' "$SP/tasks/005-stats-fix.md"
-printf -- '- 2026-11-06 09:00 — status → working\n- 2026-11-06 12:00 — status → pr-open\n- 2026-11-06 13:00 — status → addressing-feedback\n- 2026-11-06 14:00 — status → pr-open\n- 2026-11-06 16:00 — status → merged\n' >>"$SP/tasks/001-stats-one.md"
-printf -- '- 2026-11-07 09:00 — status → needs-input\n- 2026-11-07 11:00 — status → working\n- 2026-11-07 12:00 — status → pr-open\n- 2026-11-08 12:00 — status → merged\n' >>"$SP/tasks/002-stats-two.md"
-printf -- '- 2026-10-20 12:00 — status → merged\n' >>"$SP/tasks/003-stats-old.md"
-printf -- '- 2026-09-06 12:00 — status → merged\n' >>"$SP/tasks/004-stats-cause.md"
-printf -- '- 2026-11-09 12:00 — status → merged\n' >>"$SP/tasks/005-stats-fix.md"
+for c in "2026-11-06 09:00 working" "2026-11-06 12:00 pr-open" "2026-11-06 13:00 addressing-feedback" "2026-11-06 14:00 pr-open" "2026-11-06 16:00 merged"; do
+  status_record "$SP/tasks/001-stats-one.md" "${c% *}" "${c##* }"
+done
+for c in "2026-11-07 09:00 needs-input" "2026-11-07 11:00 working" "2026-11-07 12:00 pr-open" "2026-11-08 12:00 merged"; do
+  status_record "$SP/tasks/002-stats-two.md" "${c% *}" "${c##* }"
+done
+status_record "$SP/tasks/003-stats-old.md" "2026-10-20 12:00" merged
+status_record "$SP/tasks/004-stats-cause.md" "2026-09-06 12:00" merged
+status_record "$SP/tasks/005-stats-fix.md" "2026-11-09 12:00" merged
+for line in "dispatched: x" "followup (resume): x" "status → pr-open" "status → merged" "PR merged"; do crew log "$SP/tasks/003-stats-old.md" "$line" >/dev/null; done
 crew commit "stats fixtures" >/dev/null
 git init -q --bare "$SB/stats.git" && git clone -q "$SB/stats.git" "$SB/stats" 2>/dev/null
 (cd "$SB/stats" && echo two >two && git add two && git commit -qm "Merge pull request #35 from me/two" &&
@@ -3138,7 +3170,7 @@ out=$(cd "$HOME" && crew stats --project stats --since 2026-11-05); rows=$(tr -s
 check "stats has a row for each task merged since the date: kind, rounds, comments, PR and question waits, reviews, clean after, findings, later fixes, reverts" \
   '[[ $rows == *" 001-stats-one build 1 1 3h - 2 2 1 0 0 0 0"* && $rows == *" 002-stats-two build 0 0 24h 2h 0 - 0 0 0 0 1"* && $rows == *" 005-stats-fix fix 0 0 - - 0 - 0 0 0 0 0"* ]]'
 check "stats gives the totals and the median waits" '[[ $rows == *" total 1 1 27h 2h 2 1 0 0 0 1"*" median 3h -"* ]]'
-check "stats leaves out a task merged before the date" \
+check "stats leaves out a task merged before the date, though Log lines say it merged today" \
   '[[ $out == "stats: 3 task(s) merged since 2026-11-05"* && $out != *003-stats-old* && $(crew stats --project stats --since 2026-10-01) == *003-stats-old* ]]'
 check "a task merged before the date shows its later fix in its row" \
   '[[ $(crew stats --project stats --since 2026-09-01 | tr -s " ") == *" 004-stats-cause build 0 0 - - 0 - 0 0 0 1 0"* ]]'
@@ -3207,9 +3239,9 @@ review_then_round() {  # file day: a review at 11:00 that day, then a round at 1
 review_then_round "$MT/090-misses-one.md" 2026-11-06 '**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > name it for the domain'
 review_then_round "$MT/091-misses-ci.md" 2026-11-07 '- [x] CI failed on aaa1111: test'
 review_then_round "$MT/092-misses-old.md" 2026-11-04 '**Conversation comments**\n- [x] comment 6 — [link](u6)\n  > too late'
-printf -- '- 2026-11-06 16:00 — status → merged\n' >>"$MT/090-misses-one.md"
-printf -- '- 2026-11-07 16:00 — status → merged\n' >>"$MT/091-misses-ci.md"
-printf -- '- 2026-11-04 16:00 — status → merged\n' >>"$MT/092-misses-old.md"
+status_record "$MT/090-misses-one.md" "2026-11-06 16:00" merged
+status_record "$MT/091-misses-ci.md" "2026-11-07 16:00" merged
+status_record "$MT/092-misses-old.md" "2026-11-04 16:00" merged
 date -d '2026-11-05 00:00' --iso-8601=seconds >"$PD/misses.last"
 git -C "$SB/webapp" rev-parse origin/main >"$PD/gardener.last"   # no new commits for the gardener
 crew commit "misses fixtures" >/dev/null
@@ -3229,7 +3261,7 @@ check "a second run with nothing new starts no session" \
 # The gardener fails on a new commit; the misses agent still runs and records its own progress.
 sed 's/^status: .*/status: merged/' "$L/templates/task.md" >"$MT/093-misses-two.md"
 review_then_round "$MT/093-misses-two.md" 2026-11-08 '**Conversation comments**\n- [x] comment 7 — [link](u7)\n  > split this'
-printf -- '- 2026-11-08 16:00 — status → merged\n' >>"$MT/093-misses-two.md"
+status_record "$MT/093-misses-two.md" "2026-11-08 16:00" merged
 crew commit "misses fixture" >/dev/null
 (cd "$SB/webapp" && git commit -q --allow-empty -m "more" && git push -q)
 glast=$(cat "$PD/gardener.last"); echo gardener >"$HOME/fail-agent"

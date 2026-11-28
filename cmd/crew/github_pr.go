@@ -86,17 +86,20 @@ func (pr gitHubPR) record(t Task) bool {
 	return changed
 }
 
-// noteMerge marks t merged when this, its PR, is, and says whether it did.
-// crew sync does it for every task, and crew check-base and crew hand-over
-// for a first run's parent, which may have merged since sync last looked.
-func (pr gitHubPR) noteMerge(t Task) bool {
+// noteMerge marks t merged when this, its PR, is, as the crew command by, and
+// says whether it did. crew sync does it for every task, and crew check-base
+// and crew hand-over for a first run's parent, which may have merged since
+// sync last looked.
+func (pr gitHubPR) noteMerge(t Task, by string) (bool, error) {
 	if pr.URL != t.PR() || pr.State != "MERGED" || t.Status() == Merged {
-		return false
+		return false, nil
 	}
-	t.SetStatus(Merged)
+	if err := t.SetStatus(Merged, by); err != nil {
+		return false, err
+	}
 	t.Touch()
 	t.Log("PR merged")
-	return true
+	return true, nil
 }
 
 // label words the PR's state for pr_state: merged, closed, draft or open, and,

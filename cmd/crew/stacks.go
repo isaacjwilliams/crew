@@ -169,9 +169,12 @@ func raiseRisk(t Task, p *Project, handingOver bool) (string, error) {
 	}
 	// The worker may not have reached its pre-PR passes while it has neither
 	// opened its PR nor handed over: a task that makes no PR (pr_mode none)
-	// never opens one, so only its hand-over tells.
-	if t.PrePRReviewOff() && !handingOver && t.PR() == "" && !t.HandedOver() {
-		line += "; pre-PR passes back on"
+	// never opens one, so only its hand-over tells. When crew can't read its
+	// history, it may not have.
+	if t.PrePRReviewOff() && !handingOver && t.PR() == "" {
+		if handedOver, err := t.HandedOver(); err != nil || !handedOver {
+			line += "; pre-PR passes back on"
+		}
 	}
 	t.Set("risk", string(RiskHigh))
 	t.Touch()

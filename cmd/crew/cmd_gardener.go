@@ -137,7 +137,10 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	if err != nil {
 		return err
 	}
-	tasks, newest := tasksToSort(c.tasks(p.Name), since, time.Now())
+	tasks, newest, err := tasksToSort(c.tasks(p.Name), since, time.Now())
+	if err != nil {
+		return err
+	}
 	if len(tasks) == 0 {
 		fmt.Printf("%s: no newly merged tasks with your comments after automated review\n", p.Name)
 		return nil
@@ -166,11 +169,12 @@ type taskToSort struct {
 
 // tasksToSort picks, from tasks, those merged after since that have the
 // user's comments after an automated review, and returns them with the newest
-// of their merge times. A merge time is when crew sync logged the merge, so a
-// task synced late still comes after since. Log times are to the minute, so a
-// task synced later in now's minute would tie with a cursor set now, and be
+// of their merge times. A merge time is when crew sync recorded the merge, so
+// a task synced late still comes after since. Merge times go no finer than the
+// second, and those crew migrate read from the Log only to the minute, so a
+// task synced later in now's minute could tie with a cursor set now, and be
 // skipped: one merged in that minute waits for the next run.
-func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
+func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time, error) {
 	thisMinute := now.Truncate(time.Minute)
 	var picked []taskToSort
 	newest := since
@@ -178,7 +182,11 @@ func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
 		if t.Status() != Merged {
 			continue
 		}
-		merged := mergedAt(t.LogEntries())
+		h, err := t.StatusHistory()
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("%s: %w", t.ID(), err)
+		}
+		merged := h.Merged()
 		if !merged.After(since) || !merged.Before(thisMinute) {
 			continue
 		}
@@ -189,7 +197,7 @@ func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
 			}
 		}
 	}
-	return picked, newest
+	return picked, newest, nil
 }
 
 // missesSince is where the misses agent's run starts: the time in lastFile,

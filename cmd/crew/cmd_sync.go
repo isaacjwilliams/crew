@@ -79,7 +79,11 @@ func cmdSync(c *Crew, args []string) error {
 			if onGitHub.record(t) {
 				changed = true
 			}
-			if onGitHub.noteMerge(t) {
+			merged, err := onGitHub.noteMerge(t, "crew sync")
+			if err != nil {
+				warn("%s: merged on GitHub, but crew can't record it yet: %v", t.ID(), err)
+				skipped = true
+			} else if merged {
 				changed = true
 				fmt.Printf("%s: merged (run 'crew cleanup %s')\n", t.ID(), t.ID())
 			} else if onGitHub.State == "CLOSED" && st != Abandoned {
@@ -148,9 +152,14 @@ func cmdSync(c *Crew, args []string) error {
 }
 
 // mover says who moves a task whose branch or PR is off its base: crew restack,
-// or, before its first hand-over, the task's own worker.
+// or, before its first hand-over, the task's own worker. When crew can't tell
+// which, it says why.
 func mover(t Task) string {
-	if !t.HandedOver() {
+	handedOver, err := t.HandedOver()
+	switch {
+	case err != nil:
+		return "crew can't tell who moves it: " + err.Error()
+	case !handedOver:
 		return movesBeforeHandOver
 	}
 	return fmt.Sprintf("run 'crew restack %s'", t.ID())

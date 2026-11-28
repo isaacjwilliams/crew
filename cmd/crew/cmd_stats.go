@@ -55,13 +55,20 @@ func cmdStats(c *Crew, args []string) error {
 			return err
 		}
 		tasks := c.tasks(name)
-		h := historyOf(p, tasks)
+		h, err := historyOf(p, tasks)
+		if err != nil {
+			return fail("%v", err)
+		}
 		var stats []taskStats
 		for _, t := range tasks {
 			if t.Status() != Merged {
 				continue
 			}
-			if s := statsOf(t, h); !s.merged.Before(since) {
+			s, err := statsOf(t, h)
+			if err != nil {
+				return fail("%s: %v", t.ID(), err)
+			}
+			if !s.merged.Before(since) {
 				stats = append(stats, s)
 			}
 		}
@@ -131,33 +138,40 @@ func (s taskStats) cleanAfterText() string {
 	return "-"
 }
 
-// statsOf measures a task from its file, and from the project's history for
-// its later fixes and reverts.
-func statsOf(t Task, h history) taskStats {
-	log := withStatusLines(t.LogEntries())
+// statsOf measures a task from its file and its status history, and from the
+// project's history for its later fixes and reverts.
+func statsOf(t Task, h history) (taskStats, error) {
+	changes, err := t.StatusHistory()
+	if err != nil {
+		return taskStats{}, err
+	}
 	s := taskStats{
 		task:     t,
-		merged:   mergedAt(log),
+		merged:   changes.Merged(),
 		rounds:   t.FeedbackRounds(),
 		comments: t.ReviewComments(),
-		prWait:   waited(log, changedTo(PROpen), anyChange),
+		prWait:   waited(events(changes, nil), changedTo(PROpen), anyChange),
 	}
+	var questions []logEntry
 	asked := changedTo(NeedsInput)
 	if t.Goal() != "" {
 		// The goal lead answers most of its tasks' workers' questions itself.
 		// Only those it leaves for the user wait on them, and for each it logs a
 		// "For the user: …" line (goal-lead.md). A collaborator's comment and red
 		// CI past MAX_CI_FIXES go to the user directly.
-		asked = func(e logEntry) bool {
-			return strings.HasPrefix(e.msg, "For the user:") || strings.HasSuffix(e.msg, recordedForTheUser)
+		for _, e := range t.LogEntries() {
+			if strings.HasPrefix(e.msg, "For the user:") || strings.HasSuffix(e.msg, recordedForTheUser) {
+				questions = append(questions, e)
+			}
 		}
+		asked = func(e event) bool { return e.to == "" }
 	}
 	// A question is answered when the task leaves needs-input, or merges.
 	// crew tick marks it needs-input only once its worker is idle, so the
 	// worker's own changes before then (a review round sent, say) answer
 	// nothing.
 	answered := func(from, to Status) bool { return from == NeedsInput && to != NeedsInput || to == Merged }
-	s.questionWait = waited(log, asked, answered)
+	s.questionWait = waited(events(changes, questions), asked, answered)
 	s.laterFixes, s.reverts = tally(h.causedBy(t))
 
 	reviews := t.AutomatedReviews()
@@ -181,7 +195,7 @@ func statsOf(t Task, h history) taskStats {
 			}
 		}
 	}
-	return s
+	return s, nil
 }
 
 // history is what came after a project's tasks merged: the fix tasks that
@@ -203,7 +217,7 @@ type correction struct {
 
 // historyOf traces the project's merged fixes, by their fixes key, and the
 // reverts on its default branch, by the PR each reverted, to their tasks.
-func historyOf(p *Project, tasks []Task) history {
+func historyOf(p *Project, tasks []Task) (history, error) {
 	byID, byPR := map[string]*Task{}, map[string]*Task{}
 	for _, t := range tasks {
 		byID[t.ID()] = &t
@@ -215,8 +229,11 @@ func historyOf(p *Project, tasks []Task) history {
 	for _, t := range tasks {
 		// A fix whose fixes is "unknown" finds no task, so its cause stays nil.
 		if t.Kind() == KindFix && t.Status() == Merged {
-			fixedAt := mergedAt(withStatusLines(t.LogEntries()))
-			h.corrections = append(h.corrections, correction{at: fixedAt, fix: &t, cause: byID[t.Fixes()]})
+			changes, err := t.StatusHistory()
+			if err != nil {
+				return history{}, fmt.Errorf("%s: %w", t.ID(), err)
+			}
+			h.corrections = append(h.corrections, correction{at: changes.Merged(), fix: &t, cause: byID[t.Fixes()]})
 		}
 	}
 	reverts, err := p.reverts()
@@ -227,7 +244,7 @@ func historyOf(p *Project, tasks []Task) history {
 		r.cause = byPR[r.pr]
 		h.corrections = append(h.corrections, r)
 	}
-	return h
+	return h, nil
 }
 
 // causedBy is the corrections traced to t.
@@ -389,36 +406,47 @@ func revertedPRs(log string) []correction {
 	return reverts
 }
 
-// mergedAt is when the task's Log says it merged, the last time if it says so
-// more than once, or zero if it never does: such a task isn't reported.
-func mergedAt(log []logEntry) time.Time {
-	var at time.Time
-	for _, e := range log {
-		if changedTo(Merged)(e) {
-			at = e.at
-		}
-	}
-	return at
+// An event in a task's history, as crew stats measures waits: a change of its
+// status to to, or, with to empty, a question a Log line says was put to the
+// user.
+type event struct {
+	at time.Time
+	to Status
 }
 
-// changedTo picks the Log entries that change the task's status to s.
-func changedTo(s Status) func(logEntry) bool {
-	return func(e logEntry) bool {
-		st, ok := e.status()
-		return ok && st == s
+// events are the task's changes of status and its questions, oldest first. A
+// Log line has only its minute, so a question goes after the changes of status
+// in its minute: it's put to the user once the task waits on its answer, as
+// the goal lead reads it from a task already in needs-input.
+func events(changes StatusHistory, questions []logEntry) []event {
+	var out []event
+	for _, c := range changes {
+		out = append(out, event{at: c.At, to: c.Status.To})
 	}
+	for _, q := range questions {
+		out = append(out, event{at: q.at})
+	}
+	slices.SortStableFunc(out, func(a, b event) int {
+		return a.at.Truncate(time.Minute).Compare(b.at.Truncate(time.Minute))
+	})
+	return out
 }
 
-// waited adds up the time from each Log entry that starts a wait on the user
-// to the next change of status that ends it: ends is given the status the task
+// changedTo picks the events that change the task's status to s.
+func changedTo(s Status) func(event) bool {
+	return func(e event) bool { return e.to == s }
+}
+
+// waited adds up the time from each event that starts a wait on the user to
+// the next change of status that ends it: ends is given the status the task
 // had and the one it changed to.
-func waited(log []logEntry, starts func(logEntry) bool, ends func(from, to Status) bool) time.Duration {
+func waited(events []event, starts func(event) bool, ends func(from, to Status) bool) time.Duration {
 	var total time.Duration
 	var since time.Time // when the wait under way began, or zero
-	var status Status   // the task's status before the entry
-	for _, e := range log {
-		to, changed := e.status()
-		if !since.IsZero() && changed && ends(status, to) {
+	var status Status   // the task's status before the event
+	for _, e := range events {
+		changed := e.to != ""
+		if !since.IsZero() && changed && ends(status, e.to) {
 			total += e.at.Sub(since)
 			since = time.Time{}
 		}
@@ -426,7 +454,7 @@ func waited(log []logEntry, starts func(logEntry) bool, ends func(from, to Statu
 			since = e.at
 		}
 		if changed {
-			status = to
+			status = e.to
 		}
 	}
 	return total
@@ -434,45 +462,6 @@ func waited(log []logEntry, starts func(logEntry) bool, ends func(from, to Statu
 
 // anyChange ends a wait at every change of status.
 func anyChange(from, to Status) bool { return true }
-
-// withStatusLines adds the status lines a task dispatched before
-// Task.SetStatus lacks. Back then crew dispatch, crew followup and crew sync
-// changed the status without one, so each status line goes after the line the
-// command did write. Remove this after 2026-12-31: tasks merged before then are
-// outside the default 30 days by then.
-func withStatusLines(log []logEntry) []logEntry {
-	if !dispatchedBeforeSetStatus(log) {
-		return log
-	}
-	var out []logEntry
-	for _, e := range log {
-		out = append(out, e)
-		var status Status
-		switch {
-		case strings.HasPrefix(e.msg, "dispatched"):
-			status = Working
-		case strings.HasPrefix(e.msg, "followup ("):
-			status = AddressingFeedback // or working, after a note: the worker's turn either way
-		case e.msg == "PR merged":
-			status = Merged
-		}
-		if status != "" {
-			out = append(out, logEntry{e.at, statusLogged + string(status)})
-		}
-	}
-	return out
-}
-
-// dispatchedBeforeSetStatus: the task's "dispatched" line has no status line
-// just before it, as crew dispatch writes one now.
-func dispatchedBeforeSetStatus(log []logEntry) bool {
-	for i, e := range log {
-		if strings.HasPrefix(e.msg, "dispatched") {
-			return i == 0 || !changedTo(Working)(log[i-1])
-		}
-	}
-	return false
-}
 
 // The report's columns, each headed by two lines.
 var statsHeadings = [][2]string{

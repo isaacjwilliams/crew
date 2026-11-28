@@ -124,6 +124,18 @@ func (c *Crew) followup(t Task, with followupWith) (followupSent, error) {
 	if err := c.followupRefusal(p, t, as); err != nil {
 		return followupSent{}, err
 	}
+	// Word of a pause alone leaves the status as the worker last set it: a pause
+	// can land after it set pr-open.
+	next := t.Status()
+	switch {
+	case newRound:
+		next = AddressingFeedback
+	case with.note != "" && !next.WorkersTurn():
+		// A note hands a task that waits on you back to its worker.
+		if next, err = backToWorker(t); err != nil {
+			return followupSent{}, err
+		}
+	}
 	// Why crew starts a fresh worker where the caller didn't ask for one: after
 	// a restack, or when resuming would cost more. A fresh start the caller
 	// asked for, or one a changed model, effort or settings needs, keeps the
@@ -145,14 +157,8 @@ func (c *Crew) followup(t Task, with followupWith) (followupSent, error) {
 	l.record(t.Doc)
 	t.Set("last_round_sent", fmt.Sprint(rounds))
 	t.Set("interrupted", "")
-	// Word of a pause alone leaves the status as the worker last set it: a pause
-	// can land after it set pr-open.
-	switch {
-	case newRound:
-		t.SetStatus(AddressingFeedback)
-	case with.note != "" && !t.Status().WorkersTurn():
-		// A note hands a task that waits on you back to its worker.
-		t.SetStatus(backToWorker(t))
+	if err := t.SetStatus(next, "crew followup"); err != nil {
+		c.warn("%s: the worker has it, but its status is still %s: %v", t.ID(), t.Status(), err)
 	}
 	t.Touch()
 	msg := fmt.Sprintf("followup (%s): worker %s", l.mode, l.job)
@@ -183,7 +189,8 @@ type followupSent struct {
 // followupRefusal is why followup would send t's worker nothing now, whatever
 // it was given to send, or nil when it would send: the task has no worker,
 // it's finished, its project is paused, its worker is busy (as is what claude
-// agents lists), or this machine doesn't run the crew, in that order. followup
+// agents lists), crew can't record the change of status a followup makes
+// (before crew migrate), or this machine doesn't run the crew, in that order. followup
 // asks it before it sends and again under the ledger lock, and noteRefusal for
 // a caller that asks first.
 func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
@@ -204,6 +211,9 @@ func (c *Crew) followupRefusal(p *Project, t Task, as Agents) error {
 			return fail("worker %s is busy (%s). crew tick sends %s once it's free", job, as.jobState(job), unsentRounds(t))
 		}
 		return fail("worker %s is busy (%s). Wait for it, answer it in your terminal with crew attach %s, or SendMessage %s a note", job, as.jobState(job), c.taskArg(t), t.Get("worker_name"))
+	}
+	if _, err := t.StatusHistory(); err != nil {
+		return fail("not sending %s's worker anything, since crew can't record the status it moves to: %v", t.ID(), err)
 	}
 	return c.requireHost()
 }
@@ -232,27 +242,33 @@ func unsentRounds(t Task) string {
 }
 
 // backToWorker is the status a note gives a task that waits on you. A question
-// goes back to the worker's turn it was asked in, which the Log tells, so one
-// asked in a review round goes back to addressing-feedback. Anything else goes
-// to working.
-func backToWorker(t Task) Status {
-	if t.Status() == NeedsInput {
-		if s := statusBeforeNeedsInput(t); s.WorkersTurn() {
-			return s
-		}
+// goes back to the worker's turn it was asked in, which the task's history
+// tells, so one asked in a review round goes back to addressing-feedback.
+// Anything else goes to working.
+func backToWorker(t Task) (Status, error) {
+	if t.Status() != NeedsInput {
+		return Working, nil
 	}
-	return Working
+	s, err := statusBeforeNeedsInput(t)
+	if err != nil || !s.WorkersTurn() {
+		return Working, err
+	}
+	return s, nil
 }
 
-// statusBeforeNeedsInput is the last status in the task's Log that isn't
+// statusBeforeNeedsInput is the last status in the task's history that isn't
 // needs-input, or working when it has none.
-func statusBeforeNeedsInput(t Task) Status {
-	for _, e := range slices.Backward(t.LogEntries()) {
-		if s, ok := e.status(); ok && s != NeedsInput {
-			return s
+func statusBeforeNeedsInput(t Task) (Status, error) {
+	h, err := t.StatusHistory()
+	if err != nil {
+		return "", err
+	}
+	for _, r := range slices.Backward(h) {
+		if r.Status.To != NeedsInput {
+			return r.Status.To, nil
 		}
 	}
-	return Working
+	return Working, nil
 }
 
 // crew attach TASK: attaches this terminal to the task's worker, as `claude
@@ -323,8 +339,14 @@ func cmdRestack(c *Crew, args []string) error {
 	if !stacked && !idx.prOffBase(t) {
 		return fail("%s has nothing to restack: it isn't stacked (its base '%s' isn't another task's branch), and no open PR of its targets another branch", t.ID(), t.Base())
 	}
+	// Before anything is sent: a restack moves the task to working, which crew
+	// can't record before crew migrate.
+	handedOver, err := t.HandedOver()
+	if err != nil {
+		return fail("not restacking %s: %v", t.ID(), err)
+	}
 	if st := t.Status(); st != PROpen {
-		if !t.HandedOver() {
+		if !handedOver {
 			return notYet("%s hasn't been handed over: %s", t.ID(), movesBeforeHandOver)
 		}
 		return notYet("%s is %s; a restack waits until it's %s", t.ID(), st, PROpen)
@@ -492,7 +514,9 @@ func (c *Crew) startRestack(p *Project, t Task, note, onto, retargetTo string) e
 	if retargetTo != "" {
 		t.Set("retarget_sent", retargetTo)
 	}
-	t.SetStatus(Working)
+	if err := t.SetStatus(Working, "crew restack"); err != nil {
+		warn("%s: the worker has the restack, but its status is still %s: %v", t.ID(), t.Status(), err)
+	}
 	t.Touch()
 	t.Log(fmt.Sprintf("restack: fresh worker %s on %s — %s", l.job, restackModel, note))
 	c.commit("restack " + p.Name + "/" + t.ID())
@@ -638,6 +662,12 @@ func cmdSettle(c *Crew, args []string) error {
 	if by == "" {
 		return nothingToDo("%s's worker hasn't moved on since its nudge question", t.ID())
 	}
+	// Read before the questions are settled, so a task whose status can't be
+	// restored (before crew migrate) keeps its question for a later settle.
+	before, err := statusBeforeNeedsInput(t)
+	if err != nil {
+		return fail("not settling %s's nudge question: %v", t.ID(), err)
+	}
 	if err := t.SettleNudgeQuestions(by); err != nil {
 		return err
 	}
@@ -645,7 +675,9 @@ func cmdSettle(c *Crew, args []string) error {
 	// had before: its worker's turn, or pr-open when tick marked a handed-over
 	// task needs-input.
 	if t.Status() == NeedsInput && t.OpenQuestions() == 0 {
-		t.SetStatus(statusBeforeNeedsInput(t))
+		if err := t.SetStatus(before, "crew settle"); err != nil {
+			return err
+		}
 	}
 	t.Log(nudgeSettled + by)
 	t.Touch()
