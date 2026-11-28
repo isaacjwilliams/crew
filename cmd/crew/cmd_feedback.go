@@ -386,6 +386,21 @@ func (r reviewRound) empty() bool {
 	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil && r.conflict == nil
 }
 
+// comments are the user's comments in the round, as its record keeps them.
+func (r reviewRound) comments() []RoundComment {
+	var out []RoundComment
+	for _, cm := range r.reviews {
+		out = append(out, cm.inRound(reviewSummary))
+	}
+	for _, cm := range r.inline {
+		out = append(out, cm.inRound(inlineComment))
+	}
+	for _, cm := range r.convo {
+		out = append(out, cm.inRound(convoComment))
+	}
+	return out
+}
+
 // add records the round as the task's next, then writes its text before
 // ## Log and counts it in review_rounds. It returns the round's number and
 // text. It writes nothing when it can't read the task's records, as before
@@ -397,15 +412,7 @@ func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 		return 0, "", fmt.Errorf("can't record a review round on %s: %w", t.ID(), err)
 	}
 	rec := newRecord(r.by, records)
-	rec.Round = &Round{Number: n, ReviewRequested: len(r.reviewRequests) > 0}
-	for _, cms := range []struct {
-		kind commentKind
-		list []ghComment
-	}{{reviewSummary, r.reviews}, {inlineComment, r.inline}, {convoComment, r.convo}} {
-		for _, cm := range cms.list {
-			rec.Round.Comments = append(rec.Round.Comments, cm.inRound(cms.kind))
-		}
-	}
+	rec.Round = &Round{Number: n, Comments: r.comments(), ReviewRequested: len(r.reviewRequests) > 0}
 	if err := t.AddRecords(rec); err != nil {
 		return 0, "", err
 	}

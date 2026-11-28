@@ -1691,23 +1691,29 @@ func (t Task) ReviewRounds() ([]ReviewRound, error) {
 // MAX_REVIEW_ROUNDS limits: every round but those holding only crew's reports.
 func (t Task) FeedbackRounds() (int, error) {
 	rounds, err := t.ReviewRounds()
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, r := range rounds {
 		if r.Feedback() {
 			n++
 		}
 	}
-	return n, err
+	return n, nil
 }
 
 // ReviewComments counts the user's comments in the task's review rounds.
 func (t Task) ReviewComments() (int, error) {
 	rounds, err := t.ReviewRounds()
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, r := range rounds {
 		n += len(r.Comments)
 	}
-	return n, err
+	return n, nil
 }
 
 // A comment the user made after automated review had been through the PR:
