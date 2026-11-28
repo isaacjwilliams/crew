@@ -1192,7 +1192,7 @@ func TestLiveStatusWheelMovesOnlyTheScreen(t *testing.T) {
 					if m.cursor != cursor || stripped(m) != want {
 						t.Fatalf("%s: the wheel (%v) moves the highlight to line %d, or changes the strip, from line %d", name, button, m.cursor, cursor)
 					}
-					if start, end := m.cursorSpan(); !m.wholly(start, end) {
+					if start, end := m.cursorSpan(); !m.shows(start, end) {
 						wentOff[fmt.Sprint(button, start < m.top)] = true
 					}
 					turn := min(wheelStep, m.bodyHeight())
@@ -1216,27 +1216,32 @@ func TestLiveStatusClickNeverMovesTheScreen(t *testing.T) {
 	for name, size := range mouseLayouts {
 		m := mouseOn(t, size)
 		withVariedNotes(m)
-		taller, shorter := 0, 0
+		taller, shorter, filled := 0, 0, 0
 		for from := range m.shown {
-			for turns := 0; turns < 20; turns += 3 {
+			for turns := -1; turns < 20; turns += 3 { // -1 is the end of the report
 				for y := len(m.headings); y < len(m.headings)+m.bodyHeight(); y++ {
 					m.setCursor(from)
-					m.top = min(turns*wheelStep, m.drawnHeight(0, len(m.shown))-m.bodyHeight())
+					m.top = min(turns*wheelStep, m.lastTop())
+					if turns < 0 {
+						m.top = m.lastTop()
+					}
 					top, body := m.top, m.bodyHeight()
 					if y >= len(m.headings)+body {
 						continue // the strip of the line the cursor starts on covers this row
 					}
 					want := m.lineAt(top + y - len(m.headings))
 					clicked(m, m.width-1, y)
-					if m.cursor != want || m.top != top {
-						t.Fatalf("%s: from line %d at top %d, a click at screen line %d goes to line %d (want %d) and top %d", name, from, top, y, m.cursor, want, m.top)
+					// The screen stays, unless it would leave room empty under the last line.
+					wantTop := min(top, m.lastTop())
+					if m.cursor != want || m.top != wantTop {
+						t.Fatalf("%s: from line %d at top %d, a click at screen line %d goes to line %d (want %d) and top %d, want top %d", name, from, top, y, m.cursor, want, m.top, wantTop)
 					}
-					taller, shorter = taller+b2i(m.bodyHeight() < body), shorter+b2i(m.bodyHeight() > body)
+					taller, shorter, filled = taller+b2i(m.bodyHeight() < body), shorter+b2i(m.bodyHeight() > body), filled+b2i(m.top < top)
 				}
 			}
 		}
-		if taller == 0 || shorter == 0 {
-			t.Errorf("%s: clicks met %d taller and %d shorter strips, want both", name, taller, shorter)
+		if taller == 0 || shorter == 0 || filled == 0 {
+			t.Errorf("%s: clicks met %d taller and %d shorter strips, and %d moved the screen up to fill the room, want all three", name, taller, shorter, filled)
 		}
 	}
 }
@@ -1387,31 +1392,12 @@ func TestLiveStatusReportNeverMovesTheScreen(t *testing.T) {
 	}
 }
 
-// A click onto a line with a shorter strip leaves empty room under the last
-// line. The test starts from that state. The room stays through a refresh and
-// a turn of the wheel down, until the user scrolls up.
-func TestLiveStatusKeepsEmptyRoomUnderTheLastLine(t *testing.T) {
-	for name, size := range mouseLayouts {
-		m := mouseOn(t, size)
-		m.top = m.lastTop() + 2
-		top := m.top
-		m.showLines(m.lines, time.Now())
-		if m.top != top {
-			t.Errorf("%s: a refresh moves the screen from top %d to %d", name, top, m.top)
-		}
-		wheeled(m, tea.MouseWheelDown, 1)
-		if m.top != top {
-			t.Errorf("%s: a turn down moves the screen from top %d to %d", name, top, m.top)
-		}
-	}
-}
-
 // A report with none of the lines that were on screen, and shorter than the
-// empty room a click left, shows all of its lines.
+// screen was tall, shows all of its lines.
 func TestLiveStatusShowsAShrunkReportWhole(t *testing.T) {
 	for _, n := range []int{1, 3} {
 		m := mouseOn(t, mouseLayouts["table"])
-		m.top = m.lastTop() + 4
+		m.top = m.lastTop()
 		var lines []statusLine
 		for i := range n {
 			lines = append(lines, statusLine{key: fmt.Sprint("new", i), head: "a new line"})
@@ -1424,15 +1410,14 @@ func TestLiveStatusShowsAShrunkReportWhole(t *testing.T) {
 }
 
 // A line partly above the screen that comes back shorter, as the last line of
-// a report, stays in view even when a click left empty room under it.
-func TestLiveStatusShowsALineThatShrinksAboveTheEmptyRoom(t *testing.T) {
+// a report, stays in view.
+func TestLiveStatusShowsALineThatShrinksUnderTheScreen(t *testing.T) {
 	m := mouseOn(t, mouseLayouts["cards"])
-	tall := statusLine{key: "tall", head: strings.Repeat("a long line ", 30)}
+	tall := statusLine{key: "tall", head: strings.Repeat("a long line ", 200)}
 	m.showLines([]statusLine{{key: "a", head: "a"}, {key: "b", head: "b"}, tall}, time.Now())
 	m.top = m.drawnHeight(0, 2) + 2
-	m.top = min(m.top, m.drawnHeight(0, len(m.shown))-1)
-	if m.top <= m.drawnHeight(0, 2) || m.emptyRoom() == 0 {
-		t.Fatalf("setup: top %d, empty room %d, want the screen inside the last line, with empty room", m.top, m.emptyRoom())
+	if m.top > m.lastTop() {
+		t.Fatalf("setup: the screen at top %d starts past the last screenful at %d", m.top, m.lastTop())
 	}
 	m.showLines([]statusLine{{key: "a", head: "a"}, {key: "b", head: "b"}, {key: "tall", head: "short"}}, time.Now())
 	if end := m.drawnHeight(0, len(m.shown)); m.top >= end {
@@ -1440,7 +1425,7 @@ func TestLiveStatusShowsALineThatShrinksAboveTheEmptyRoom(t *testing.T) {
 	}
 }
 
-func TestLiveStatusUpAndDownShowALineThatIsNotWhollyOnScreen(t *testing.T) {
+func TestLiveStatusUpAndDownShowALineWithNoRowOnScreen(t *testing.T) {
 	for name, size := range mouseLayouts {
 		for _, by := range []int{1, -1} {
 			for cursor := range 12 {
@@ -1455,7 +1440,7 @@ func TestLiveStatusUpAndDownShowALineThatIsNotWhollyOnScreen(t *testing.T) {
 				} {
 					m.moveTo(cursor + 1)
 					setUp()
-					if start, end := m.cursorSpan(); m.wholly(start, end) {
+					if start, end := m.cursorSpan(); m.shows(start, end) {
 						continue
 					}
 					from := m.cursor
@@ -1463,10 +1448,38 @@ func TestLiveStatusUpAndDownShowALineThatIsNotWhollyOnScreen(t *testing.T) {
 					if m.cursor != from+by {
 						t.Errorf("%s: from line %d off the screen, a press (%d) goes to line %d", name, from, by, m.cursor)
 					}
-					if start, end := m.cursorSpan(); !m.wholly(start, end) {
+					if start, end := m.cursorSpan(); !m.shows(start, end) {
 						t.Errorf("%s: from line %d off the screen, a press (%d) leaves line %d off it", name, from, by, m.cursor)
 					}
 				}
+			}
+		}
+	}
+}
+
+// A click on a line taller than the screen, partly on it, leaves ↓ scrolling
+// through the rest of the line before it goes to the next.
+func TestLiveStatusDownAfterAClickOnATallLineShowsEachOfItsRows(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		tall := statusLine{key: "tall", head: strings.Repeat("a long line ", 200)}
+		m.showLines([]statusLine{{key: "a", head: "a"}, tall, {key: "b", head: "b"}}, time.Now())
+		start, end := startOf(m, 1), startOf(m, 2)
+		m.top = start - 2 // the line's first rows are on the screen, and the rest below it
+		clicked(m, m.width-1, len(m.headings)+2)
+		if m.cursor != 1 || end-start <= m.bodyHeight() {
+			t.Fatalf("%s: setup: the click goes to line %d, whose %d rows are not taller than the screen's %d", name, m.cursor, end-start, m.bodyHeight())
+		}
+		seen := map[int]bool{}
+		for m.cursor == 1 {
+			for n := m.top; n < m.top+m.bodyHeight(); n++ {
+				seen[n] = true
+			}
+			press(m, "down")
+		}
+		for n := start; n < end; n++ {
+			if !seen[n] {
+				t.Errorf("%s: after a click on the tall line, ↓ never shows its screen line %d (of %d to %d)", name, n, start, end)
 			}
 		}
 	}

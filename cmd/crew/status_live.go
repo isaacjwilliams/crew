@@ -272,7 +272,7 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 	if l, ok := m.current(); ok {
 		key = l.key
 	}
-	onScreen, emptyRoom := m.rows(), m.emptyRoom()
+	onScreen := m.rows()
 	m.lines, m.builtAt = lines, at
 	m.layOut()
 	i := m.indexOf(key)
@@ -281,17 +281,14 @@ func (m *liveStatus) showLines(lines []statusLine, at time.Time) {
 	}
 	m.setCursor(i)
 	// Put the first old row that's still in the report back at its screen line,
-	// and keep the room a click left under the last line. With no old row left
-	// to hold in place, the screen goes no further than the report's end. Either
-	// way, at least one report line stays on screen.
-	room := 0
+	// and the screen no further than the report's end.
 	for _, row := range onScreen {
 		if j := m.indexOf(row.key); j >= 0 {
-			m.top, room = m.drawnHeight(0, j)-row.at, emptyRoom
+			m.top = m.drawnHeight(0, j) - row.at
 			break
 		}
 	}
-	m.top = max(0, min(m.top, m.lastTop()+room, m.drawnHeight(0, len(m.shown))-1))
+	m.top = max(0, min(m.top, m.lastTop()))
 }
 
 // screenRow is a line on the screen, with the screen line it starts on,
@@ -313,12 +310,6 @@ func (m *liveStatus) rows() []screenRow {
 		start = end
 	}
 	return rows
-}
-
-// emptyRoom is how many screen lines a click left empty under the last line,
-// which stay until the user scrolls.
-func (m *liveStatus) emptyRoom() int {
-	return max(0, m.top-m.lastTop())
 }
 
 // lastTop is the top of the last screenful: the screen that ends with the
@@ -559,15 +550,15 @@ func (m *liveStatus) lineAt(n int) int {
 	return len(m.shown) - 1
 }
 
-// step moves the cursor one line up or down, and shows it. If the cursor's line
-// isn't all on the screen (the wheel took it off, or a click left its strip over
-// it), that's all it does. Otherwise, going down, it first scrolls through a
+// step moves the cursor one line up or down, and shows it. If none of the
+// cursor's line is on the screen (the wheel took it off, or a click left its
+// strip over it), that's all it does. Otherwise, going down, it first scrolls through a
 // line taller than the screen, then through notes too long for the strip; going
 // up, it scrolls back through them the other way round.
 func (m *liveStatus) step(by int) {
 	start, end := m.cursorSpan()
 	switch {
-	case !m.wholly(start, end):
+	case !m.shows(start, end):
 		m.moveTo(m.cursor + by)
 		return
 	case by > 0 && end > m.top+m.bodyHeight():
@@ -609,23 +600,17 @@ const wheelStep = 3
 // wheel scrolls the screen a turn up or down (by is -1 or 1), and not past
 // either end. A turn is wheelStep lines, or the whole screen when that's less,
 // so no line goes by unseen. The cursor and the strip stay as they are, even
-// when the cursor's line goes off the screen. After a click left empty room
-// under the last line, a turn down leaves the screen alone.
+// when the cursor's line goes off the screen.
 func (m *liveStatus) wheel(by int) {
-	n := by * min(wheelStep, m.bodyHeight())
-	if by < 0 {
-		m.top = max(0, m.top+n)
-		return
-	}
-	m.top = max(m.top, min(m.top+n, m.lastTop()))
+	m.top = max(0, min(m.top+by*min(wheelStep, m.bodyHeight()), m.lastTop()))
 }
 
 // click puts the cursor on the line drawn at column x of screen line y, and
 // opens or closes it when x is on its marker. Anything else on the screen,
 // the headings, the strip, the bar and the room below the last line, is not
 // a line, and does nothing. The screen stays where it is, whatever the new
-// line's strip covers or leaves empty. Folding a line leaves the screen at
-// the report's new end when the report no longer reaches it.
+// line's strip covers, except that it moves up to the report's end when a
+// shorter strip or a folded line would leave room empty under the last line.
 func (m *liveStatus) click(x, y int) {
 	n := m.top + y - len(m.headings) // the screen line y, counted from the first shown line
 	if y < len(m.headings) || y >= len(m.headings)+m.bodyHeight() || n >= m.drawnHeight(0, len(m.shown)) {
@@ -634,9 +619,10 @@ func (m *liveStatus) click(x, y int) {
 	i := m.lineAt(n)
 	m.setCursor(i)
 	// Only a line's first row has its marker.
-	if n == m.drawnHeight(0, i) && x == m.markerColumn() && m.fold(!m.shown[i].open) {
-		m.top = min(m.top, m.lastTop())
+	if n == m.drawnHeight(0, i) && x == m.markerColumn() {
+		m.fold(!m.shown[i].open)
 	}
+	m.top = min(m.top, m.lastTop())
 }
 
 // markerColumn is the screen column of the cursor's line's fold marker, or -1
@@ -656,11 +642,10 @@ func (m *liveStatus) markerColumn() int {
 	return column
 }
 
-// wholly is whether the screen lines from start to end, counted from the first
-// shown line, are all on the screen, or fill it when they're too tall for it.
-func (m *liveStatus) wholly(start, end int) bool {
-	top, bottom := m.top, m.top+m.bodyHeight()
-	return start >= top && end <= bottom || start <= top && end >= bottom
+// shows is whether any of the screen lines from start to end, counted from the
+// first shown line, is on the screen.
+func (m *liveStatus) shows(start, end int) bool {
+	return end > m.top && start < m.top+m.bodyHeight()
 }
 
 // scroll moves the screen as little as keeps the cursor's line on it: all of
