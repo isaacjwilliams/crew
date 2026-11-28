@@ -148,19 +148,17 @@ func withLearnItems(t Task, ls []string) []string {
 // Log.
 func withStatusHistory(t Task, ls []string) []string {
 	h, err := t.StatusHistory()
-	var lines []string
-	switch {
-	case errors.Is(err, errNotMigrated):
+	if errors.Is(err, errNotMigrated) || err == nil && len(h) == 0 {
 		return ls
-	case err != nil:
-		lines = []string{"crew can't read the status history: " + err.Error()}
-	case len(h) == 0:
-		return ls
+	}
+	lines := []string{statusHistoryHeading}
+	if err != nil {
+		lines = append(lines, "crew can't read the status history: "+err.Error())
 	}
 	for _, r := range h {
 		lines = append(lines, fmt.Sprintf("- %s (%s)", r.Status.To, stamp(r)))
 	}
-	return slices.Insert(ls, beforeLog(ls), slices.Concat([]string{statusHistoryHeading}, lines, []string{""})...)
+	return slices.Insert(ls, beforeLog(ls), append(lines, "")...)
 }
 
 const statusHistoryHeading = "## Status history"

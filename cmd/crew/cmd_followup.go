@@ -8,7 +8,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"slices"
 	"time"
 )
 
@@ -263,10 +262,8 @@ func statusBeforeNeedsInput(t Task) (Status, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, r := range slices.Backward(h) {
-		if r.Status.To != NeedsInput {
-			return r.Status.To, nil
-		}
+	if r := h.Last(func(s Status) bool { return s != NeedsInput }); r.Status != nil {
+		return r.Status.To, nil
 	}
 	return Working, nil
 }

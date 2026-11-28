@@ -164,7 +164,7 @@ func statsOf(t Task, h history) (taskStats, error) {
 				questions = append(questions, e)
 			}
 		}
-		asked = func(e event) bool { return e.to == "" }
+		asked = func(e event) bool { return e.question }
 	}
 	// A question is answered when the task leaves needs-input, or merges.
 	// crew tick marks it needs-input only once its worker is idle, so the
@@ -407,11 +407,11 @@ func revertedPRs(log string) []correction {
 }
 
 // An event in a task's history, as crew stats measures waits: a change of its
-// status to to, or, with to empty, a question a Log line says was put to the
-// user.
+// status to to, or a question a Log line says was put to the user.
 type event struct {
-	at time.Time
-	to Status
+	at       time.Time
+	to       Status
+	question bool
 }
 
 // events are the task's changes of status and its questions, oldest first. A
@@ -424,7 +424,7 @@ func events(changes StatusHistory, questions []logEntry) []event {
 		out = append(out, event{at: c.At, to: c.Status.To})
 	}
 	for _, q := range questions {
-		out = append(out, event{at: q.at})
+		out = append(out, event{at: q.at, question: true})
 	}
 	slices.SortStableFunc(out, func(a, b event) int {
 		return a.at.Truncate(time.Minute).Compare(b.at.Truncate(time.Minute))
@@ -445,7 +445,7 @@ func waited(events []event, starts func(event) bool, ends func(from, to Status) 
 	var since time.Time // when the wait under way began, or zero
 	var status Status   // the task's status before the event
 	for _, e := range events {
-		changed := e.to != ""
+		changed := !e.question
 		if !since.IsZero() && changed && ends(status, e.to) {
 			total += e.at.Sub(since)
 			since = time.Time{}
