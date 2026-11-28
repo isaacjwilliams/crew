@@ -648,6 +648,50 @@ crew ready 050                          # refuses a fix without fixes and missed
 - **`missed_by`** is one of `brief-review`, `tests`, `pre-pr-review`, `security-review`, `automated-review`, `ci` or `user-review`.
 - **The worker proves the defect first**: it commits a test that reproduces it and fails, before the fix commit, which makes it pass. The PR's evidence shows both runs, so you can see the test failed before the fix.
 
+### The Contract: what each component promises
+
+A component's **Contract** lists what it promises whoever uses it, one **obligation** at a time, and ties each obligation to the tests that prove it. It's the convention of [IMP](https://impatientprogramming.org/rules) and of [exhale](https://github.com/tools4imps/exhale-ruby), whose tools read the same files. `crew contract` checks that a repo keeps its Contract. Run it anywhere in a git repo: it needs no crew home and writes nothing, so CI and a collaborator's clone can run it too.
+
+- **Where it lives**: `contract/<component>/README.md`, at the top of the repo, a directory for each component. A component's name is lowercase letters, digits and dashes (`guard`). The rest of the README, such as a paragraph on what the component is for, is yours: the check reads only the obligations.
+- **An obligation** is a list line: a dash at the start of the line, the obligation's ID in bold, then a plain sentence about behaviour. The ID is capital letters, then digits, and is unique within its component. The obligation below is named `guard/G7`:
+
+  ```markdown
+  - **G7** A path or home it can't resolve blocks the edit.
+  ```
+
+- **A tag** is a line that holds only a comment naming one obligation, in a test of any language whose comments start with `//` or `#`. Put it above the test that proves the obligation. A test that proves several gets one line for each.
+
+  ```go
+  // Contract: guard/G7
+  func TestGuardBlocksWhatItCantResolve(t *testing.T) {
+  ```
+
+  ```sh
+  # Contract: guard/G7
+  check 'an edit through a symlink loop is blocked'
+  ```
+
+- **What it reads**: the whole repo, wherever in it you run the check. It reads the files git tracks and the new ones git doesn't ignore, so a tag in a test you haven't committed yet counts, and one in an ignored file (a build output, a test sandbox, a vendored dependency) doesn't. Markdown files (`.md`, `.markdown`) hold no tags: a `# Contract: …` line there is a heading.
+- **What it says**: each obligation with the files that hold a tag for it, then each problem as `<file>:<line>: <what's wrong>`. It exits 1 when there's a problem:
+  - an obligation with no tag;
+  - a tag that names an obligation or a component that doesn't exist;
+  - a line meant as an obligation that isn't in its form. Any list item in a component's README that starts in bold is meant as one, so `* **G7** …`, `1. **G7** …`, `- **g7** …` and `- **G7**: …` are each a problem, never skipped;
+  - a line meant as a tag that isn't in its form. Any comment line that starts with `Contract:`, in any case, is meant as one, so `// Contract: Guard/G7` and `# Contract: guard/G7, guard/G8` are each a problem;
+  - two obligations with the same ID in one component;
+  - a directory in `contract/` with no `README.md`, or with a name that isn't lowercase.
+- **What isn't a problem**: a repo with no `contract/` at all, and code that no component's Contract mentions. A Contract grows where work happens, a component at a time, never all up front.
+- **Tags are a floor.** The check counts tags, not what the tagged tests cover: a tag above a test that proves half an obligation counts the obligation as kept. Mutation testing, such as [flinch](https://github.com/tools4imps/flinch), is what shows those gaps.
+
+```console
+$ crew contract
+guard/G1   cmd/crew/guard_test.go, tests/guard.sh
+guard/G5   no test
+ledger/L1  cmd/crew/ledger_test.go
+2 of 3 obligations have a test.
+contract/guard/README.md:9: guard/G5 has no test tagged for it
+crew: the Contract isn't kept: 1 problem
+```
+
 ## 6. The casual observer on its own
 
 Workers run it automatically before opening a PR. You can also use it anywhere:
