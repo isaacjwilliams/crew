@@ -378,10 +378,19 @@ func (r reviewRound) empty() bool {
 	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil && r.conflict == nil
 }
 
-// add writes the round into the task as its next, before ## Log, and counts it
-// in review_rounds. It returns the round's number and text. Run it with the
-// ledger lock held.
+// add writes the round into the task as its next, after any round of red CI or
+// a conflict crew recorded but didn't write (addMissingRounds). It returns the
+// round's number and text. Run it with the ledger lock held.
 func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
+	if _, err := addMissingRounds(t, prNumber); err != nil {
+		return 0, "", err
+	}
+	return r.write(t, prNumber)
+}
+
+// write writes the round into the task as its next, before ## Log, and counts it
+// in review_rounds. It returns the round's number and text.
+func (r reviewRound) write(t Task, prNumber string) (int, string, error) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
@@ -428,15 +437,77 @@ func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 	return n, b.String(), t.Set("review_rounds", fmt.Sprint(n))
 }
 
-// addRecorded adds the round, then the record of what it reports, and returns
-// the round's number. In that order, a run stopped between the two leaves no
-// record, so the next run sends the report again rather than never.
-func (r reviewRound) addRecorded(t Task, prNumber string, report Record) (int, error) {
-	n, _, err := r.add(t, prNumber)
-	if err != nil {
-		return 0, err
+// addReport records report, red CI or a conflict crew sends the worker, with the
+// number of the round that sends it, then writes that round. It returns the
+// record as written. A run stopped between the two leaves a record of a round
+// the task doesn't have, which the next round crew adds writes first.
+func addReport(t Task, prNumber string, report Record) (Record, error) {
+	if _, err := addMissingRounds(t, prNumber); err != nil {
+		return report, err
 	}
-	return n, t.AddRecords(report)
+	report.Round = atoiOr0(t.Get("review_rounds")) + 1
+	if err := t.AddRecords(report); err != nil {
+		return report, err
+	}
+	_, _, err := report.round().write(t, prNumber)
+	return report, err
+}
+
+// addMissingRounds writes the rounds of the red CI and conflicts crew recorded
+// for the task without writing their rounds, and returns their records.
+func addMissingRounds(t Task, prNumber string) ([]Record, error) {
+	// Whatever the project's format: crew feedback adds rounds in a project crew
+	// migrate hasn't moved yet, which has no red CI or conflicts recorded.
+	records, err := t.readRecords()
+	if err != nil {
+		return nil, err
+	}
+	var missing []Record
+	for _, r := range records {
+		if r.Round > atoiOr0(t.Get("review_rounds")) {
+			if _, _, err := r.round().write(t, prNumber); err != nil {
+				return missing, err
+			}
+			missing = append(missing, r)
+		}
+	}
+	return missing, nil
+}
+
+// round is the review round that sends the red CI or conflict r reports.
+func (r Record) round() reviewRound {
+	return reviewRound{redCI: r.RedCI, conflict: r.BaseConflict}
+}
+
+// sends says what the round that sends r reports, for crew's log and output.
+func (r Record) sends() string {
+	if r.RedCI != nil {
+		return fmt.Sprintf("CI failed on %s (%s)", r.RedCI.Head, strings.Join(r.RedCI.Checks, ", "))
+	}
+	return fmt.Sprintf("conflicts with %s at %s", r.BaseConflict.Base, r.BaseConflict.At)
+}
+
+// logSent logs and prints that the round sending report was recorded, for tick
+// to send. crew ci-fix and crew catch-up call it.
+func logSent(t Task, report Record) {
+	t.Log(fmt.Sprintf("review round %d recorded: %s", report.Round, report.sends()))
+	fmt.Printf("round %d recorded: %s; crew tick sends it to the worker\n", report.Round, report.sends())
+}
+
+// recoverRounds writes the rounds an earlier run of crew ci-fix or crew
+// catch-up recorded but stopped before writing, and says whether there were
+// any. If so, they are this run's report, and it commits them as cmd's.
+func (c *Crew) recoverRounds(t Task, p *Project, cmd string) (bool, error) {
+	missing, err := addMissingRounds(t, t.PRNumber())
+	for _, r := range missing {
+		logSent(t, r)
+	}
+	if len(missing) == 0 {
+		return false, err
+	}
+	t.Touch()
+	c.commit(cmd + " " + p.Name + "/" + t.ID())
+	return true, err
 }
 
 // withRoundReports is the task file's lines with the red CI and conflicts crew

@@ -33,6 +33,9 @@ type Record struct {
 	ID string    `json:"id"`
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
+	// Round is the review round that sends a red_ci or base_conflict to the
+	// worker. It's 0 for one crew migrate recorded, from a round the task has.
+	Round int `json:"round,omitempty"`
 
 	ToLearn      *ToLearn      `json:"to_learn,omitempty"`
 	Learned      *Learned      `json:"learned,omitempty"`

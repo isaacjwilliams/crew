@@ -3422,6 +3422,13 @@ o1=$(crew ci-fix "$WF" 2>&1); c1=$?; o2=$(crew catch-up "$WF" 2>&1); c2=$?
 chmod u+w "$WD"; o3=$(crew ci-fix "$WF"); o4=$(crew catch-up "$WF")
 check "a ledger crew can't write fails ci-fix and catch-up, and they record nothing, so the next run sends the round" \
   '((c1 == 1 && c2 == 1)) && [[ $o1$o2 != *"recorded"* && $o3 == "round $((r + 1)) recorded: CI failed on 9191bbb (test); crew tick sends it to the worker" && $o4 == "round $((r + 2)) recorded: conflicts with main at $WB; crew tick sends it to the worker" ]]'
+# A run stopped after its record and before its round: the next run writes the
+# round, as that run's report, and the worker can answer it.
+r=$(crew get "$WF" review_rounds)
+printf '{"id":"stopped1","at":"2026-11-27T10:00:00Z","by":"crew ci-fix","round":%d,"red_ci":{"head":"9292ccc","checks":["test"]}}\n' $((r + 1)) >>"${WF%.md}.records.jsonl"
+o5=$(crew ci-fix "$WF"); c5=$?; o6=$(crew ci-fix "$WF"); c6=$?; printf 'CI was red\n' >"$HOME/ci.md"
+check "a red CI recorded without its round gets it from the next ci-fix, once, and ci-summary takes its head" \
+  '((c5 == 0 && c6 == 3)) && [[ $o5 == "round $((r + 1)) recorded: CI failed on 9292ccc (test); crew tick sends it to the worker" && $(crew get "$WF" review_rounds) == $((r + 1)) ]] && grep -q "^- \[ \] CI failed on 9292ccc: test$" "$WF" && crew ci-summary "$WF" 9292ccc "$HOME/ci.md" >/dev/null'
 rm -f "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew set "$WF" status abandoned
 rm -rf "$HOME/gh-summaries" "$HOME/gh-pr-head" "$HOME/gh-pr-checks" "$HOME/gh-pr-state"
 

@@ -168,6 +168,9 @@ func cmdCIFix(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	if done, err := c.recoverRounds(t, p, "ci-fix"); done || err != nil {
+		return err
+	}
 	reports := roundReports(records)
 	if len(reports.CIOn(head)) > 0 || t.CIQuestionAsked(head) {
 		return nothingToDo("the red CI on %s is reported already", head)
@@ -176,12 +179,10 @@ func cmdCIFix(c *Crew, args []string) error {
 	if fixes := reports.CIFixes(); fixes < maxFixes {
 		r := newRecord("crew ci-fix", records)
 		r.RedCI = &RedCI{Head: head, Checks: failed}
-		n, err := reviewRound{redCI: r.RedCI}.addRecorded(t, t.PRNumber(), r)
-		if err != nil {
+		if r, err = addReport(t, t.PRNumber(), r); err != nil {
 			return err
 		}
-		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
-		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
+		logSent(t, r)
 	} else {
 		t.AppendToSection("## Open questions", fmt.Sprintf("- [ ] %s%s after %d CI rounds the branch caused (MAX_CI_FIXES=%d): %s. Look at it yourself, or tell the worker to try again.\n", ciStillRedOn, head, fixes, maxFixes, checks))
 		t.Log(fmt.Sprintf("CI still red on %s after %d CI rounds the branch caused; %s", head, fixes, recordedForTheUser))

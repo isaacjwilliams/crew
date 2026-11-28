@@ -12,7 +12,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -92,19 +91,20 @@ func cmdCatchUp(c *Crew, args []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	if done, err := c.recoverRounds(t, p, "catch-up"); done || err != nil {
+		return err
+	}
 	conflict := &BaseConflict{Base: base, At: shortSHA(sha)}
 	if roundReports(records).ConflictAt(conflict.At) {
 		return nothingToDo("the conflict with %s at %s is reported already", conflict.Base, conflict.At)
 	}
 	r := newRecord("crew catch-up", records)
 	r.BaseConflict = conflict
-	n, err := reviewRound{conflict: conflict}.addRecorded(t, num, r)
-	if err != nil {
+	if r, err = addReport(t, num, r); err != nil {
 		return err
 	}
-	t.Log(fmt.Sprintf("review round %d recorded: conflicts with %s at %s", n, conflict.Base, conflict.At))
+	logSent(t, r)
 	t.Touch()
 	c.commit("catch-up " + p.Name + "/" + t.ID())
-	fmt.Printf("round %d recorded: conflicts with %s at %s; crew tick sends it to the worker\n", n, conflict.Base, conflict.At)
 	return nil
 }

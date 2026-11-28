@@ -180,23 +180,19 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 	// crew sync's ci_state is only a filter: crew ci-fix reads the checks again,
 	// and decides. It exits 0 when it recorded a round or a question.
 	if st == PROpen && t.Get("ci_state") == string(ciFailing) {
-		before, _ := t.RoundReports() // when it can't be read, ci-fix refuses too
-		if c.step(nil, "ci-fix", t.Path) == 0 {
-			switch after, err := t.RoundReports(); {
-			case err != nil:
-				warn("%s: %v", id, err)
-			case len(after.RedCI) > len(before.RedCI):
-				news.did(p.Name, "%s: CI round %s recorded: red on %s", id, t.Get("review_rounds"), after.RedCI[len(after.RedCI)-1].RedCI.Head)
-			default:
-				news.did(p.Name, "%s: CI still red after %d CI rounds the branch caused, for you", id, after.CIFixes())
+		rounds := atoiOr0(t.Get("review_rounds"))
+		if c.step(nil, "ci-fix", t.Path) == 0 && !roundNews(news, p.Name, t, rounds) {
+			if reports, err := t.RoundReports(); err == nil {
+				news.did(p.Name, "%s: CI still red after %d CI rounds the branch caused, for you", id, reports.CIFixes())
 			}
 		}
 	}
 	// Likewise mergeable: crew catch-up reads the PR again, and decides. It exits
 	// 0 when it recorded a round. A stacked task's conflicts are a restack's.
 	if _, stacked := idx.parentOf(t); st == PROpen && t.Get("mergeable") == conflicting && !stacked {
+		rounds := atoiOr0(t.Get("review_rounds"))
 		if c.step(nil, "catch-up", t.Path) == 0 {
-			news.did(p.Name, "%s: catch-up round %s recorded: conflicts with %s", id, t.Get("review_rounds"), t.Base())
+			roundNews(news, p.Name, t, rounds)
 		}
 	}
 	job := t.WorkerJob()
@@ -261,6 +257,29 @@ func (c *Crew) tickTask(p *Project, idx Branches, t Task, as Agents, paused bool
 // can ask the lead instead of resuming the worker, and asked is what tick says
 // then.
 type workerSend struct{ command, what, sent, asked string }
+
+// roundNews tells of each round of red CI or a conflict added to t after round
+// n, and says whether there was one. crew ci-fix and crew catch-up add them.
+func roundNews(news *tickNews, project string, t Task, n int) bool {
+	records, err := t.Records()
+	if err != nil {
+		warn("%s: %v", t.ID(), err)
+		return false
+	}
+	added := false
+	for _, r := range records {
+		switch {
+		case r.Round <= n:
+			continue
+		case r.RedCI != nil:
+			news.did(project, "%s: CI round %d recorded: red on %s", t.ID(), r.Round, r.RedCI.Head)
+		default:
+			news.did(project, "%s: catch-up round %d recorded: conflicts with %s", t.ID(), r.Round, r.BaseConflict.Base)
+		}
+		added = true
+	}
+	return added
+}
 
 // forWorker is the first of these that a task's worker, a (nil when claude
 // agents doesn't list it), hasn't had: unsent review rounds, word that a pause

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -338,35 +337,41 @@ Some prose that isn't an item.
 	}
 }
 
-// crew ci-fix and crew catch-up add a round before its record: a round crew
-// can't write leaves no record, so the next run sends the report again, and a
-// record crew can't write leaves the round, which the next run sends again.
-func TestRoundAddedBeforeItsRecord(t *testing.T) {
-	report := func() (reviewRound, Record) {
+// crew ci-fix and crew catch-up record a report before the round that sends it:
+// a record crew can't write leaves no round, so the next run sends the report
+// again, and a run stopped before the round leaves a record of a round the task
+// doesn't have, which the next round crew adds writes first.
+func TestReportRecordedBeforeItsRound(t *testing.T) {
+	report := func() Record {
 		r := newRecord("crew ci-fix", nil)
 		r.RedCI = &RedCI{Head: "ccc3333", Checks: []string{"test"}}
-		return reviewRound{redCI: r.RedCI}, r
+		return r
 	}
 	task := learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
-	os.Remove(task.Path)
-	round, r := report()
-	if _, err := round.addRecorded(task, "12", r); err == nil {
-		t.Error("addRecorded wrote a round into a task file that isn't there")
-	}
-	if _, err := os.Stat(task.RecordsPath()); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("a round crew couldn't write left records: %v", err)
-	}
-
-	task = learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
 	if err := os.Mkdir(task.RecordsPath(), 0o755); err != nil { // a records file crew can't write
 		t.Fatal(err)
 	}
-	round, r = report()
-	if _, err := round.addRecorded(task, "12", r); err == nil {
-		t.Error("addRecorded wrote a record into a records file it can't write")
+	if _, err := addReport(task, "12", report()); err == nil {
+		t.Error("addReport wrote a record into a records file it can't write")
 	}
-	if b, _ := os.ReadFile(task.Path); !strings.Contains(string(b), "- [ ] CI failed on ccc3333: test") || task.Get("review_rounds") != "1" {
-		t.Errorf("a record crew couldn't write took its round with it:\n%s", b)
+	if b, _ := os.ReadFile(task.Path); strings.Contains(string(b), "### Round") || task.Get("review_rounds") != "0" {
+		t.Errorf("a report crew couldn't record was sent:\n%s", b)
+	}
+
+	task = learnTask(t, "---\nreview_rounds: 0\n---\n# A\n\n## Log\n")
+	stopped := report()
+	stopped.Round = 1 // recorded, and stopped before its round
+	if err := task.AddRecords(stopped); err != nil {
+		t.Fatal(err)
+	}
+	n, _, err := reviewRound{reviewRequests: []string{"crew review"}}.add(task, "12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(task.Path)
+	ci := strings.Index(string(b), "### Round 1 ")
+	if n != 2 || task.Get("review_rounds") != "2" || ci < 0 || !strings.Contains(string(b)[ci:strings.Index(string(b), "### Round 2 ")], "- [ ] CI failed on ccc3333: test") {
+		t.Errorf("the next round, %d, didn't follow the stopped run's round:\n%s", n, b)
 	}
 }
 
