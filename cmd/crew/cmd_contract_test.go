@@ -19,6 +19,13 @@ const guardReadme = "# Guard\n\nKeeps each agent's edits in bounds.\n\n## Obliga
 	"- **G1** Exit 0 allows the edit.\n" +
 	"- **G2** Exit 2 blocks it.\n"
 
+// What crew contract says of a line meant as an obligation or a tag that isn't
+// in its form.
+const (
+	badObligation = `contract/guard/README.md:%d: an obligation is a line "- **G7** <what it promises>": a dash, its ID in bold (capital letters, then digits), a sentence`
+	badTag        = `a tag is one comment naming one obligation, as in "// Contract: guard/G7" or "# Contract: guard/G7"`
+)
+
 // contractRepo is a new git repo holding files, from paths to contents, all
 // committed.
 func contractRepo(t *testing.T, files map[string]string) string {
@@ -100,7 +107,7 @@ func TestContractFailsOnEachProblem(t *testing.T) {
 				"contract/guard/README.md": guardReadme + "* **G19** A path it can't resolve blocks.\n",
 				"guard_test.go":            "// Contract: guard/G1\n// Contract: guard/G2\n",
 			},
-			[]string{`contract/guard/README.md:9: an obligation is a line "- **G7** <what it promises>": a dash, its ID in bold (capital letters, then digits), a sentence`},
+			[]string{fmt.Sprintf(badObligation, 9)},
 		},
 		{
 			"obligations numbered, in lowercase, or with a colon",
@@ -109,26 +116,26 @@ func TestContractFailsOnEachProblem(t *testing.T) {
 				"guard_test.go":            "// Contract: guard/G1\n// Contract: guard/G2\n",
 			},
 			[]string{
-				`contract/guard/README.md:9: an obligation is a line "- **G7** <what it promises>": a dash, its ID in bold (capital letters, then digits), a sentence`,
-				`contract/guard/README.md:10: an obligation is a line "- **G7** <what it promises>": a dash, its ID in bold (capital letters, then digits), a sentence`,
-				`contract/guard/README.md:11: an obligation is a line "- **G7** <what it promises>": a dash, its ID in bold (capital letters, then digits), a sentence`,
+				fmt.Sprintf(badObligation, 9),
+				fmt.Sprintf(badObligation, 10),
+				fmt.Sprintf(badObligation, 11),
 			},
 		},
 		{
 			"a tag in lowercase",
 			map[string]string{"guard_test.go": "// Contract: guard/G1\n// Contract: guard/G2\n# contract: guard/G1\n"},
-			[]string{`guard_test.go:3: a tag is one comment naming one obligation, as in "// Contract: guard/G7" or "# Contract: guard/G7"`},
+			[]string{"guard_test.go:3: " + badTag},
 		},
 		{
 			"a tag naming its component in capitals",
 			map[string]string{"guard_test.go": "// Contract: guard/G1\n// Contract: guard/G2\n// Contract: Guard/G2\n"},
-			[]string{`guard_test.go:3: a tag is one comment naming one obligation, as in "// Contract: guard/G7" or "# Contract: guard/G7"`},
+			[]string{"guard_test.go:3: " + badTag},
 		},
 		{
 			"a tag naming two obligations on one line",
 			map[string]string{"guard.sh": "# Contract: guard/G1, guard/G2\n"},
 			[]string{
-				`guard.sh:1: a tag is one comment naming one obligation, as in "// Contract: guard/G7" or "# Contract: guard/G7"`,
+				"guard.sh:1: " + badTag,
 				"contract/guard/README.md:7: guard/G1 has no test tagged for it",
 				"contract/guard/README.md:8: guard/G2 has no test tagged for it",
 			},

@@ -41,6 +41,7 @@ type obligation struct {
 // order the READMEs give them, and every way the repo fails to keep them.
 type contractCheck struct {
 	obligations []*obligation
+	byID        map[string]*obligation
 	problems    []string
 }
 
@@ -87,14 +88,13 @@ func cmdContract(args []string) error {
 // checkContract reads the Contract in the repo at root and the tags in its
 // files: those git tracks and the new ones it doesn't ignore.
 func checkContract(root string) (contractCheck, error) {
-	var check contractCheck
+	check := contractCheck{byID: map[string]*obligation{}}
 	files, err := repoFiles(root)
 	if err != nil {
 		return check, err
 	}
-	// Every directory in contract/ is a component, named by its obligations' IDs:
-	// components["guard"]["guard/G7"].
-	components := map[string]map[string]*obligation{}
+	// Every directory in contract/ is a component.
+	components := map[string]bool{}
 	seen := map[string]bool{}
 	for _, f := range files {
 		rel, inContract := strings.CutPrefix(f, "contract/")
@@ -109,8 +109,8 @@ func checkContract(root string) (contractCheck, error) {
 		case !slices.Contains(files, "contract/"+dir+"/README.md"):
 			check.problem("contract/%s: a component needs a README.md that lists its obligations", dir)
 		default:
-			components[dir] = map[string]*obligation{}
-			if err := check.readObligations(root, dir, components[dir]); err != nil {
+			components[dir] = true
+			if err := check.readObligations(root, dir); err != nil {
 				return check, err
 			}
 		}
@@ -134,9 +134,9 @@ func checkContract(root string) (contractCheck, error) {
 				continue
 			}
 			component, _, _ := strings.Cut(m[1], "/")
-			o := components[component][m[1]]
+			o := check.byID[m[1]]
 			switch {
-			case components[component] == nil:
+			case !components[component]:
 				check.problem("%s: the tag names %s, but there's no component %s (no contract/%s/README.md)", where, m[1], component, component)
 			case o == nil:
 				check.problem("%s: the tag names %s, which contract/%s/README.md doesn't list", where, m[1], component)
@@ -153,9 +153,9 @@ func checkContract(root string) (contractCheck, error) {
 	return check, nil
 }
 
-// readObligations adds the obligations in component's README to check and to
-// byID, and a problem for each line meant as one that isn't in its form.
-func (check *contractCheck) readObligations(root, component string, byID map[string]*obligation) error {
+// readObligations adds the obligations in component's README to check, and a
+// problem for each line meant as one that isn't in its form.
+func (check *contractCheck) readObligations(root, component string) error {
 	readme := "contract/" + component + "/README.md"
 	lines, err := readLines(root, readme)
 	if err != nil {
@@ -172,12 +172,12 @@ func (check *contractCheck) readObligations(root, component string, byID map[str
 			continue
 		}
 		id := component + "/" + m[1]
-		if first := byID[id]; first != nil {
+		if first := check.byID[id]; first != nil {
 			check.problem("%s: %s is listed twice, here and at %s", where, id, first.where)
 			continue
 		}
 		o := &obligation{id: id, where: where}
-		byID[id] = o
+		check.byID[id] = o
 		check.obligations = append(check.obligations, o)
 	}
 	return nil
@@ -190,18 +190,13 @@ func (check *contractCheck) problem(format string, a ...any) {
 // repoFiles lists the files in the working tree at root that git tracks, and the
 // new ones it doesn't ignore, sorted, as paths from root.
 func repoFiles(root string) ([]string, error) {
-	out, err := git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	out, err := git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
 	if err != nil {
 		return nil, fail("can't list the files in %s: %v", root, err)
 	}
-	var files []string
-	for _, f := range strings.Split(out, "\x00") {
-		if f != "" {
-			files = append(files, f)
-		}
-	}
-	slices.Sort(files)
-	return slices.Compact(files), nil // a file with a merge conflict is listed once per side
+	files := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
+	slices.Sort(files) // the tracked files come first, then the new ones
+	return files, nil
 }
 
 // readLines is the lines of the file at name, from root. A file that isn't in the
@@ -210,11 +205,14 @@ func repoFiles(root string) ([]string, error) {
 func readLines(root, name string) ([]string, error) {
 	p := filepath.Join(root, filepath.FromSlash(name))
 	info, err := os.Lstat(p)
-	if errors.Is(err, fs.ErrNotExist) || err == nil && !info.Mode().IsRegular() {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fail("can't read %s: %v", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -223,5 +221,5 @@ func readLines(root, name string) ([]string, error) {
 	if slices.Contains(b, 0) {
 		return nil, nil
 	}
-	return strings.Split(string(b), "\n"), nil
+	return splitLines(string(b)), nil
 }
