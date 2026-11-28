@@ -8,13 +8,16 @@ package main
 // crew home, and writes nothing. SETUP.md's "The Contract" states the convention.
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 var (
@@ -214,29 +217,20 @@ func (check *contractCheck) print() {
 }
 
 // repoFiles lists the files in the working tree at root that git tracks, and the
-// new ones it doesn't ignore, sorted, as paths from root. A tracked file deleted
-// from the working tree isn't listed, whether or not the deletion is staged.
+// new ones it doesn't ignore, sorted, as paths from root. A path git lists that
+// isn't on disk is skipped; any other error reading a file fails the check.
 func repoFiles(root string) ([]string, error) {
 	out, err := git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
 	if err != nil {
 		return nil, fail("can't list the files in %s: %v", root, err)
 	}
-	deleted, err := git(root, "ls-files", "-z", "--deleted")
-	if err != nil {
-		return nil, fail("can't list the files in %s: %v", root, err)
-	}
-	gone := map[string]bool{}
-	for _, f := range nulSeparated(deleted) {
-		gone[f] = true
-	}
-	files := slices.DeleteFunc(nulSeparated(out), func(f string) bool { return gone[f] })
+	files := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
+	files = slices.DeleteFunc(files, func(f string) bool {
+		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(f)))
+		return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
+	})
 	slices.Sort(files) // git lists the tracked files, then the new ones after them
 	return files, nil
-}
-
-// nulSeparated splits the output of a git command run with -z.
-func nulSeparated(out string) []string {
-	return strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
 }
 
 // readTextLines is the lines of the text file at name, from root. A file that

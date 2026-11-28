@@ -327,7 +327,13 @@ func TestContractReadsTheWorkingTreeNotTheIndex(t *testing.T) {
 		"old_test.go":               "// Contract: guard/G2\n// Contract: ledger/L1\n",
 		"contract/spare/README.md":  "- **S1** Gone.\n",
 		"tools/run.sh":              "# Contract: guard/G1\n",
+		"sparse/run.sh":             "# Contract: guard/G1\n",
 	})
+	// A file left out of a sparse checkout is in the index but not on disk.
+	runIn(t, repo, "git", "update-index", "--skip-worktree", "sparse/run.sh")
+	if err := os.Remove(filepath.Join(repo, "sparse/run.sh")); err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range []string{"contract/ledger/README.md", "contract/Old/README.md", "old_test.go"} {
 		if err := os.Remove(filepath.Join(repo, f)); err != nil {
 			t.Fatal(err)
@@ -355,5 +361,25 @@ func TestContractReadsTheWorkingTreeNotTheIndex(t *testing.T) {
 		if !slices.Equal(check.problems, want) {
 			t.Errorf("with the deletions staged: %v, problems:\n%s\nwant\n%s", staged, strings.Join(check.problems, "\n"), strings.Join(want, "\n"))
 		}
+	}
+}
+
+func TestContractFailsOnAComponentItCantRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a directory whatever its mode")
+	}
+	repo := contractRepo(t, map[string]string{
+		"contract/guard/README.md":  guardReadme,
+		"contract/hidden/README.md": "- **H1** It has no test.\n",
+		"guard_test.go":             "// Contract: guard/G1\n// Contract: guard/G2\n",
+	})
+	hidden := filepath.Join(repo, "contract/hidden")
+	if err := os.Chmod(hidden, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(hidden, 0o755) })
+	code, out := runContract(t, repo)
+	if want := "crew: can't read contract/hidden/README.md: "; code != 1 || !strings.HasPrefix(out, want) {
+		t.Errorf("exit %d with\n%s\nwant exit 1 with %q…", code, out, want)
 	}
 }
