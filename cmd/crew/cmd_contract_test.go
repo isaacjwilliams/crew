@@ -61,6 +61,36 @@ func runContract(t *testing.T, dir string) (int, string) {
 	return code, done()
 }
 
+// treeSnapshot is every file and directory under root, .git included, with its
+// mode, its time of change and a hash of its content.
+func treeSnapshot(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&b, "%s %v %v", p, info.Mode(), info.ModTime().UnixNano())
+		if info.Mode().IsRegular() {
+			content, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(&b, " %x", sha256.Sum256(content))
+		}
+		b.WriteString("\n")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
 func TestContractListsEachObligationWithItsTests(t *testing.T) {
 	repo := contractRepo(t, map[string]string{
 		"contract/guard/README.md":  guardReadme,
@@ -179,7 +209,7 @@ func TestContractFailsOnEachProblem(t *testing.T) {
 	}
 }
 
-func TestContractNeedNotCoverEveryComponent(t *testing.T) {
+func TestContractAllowsCodeWithNoContract(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		files map[string]string
@@ -251,36 +281,6 @@ func TestContractNeedsNoHomeAndWritesNothing(t *testing.T) {
 	if after := treeSnapshot(t, repo); after != before {
 		t.Errorf("the tree changed:\nbefore\n%s\nafter\n%s", before, after)
 	}
-}
-
-// treeSnapshot is every file and directory under root, .git included, with its
-// mode, its time of change and a hash of its content.
-func treeSnapshot(t *testing.T, root string) string {
-	t.Helper()
-	var b strings.Builder
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(&b, "%s %v %v", p, info.Mode(), info.ModTime().UnixNano())
-		if info.Mode().IsRegular() {
-			content, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(&b, " %x", sha256.Sum256(content))
-		}
-		b.WriteString("\n")
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b.String()
 }
 
 func TestContractReadsTheWholeRepoButWhatGitIgnores(t *testing.T) {
