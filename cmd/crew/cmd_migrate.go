@@ -461,12 +461,11 @@ func oldDecisions(section []string, created time.Time) (found []oldDecision, res
 				d.made, first = day, first[len(m[0]):]
 			}
 		}
-		marks := callAtStart.FindAllStringSubmatch(first, 1)
-		for _, l := range append([]string{first}, under...) {
-			marks = append(marks, callAtLineEnd.FindAllStringSubmatch(l, 1)...)
+		if m := callAtStart.FindStringSubmatch(first); m != nil {
+			d.Call = m[1]
 		}
-		for _, m := range marks {
-			if d.Call != "user" {
+		for _, l := range append([]string{first}, under...) {
+			if m := callAtLineEnd.FindStringSubmatch(l); m != nil && d.Call != "user" {
 				d.Call = m[1]
 			}
 		}
