@@ -2812,15 +2812,19 @@ rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 
-# crew show prints a ledger file as it is on disk, and crew path prints its path.
+# crew show prints a ledger file as it is on disk, with a task's status history
+# added, and crew path prints its path.
 shows() {  # file arg...: crew show arg... prints file, and crew path arg... its path
   local f=$1; shift
-  [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
+  [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@" | awk '$0 == "## Status history" {skip=1; next} skip && /^## / {skip=0} !skip') "$f"
 }
 shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
 TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
 check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
   'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+sh=$(crew show 1); want=$(jq -rs 'map(select(.status)) | sort_by(.at) | .[] | "- \(.status.to) (\(.at[0:10]) \(.at[11:16]) by \(.by))"' "${F1%.md}.records.jsonl")
+check "show lists a task's status history before its Log, each change with when and which command made it" \
+  '[[ $(sed -n "/^## Status history\$/,/^## Log\$/p" <<<"$sh") == "## Status history$NL$want$NL$NL## Log" && $want == *"- pr-open ("*"by crew hand-over)"* ]]'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
 check "show memory prints the project's memory.md as it is on disk, and path finds it and memory-suggestions.md, in the default project or --project's" \

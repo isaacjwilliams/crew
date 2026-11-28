@@ -266,9 +266,18 @@ func TestShownTask(t *testing.T) {
 	if got, _ := shownTask(noSection.Path); got != "# C\n\n## Still to learn\n- [ ] Q? (aaaaaaaa, added 2026-11-25 10:00 by crew to-learn)\n\n## Log\n- x\n" {
 		t.Errorf("shownTask of a task with items and no section = %q; want the section before Log", got)
 	}
+	moved := learnTask(t, "# D\n\n## Log\n- x\n")
+	write(moved,
+		Record{ID: "aaaaaaaa", At: at, By: "crew dispatch", Status: &StatusChanged{Working}},
+		Record{ID: "bbbbbbbb", At: at.Add(time.Hour), By: "crew hand-over", Status: &StatusChanged{PROpen}},
+	)
+	if got, _ := shownTask(moved.Path); got != "# D\n\n## Status history\n- working (2026-11-25 10:00 by crew dispatch)\n- pr-open (2026-11-25 11:00 by crew hand-over)\n\n## Log\n- x\n" {
+		t.Errorf("shownTask of a task whose status changed = %q; want its history before the Log", got)
+	}
 	os.WriteFile(noSection.RecordsPath(), []byte("oops\n"), 0o644)
-	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Still to learn\ncrew can't read the items still to learn: 001-a.records.jsonl:1: not a record crew can read") {
-		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in the section", got)
+	if got, _ := shownTask(noSection.Path); !strings.Contains(got, "## Still to learn\ncrew can't read the items still to learn: 001-a.records.jsonl:1: not a record crew can read") ||
+		!strings.Contains(got, "## Status history\ncrew can't read the status history: 001-a.records.jsonl:1: not a record crew can read") {
+		t.Errorf("shownTask with an unreadable records file = %q; want it to say so in each section", got)
 	}
 	os.WriteFile(task.RecordsPath(), []byte("oops\n"), 0o644)
 	if got, _ := shownTask(task.Path); !strings.Contains(got, "\n\nTyped into the file, so not items crew counts (crew to-learn adds one):\n- [ ] typed by hand\n") {

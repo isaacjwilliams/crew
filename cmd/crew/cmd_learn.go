@@ -87,17 +87,24 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
+// shownTask is a task as crew show prints it: its file, with what its records
+// hold in sections of their own: its still-to-learn items (withLearnItems) and
+// its status history (withStatusHistory).
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
 	if err != nil {
 		return "", err
 	}
+	return strings.Join(withStatusHistory(t, withLearnItems(t, ls)), "\n") + "\n", nil
+}
+
+// withLearnItems is the task's lines ls with its still-to-learn items from its
+// records under Still to learn. Anything typed into the file's section stays
+// below them, marked as not being items crew counts. When crew can't read the
+// items, the section says why. In a project not yet migrated, what's typed in
+// it is the items, so it's shown as it is.
+func withLearnItems(t Task, ls []string) []string {
 	var items []string
 	learning, unread := t.StillToLearn()
 	if unread != nil {
@@ -107,13 +114,10 @@ func shownTask(path string) (string, error) {
 	}
 	start := slices.Index(ls, learnHeading)
 	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+		return ls
 	}
 	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
+		start = beforeLog(ls)
 		ls = slices.Insert(ls, start, learnHeading, "")
 	}
 	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
@@ -134,8 +138,40 @@ func shownTask(path string) (string, error) {
 	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
+}
+
+// withStatusHistory is the task's lines ls with a Status history section
+// before its Log: each change of status its records hold, oldest first, or why
+// crew can't read them. A task whose status hasn't changed yet has none, and
+// nor does one in a project not yet migrated, whose history is still in its
+// Log.
+func withStatusHistory(t Task, ls []string) []string {
+	h, err := t.StatusHistory()
+	var lines []string
+	switch {
+	case errors.Is(err, errNotMigrated):
+		return ls
+	case err != nil:
+		lines = []string{"crew can't read the status history: " + err.Error()}
+	case len(h) == 0:
+		return ls
+	}
+	for _, r := range h {
+		lines = append(lines, fmt.Sprintf("- %s (%s)", r.Status.To, stamp(r)))
+	}
+	return slices.Insert(ls, beforeLog(ls), slices.Concat([]string{statusHistoryHeading}, lines, []string{""})...)
+}
+
+const statusHistoryHeading = "## Status history"
+
+// beforeLog is where a section shown before the task's Log goes: at its Log's
+// heading, or at the end when it has none.
+func beforeLog(ls []string) int {
+	if i := slices.Index(ls, "## Log"); i >= 0 {
+		return i
+	}
+	return len(ls)
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is
