@@ -40,6 +40,8 @@ type Record struct {
 	Suggested *Suggested `json:"suggested,omitempty"`
 	Kept      *Kept      `json:"kept,omitempty"`
 	Declined  *Declined  `json:"declined,omitempty"`
+	Question  *Question  `json:"question,omitempty"`
+	Answered  *Answered  `json:"answered,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -71,6 +73,36 @@ type Kept struct {
 type Declined struct {
 	Suggestion string `json:"suggestion"` // the Suggested record's ID
 	Reason     string `json:"reason"`
+}
+
+// A Question waits on someone: asked by its asker, of its kind, for the one who
+// answers it.
+type Question struct {
+	Kind  QuestionKind `json:"kind"`
+	Asker string       `json:"asker"` // crew, or the collaborator whose comment it is, as @login
+	For   string       `json:"for"`   // who answers it: user or lead
+	Text  string       `json:"text"`
+	Head  string       `json:"head,omitempty"` // red CI's only: the commit CI was red on
+}
+
+// QuestionKind says what opened a question.
+type QuestionKind string
+
+const (
+	QuestionCollaborator QuestionKind = "collaborator" // a collaborator commented on the PR (crew feedback)
+	QuestionNudge        QuestionKind = "nudge"        // a worker stalled again, or its worktree is gone (crew nudge)
+	QuestionRedCI        QuestionKind = "red-ci"       // CI is still red past MAX_CI_FIXES (crew ci-fix)
+)
+
+var (
+	questionKinds = []QuestionKind{QuestionCollaborator, QuestionNudge, QuestionRedCI}
+	answerers     = []string{"user", "lead"}
+)
+
+// Answered settles a question, with what settled it.
+type Answered struct {
+	Question string `json:"question"` // the Question record's ID
+	Text     string `json:"text"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -146,6 +178,7 @@ func (d Doc) readRecords() ([]Record, error) {
 const (
 	kindToLearn    = "an item to learn"
 	kindSuggestion = "a memory suggestion"
+	kindQuestion   = "a question"
 )
 
 // adds is the kind of item the record adds for a later record to settle, or ""
@@ -156,6 +189,8 @@ func (r Record) adds() string {
 		return kindToLearn
 	case r.Suggested != nil:
 		return kindSuggestion
+	case r.Question != nil:
+		return kindQuestion
 	}
 	return ""
 }
@@ -170,14 +205,16 @@ func (r Record) settles() (item, what string) {
 		return r.Kept.Suggestion, kindSuggestion
 	case r.Declined != nil:
 		return r.Declined.Suggestion, kindSuggestion
+	case r.Answered != nil:
+		return r.Answered.Question, kindQuestion
 	}
 	return "", ""
 }
 
 // An Item is something a record adds for later records to settle, an item
-// still to learn or a memory suggestion, and the records that settle it, oldest
-// first. Two clones may each settle it, so it can have more than one. It's open
-// until one does.
+// still to learn, a memory suggestion or a question, and the records that
+// settle it, oldest first. Two clones may each settle it, so it can have more
+// than one. It's open until one does.
 type Item struct {
 	Record
 	Settled []Record
@@ -236,7 +273,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil, r.Question != nil, r.Answered != nil} {
 		if set {
 			payloads++
 		}
@@ -255,6 +292,31 @@ func (r Record) check() error {
 		return errors.New("a kept record needs its suggestion")
 	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
 		return errors.New("a declined record needs its suggestion and its reason")
+	case r.Question != nil:
+		return r.Question.check()
+	case r.Answered != nil && (r.Answered.Question == "" || strings.TrimSpace(r.Answered.Text) == ""):
+		return errors.New("an answered record needs its question and its text")
+	}
+	return nil
+}
+
+// check says what's missing from a question or wrong with it. A collaborator's
+// comment is asked by its @login, and the rest by crew; only red CI names the
+// commit it was red on.
+func (q Question) check() error {
+	switch {
+	case !slices.Contains(questionKinds, q.Kind):
+		return fmt.Errorf("a question's kind is one of %v, not %q", questionKinds, q.Kind)
+	case q.Kind == QuestionCollaborator && (len(q.Asker) < 2 || q.Asker[0] != '@'):
+		return fmt.Errorf("a collaborator's question is asked by an @login, not %q", q.Asker)
+	case q.Kind != QuestionCollaborator && q.Asker != "crew":
+		return fmt.Errorf("a %s question is asked by crew, not %q", q.Kind, q.Asker)
+	case !slices.Contains(answerers, q.For):
+		return fmt.Errorf("a question is for one of %v, not %q", answerers, q.For)
+	case strings.TrimSpace(q.Text) == "":
+		return errors.New("a question needs its text")
+	case (q.Kind == QuestionRedCI) != (q.Head != ""):
+		return errors.New("a question names the head it's about if, and only if, it's about red CI")
 	}
 	return nil
 }

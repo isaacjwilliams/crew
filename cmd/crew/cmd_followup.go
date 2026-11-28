@@ -571,7 +571,9 @@ func cmdNudge(c *Crew, args []string) error {
 		return nothingToDo("%s hasn't stalled", t.ID())
 	}
 	ask := func(question, log string) error {
-		t.AppendToSection("## Open questions", "- [ ] "+question+"\n")
+		if _, err := t.ask("crew nudge", Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: question}); err != nil {
+			return fail("%v", err)
+		}
 		t.Log(log)
 		t.Touch()
 		c.commit("nudge " + p.Name + "/" + t.ID())
@@ -603,8 +605,8 @@ func cmdNudge(c *Crew, args []string) error {
 }
 
 // crew settle TASK: when the worker of a task with an open nudge question has
-// moved on since crew nudge asked it (see Task.WorkerMovedOn), checks the
-// question off, saying what settled it. A task that waits on no other question
+// moved on since crew nudge asked it (see Task.WorkerMovedOn), settles the
+// question, saying what settled it. A task that waits on no other question
 // goes back to the status it had before needs-input. Exits 3 when there's
 // nothing to settle.
 func cmdSettle(c *Crew, args []string) error {

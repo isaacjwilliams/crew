@@ -1609,25 +1609,6 @@ func (t Task) WorkerMovedOn(head string) string {
 	return ""
 }
 
-// SettleNudgeQuestions checks off the open questions crew nudge asked the
-// lead, and says what settled them.
-func (t Task) SettleNudgeQuestions(by string) error {
-	ls, err := t.read()
-	if err != nil {
-		return err
-	}
-	in := false
-	for i, l := range ls {
-		if strings.HasPrefix(l, "## ") {
-			in = l == "## Open questions"
-		}
-		if in && isOpenNudgeQuestion(l) {
-			ls[i] = "- [x]" + strings.TrimPrefix(l, "- [ ]") + " Settled: " + by + "."
-		}
-	}
-	return t.writeLines(ls)
-}
-
 // FeedbackRounds counts the review rounds that hold the user's feedback: every
 // round but those that only hold crew's own reports (crewReports), of red CI
 // or a conflict with the base. MAX_REVIEW_ROUNDS limits these.

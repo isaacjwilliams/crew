@@ -107,15 +107,20 @@ func (cm ghComment) where() string {
 
 // quoted is a comment's body as a Markdown quote, indented under a list item.
 func quoted(body string) string {
+	q := blockquote(body)
+	if q == "" {
+		return ""
+	}
+	return "  " + strings.ReplaceAll(q, "\n", "\n  ")
+}
+
+// blockquote is a comment's body as a Markdown quote.
+func blockquote(body string) string {
 	body = strings.ReplaceAll(body, "\r", "")
 	if body == "" {
 		return ""
 	}
-	lines := strings.Split(body, "\n")
-	for i, l := range lines {
-		lines[i] = "  > " + l
-	}
-	return strings.Join(lines, "\n")
+	return "> " + strings.ReplaceAll(body, "\n", "\n> ")
 }
 
 // ghList reads every page of a list endpoint: one object per line, as
@@ -165,7 +170,7 @@ func byWho(cms []ghComment, who string) []ghComment {
 // feedback_since. The user's own become a review round for the worker; a
 // comment of theirs that says only `crew review` (isReviewRequest) asks it for
 // another automated review.
-// Collaborators' become unchecked items under Open questions: they wait for the
+// Collaborators' become questions for the user (Task.ask): they wait for the
 // user to decide what to do, and no agent answers them on its own. Anyone else's
 // are left alone. Exits 3 if there was nothing new.
 func cmdFeedback(c *Crew, args []string) error {
@@ -260,19 +265,35 @@ func cmdFeedback(c *Crew, args []string) error {
 		return exitQuietly(3)
 	}
 
-	var questions strings.Builder
+	var questions []Question
+	collaborator := func(cm ghComment, format string, a ...any) {
+		text := strings.TrimSuffix("@"+cm.User.Login+" "+fmt.Sprintf(format, a...)+"\n"+blockquote(cm.Body), "\n")
+		questions = append(questions, Question{Kind: QuestionCollaborator, Asker: "@" + cm.User.Login, For: "user", Text: text})
+	}
 	for _, rv := range theirReviews {
-		fmt.Fprintf(&questions, "- [ ] @%s reviewed PR #%s (%s), review %s — [link](%s)\n%s\n", rv.User.Login, num, strings.ToLower(rv.State), rv.ID, rv.HTMLURL, quoted(rv.Body))
+		collaborator(rv, "reviewed PR #%s (%s), review %s — [link](%s)", num, strings.ToLower(rv.State), rv.ID, rv.HTMLURL)
 	}
 	for _, cm := range theirInline {
-		fmt.Fprintf(&questions, "- [ ] @%s commented on %s in PR #%s, comment %s — [link](%s)\n%s\n", cm.User.Login, cm.where(), num, cm.ID, cm.HTMLURL, quoted(cm.Body))
+		collaborator(cm, "commented on %s in PR #%s, comment %s — [link](%s)", cm.where(), num, cm.ID, cm.HTMLURL)
 	}
 	for _, cm := range theirConvo {
-		fmt.Fprintf(&questions, "- [ ] @%s commented on PR #%s, comment %s — [link](%s)\n%s\n", cm.User.Login, num, cm.ID, cm.HTMLURL, quoted(cm.Body))
+		collaborator(cm, "commented on PR #%s, comment %s — [link](%s)", num, cm.ID, cm.HTMLURL)
 	}
 
 	if err := c.lock(); err != nil {
 		return err
+	}
+	// Asked first: when crew can't record them (before crew migrate, say),
+	// nothing is written, and the next run reads the comments again.
+	var asked []string
+	if len(questions) > 0 {
+		rs, err := t.ask("crew feedback", questions...)
+		if err != nil {
+			return fail("%v", err)
+		}
+		for _, r := range rs {
+			asked = append(asked, r.questionItem()...)
+		}
 	}
 	var n int
 	var round string
@@ -284,16 +305,15 @@ func cmdFeedback(c *Crew, args []string) error {
 		}
 		t.Log(msg)
 	}
-	if questions.Len() > 0 {
-		t.AppendToSection("## Open questions", questions.String())
+	if len(questions) > 0 {
 		t.Log(fmt.Sprintf("%d collaborator comment(s) %s", no, recordedForTheUser))
 	}
 	t.Set("pr", pr)
 	t.Set("feedback_since", stamp)
 	t.Touch()
 	c.commit("feedback " + p.Name + "/" + t.ID())
-	if questions.Len() > 0 {
-		fmt.Print("For the user (under Open questions):\n" + questions.String())
+	if len(asked) > 0 {
+		fmt.Print("For the user (under Open questions):\n" + strings.Join(asked, "\n") + "\n")
 	}
 	if round == "" {
 		return nil

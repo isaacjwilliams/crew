@@ -1373,7 +1373,14 @@ func TestWorkerMovedOn(t *testing.T) {
 }
 
 func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
-	task := nudgeQuestionTask(t)
+	task := learnTask(t, "---\nid: 1\nstatus: needs-input\n---\n## Open questions\n- [ ] Which way? A or B.\n\n## Log\n")
+	rs, err := task.ask("test",
+		Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: nudgeQuestionStart + " again after a nudge, with no new commit."},
+		Question{Kind: QuestionCollaborator, Asker: "@bob", For: "user", Text: "@bob commented on PR #7\n> Why not a scan?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge, comment := rs[0], rs[1]
 	if n := task.NudgeQuestions(); n != 1 {
 		t.Fatalf("NudgeQuestions = %d, want 1", n)
 	}
@@ -1383,12 +1390,27 @@ func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
 	if n := task.NudgeQuestions(); n != 0 {
 		t.Errorf("NudgeQuestions = %d after settling, want 0", n)
 	}
-	if n := task.OpenQuestions(); n != 3 {
-		t.Errorf("OpenQuestions = %d after settling, want the 3 that aren't nudge questions", n)
+	if n := task.OpenQuestions(); n != 2 {
+		t.Errorf("OpenQuestions = %d after settling, want the typed one and the comment", n)
 	}
-	want := "- [x] " + nudgeQuestionStart + " again after a nudge, with no new commit. Settled: new commit bbb2222."
+	want := "- [x] " + nudgeQuestionStart + " again after a nudge, with no new commit. Settled: new commit bbb2222. (question " + nudge.ID + ")"
 	if !strings.Contains(contents(t, task.Doc), want) {
 		t.Errorf("the settled question isn't marked as settled:\n%s", contents(t, task.Doc))
+	}
+	questions, err := task.Questions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range questions {
+		state := "open"
+		for _, a := range q.Settled {
+			state = a.By + ": " + a.Answered.Text
+		}
+		got = append(got, q.ID+" "+state)
+	}
+	if want := []string{nudge.ID + " crew settle: The worker moved on: new commit bbb2222.", comment.ID + " open"}; !slices.Equal(got, want) {
+		t.Errorf("questions after settling = %q, want %q", got, want)
 	}
 }
 

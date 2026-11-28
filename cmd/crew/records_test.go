@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,6 +85,84 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "001-a.records.jsonl:2: ") || !strings.Contains(err.Error(), want) {
 			t.Errorf("StillToLearn with %s = %v; want an error at line 2 saying %q", line, err, want)
 		}
+	}
+}
+
+func TestQuestionRecordsRefuseWhatTheyCantRead(t *testing.T) {
+	good := `{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"Q?"}}`
+	for question, want := range map[string]string{
+		`"question":{"kind":"worker","asker":"crew","for":"user","text":"Q?"}`:                                              "kind is one of",
+		`"question":{"kind":"collaborator","asker":"bob","for":"user","text":"Q?"}`:                                         `asked by an @login, not "bob"`,
+		`"question":{"kind":"nudge","asker":"@bob","for":"lead","text":"Q?"}`:                                               `a nudge question is asked by crew, not "@bob"`,
+		`"question":{"kind":"nudge","asker":"crew","for":"worker","text":"Q?"}`:                                             "is for one of",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":" "}`:                                                "a question needs its text",
+		`"question":{"kind":"red-ci","asker":"crew","for":"user","text":"Q?"}`:                                              "the head it's about",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":"Q?","head":"abc1234"}`:                              "the head it's about",
+		`"answered":{"question":"aaaaaaaa","text":"A"}`:                                                                     "settles aaaaaaaa, which no line adds as a question",
+		`"answered":{"question":"cccccccc","text":""}`:                                                                      "needs its question and its text",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":"Q?"},"answered":{"question":"aaaaaaaa","text":"A"}`: "not 2",
+	} {
+		line := `{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x",` + question + `}`
+		task := learnTask(t, "## Log\n")
+		if err := os.WriteFile(task.RecordsPath(), []byte(good+"\n"+line+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := task.Questions()
+		if err == nil || !strings.Contains(err.Error(), "001-a.records.jsonl:2: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("Questions with %s = %v; want an error at line 2 saying %q", line, err, want)
+		}
+	}
+}
+
+// crew's own questions are records, each with its item under Open questions,
+// which crew still counts until it decides from the records.
+func TestAskRecordsEachQuestionWithItsItem(t *testing.T) {
+	task := learnTask(t, "## Open questions\n- [ ] Typed by hand?\n\n## Log\n")
+	rs, err := task.ask("test",
+		Question{Kind: QuestionCollaborator, Asker: "@bob", For: "user", Text: "@bob commented on PR #7\n> Why not a scan?\n> \n> Just asking."},
+		Question{Kind: QuestionRedCI, Asker: "crew", For: "user", Head: "abc1234", Text: "CI is still red on abc1234 after 2 CI rounds."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions, err := task.Questions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range questions {
+		got = append(got, fmt.Sprintf("%s %s %s %s open=%v", q.ID, q.Question.Kind, q.Question.Asker, q.Question.For, q.Open()))
+	}
+	if want := []string{rs[0].ID + " collaborator @bob user open=true", rs[1].ID + " red-ci crew user open=true"}; !slices.Equal(got, want) {
+		t.Errorf("Questions = %q, want %q", got, want)
+	}
+	if questions[1].Question.Head != "abc1234" {
+		t.Errorf("the red CI question's head = %q, want abc1234", questions[1].Question.Head)
+	}
+	wantSection := "- [ ] Typed by hand?\n" +
+		"- [ ] @bob commented on PR #7 (question " + rs[0].ID + ")\n  > Why not a scan?\n  > \n  > Just asking.\n" +
+		"- [ ] CI is still red on abc1234 after 2 CI rounds. (question " + rs[1].ID + ")"
+	if got := strings.TrimSpace(task.Section(questionsHeading)); got != wantSection {
+		t.Errorf("Open questions =\n%s\nwant\n%s", got, wantSection)
+	}
+	if n := task.OpenQuestions(); n != 3 {
+		t.Errorf("OpenQuestions = %d, want the typed one and the two crew asked", n)
+	}
+}
+
+// Before crew migrate, ask writes nothing, so the command that asked can refuse
+// and lose nothing.
+func TestAskWritesNothingBeforeMigrate(t *testing.T) {
+	task := learnTask(t, "## Open questions\n\n## Log\n")
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	before := contents(t, task.Doc)
+	_, err := task.ask("test", Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Stalled?"})
+	if !errors.Is(err, errNotMigrated) {
+		t.Errorf("ask before migrate = %v, want it to say to run crew migrate", err)
+	}
+	if _, statErr := os.Stat(task.RecordsPath()); !errors.Is(statErr, os.ErrNotExist) || contents(t, task.Doc) != before {
+		t.Errorf("ask before migrate wrote something: %v\n%s", statErr, contents(t, task.Doc))
 	}
 }
 
