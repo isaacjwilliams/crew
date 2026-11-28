@@ -140,7 +140,7 @@ var showKinds = []showKind{
 	{word: "proposal", arg: "PROPOSAL", find: ledgerKind("proposals")},
 	{word: "goal", arg: "GOAL", find: ledgerKind("goals")},
 	{word: "memory", project: true, find: projectFile("memory.md")},
-	{word: "memory-suggestions", project: true, find: projectFile("memory-suggestions.md")},
+	{word: "memory-suggestions", project: true, find: projectFile(suggestionsFile), show: shownSuggestions},
 	{word: "file", arg: "NAME", project: true, find: (*Crew).resolveFile},
 }
 

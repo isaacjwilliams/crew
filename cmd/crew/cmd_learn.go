@@ -68,12 +68,12 @@ func cmdLearned(c *Crew, args []string) error {
 		return fail("%v", err)
 	}
 	items := learnItems(records)
-	i := slices.IndexFunc(items, func(i LearnItem) bool { return i.ID == id })
+	i := slices.IndexFunc(items, func(i Item) bool { return i.ID == id })
 	if i < 0 {
 		return fail("%s has no item %s still to learn (crew show %s lists them)", t.ID(), id, t.ID())
 	}
 	if !items[i].Open() {
-		return fail("%s is already settled, on %s", id, items[i].Answers[0].At.Local().Format(logTime))
+		return fail("%s is already settled, on %s", id, items[i].Settled[0].At.Local().Format(logTime))
 	}
 	r := newRecord("crew learned", records)
 	r.Learned = &Learned{Item: id, Answer: answer}
@@ -142,7 +142,7 @@ func shownTask(path string) (string, error) {
 // settled, with its ID and when it was added, and under it each answer, with
 // when it was given. Two clones may each settle an item, so it can have more
 // than one answer.
-func learnLines(items []LearnItem) []string {
+func learnLines(items []Item) []string {
 	var out []string
 	for _, i := range items {
 		box := "[x]"
@@ -150,7 +150,7 @@ func learnLines(items []LearnItem) []string {
 			box = "[ ]"
 		}
 		out = append(out, fmt.Sprintf("- %s %s (%s, added %s)", box, i.ToLearn.Text, i.ID, stamp(i.Record)))
-		for _, a := range i.Answers {
+		for _, a := range i.Settled {
 			lead := "  - settled " + stamp(a) + ":"
 			if lines := strings.Split(a.Learned.Answer, "\n"); len(lines) == 1 {
 				out = append(out, lead+" "+lines[0])

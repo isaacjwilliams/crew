@@ -40,6 +40,8 @@ var commands = map[string]func(*Crew, []string) error{
 	"check-base":     cmdCheckBase,
 	"promote":        cmdPromote,
 	"remember":       cmdRemember,
+	"keep":           cmdKeep,
+	"decline":        cmdDecline,
 	"memory":         cmdMemory,
 	"mcp":            cmdMCP,
 	"status":         cmdStatus,

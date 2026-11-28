@@ -1,8 +1,9 @@
 package main
 
 // Records are typed facts about a ledger file, kept beside it in its records
-// file: tasks/<id>.records.jsonl beside tasks/<id>.md. crew decides from them,
-// never from the file's prose. Only crew commands write records, one JSON line
+// file: tasks/<id>.records.jsonl beside tasks/<id>.md, and
+// memory-suggestions.records.jsonl beside a project's memory-suggestions.md.
+// crew decides from them, never from the file's prose. Only crew commands write records, one JSON line
 // each, appended under the ledger lock, and none is ever changed: a later fact
 // is a new record that names the one it follows. Two clones that each append
 // records merge without a conflict, since git's union driver keeps both sides'
@@ -34,8 +35,11 @@ type Record struct {
 	At time.Time `json:"at"`
 	By string    `json:"by"` // the crew command that wrote it
 
-	ToLearn *ToLearn `json:"to_learn,omitempty"`
-	Learned *Learned `json:"learned,omitempty"`
+	ToLearn   *ToLearn   `json:"to_learn,omitempty"`
+	Learned   *Learned   `json:"learned,omitempty"`
+	Suggested *Suggested `json:"suggested,omitempty"`
+	Kept      *Kept      `json:"kept,omitempty"`
+	Declined  *Declined  `json:"declined,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -48,6 +52,25 @@ type ToLearn struct {
 type Learned struct {
 	Item   string `json:"item"` // the ToLearn record's ID
 	Answer string `json:"answer"`
+}
+
+// Suggested adds a fact suggested for the project's memory.md, which waits on
+// the user until Kept or Declined settles it.
+type Suggested struct {
+	Fact   string `json:"fact"`
+	Why    string `json:"why"`
+	Source string `json:"source"` // who suggested it, as ledgerSource checks it
+}
+
+// Kept settles a suggestion the user kept for memory.md.
+type Kept struct {
+	Suggestion string `json:"suggestion"` // the Suggested record's ID
+}
+
+// Declined settles a suggestion the user turned down, with why.
+type Declined struct {
+	Suggestion string `json:"suggestion"` // the Suggested record's ID
+	Reason     string `json:"reason"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -70,10 +93,19 @@ func (d Doc) RecordsPath() string { return strings.TrimSuffix(d.Path, ".md") + "
 // file. It fails on any line it can't read, naming the line, and when the
 // project's ledger isn't in the format this crew reads (ledgerFormat).
 func (d Doc) Records() ([]Record, error) {
-	if err := checkLedgerFormat(filepath.Dir(filepath.Dir(d.Path))); err != nil {
+	if err := checkLedgerFormat(d.projectDir()); err != nil {
 		return nil, err
 	}
 	return d.readRecords()
+}
+
+// projectDir is the project the file belongs to: projects/<p>/, which holds
+// memory-suggestions.md and the folders of tasks, goals and proposals.
+func (d Doc) projectDir() string {
+	if filepath.Base(d.Path) == suggestionsFile {
+		return filepath.Dir(d.Path)
+	}
+	return filepath.Dir(filepath.Dir(d.Path))
 }
 
 // readRecords are the records in the file, whatever the project's format.
@@ -89,25 +121,98 @@ func (d Doc) readRecords() ([]Record, error) {
 	}
 	name := filepath.Base(d.RecordsPath())
 	var records []Record
-	toLearn := map[string]bool{} // whether the record with each ID adds an item
+	adds := map[string]string{} // what the record with each ID adds, if anything
 	for i, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		r, err := parseRecord([]byte(line))
-		if _, taken := toLearn[r.ID]; err == nil && taken {
+		if _, taken := adds[r.ID]; err == nil && taken {
 			err = fmt.Errorf("id %s is already taken by an earlier line", r.ID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", name, i+1, err)
 		}
-		toLearn[r.ID] = r.ToLearn != nil
+		adds[r.ID] = r.adds()
 		records = append(records, r)
 	}
 	// Checked once every line is in: a merge may put a record before the one it names.
 	for i, r := range records {
-		if r.Learned != nil && !toLearn[r.Learned.Item] {
-			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as an item to learn", name, i+1, r.Learned.Item)
+		if item, what := r.settles(); what != "" && adds[item] != what {
+			return nil, fmt.Errorf("%s:%d: it settles %s, which no line adds as %s", name, i+1, item, what)
 		}
 	}
 	return records, nil
+}
+
+// The kinds of item records add. Each is also the words an error names it by.
+const (
+	kindToLearn    = "an item to learn"
+	kindSuggestion = "a memory suggestion"
+)
+
+// adds is the kind of item the record adds for a later record to settle, or ""
+// when it adds nothing.
+func (r Record) adds() string {
+	switch {
+	case r.ToLearn != nil:
+		return kindToLearn
+	case r.Suggested != nil:
+		return kindSuggestion
+	}
+	return ""
+}
+
+// settles is the ID of the item the record settles, and that item's kind; what
+// is "" for a record that settles nothing.
+func (r Record) settles() (item, what string) {
+	switch {
+	case r.Learned != nil:
+		return r.Learned.Item, kindToLearn
+	case r.Kept != nil:
+		return r.Kept.Suggestion, kindSuggestion
+	case r.Declined != nil:
+		return r.Declined.Suggestion, kindSuggestion
+	}
+	return "", ""
+}
+
+// An Item is something a record adds for later records to settle, an item
+// still to learn or a memory suggestion, and the records that settle it, oldest
+// first. Two clones may each settle it, so it can have more than one. It's open
+// until one does.
+type Item struct {
+	Record
+	Settled []Record
+}
+
+func (i Item) Open() bool { return len(i.Settled) == 0 }
+
+// items are the items of one kind the records add, in the order they were
+// added, each with what settles it. Records from readRecords settle only items
+// of the kind they name, which it checks.
+func items(records []Record, kind string) []Item {
+	var items []Item
+	for _, r := range records {
+		if r.adds() == kind {
+			items = append(items, Item{Record: r})
+		}
+	}
+	for _, r := range records {
+		item, _ := r.settles()
+		if i := slices.IndexFunc(items, func(i Item) bool { return i.ID == item }); item != "" && i >= 0 {
+			items[i].Settled = append(items[i].Settled, r)
+		}
+	}
+	return items
+}
+
+// openItems counts the items that are still open.
+func openItems(items []Item) int {
+	n := 0
+	for _, i := range items {
+		if i.Open() {
+			n++
+		}
+	}
+	return n
 }
 
 // parseRecord reads one line of a records file, refusing a field it doesn't
@@ -131,7 +236,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
 		if set {
 			payloads++
 		}
@@ -144,6 +249,12 @@ func (r Record) check() error {
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.Suggested != nil && (strings.TrimSpace(r.Suggested.Fact) == "" || strings.TrimSpace(r.Suggested.Why) == "" || r.Suggested.Source == ""):
+		return errors.New("a suggested record needs its fact, its why and its source")
+	case r.Kept != nil && r.Kept.Suggestion == "":
+		return errors.New("a kept record needs its suggestion")
+	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
+		return errors.New("a declined record needs its suggestion and its reason")
 	}
 	return nil
 }
@@ -171,9 +282,10 @@ func (d Doc) AddRecords(rs ...Record) error {
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
-// records; before it they were checkboxes in the task file, which crew migrate
-// moves into records. crew project add writes the file for a new project.
-const ledgerFormat = 1
+// records, and format 2 memory suggestions; before, they were checkboxes in the
+// task file and in memory-suggestions.md, which crew migrate moves into records.
+// crew project add writes the file for a new project.
+const ledgerFormat = 2
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

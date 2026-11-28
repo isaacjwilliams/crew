@@ -33,6 +33,38 @@ func reportTask(t *testing.T, c *Crew, project, name string, asks bool, fields .
 	return Task{Doc{p}}
 }
 
+// suggestFact adds a memory suggestion to the project, as crew remember does,
+// and returns its ID.
+func suggestFact(t *testing.T, c *Crew, project, fact string) string {
+	t.Helper()
+	r := Record{Suggested: &Suggested{Fact: fact, Why: "Why not.", Source: "lead"}}
+	return addSuggestionRecord(t, c, project, r)
+}
+
+// addSuggestionRecord adds a record to the project's memory suggestions, as crew
+// remember, crew keep and crew decline do, and returns its ID.
+func addSuggestionRecord(t *testing.T, c *Crew, project string, r Record) string {
+	t.Helper()
+	dir := c.path("projects", project)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLedgerFormat(dir); err != nil {
+		t.Fatal(err)
+	}
+	d := c.suggestionsDoc(project)
+	records, err := d.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := newRecord("test", records)
+	n.Suggested, n.Kept, n.Declined = r.Suggested, r.Kept, r.Declined
+	if err := d.AddRecords(n); err != nil {
+		t.Fatal(err)
+	}
+	return n.ID
+}
+
 // writeFile writes a file in the home, making its directory.
 func writeFile(t *testing.T, c *Crew, content string, path ...string) {
 	t.Helper()
@@ -116,7 +148,7 @@ echo '[{"id":"w1","state":"working","pid":1}]'
 	reportTask(t, c, "q", "001-asks", true, "status: draft")
 	reportTask(t, c, "q", "002-pr", false, "status: pr-open", "pr: https://github.com/o/q/pull/3")
 	reportTask(t, c, "q", "003-merged", true, "status: merged")
-	writeFile(t, c, "# Memory suggestions: q\n\n- [ ] **A** a. (lead, 2026-11-09)\n", "projects", "q", "memory-suggestions.md")
+	suggestFact(t, c, "q", "A")
 	return c
 }
 
@@ -198,6 +230,24 @@ func TestBuildReportStacksAndFoldsTasksOutsideAGoal(t *testing.T) {
 	}
 	if want := []string{"015-earlier", "014-later", "013-risky"}; !slices.Equal(review, want) {
 		t.Errorf("to review = %v, want cheapest look first, then by PR number: %v", review, want)
+	}
+}
+
+// Until crew migrate, a project's suggestions are still lines in its file, which
+// crew no longer reads: status says it can't count them rather than show none.
+func TestBuildReportDoesntCountSuggestionsBeforeTheMigration(t *testing.T) {
+	c := statusLedger(t)
+	os.Remove(ledgerFormatPath(c.path("projects", "q")))
+	writeFile(t, c, "# Memory suggestions: q\n\n- [ ] **A** a. (lead, 2026-11-09)\n", "projects", "q", suggestionsFile)
+	q := readReport(c, "p").Projects[1]
+	if !errors.Is(q.Waiting.MemoryUnread, errNotMigrated) {
+		t.Fatalf("q waiting = %+v, want its memory suggestions unread", q.Waiting)
+	}
+	if got := q.Waiting.String(); !strings.Contains(got, "memory suggestions not counted: q's ledger isn't migrated") || strings.Contains(got, "memory suggestion(s)") {
+		t.Errorf("q waiting says %q", got)
+	}
+	if got := q.footer("q"); !strings.Contains(fmt.Sprint(got), "memory suggestions: can't count them: q's ledger isn't migrated") {
+		t.Errorf("q's footer = %v", got)
 	}
 }
 
