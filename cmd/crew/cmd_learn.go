@@ -87,8 +87,9 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn (shownSection).
+// shownTask is a task as crew show prints it: its file, with what its records
+// hold in the sections they belong to (shownSection): its still-to-learn items
+// under Still to learn, and its evidence and security review under Evidence.
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
@@ -98,6 +99,10 @@ func shownTask(path string) (string, error) {
 	learning, unread := t.StillToLearn()
 	ls = shownSection(ls, learnHeading, learnLines(learning), unread,
 		"the items still to learn", "items crew counts (crew to-learn adds one)")
+	evidence, unread := t.Evidence()
+	reviews, _ := t.SecurityReviews() // it fails as the evidence does
+	ls = shownSection(ls, evidenceHeading, evidenceLines(t, evidence, reviews), unread,
+		"the evidence", "evidence crew counts (crew record-evidence records it)")
 	return strings.Join(ls, "\n") + "\n", nil
 }
 
@@ -123,17 +128,17 @@ func shownSection(ls []string, heading string, shown []string, unread error, wha
 		ls = slices.Insert(slices.Clone(ls), start, heading, "")
 	}
 	end := start + 1 + len(sectionLines(ls[start:], heading))
-	// uncommented blanks out comment lines rather than dropping them, so its
-	// lines line up with the section's.
-	var kept, typed []string // the section's comments and blank lines, and the rest
-	for i, l := range uncommented(ls[start+1 : end]) {
-		if strings.Trim(l, " \t") == "" {
-			kept = append(kept, ls[start+1+i])
-		} else {
-			typed = append(typed, ls[start+1+i])
-		}
+	// What's typed runs from the first line outside a comment to the section's
+	// end, as written: prose keeps its paragraphs. uncommented blanks out
+	// comment lines rather than dropping them, so its lines line up with the
+	// section's.
+	section := ls[start+1 : end]
+	first := slices.IndexFunc(uncommented(section), func(l string) bool { return strings.Trim(l, " \t") != "" })
+	kept, typed := section, []string(nil) // the comments above what's typed, and what's typed
+	if first >= 0 {
+		kept, typed = section[:first], trimBlankEnd(section[first:])
 	}
-	body := append(trimBlankEnd(kept), shown...)
+	body := append(trimBlankEnd(slices.Clone(kept)), shown...)
 	switch {
 	case errors.Is(unread, errNotMigrated):
 		body = append(body, typed...)

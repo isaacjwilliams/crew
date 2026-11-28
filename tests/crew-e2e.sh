@@ -77,29 +77,29 @@ fill() { sed -i -e '/^## Goal$/a x' -e '/^## Acceptance criteria$/a - z' -e '/^#
 review() { sed -i "/^## Review rounds\$/i ### Automated review $2\\n${3:+$3\\n}" "$1"; }   # task-file review-number [record-line]
 clear_review() { sed -i '/^### Automated review 1$/,+1d' "$1"; }   # task-file: takes out what review wrote
 section() { awk -v h="$2" '$0==h {on=1; next} on && /^## / {exit} on' "$1"; }
+NL=$'\n'
 # What a worker does before its hand-over: it records the evidence for each acceptance
-# criterion, on its branch as it is now, here or on origin. Recording it again names
-# the new commit.
+# criterion with crew record-evidence, on its branch as it is now, here or on origin.
+# Recording it again names the new commit.
 record_evidence() {  # task
   local f b sha n i; f=$(crew path "$1"); b=$(crew get "$1" branch)
-  sha=$(git -C "$SB/webapp" rev-parse --short --verify -q "refs/heads/$b" || git -C "$SB/webapp" rev-parse --short --verify -q "refs/remotes/origin/$b")
-  if section "$f" "## Evidence" | grep -q '^### [0-9]'; then
-    sed -i -E -e "/^## Evidence\$/,/^## /s/^(### [0-9]+\..*) \(on [0-9a-f]+\)\$/\1/" -e "/^## Evidence\$/,/^## /s/^(### [0-9]+\..*)\$/\1 (on $sha)/" "$f"
-  else
-    n=$(section "$f" "## Acceptance criteria" | grep -c '^- ')
-    for ((i = n; i >= 1; i--)); do  # each lands just under the heading, so the last goes first
-      sed -i "/^## Evidence\$/a ### $i. (on $sha)\\nok" "$f"
-    done
-  fi
+  sha=$(git -C "$SB/webapp" rev-parse --verify -q "refs/heads/$b" || git -C "$SB/webapp" rev-parse --verify -q "refs/remotes/origin/$b")
+  n=$(section "$f" "## Acceptance criteria" | grep -c '^- ')
+  for ((i = 1; i <= n; i++)); do
+    crew record-evidence "$1" "$i" --on "$sha" --ran ok >/dev/null
+  done
 }
-# The PR body's Evidence, as the worker builds it from the task's: an item for each entry.
+records() { local f; f=$(crew path "$1"); echo "${f%.md}.records.jsonl"; }   # task: its records file
+# The evidence crew show prints, without what's typed under the section.
+shown_evidence() { crew show "$1" | awk '$0 == "## Evidence" {on = 1; next} on && (/^## / || /^Typed into the file/) {exit} on'; }
+# The PR body's Evidence, as the worker builds it from crew show: an item for each criterion.
 pr_body() {  # task
-  local f pr; f=$(crew path "$1"); pr=$(crew get "$1" pr)
+  local pr; pr=$(crew get "$1" pr)
   [[ -n $pr ]] || return 0
-  { printf 'The objective.\n\n## Evidence\n\n'; section "$f" "## Evidence" | sed -n -E 's/^### ([0-9]+\..*)$/\1: `ok`/p'; } >"$HOME/gh-pr-body-${pr##*/}"
+  { printf 'The objective.\n\n## Evidence\n\n'; shown_evidence "$1" | sed -n -E 's/^### ([0-9]+\..*)$/\1: `ok`/p'; } >"$HOME/gh-pr-body-${pr##*/}"
 }
-# The commit a task's evidence for its first criterion names.
-evidence_commit() { sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p' "$(crew path "$1")"; }
+# The commit a task's evidence for its first criterion names, as hand-over names it.
+evidence_commit() { shown_evidence "$1" | sed -n -E 's/^### 1\..*\(on ([0-9a-f]+)\)$/\1/p'; }
 # What a worker does to put its task in pr-open: evidence for each acceptance criterion,
 # the first time, in the task and the PR body, then crew hand-over. A refusal fails the
 # suite, since the checks after it would run against a task that isn't pr-open.
@@ -116,7 +116,7 @@ restacked() {
     $(jq -r --arg j "$(crew get "$1" worker_job)" '.[] | select(.id == $j) | .sessionId' "$HOME/agents.json") == "$(crew get "$1" worker_session)" ]]
 }
 hand_over() {  # task: records evidence and, unless it has one, an automated review, since hand-over needs both
-  section "$(crew path "$1")" "## Evidence" | grep -q '^### ' || record_evidence "$1"
+  grep -qs '"evidence":' "$(records "$1")" || record_evidence "$1"
   grep -q '^### Automated review ' "$(crew path "$1")" || review "$(crew path "$1")" 1
   pr_body "$1"
   crew hand-over "$1" >/dev/null || { FAIL=$((FAIL + 1)); printf '  FAIL: hand_over %s refused at line %s\n' "$1" "${BASH_LINENO[0]}"; }
@@ -378,10 +378,40 @@ crew set 1 status $'\tpr-open' 2>/dev/null || refused=$((refused + 1))
 crew set 1 status pr-open "" 2>/dev/null || refused=$((refused + 1))  # joined with a space
 check "crew set refuses pr-open with a space or tab around it, which reading the status back would drop" \
   '((refused == 3)) && [[ $(crew get 1 status) == working ]]'
-sed -i -e '/^## Evidence$/a ### 1. z2\n```\nok\n```\n### 3. z\nok' "$F1"
-check "hand-over refuses a task without evidence for every acceptance criterion, and names the missing ones" \
+# The evidence is what crew records: the prose under ## Evidence is for people, and
+# crew record-evidence refuses what it can't stand behind, leaving the ledger as it was.
+B=$(git -C "$SB/webapp" rev-parse agent/saved-search-filters)
+sed -i -e "/^## Evidence\$/a ### 1. z2 (on ${B:0:7})\\n\`\`\`\\nok\\n\`\`\`\\n### 2. z3 (on ${B:0:7})\\nseen\\n### 3. z (on ${B:0:7})\\nok" "$F1"
+check "hand-over refuses evidence typed under ## Evidence that crew hasn't recorded" \
+  'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 1, 2, 3 of 3: run each one'"'"'s check and record it with crew record-evidence"* && $(crew get 1 status) == working ]]'
+OFF=$(git -C "$SB/webapp" commit-tree "$B^{tree}" -m "on no branch")
+head=$(git -C "$L" rev-parse HEAD); refused=0
+for args in "0 --on $B --ran ok" "4 --on $B --ran ok" "x --on $B --ran ok" "1 --on $OFF --ran ok" "1 --on nosuch --ran ok" \
+  "1 --on $B" "1 --on $B --ran ok --not-run why" "1 --ran ok"; do
+  # shellcheck disable=SC2086 # each case is its own words
+  out=$(crew record-evidence 1 $args 2>&1) && continue
+  case $args in
+    [04x]" "*) [[ $out == *"001-saved-search-filters has acceptance criteria 1 to 3, not ${args%% *}"* ]] ;;
+    *" $OFF "*) [[ $out == *"$OFF isn't on the task's branch agent/saved-search-filters, here or on origin"* ]] ;;
+    *nosuch*) [[ $out == *"nosuch isn't a commit in $SB/webapp"* ]] ;;
+    *--on*) [[ $out == *"say whether the check ran: --ran with what ran and what it showed, or --not-run"* ]] ;;
+    *) [[ $out == *"name the commit the check ran on, with --on <sha>"* ]] ;;
+  esac && refused=$((refused + 1))
+done
+[[ $(crew record-evidence 1 1 --on "$B" --ran "  " 2>&1) == *"say whether the check ran"* ]] && refused=$((refused + 1))  # what ran says nothing
+check "record-evidence refuses a criterion the brief hasn't, a commit off the task's branch or none, and no word on whether the check ran, and records nothing" \
+  '((refused == 9)) && [[ $(git -C "$L" rev-parse HEAD) == "$head" && ! -e $(records 1) ]]'
+crew record-evidence 1 1 --on "$B" --ran ok >/dev/null; crew record-evidence 1 3 --on "${B:0:7}" --ran ok >/dev/null
+check "record-evidence records a criterion's evidence on a commit of the branch, and commits it" \
+  '[[ $(git -C "$L" log -1 --format=%s) == "record-evidence 001-saved-search-filters" && $(jq -s -c "map(.evidence | [.criterion, .commit, .ran])" "$(records 1)") == "[[1,\"$B\",true],[3,\"$B\",true]]" ]]'
+check "hand-over refuses a task without evidence recorded for every acceptance criterion, and names the missing ones" \
   'out=$(crew hand-over 1 2>&1); (($? == 1)) && [[ $out == *"evidence missing for acceptance criteria 2 of 3"* && $(crew get 1 status) == working ]]'
-sed -i -e '/^### 3. z$/i ### 2. z3\nseen' -e 's/^\(- z[23]\?\)$/1. \1/' "$F1"
+crew record-evidence 1 2 --on "$B" --ran seen >/dev/null
+echo '{"id":"0badf00d","at":"2026-11-28T10:00:00Z","by":"hand","evidence":{"criterion":2,"commit":"'"$B"'","ran":true,"shows":""}}' >>"$(records 1)"
+check "hand-over refuses evidence that holds none of what it shows" \
+  '[[ $(crew hand-over 1 2>&1) == *"couldn'"'"'t read the evidence: 001-saved-search-filters.records.jsonl:4: an evidence record needs its criterion, its commit and what it shows"* && $(crew get 1 status) == working ]]'
+sed -i '$d' "$(records 1)"
+sed -i -e 's/^\(- z[23]\?\)$/1. \1/' "$F1"
 check "hand-over refuses acceptance criteria that aren't '- ' items, and says to ask" '[[ $(crew hand-over 1 2>&1) == *"no '"'"'- '"'"' items to show evidence for: ask"* ]]'
 sed -i 's/^1\. \(- z[23]\?\)$/\1/' "$F1"
 # A hand-over waiting for the ledger lock checks the task as it is once it has it
@@ -395,11 +425,9 @@ crew set 1 status needs-input
 # task high risk, at the hand-over and at every sync; high risk needs a security review.
 commit_in() { (cd "$1" && shift && for f in "$@"; do mkdir -p "$(dirname "$f")" && echo x >"$f"; done && git add -A && git commit -qm "change $*"); }
 commit_in "$WT" src/search.ts src/oauth.ts
-# The evidence the user reads names the commit it ran on, in the task and the PR body,
-# and that commit holds the branch's own work as it is now.
-check "hand-over refuses evidence that doesn't name the commit it ran on" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence for acceptance criteria 1, 2, 3 doesn'"'"'t name the commit it ran on: end each entry'"'"'s heading with '"'"'(on <sha>)'"'"'"* && $(crew get 1 status) == needs-input ]]'
-record_evidence 1; E1=$(git -C "$WT" rev-parse --short HEAD)
+# The evidence names the commit it ran on, in the records and the PR body, and that
+# commit holds the branch's own work as it is now.
+record_evidence 1; E1=$(git -C "$WT" rev-parse --short=12 HEAD)
 printf '## Evidence\n\n1. z (on %s): `ok`\n3. z3 (on %s): `ok`\n' "$E1" "$E1" >"$HOME/gh-pr-body-12"
 check "hand-over refuses a PR body without evidence for every acceptance criterion, and names the missing ones" \
   '[[ $(crew hand-over 1 2>&1) == *"the PR body'"'"'s Evidence has no item for acceptance criteria 2 of 3: add a '"'"'<n>. … (on <sha>)'"'"' item for each"* && $(crew get 1 status) == needs-input ]]'
@@ -411,25 +439,28 @@ check "hand-over refuses evidence that names a commit it can't find" \
   '[[ $(crew hand-over 1 2>&1) == *"couldn'"'"'t check the evidence: 0123abc isn'"'"'t a commit in "* && $(crew get 1 status) == needs-input ]]'
 pr_body 1; commit_in "$WT" src/filters.ts
 check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in the recorded evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
 record_evidence 1; pr_body 1
 # Only the user's checks may be left to them: the brief marks one "User check:", or the
 # user makes one theirs later, in a Decision. Criterion 1 is marked; 3 isn't, until then.
-cp "$F1" "$SB/f1-before-user-checks"
+# Whether a check ran is what crew recorded: prose saying it wasn't changes nothing.
+cp "$F1" "$SB/f1-before-user-checks"; cp "$(records 1)" "$SB/r1-before-user-checks"
 not_run='Not done: it needs a real terminal. To try: run it.'
+H=$(git -C "$WT" rev-parse HEAD)
 sed -i 's/^- z2$/- User check: z2/' "$F1"
-sed -i "/^### [13]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
-sed -i "/^[13]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
+crew record-evidence 1 1 --on "$H" --not-run "$not_run" >/dev/null; crew record-evidence 1 3 --on "$H" --not-run "$not_run" >/dev/null
+sed -i "/^### 2\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
+sed -i "/^[123]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
 out=$(crew hand-over 1 2>&1); st=$?
-check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless the brief marks it a user check" \
-  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
+check "hand-over refuses evidence recorded as not run unless the brief marks it a user check, and not for prose saying a check ran wasn't" \
+  '((st == 1)) && [[ $out == *"evidence for acceptance criteria 3 is recorded as not run. Run each check the ways the project'"'"'s AGENTS.md, docs and memory give, and record what it showed with crew record-evidence --ran"* && $(crew get 1 status) == needs-input ]]'
 sed -i '/^## Decisions$/a - 2026-11-24 — Criterion 3 is a user check: only a real terminal shows it (lead)' "$F1"
-check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 3 ("* ]]'
+check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"evidence for acceptance criteria 3 is recorded as not run"* ]]'
 sed -i 's/^\(- 2026-11-24 — Criterion 3 is a user check: .*\) (lead)$/\1 (user)/' "$F1"
 out=$(crew hand-over 1 2>&1)
-check "hand-over accepts evidence that leaves a check to the user once a Decision of theirs makes it a user check" \
-  '[[ $out != *"wasn'"'"'t run"* && $out == *"automated review hasn'"'"'t run"* ]]'
-cp "$SB/f1-before-user-checks" "$F1"; pr_body 1
+check "hand-over accepts evidence recorded as not run once a Decision of the user's makes it a user check" \
+  '[[ $out != *"not run"* && $out == *"automated review hasn'"'"'t run"* ]]'
+cp "$SB/f1-before-user-checks" "$F1"; cp "$SB/r1-before-user-checks" "$(records 1)"; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses when it can't check SENSITIVE_PATHS, rather than hand over unchecked" \
@@ -475,7 +506,7 @@ crew set 1 status addressing-feedback; crew set 1 risk medium; crew set 1 auto_r
 git -C "$WT" pull -q --ff-only; commit_in "$WT" db/migrate/001_add_filters.sql app/auth.rb; git -C "$WT" push -q origin HEAD; record_evidence 1; pr_body 1
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over after a review round raises the risk of a branch whose own commits and origin's both touch sensitive paths, naming the first, then refuses it without a security review" \
-  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them under ## Evidence as '"'"'### Security review'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
+  '((st == 1)) && [[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out == *"high risk: run /security-review, act on its findings, record them with crew record-security-review 001-saved-search-filters '"'"'<what it found, and what you did about each>'"'"', then hand over again"* && $(crew get 1 risk) == high && $(crew get 1 status) == addressing-feedback ]]'
 check "a raise at the hand-over turns the task's automated review back on, and logs why" \
   '[[ $(crew config AUTO_REVIEWS --task 1) == 3 && $(section "$F1" "## Log" | grep -c " — risk → high: touches app/auth.rb (+2 more); automated review back on$") == 1 ]]'
 # A task that makes no PR has no pr to tell its hand-over raise from a raise before its passes.
@@ -485,17 +516,22 @@ out=$(crew hand-over 1 2>&1)
 sed -i 's/status → xpr-open/status → pr-open/' "$F1"; crew set 1 pre_pr_review yes; crew set 1 pr_mode "$mode"; crew set 1 pr "$pr"
 check "a raise at the hand-over of a task that makes no PR says nothing of the pre-PR passes: they're behind it" \
   '[[ $out == *"risk → high: touches app/auth.rb (+2 more)"* && $out != *"pre-PR passes"* ]]'
-sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
 git -C "$SB/webapp" remote set-url origin "$SB/nowhere.git"; out=$(crew hand-over 1 2>&1); st=$?
 git -C "$SB/webapp" remote set-url origin "$SB/remote.git"
 check "hand-over refuses when it can't fetch, since origin may have commits it hasn't seen" \
   '((st == 1)) && [[ $out == *"couldn'"'"'t check the branch as origin has it: git fetch origin failed"* && $(crew get 1 status) == addressing-feedback ]]'
+sed -i '/^### 3. z (on /i ### Security review\nNo findings.' "$F1"
+check "hand-over refuses a security review only typed under ## Evidence" \
+  '[[ $(crew hand-over 1 2>&1) == *"high risk: run /security-review"* && $(crew get 1 status) == addressing-feedback ]]'
+check "record-security-review refuses a review that says nothing, and records nothing" \
+  '! crew record-security-review 1 "  " 2>/dev/null && ! grep -q security_review "$(records 1)"'
+crew record-security-review 1 "No findings." >/dev/null
 clear_review "$F1"   # the review recorded before the raise
 out=$(crew hand-over 1 2>&1); st=$?
 check "hand-over refuses a task whose automated review was turned back on until a review is recorded" \
   '((st == 1)) && [[ $out == *"automated review hasn'"'"'t run for this task: run a pass of automated review, then hand over again"* && $(crew get 1 status) == addressing-feedback ]]'
 review "$F1" 1
-check "hand-over hands a high-risk task over once its security review is under Evidence and its automated review recorded" \
+check "hand-over hands a high-risk task over once its security review and its automated review are recorded" \
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(crew status | grep "^  001-saved-search-filters ") == *"  high: read the diff; security review ran" ]]'
 # Whether a pr-open task's PR can merge now: crew status reads the PR on GitHub as it
 # runs. The ledger's last sync says the PR is open and clear throughout.
@@ -552,13 +588,19 @@ check "evidence stays current through a merge of the base, though it ran before 
   'crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open && $(git -C "$WT" rev-list --merges "$E1..HEAD") != "" ]]'
 main_moves src/search.ts; merge_main; crew set 1 status addressing-feedback
 check "a merge of the base whose conflict the worker resolved makes the evidence stale" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in the recorded evidence: 1 (on $E1)"* && $(crew get 1 status) == addressing-feedback ]]'
 record_evidence 1; hand_over 1
 # Evidence that ran on a commit origin doesn't have yet isn't what the user would merge.
 crew set 1 status addressing-feedback; commit_in "$WT" src/unpushed.ts; record_evidence 1; pr_body 1; E1=$(evidence_commit 1)
 check "hand-over refuses evidence that ran on a commit the branch on origin lacks, and says a push is all that's missing" \
-  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on work the branch on origin doesn'"'"'t have yet, in ## Evidence: 1 (on $E1)"*". Push the branch, then hand over again" && $(crew get 1 status) == addressing-feedback ]]'
+  '[[ $(crew hand-over 1 2>&1) == *"evidence ran on work the branch on origin doesn'"'"'t have yet, in the recorded evidence: 1 (on $E1)"*". Push the branch, then hand over again" && $(crew get 1 status) == addressing-feedback ]]'
 git -C "$WT" push -q origin HEAD; hand_over 1
+# crew show prints what crew recorded under ## Evidence, each criterion's record in full
+# and the security review, and keeps what's typed there below it.
+E1=$(git -C "$WT" rev-parse --short=12 HEAD)
+ev=$(crew show 1 | awk '$0 == "## Evidence" {on = 1; next} on && /^## / {exit} on && !/^(<!--|     )/' | sed -E 's/ Recorded [0-9-]+ [0-9:]+ by / Recorded <when> by /; s/^Recorded [0-9-]+ [0-9:]+ by /Recorded <when> by /')
+check "show prints each criterion's recorded evidence, whether it ran, on what commit and what it showed, and the security review" \
+  '[[ $ev == "### 1. z2 (on $E1)${NL}Ran. Recorded <when> by crew record-evidence:${NL}ok${NL}${NL}### 2. z3 (on $E1)${NL}Ran. Recorded <when> by crew record-evidence:${NL}ok${NL}${NL}### 3. z (on $E1)${NL}Ran. Recorded <when> by crew record-evidence:${NL}ok${NL}${NL}### Security review${NL}Recorded <when> by crew record-security-review:${NL}No findings.${NL}${NL}Typed into the file, so not evidence crew counts (crew record-evidence records it):${NL}### 1. z2 (on "*"### Security review${NL}No findings."* ]]'
 check "find by PR number" '[[ $(crew find "#12") == 001-saved-search-filters ]]'
 check "attach attaches to the task's worker from the current directory" \
   '(cd "$WT" && env -u CLAUDECODE crew attach 1) && [[ $(tail -1 "$HOME/claude-calls.log") == "claude attach $(crew get 1 worker_job)" && $(cat "$HOME/claude.cwd") == "$WT" ]]'
@@ -994,7 +1036,6 @@ P=$(ls -d "$L"/projects/*)/proposals/2026-09-25-x.md
 sed -e 's/^title: .*/title: "Extract retry"/' -e "s/^project: .*/project: $(basename "$(dirname "$(dirname "$P")")")/" -e 's/^source: .*/source: gardener/' \
   -e '/^## Proposal$/a Move the three retry loops into lib/retry.' -e '/^## First step$/a Extract the helper from api/client.' "$L/templates/proposal.md" >"$P"
 check "promote an open proposal with a branch name" 'PF=$(crew promote 2026-09-25-x --branch retry-helper) && [[ $(basename "$PF") == 006-retry-helper.md && $(crew get 6 branch) == agent/retry-helper ]]'
-NL=$'\n'
 check "a promoted gardener proposal gives the task its proposal and first step" '[[ $(section "$PF" "## Context") == *"written by the gardener."*"Proposal:""$NL""Move the three retry loops"*"First step:""$NL""Extract the helper"* && $(section "$PF" "## Context") != *"Why it matters:"* ]]'
 check "promote refuses an accepted proposal" '! crew promote 2026-09-25-x 2>/dev/null'
 check "gardener runs and exits 0" 'crew gardener >/dev/null 2>&1'
@@ -2491,7 +2532,14 @@ printf '%s\n' "# Memory suggestions: $LP" "" "<!-- Tick each one. -->" \
   "- [x] **Screenshots go in Dropbox** Collaborators can't see them. (worker:7, 2026-11-11) → kept" >"$OMS"
 crew commit "old memory suggestions" >/dev/null
 mv "$PD/ledger-format" "$HOME/ledger-format"
-out=$(crew ready "$UT" 2>&1); r1=$?; st=$(crew status)
+# Task 1, merged by now, stands in for a high-risk task in flight, and one waiting on the user.
+sed -i 's/^status: merged$/status: addressing-feedback/' "$F1"; h1=$(crew hand-over 1 2>&1); s1=$(crew get 1 status)
+sed -i 's/^status: .*/status: pr-open/' "$F1"; st=$(crew status); sed -i 's/^status: .*/status: addressing-feedback/' "$F1"
+out=$(crew ready "$UT" 2>&1); r1=$?
+check "in a project not yet migrated, hand-over refuses a task rather than take its evidence or security review as missing or current, and says to migrate" \
+  '[[ $h1 == "crew: couldn'"'"'t read the evidence: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $s1 == addressing-feedback ]]'
+check "in a project not yet migrated, status says why it can't tell whether a high-risk task's security review ran, rather than call it missing" \
+  '[[ $(tail -1 <<<"$st") == *"#12 high (security review unread: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate)"* && $st != *"no security review yet"* ]]'
 check "in a project not yet migrated, ready refuses a draft rather than count its items as none, and status says to migrate" \
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
 check "in a project not yet migrated, status says it can't count the memory suggestions, rather than show none" \
@@ -2500,12 +2548,13 @@ check "in a project not yet migrated, show gives the suggestions file as it is, 
   '[[ $(crew show memory-suggestions) == "$(cat "$OMS")$NL${NL}crew can'"'"'t read the memory suggestions: $LP'"'"'s ledger isn'"'"'t migrated"* ]] && ! crew remember "X" --why "Y" 2>/dev/null'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+sed -i '/^## Evidence$/a ### 1. z (on 0a1b2c3)\nNot done: it needs a clone. To try: run it there.\n### Security review\nNo findings.' "$UT"
 sh=$(shown "$UT")
 check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records$NL$LP: recorded the evidence of 1 task(s)" && $(cat "$PD/ledger-format") == 3 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 3" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
 sh=$(crew show memory-suggestions)
 check "migrate moves the memory suggestions into records, each kept or declined as its line said, and leaves the file only its head" \
@@ -2513,6 +2562,11 @@ check "migrate moves the memory suggestions into records, each kept or declined 
    has "^- \[x\] [0-9a-f]{8} \*\*Specs run in parallel\*\* It.s faster\. \(gardener, 2026-11-10\)$" && has "^  - declined .* by crew migrate: Not on CI\.$" &&
    has "^- \[x\] [0-9a-f]{8} \*\*Screenshots go in Dropbox\*\* .* \(worker:7, 2026-11-11\)$" && has "^  - kept .* by crew migrate$" &&
    ! grep -q "^- \[" "$OMS" && [[ $(crew status) == *"memory suggestions: 1  (crew show memory-suggestions --project $LP)"* ]]'
+check "migrate records a task's typed evidence, whether it ran as its words said, and its security review, and leaves the prose as it was" \
+  '[[ $(jq -s -c "map(select(.evidence or .security_review) | [.by, .evidence.criterion, .evidence.commit, .evidence.ran, .security_review != null])" "${UT%.md}.records.jsonl") == "[[\"crew migrate\",1,\"0a1b2c3\",false,false],[\"crew migrate\",null,null,null,true]]" &&
+     $(section "$UT" "## Evidence" | grep -c "^### ") == 2 && $(crew show "$UT") == *"### 1. z (on 0a1b2c3)${NL}Not run, and not a user check. Recorded "*" by crew migrate:${NL}Not done: it needs a clone. To try: run it there."* ]]'
+check "once migrated, hand-over reads the evidence crew recorded before, and hands the task over" 'pr_body 1; crew hand-over 1 >/dev/null && [[ $(crew get 1 status) == pr-open ]]'
+sed -i 's/^status: .*/status: merged/' "$F1"
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 # The memory suggestions below start from none.
 git -C "$L" rm -q "$OMS" "${OMS%.md}.records.jsonl" && git -C "$L" commit -qm "no memory suggestions"
@@ -2791,9 +2845,12 @@ shows() {  # file arg...: crew show arg... prints file, and crew path arg... its
   [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
 }
 shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
+# finds_task file arg: crew path finds a task that has records, and crew show prints
+# it as it does from its path, with what the records hold.
+finds_task() { [[ $(crew path "$2") == "$1" && $(crew show "$2") == "$(crew show "$1")" && $(crew show "$2") != "$(cat "$1")" ]]; }
 TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
 check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
-  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+  'finds_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
 check "show memory prints the project's memory.md as it is on disk, and path finds it and memory-suggestions.md, in the default project or --project's" \
@@ -2808,7 +2865,7 @@ check "show proposal finds a proposal by ID, unique substring or path, from any 
   '(cd "$HOME" && shows "$SP" proposal "$(basename "$SP" .md)" && shows "$SP" proposal jurisdiction-a-pricing && shows "$PP" proposal ship-to-canada && shows "$SP" proposal "$SP")'
 check "show goal finds a goal from anything goal path takes, though a task shares its number" \
   'shows "$(crew goal path 1)" goal 1 && shows "$(crew goal path "$G")" goal "$G" && shows "$(crew goal path season-page)" goal season-page &&
-   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows "$F1" 1'
+   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && finds_task "$F1" 1'
 out=$(crew show proposal "$(date +%F)" 2>&1 >/dev/null); st=$?
 check "an argument that matches more than one of its kind lists them, shows none and fails" \
   '((st == 1)) && [[ $out == *"ambiguous:"*"$(basename "$SP") ($PJ)"* && -z $(crew show proposal "$(date +%F)" 2>/dev/null) ]]'

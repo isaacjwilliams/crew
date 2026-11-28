@@ -1161,15 +1161,45 @@ func (t Task) UserDecisions() []string {
 	return lines
 }
 
-// Evidence is what one place the user reads, the task's ## Evidence or its PR
-// body's, shows for each acceptance criterion, by its number.
-type Evidence map[int]EvidenceItem
-
-// EvidenceItem is one criterion's evidence: the commit it names as the one it
-// ran on, or "" when it names none, and what it says after that.
-type EvidenceItem struct {
-	Commit, Text string
+// Evidence is the task's evidence, from its records: for each acceptance
+// criterion that has some, its newest evidence record, by the criterion's
+// number. It fails when crew can't read the task's records.
+func (t Task) Evidence() (map[int]Record, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
+	}
+	e := map[int]Record{}
+	for _, r := range records {
+		if r.Evidence != nil {
+			e[r.Evidence.Criterion] = r
+		}
+	}
+	return e, nil
 }
+
+// SecurityReviews are the task's security review records, oldest first. A
+// high-risk task needs one before its hand-over.
+func (t Task) SecurityReviews() ([]Record, error) {
+	records, err := t.Records()
+	return slices.DeleteFunc(records, func(r Record) bool { return r.SecurityReview == nil }), err
+}
+
+// AwaitsSecurityReview: the task is high risk and has no security review
+// recorded. It fails when crew can't read the task's records, so a caller can
+// say why it doesn't know.
+func (t Task) AwaitsSecurityReview() (bool, error) {
+	if t.Risk() != RiskHigh {
+		return false, nil
+	}
+	reviews, err := t.SecurityReviews()
+	return err == nil && len(reviews) == 0, err
+}
+
+// EvidenceCommits is the commit that one place's evidence, the task's records
+// or its PR body, names for each acceptance criterion it covers, by the
+// criterion's number: "" when it names none.
+type EvidenceCommits map[int]string
 
 // evidenceCommit finds the commit an evidence item names, as "(on <sha>)".
 var evidenceCommit = regexp.MustCompile(`\(on ([0-9a-f]{7,40})\)`)
@@ -1184,29 +1214,30 @@ func itemNumber(line string) (int, string) {
 	return 0, ""
 }
 
-// evidenceItem is the item whose numbered line goes on with rest, with the
-// lines under it: the commit named by the first "(on <sha>)" in rest, and as
-// Text what follows that, the lines under it included. The line up to there is
-// the criterion's words, not evidence; with no "(on <sha>)" the whole line is.
-func evidenceItem(rest, under string) EvidenceItem {
+// evidenceItem reads the item whose numbered line goes on with rest, with the
+// lines under it: the commit named by the first "(on <sha>)" in rest, or "",
+// and as text what follows that, the lines under it included. The line up to
+// there is the criterion's words, not evidence; with no "(on <sha>)" the whole
+// line is.
+func evidenceItem(rest, under string) (commit, text string) {
 	m := evidenceCommit.FindStringSubmatchIndex(rest)
 	if m == nil {
-		return EvidenceItem{Text: under}
+		return "", under
 	}
 	afterSHA, shaStart, shaEnd := m[1], m[2], m[3]
-	return EvidenceItem{Commit: rest[shaStart:shaEnd], Text: rest[afterSHA:] + "\n" + under}
+	return rest[shaStart:shaEnd], rest[afterSHA:] + "\n" + under
 }
 
-// Within is the items for the first n criteria: one numbered past them is no
+// Within is the commits for the first n criteria: one numbered past them is no
 // criterion's evidence. It's nil when e is.
-func (e Evidence) Within(n int) Evidence {
+func (e EvidenceCommits) Within(n int) EvidenceCommits {
 	w := maps.Clone(e)
-	maps.DeleteFunc(w, func(i int, _ EvidenceItem) bool { return i > n })
+	maps.DeleteFunc(w, func(i int, _ string) bool { return i > n })
 	return w
 }
 
-// Gaps is the numbers of the first n criteria that have no item.
-func (e Evidence) Gaps(n int) []int {
+// Gaps is the numbers of the first n criteria that have no evidence.
+func (e EvidenceCommits) Gaps(n int) []int {
 	var gaps []int
 	for i := 1; i <= n; i++ {
 		if _, ok := e[i]; !ok {
@@ -1216,106 +1247,46 @@ func (e Evidence) Gaps(n int) []int {
 	return gaps
 }
 
-// Unnamed is the numbers of the criteria whose item names no commit, in order.
-func (e Evidence) Unnamed() []int {
+// Unnamed is the numbers of the criteria whose evidence names no commit, in
+// order.
+func (e EvidenceCommits) Unnamed() []int {
 	var unnamed []int
 	for _, n := range slices.Sorted(maps.Keys(e)) {
-		if e[n].Commit == "" {
+		if e[n] == "" {
 			unnamed = append(unnamed, n)
 		}
 	}
 	return unnamed
 }
 
-// Naming is the items that name one of the commits marked true, as
-// "<n> (on <sha>)", in order, or "" when there are none.
-func (e Evidence) Naming(commits map[string]bool) string {
+// Naming is the criteria whose evidence names one of the commits marked true,
+// as "<n> (on <sha>)" with the SHA cut to 12, in order, or "" when there are
+// none.
+func (e EvidenceCommits) Naming(commits map[string]bool) string {
 	var items []string
 	for _, n := range slices.Sorted(maps.Keys(e)) {
-		if commits[e[n].Commit] {
-			items = append(items, fmt.Sprintf("%d (on %s)", n, e[n].Commit))
+		if commits[e[n]] {
+			items = append(items, fmt.Sprintf("%d (on %s)", n, cut(e[n], 12)))
 		}
 	}
 	return strings.Join(items, ", ")
-}
-
-// NotRun is the items, other than the user's checks, whose words say their
-// check wasn't run, each as "<n> ('<the words>')", in order, or "" when there
-// are none.
-func (e Evidence) NotRun(userChecks map[int]bool) string {
-	var items []string
-	for _, n := range slices.Sorted(maps.Keys(e)) {
-		if sign := notRunSign(e[n].Text); sign != "" && !userChecks[n] {
-			items = append(items, fmt.Sprintf("%d ('%s')", n, sign))
-		}
-	}
-	return strings.Join(items, ", ")
-}
-
-// notRunWords are the words with which evidence leaves its check undone, or
-// to someone else: "Not done. To try: …", "Only the user can check this", "I
-// can't run a real session", "Live check for Isaac". Tuned on every entry of
-// the ledgers' merged tasks: none that ran its check uses them. They are broad
-// on purpose, a capitalized word counting as a name: a false match refuses the
-// hand-over and names the words, so the worker can reword what it ran, while a
-// missed one would reach the user unchecked.
-var notRunWords = regexp.MustCompile(`(?i)\b(` +
-	`to try|not done|not run|(was|is)n['’]t run|no \w+ was possible|` +
-	`(can['’]t|cannot|couldn['’]t|could not) (run|check|make (this|that|the) check)|` +
-	`(couldn['’]t|could not) be (run|read|checked)|` +
-	`(user|lead) check|check for ` + someone + `|` +
-	`only ` + someone + ` can (run|check|make|try)|` +
-	`for ` + someone + ` (only|to (try|check|run))` +
-	`)\b`)
-
-// someone is who a check can be left to: the user, the lead, "you" in a PR
-// body, or someone named, which is any capitalized word.
-const someone = `(the user|the lead|you|(?-i:[A-Z])\w*)`
-
-// inlineCode is a code span, such as `go test ./...`.
-var inlineCode = regexp.MustCompile("`[^`]*`")
-
-// notRunSign is the first of the notRunWords in text's prose, or "". What's
-// in fenced blocks and code spans is output and commands, not what the worker
-// says about the check. The prose is read as single-spaced words, so a phrase
-// wrapped onto an indented line still matches.
-func notRunSign(text string) string {
-	var prose []string
-	for l, fenced := range markdownLines(text) {
-		if !fenced {
-			prose = append(prose, strings.Fields(inlineCode.ReplaceAllString(l, ""))...)
-		}
-	}
-	return notRunWords.FindString(strings.Join(prose, " "))
-}
-
-// Evidence is the task's evidence: for criterion n, a "### n. …" entry under
-// ## Evidence (evidenceEntries), whose heading names the commit it ran on.
-func (t Task) Evidence() Evidence {
-	e := Evidence{}
-	for _, entry := range t.evidenceEntries() {
-		if n, rest := itemNumber(strings.TrimPrefix(entry.heading, "### ")); n > 0 {
-			e[n] = evidenceItem(rest, entry.body())
-		}
-	}
-	return e
 }
 
 // PREvidence is the evidence in a PR's body: for criterion n, a top-level
 // "n. …" item under its ## Evidence that names the commit it ran on, as
-// templates/pr-body.md has them, and the lines under it, up to the next item.
-func PREvidence(body string) Evidence {
-	e := Evidence{}
+// templates/pr-body.md has them.
+func PREvidence(body string) EvidenceCommits {
+	e := EvidenceCommits{}
 	evidence := section(splitLines(strings.ReplaceAll(body, "\r", "")), "## Evidence")
 	for _, entry := range splitEntries(evidence, func(l string) bool { n, _ := itemNumber(l); return n > 0 }) {
 		n, rest := itemNumber(entry.heading)
-		e[n] = evidenceItem(rest, entry.body())
+		e[n], _ = evidenceItem(rest, entry.body())
 	}
 	return e
 }
 
 // evidenceEntry is an entry of evidence: the line it starts on, such as
-// "### 1. the criterion (on <sha>)", and the lines under it.
+// "1. the criterion (on <sha>)", and the lines under it.
 type evidenceEntry struct {
 	heading string
 	lines   []string
@@ -1336,13 +1307,6 @@ func splitEntries(text string, starts func(string) bool) []evidenceEntry {
 		}
 	}
 	return entries
-}
-
-// evidenceEntries is each "### " entry under ## Evidence that has something
-// under it.
-func (t Task) evidenceEntries() []evidenceEntry {
-	entries := splitEntries(t.Section("## Evidence"), func(l string) bool { return strings.HasPrefix(l, "### ") })
-	return slices.DeleteFunc(entries, func(e evidenceEntry) bool { return len(e.lines) == 0 })
 }
 
 // markdownLines yields each line of text, and whether it's inside a fenced
@@ -1378,21 +1342,6 @@ func fenceOpening(l string) string {
 	}
 	return ""
 }
-
-// securityReview heads the entry under ## Evidence that records a high-risk
-// task's security review: what it found and what the worker did about it.
-const securityReview = "### Security review"
-
-// SecurityReviewed: ## Evidence has a securityReview entry with something under
-// it, which a high-risk task needs before its hand-over. The entry isn't
-// numbered, so it's no criterion's evidence.
-func (t Task) SecurityReviewed() bool {
-	return slices.ContainsFunc(t.evidenceEntries(), func(e evidenceEntry) bool { return e.heading == securityReview })
-}
-
-// AwaitsSecurityReview: the task is high risk and its security review isn't
-// recorded yet.
-func (t Task) AwaitsSecurityReview() bool { return t.Risk() == RiskHigh && !t.SecurityReviewed() }
 
 // The lines that report red CI on a PR's head commit (its short SHA): a review
 // round's, which sends it to the worker, and an open question's, which asks the

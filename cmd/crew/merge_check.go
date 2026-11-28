@@ -84,6 +84,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 	restack := branches.restack
 	retarget := s.branches.offBaseReason(t, pr.Base)
 	defaultBranch := s.settings["DEFAULT_BRANCH"]
+	awaitsSecurityReview, unread := t.AwaitsSecurityReview()
 	// Every reason that holds is listed, even where one leads to another (a
 	// merged parent still the base both needs a restack and may conflict). The
 	// live view leaves to the strip what the PR's marks show.
@@ -109,7 +110,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		{pr.Mergeable == conflicting, stripOnly("conflicts with " + base)},
 		{pr.CI == ciFailing, stripOnly("CI failing")},
 		{pr.Draft, stripOnly("draft")},
-		{t.AwaitsSecurityReview(), standing("no security review yet", noSecurityReviewSign)},
+		{awaitsSecurityReview, standing("no security review yet", noSecurityReviewSign)},
 		// Needs someone on GitHub: an update of the branch, a rerun of the
 		// checks, or a reviewer's approval.
 		{pr.MergeState == "BEHIND", stripOnly("behind " + base)},
@@ -118,6 +119,7 @@ func (s *statusView) mergeCheck(t Task, worker Agent) *mergeCheck {
 		{pr.ReviewDecision == "REVIEW_REQUIRED", stripOnly("review required")},
 		// Needs the user.
 		{t.OpenQuestions() > 0, questionsNote(t.OpenQuestions())},
+		{unread != nil, forUser(fmt.Sprintf("security review unread: %v", unread), "security review?")},
 		{s.workersUnseen != "", stripOnly(s.workersUnseen)},
 	} {
 		if c.holds {

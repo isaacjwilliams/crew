@@ -274,7 +274,10 @@ func toReviewLine(open []Task) string {
 			ref = taskNumber(t)
 		}
 		items[i] = ref + " " + t.Risk().Label()
-		if t.AwaitsSecurityReview() {
+		switch awaits, unread := t.AwaitsSecurityReview(); {
+		case unread != nil:
+			items[i] += fmt.Sprintf(" (security review unread: %v)", unread)
+		case awaits:
 			items[i] += " (no security review yet)"
 		}
 	}

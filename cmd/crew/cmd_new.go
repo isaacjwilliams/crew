@@ -378,7 +378,7 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	var pr Evidence // nil without a PR: with pr_mode none, the worker opens none
+	var pr EvidenceCommits // nil without a PR: with pr_mode none, the worker opens none
 	if t.PR() != "" {
 		body, err := gh(p.Repo(), "pr", "view", t.PR(), "--json", "body", "--jq", ".body")
 		if err != nil {
@@ -424,8 +424,12 @@ func handOverPR(c *Crew, t Task) (func() error, error) {
 			fmt.Println(raised)
 			c.commit("raise risk " + t.ID())
 		}
-		if t.AwaitsSecurityReview() {
-			return fail("high risk: run /security-review, act on its findings, record them under ## Evidence as '%s', then hand over again", securityReview)
+		awaits, err := t.AwaitsSecurityReview()
+		if err != nil {
+			return fail("couldn't read the security review: %v", err)
+		}
+		if awaits {
+			return fail("high risk: run /security-review, act on its findings, record them with crew record-security-review %s '<what it found, and what you did about each>', then hand over again", t.ID())
 		}
 		if t.AwaitsAutomatedReview(p.Settings["AUTO_REVIEWS"]) {
 			return fail("automated review hasn't run for this task: run a pass of automated review, then hand over again")
@@ -554,27 +558,37 @@ func staleReview(t Task, repo string) string {
 	return ""
 }
 
-// checkEvidence refuses evidence that can't reach the user. In the task's
-// ## Evidence or the PR body (pr, nil without a PR), it refuses:
-//   - an acceptance criterion with no item;
-//   - an item that doesn't name the commit it ran on;
-//   - one that says its check wasn't run, unless it's a user check (Task.UserChecks);
-//   - one that ran on other work than the branch has now. A restack, or a merge
-//     of the base that git made on its own, keeps evidence current
+// checkEvidence refuses evidence that can't reach the user. It refuses:
+//   - an acceptance criterion with no evidence recorded, or no item in the PR
+//     body (pr, nil without a PR);
+//   - a PR body item that doesn't name the commit it ran on;
+//   - a criterion recorded as not run, unless it's a user check (Task.UserChecks);
+//   - evidence that ran on other work than the branch has now. A restack, or a
+//     merge of the base that git made on its own, keeps evidence current
 //     (branchWork.unchangedSince).
-func checkEvidence(t Task, repo string, pr Evidence) error {
+func checkEvidence(t Task, repo string, pr EvidenceCommits) error {
 	n := len(t.AcceptanceCriteria())
 	if n == 0 {
 		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
 	}
-	task := t.Evidence().Within(n)
+	records, err := t.Evidence()
+	if err != nil {
+		return fail("couldn't read the evidence: %v", err)
+	}
+	task := EvidenceCommits{}
+	var notRun []int
+	userChecks := t.UserChecks()
+	for c, r := range records {
+		task[c] = r.Evidence.Commit
+		if !r.Evidence.Ran && !userChecks[c] && c <= n {
+			notRun = append(notRun, c)
+		}
+	}
+	task = task.Within(n)
 	pr = pr.Within(n)
 	if gaps := task.Gaps(n); len(gaps) > 0 {
-		return fail("evidence missing for acceptance criteria %s of %d: add a '### <n>. … (on <sha>)' entry for each under ## Evidence (just before ## Automated reviews), with the command and its output",
-			numberList(gaps), n)
-	}
-	if unnamed := task.Unnamed(); len(unnamed) > 0 {
-		return fail("evidence for acceptance criteria %s doesn't name the commit it ran on: end each entry's heading with '(on <sha>)'", numberList(unnamed))
+		return fail("evidence missing for acceptance criteria %s of %d: run each one's check and record it with crew record-evidence %s <n> --on <sha> --ran '<what ran and what it showed>'",
+			numberList(gaps), n, t.ID())
 	}
 	if pr != nil {
 		if gaps := pr.Gaps(n); len(gaps) > 0 {
@@ -585,9 +599,9 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 			return fail("the PR body's Evidence for acceptance criteria %s doesn't name the commit it ran on: put '(on <sha>)' after each item's criterion, with gh pr edit", numberList(unnamed))
 		}
 	}
-	userChecks := t.UserChecks()
-	if notRun := evidencePlaces(task.NotRun(userChecks), pr.NotRun(userChecks)); notRun != "" {
-		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", notRun)
+	if len(notRun) > 0 {
+		slices.Sort(notRun)
+		return fail("evidence for acceptance criteria %s is recorded as not run. Run each check the ways the project's AGENTS.md, docs and memory give, and record what it showed with crew record-evidence --ran; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", numberList(notRun))
 	}
 	work, err := ownWork(t, repo)
 	if err != nil {
@@ -598,9 +612,8 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 	// work and only origin lacks it, a push is all that's missing.
 	stale := map[string]bool{}
 	staleHere := false
-	for _, e := range []Evidence{task, pr} {
-		for _, item := range e {
-			sha := item.Commit
+	for _, e := range []EvidenceCommits{task, pr} {
+		for _, sha := range e {
 			if _, checked := stale[sha]; checked {
 				continue
 			}
@@ -632,11 +645,11 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 }
 
 // evidencePlaces says where the items a check found are, in the task's
-// ## Evidence and in the PR body, or "" when it found none.
+// evidence records and in the PR body, or "" when it found none.
 func evidencePlaces(taskItems, prItems string) string {
 	var places []string
 	if taskItems != "" {
-		places = append(places, "## Evidence: "+taskItems)
+		places = append(places, "the recorded evidence: "+taskItems)
 	}
 	if prItems != "" {
 		places = append(places, "the PR body: "+prItems)

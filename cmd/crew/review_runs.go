@@ -43,8 +43,9 @@ func (t Task) ReviewRuns() []ReviewRun {
 			old = append(old, oldRunsIn(e)...)
 		}
 	}
-	if t.SecurityReviewed() {
-		old = append(old, ReviewRun{Step: stepSecurityReview, At: firstHandOver(entries)})
+	// A task whose records crew can't read shows no security review.
+	if reviews, _ := t.SecurityReviews(); len(reviews) > 0 {
+		old = append(old, ReviewRun{Step: stepSecurityReview, At: reviews[0].At})
 	}
 	// An old record counts unless a counted record of its step comes at or
 	// before it: from then on the step's runs are counted, so an old-form line
@@ -94,7 +95,7 @@ func recordedRun(e logEntry) (ReviewRun, bool) {
 // holds. A report over past tasks should count those runs, as runs of unknown
 // value rather than runs that took nothing. They can go once no report reads
 // tasks logged before 2026-11-18, when the counted records began. A past
-// security review is read from the task's Evidence (SecurityReviewed).
+// security review is read from the task's security review records.
 var oldRecords = []struct {
 	step string
 	re   *regexp.Regexp

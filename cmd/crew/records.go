@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +41,9 @@ type Record struct {
 	Suggested *Suggested `json:"suggested,omitempty"`
 	Kept      *Kept      `json:"kept,omitempty"`
 	Declined  *Declined  `json:"declined,omitempty"`
+
+	Evidence       *Evidence       `json:"evidence,omitempty"`
+	SecurityReview *SecurityReview `json:"security_review,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -71,6 +75,24 @@ type Kept struct {
 type Declined struct {
 	Suggestion string `json:"suggestion"` // the Suggested record's ID
 	Reason     string `json:"reason"`
+}
+
+// Evidence is what shows one of a task's acceptance criteria holds: the commit
+// its check ran on, whether it ran, and what it shows. A later record for the
+// same criterion replaces it.
+type Evidence struct {
+	Criterion int    `json:"criterion"` // its number, from 1
+	Commit    string `json:"commit"`
+	Ran       bool   `json:"ran"`
+	// What ran and what it showed, or what was seen and how. For a check that
+	// didn't run, why it couldn't, and what to try.
+	Shows string `json:"shows"`
+}
+
+// SecurityReview records a high-risk task's /security-review: what it found,
+// and what was done about each finding.
+type SecurityReview struct {
+	Findings string `json:"findings"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -236,7 +258,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil, r.Evidence != nil, r.SecurityReview != nil} {
 		if set {
 			payloads++
 		}
@@ -255,9 +277,16 @@ func (r Record) check() error {
 		return errors.New("a kept record needs its suggestion")
 	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
 		return errors.New("a declined record needs its suggestion and its reason")
+	case r.Evidence != nil && (r.Evidence.Criterion < 1 || !commitSHA.MatchString(r.Evidence.Commit) || strings.TrimSpace(r.Evidence.Shows) == ""):
+		return errors.New("an evidence record needs its criterion, its commit and what it shows")
+	case r.SecurityReview != nil && strings.TrimSpace(r.SecurityReview.Findings) == "":
+		return errors.New("a security_review record needs its findings")
 	}
 	return nil
 }
+
+// commitSHA is a commit's SHA as git writes it, in full or cut short.
+var commitSHA = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 
 // AddRecords adds records after the file's records, in one write, so a reader
 // never sees some of them without the rest. The caller holds the ledger lock and
@@ -284,8 +313,10 @@ func (d Doc) AddRecords(rs ...Record) error {
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
 // records, and format 2 memory suggestions; before, they were checkboxes in the
 // task file and in memory-suggestions.md, which crew migrate moves into records.
-// crew project add writes the file for a new project.
-const ledgerFormat = 2
+// Format 3 keeps evidence and security reviews in records; before, crew read
+// them from the prose under a task's ## Evidence. crew project add writes the
+// file for a new project.
+const ledgerFormat = 3
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

@@ -566,11 +566,12 @@ func (s *statusView) row(t Task) taskRow {
 }
 
 // lookNote says what look a PR waiting on the user needs: its tier and the
-// tier's look, or in the live view its tier. A high-risk task still waiting for
-// its security review has only its tier: its merge check says what's missing.
+// tier's look, or in the live view its tier. A high-risk task whose security
+// review is missing, or can't be read, has only its tier: its merge check says
+// which.
 func lookNote(t Task) wording {
 	tier := t.Risk().Label()
-	if t.AwaitsSecurityReview() {
+	if awaits, unread := t.AwaitsSecurityReview(); awaits || unread != nil {
 		return forUser(tier, tier)
 	}
 	return forUser(tier+": "+t.Risk().Look(), tier)

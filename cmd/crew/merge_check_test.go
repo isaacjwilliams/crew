@@ -77,19 +77,21 @@ func TestMergeCheck(t *testing.T) {
 	}
 	decisions := "## Decisions\n- 2026-11-20 — Keep the old flag. (user)\n- 2026-11-20 — Automated review 2, finding 1: no change. (user)\n\n"
 	for _, tc := range []struct {
-		name     string
-		fields   map[string]string // over clearTask's; an empty value removes the key
-		body     string            // in place of clearBody
-		pr       func(*gitHubPR)   // changes clearPR
-		unread   bool              // GitHub didn't answer
-		unasked  bool              // GitHub wasn't asked for the PR
-		worker   Agent
-		unseen   string            // why the workers can't be seen
-		unbranch bool              // the branches haven't been read yet
-		settings map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
-		parent   string            // the status of 020-parent, on branch agent/parent
-		reparent string            // 020-parent's status by the time the report is built, after the branches were read
-		want     string
+		name       string
+		fields     map[string]string // over clearTask's; an empty value removes the key
+		body       string            // in place of clearBody
+		pr         func(*gitHubPR)   // changes clearPR
+		unread     bool              // GitHub didn't answer
+		unasked    bool              // GitHub wasn't asked for the PR
+		worker     Agent
+		unseen     string            // why the workers can't be seen
+		unbranch   bool              // the branches haven't been read yet
+		settings   map[string]string // over AUTO_REVIEWS=2, DEFAULT_BRANCH=main
+		parent     string            // the status of 020-parent, on branch agent/parent
+		reparent   string            // 020-parent's status by the time the report is built, after the branches were read
+		secured    bool              // a security review is recorded
+		unmigrated bool              // the ledger isn't migrated to this crew's records
+		want       string
 	}{
 		{name: "nothing in the way", want: "merge now"},
 		{name: "worker busy", worker: Agent{State: "working"}, want: "not yet: worker busy"},
@@ -112,7 +114,11 @@ func TestMergeCheck(t *testing.T) {
 		{name: "draft", pr: func(p *gitHubPR) { p.Draft = true }, want: "not yet: draft"},
 		{name: "changes requested", pr: func(p *gitHubPR) { p.ReviewDecision = "CHANGES_REQUESTED" }, want: "not yet: changes requested"},
 		{name: "high risk without its security review", fields: map[string]string{"risk": "high"}, want: "not yet: no security review yet"},
-		{name: "high risk with its security review", fields: map[string]string{"risk": "high"}, body: "## Evidence\n### Security review\nNothing found.\n\n## Automated reviews\n" + reviewed + "## Log\n", want: "merge now"},
+		{name: "high risk with its security review", fields: map[string]string{"risk": "high"}, secured: true, want: "merge now"},
+		{name: "high risk with only a security review typed into the file", fields: map[string]string{"risk": "high"}, body: "## Evidence\n### Security review\nNothing found.\n\n## Automated reviews\n" + reviewed + "## Log\n", want: "not yet: no security review yet"},
+		{name: "high risk, in a ledger not migrated yet", fields: map[string]string{"risk": "high"}, body: "## Evidence\n### Security review\nNothing found.\n\n## Automated reviews\n" + reviewed + "## Log\n", unmigrated: true,
+			want: "not yet: security review unread: p's ledger isn't migrated to this crew's records yet: run crew migrate"},
+		{name: "low risk, in a ledger not migrated yet", unmigrated: true, want: "merge now"},
 		{name: "open question", body: "## Open questions\n- [ ] Which way?\n\n## Automated reviews\n" + reviewed + "## Log\n", want: "not yet: 1 open question(s)"},
 		{name: "review required", pr: func(p *gitHubPR) { p.ReviewDecision, p.MergeState = "REVIEW_REQUIRED", "BLOCKED" }, want: "not yet: review required"},
 		{name: "blocked on GitHub for a reason crew can't name", pr: func(p *gitHubPR) { p.MergeState = "BLOCKED" }, want: "not yet: blocked by a branch rule on GitHub"},
@@ -155,6 +161,14 @@ func TestMergeCheck(t *testing.T) {
 			}
 			body := cmp.Or(tc.body, clearBody)
 			task := mergeTask(t, dir, "021-task", fields, body)
+			if !tc.unmigrated {
+				if err := writeLedgerFormat(filepath.Join(dir, "projects", "p")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.secured {
+				add(t, task, Record{SecurityReview: &SecurityReview{"Nothing found."}})
+			}
 			if tc.parent != "" {
 				mergeTask(t, dir, "020-parent", map[string]string{"status": tc.parent, "base": "main", "branch": "agent/parent"}, "## Log\n")
 			}

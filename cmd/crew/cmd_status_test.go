@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -193,7 +194,6 @@ func everyNoteLedger(t *testing.T) (*Crew, statusReads) {
 		"#### 1. [should fix] f1\n- Agreed severity: should fix\n- Outcome: left for the user\n" +
 		"#### 2. [should fix] f2\n- Agreed severity: should fix\n- Outcome: left for the user\n\n"
 	asks := "## Open questions\n- [ ] Which way?\n\n"
-	secured := "## Evidence\n### Security review\nNothing found.\n\n"
 	prs := map[string]prRead{}
 	// prURL is the URL of the PR numbered as the task is.
 	prURL := func(name string) string { return "https://github.com/o/r/pull/" + name[:3] }
@@ -252,7 +252,8 @@ func everyNoteLedger(t *testing.T) (*Crew, statusReads) {
 	task("127-no-pr", reviewed, "status: pr-open", "risk: low")
 	prOpen("128-branches-unread", "", func(p *gitHubPR) { p.Base = "agent/open-parent" }, "base: agent/open-parent")
 	prOpen("129-no-risk-tier", "", nil, "risk:")
-	prOpen("130-secured", secured+reviewed, nil, "risk: high")
+	prOpen("130-secured", "", nil, "risk: high")
+	add(t, Task{Doc{c.path("projects", "p", "tasks", "130-secured.md")}}, Record{SecurityReview: &SecurityReview{"Nothing found."}})
 
 	// Tasks of other statuses, with a PR crew sync recorded, a branch to
 	// move, or a question.
@@ -427,4 +428,26 @@ func rowText(t *testing.T, r statusReport, id string) string {
 	}
 	t.Fatalf("no row for %s", id)
 	return ""
+}
+
+// The to-review line says a high-risk task's security review is missing only
+// when crew can read its records, and says why when it can't.
+func TestToReviewLineSaysWhyItCantReadASecurityReview(t *testing.T) {
+	dir := t.TempDir()
+	fields := map[string]string{"risk": "high", "pr": "https://github.com/o/r/pull/7"}
+	typed := "## Evidence\n### Security review\nNothing found.\n\n## Log\n"
+	task := mergeTask(t, dir, "007-a", fields, typed)
+	if got, want := toReviewLine([]Task{task}), "to review: #7 high (security review unread: p's ledger isn't migrated to this crew's records yet: run crew migrate)"; got != want {
+		t.Errorf("before crew migrate: %q, want %q", got, want)
+	}
+	if err := writeLedgerFormat(filepath.Join(dir, "projects", "p")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := toReviewLine([]Task{task}), "to review: #7 high (no security review yet)"; got != want {
+		t.Errorf("with a security review only typed into the file: %q, want %q", got, want)
+	}
+	add(t, task, Record{SecurityReview: &SecurityReview{"Nothing found."}})
+	if got, want := toReviewLine([]Task{task}), "to review: #7 high"; got != want {
+		t.Errorf("with a security review recorded: %q, want %q", got, want)
+	}
 }

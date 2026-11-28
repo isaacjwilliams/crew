@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -23,6 +24,10 @@ import (
 // into records: each becomes a suggested record and, once ticked, a kept or
 // declined record. The file keeps any line that wasn't a suggestion, under the
 // head crew remember writes.
+//
+// Format 3 records each task's evidence and security review, which crew read
+// from the prose under ## Evidence before (migrateEvidence). The prose stays as
+// it is, for people.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -71,6 +76,19 @@ func cmdMigrate(c *Crew, args []string) error {
 				return fail("%s: %v", p, err)
 			}
 			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
+		}
+		if have < 3 {
+			tasks := 0
+			for _, t := range c.tasks(p) {
+				n, err := migrateEvidence(t)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				if n > 0 {
+					tasks++
+				}
+			}
+			fmt.Printf("%s: recorded the evidence of %d task(s)\n", p, tasks)
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
@@ -305,4 +323,97 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 		return o, fmt.Errorf("%v: %s", err, line)
 	}
 	return o, nil
+}
+
+// migrateEvidence records the task's evidence as crew hand-over read it from
+// ## Evidence before records, and says how many records it wrote. For criterion
+// n, the last "### n. …" entry with something under it is its evidence, when
+// it names the commit it ran on, as "(on <sha>)" in its heading. It ran unless
+// its prose says it didn't (notRunSign). A "### Security review" entry with
+// something under it is the task's security review, recorded as of its first
+// hand-over, which it let through. The task file stays as it is.
+//
+// A task that has evidence or a security review recorded already has been
+// migrated, or recorded them itself, so its prose adds nothing.
+func migrateEvidence(t Task) (int, error) {
+	criteria := len(t.AcceptanceCriteria())
+	last := map[int]evidenceEntry{}
+	var reviews []evidenceEntry
+	for _, entry := range splitEntries(t.Section(evidenceHeading), func(l string) bool { return strings.HasPrefix(l, "### ") }) {
+		n, _ := itemNumber(strings.TrimPrefix(entry.heading, "### "))
+		switch {
+		case len(entry.lines) == 0:
+		case entry.heading == "### Security review":
+			reviews = append(reviews, entry)
+		case n > 0 && n <= criteria:
+			last[n] = entry
+		}
+	}
+	var moved []Record
+	for _, n := range slices.Sorted(maps.Keys(last)) {
+		_, rest := itemNumber(strings.TrimPrefix(last[n].heading, "### "))
+		commit, text := evidenceItem(rest, last[n].body())
+		if commit == "" {
+			continue // hand-over refused it, as it does with no evidence
+		}
+		moved = append(moved, Record{Evidence: &Evidence{Criterion: n, Commit: commit, Ran: notRunSign(text) == "", Shows: strings.TrimSpace(text)}})
+	}
+	if len(reviews) > 0 {
+		moved = append(moved, Record{At: firstHandOver(t.LogEntries()), SecurityReview: &SecurityReview{Findings: strings.TrimSpace(reviews[len(reviews)-1].body())}})
+	}
+	if len(moved) == 0 {
+		return 0, nil
+	}
+	records, err := t.readRecords()
+	if err != nil {
+		return 0, err
+	}
+	if slices.ContainsFunc(records, func(r Record) bool { return r.Evidence != nil || r.SecurityReview != nil }) {
+		return 0, nil
+	}
+	for i, m := range moved {
+		r := newRecord("crew migrate", records)
+		if !m.At.IsZero() {
+			r.At = m.At
+		}
+		r.Evidence, r.SecurityReview = m.Evidence, m.SecurityReview
+		records, moved[i] = append(records, r), r
+	}
+	return len(moved), t.AddRecords(moved...)
+}
+
+// notRunWords are the words with which evidence left its check undone, or to
+// someone else, before workers recorded whether it ran: "Not done. To try: …",
+// "Only the user can check this", "I can't run a real session", "Live check
+// for Isaac". crew hand-over read them until records; crew migrate reads them
+// once, to carry that answer over. They are broad on purpose, a capitalized
+// word counting as a name.
+var notRunWords = regexp.MustCompile(`(?i)\b(` +
+	`to try|not done|not run|(was|is)n['’]t run|no \w+ was possible|` +
+	`(can['’]t|cannot|couldn['’]t|could not) (run|check|make (this|that|the) check)|` +
+	`(couldn['’]t|could not) be (run|read|checked)|` +
+	`(user|lead) check|check for ` + someone + `|` +
+	`only ` + someone + ` can (run|check|make|try)|` +
+	`for ` + someone + ` (only|to (try|check|run))` +
+	`)\b`)
+
+// someone is who a check can be left to: the user, the lead, "you" in a PR
+// body, or someone named, which is any capitalized word.
+const someone = `(the user|the lead|you|(?-i:[A-Z])\w*)`
+
+// inlineCode is a code span, such as `go test ./...`.
+var inlineCode = regexp.MustCompile("`[^`]*`")
+
+// notRunSign is the first of the notRunWords in text's prose, or "". What's
+// in fenced blocks and code spans is output and commands, not what the worker
+// says about the check. The prose is read as single-spaced words, so a phrase
+// wrapped onto an indented line still matches.
+func notRunSign(text string) string {
+	var prose []string
+	for l, fenced := range markdownLines(text) {
+		if !fenced {
+			prose = append(prose, strings.Fields(inlineCode.ReplaceAllString(l, ""))...)
+		}
+	}
+	return notRunWords.FindString(strings.Join(prose, " "))
 }
