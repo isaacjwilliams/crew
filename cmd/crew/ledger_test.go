@@ -1414,6 +1414,47 @@ func TestSettleNudgeQuestionsLeavesOthersOpen(t *testing.T) {
 	}
 }
 
+// A nudge question the lead settled by hand, ticking or removing its item,
+// isn't one crew settle settles: it records nothing for it.
+func TestSettleNudgeQuestionsAnswersOnlyTheItemsItTicks(t *testing.T) {
+	task := learnTask(t, "---\nid: 1\nstatus: needs-input\n---\n## Open questions\n\n## Log\n")
+	nudge := Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: nudgeQuestionStart + " again after a nudge, with no new commit."}
+	rs, err := task.ask("test", nudge, nudge, nudge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticked, removed, open := rs[0], rs[1], rs[2]
+	var kept []string
+	for _, l := range splitLines(contents(t, task.Doc)) {
+		switch itemQuestion(l) {
+		case ticked.ID:
+			l = "- [x]" + strings.TrimPrefix(l, "- [ ]")
+		case removed.ID:
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if err := os.WriteFile(task.Path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := task.SettleNudgeQuestions("new commit bbb2222"); err != nil {
+		t.Fatal(err)
+	}
+	questions, err := task.Questions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range questions {
+		if !q.Open() {
+			got = append(got, q.ID)
+		}
+	}
+	if want := []string{open.ID}; !slices.Equal(got, want) {
+		t.Errorf("questions settled by crew settle = %q, want only the open one, %q", got, want)
+	}
+}
+
 // A handed-over task that tick marked needs-input for a nudge question goes
 // back to pr-open, not to its worker's turn.
 func TestStatusBeforeNeedsInputKeepsAHandOver(t *testing.T) {

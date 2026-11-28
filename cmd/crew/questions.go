@@ -80,32 +80,26 @@ func itemQuestion(l string) string {
 }
 
 // SettleNudgeQuestions settles the open questions crew nudge asked the lead,
-// saying what settled them (by). It records the settling, as an answered
-// record for each open nudge question, and ticks each open nudge item under
-// Open questions, which is what crew still counts. It reads the records first,
-// so a ledger crew can't record the settling in is left as it was.
+// saying what settled them (by): it ticks each open nudge item under Open
+// questions, which is what crew still counts, and records the settling of each
+// item it ticks, as an answered record. A nudge question whose item was ticked
+// or removed by hand isn't one it settles, so it records nothing for it. It
+// reads the records first, so a ledger crew can't record the settling in is
+// left as it was.
 func (t Task) SettleNudgeQuestions(by string) error {
 	records, err := t.Records()
 	if err != nil {
 		return fmt.Errorf("can't settle the nudge question on %s: %w", t.ID(), err)
 	}
-	var answers []Record
+	open := map[string]bool{}
 	for _, q := range items(records, kindQuestion) {
-		if q.Question.Kind == QuestionNudge && q.Open() {
-			r := newRecord("crew settle", append(records, answers...))
-			r.Answered = &Answered{Question: q.ID, Text: "The worker moved on: " + by + "."}
-			answers = append(answers, r)
-		}
-	}
-	if len(answers) > 0 {
-		if err := t.AddRecords(answers...); err != nil {
-			return err
-		}
+		open[q.ID] = q.Question.Kind == QuestionNudge && q.Open()
 	}
 	ls, err := t.read()
 	if err != nil {
 		return err
 	}
+	var answers []Record
 	in := false
 	for i, l := range ls {
 		if strings.HasPrefix(l, "## ") {
@@ -113,11 +107,22 @@ func (t Task) SettleNudgeQuestions(by string) error {
 		}
 		// By its words, not its record, so a nudge question asked before crew
 		// kept records is settled too.
-		if in && isOpenNudgeQuestion(l) {
-			// The marker stays last, to tie the item to its record.
-			item := strings.TrimPrefix(l, "- [ ]")
-			marker := questionMarkerEnd.FindString(item)
-			ls[i] = "- [x]" + strings.TrimSuffix(item, marker) + " Settled: " + by + "." + marker
+		if !in || !isOpenNudgeQuestion(l) {
+			continue
+		}
+		if id := itemQuestion(l); open[id] {
+			r := newRecord("crew settle", append(records, answers...))
+			r.Answered = &Answered{Question: id, Text: "The worker moved on: " + by + "."}
+			answers = append(answers, r)
+		}
+		// The marker stays last, to tie the item to its record.
+		item := strings.TrimPrefix(l, "- [ ]")
+		marker := questionMarkerEnd.FindString(item)
+		ls[i] = "- [x]" + strings.TrimSuffix(item, marker) + " Settled: " + by + "." + marker
+	}
+	if len(answers) > 0 {
+		if err := t.AddRecords(answers...); err != nil {
+			return err
 		}
 	}
 	return t.writeLines(ls)
