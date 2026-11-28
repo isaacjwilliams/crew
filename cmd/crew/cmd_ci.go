@@ -175,7 +175,10 @@ func cmdCIFix(c *Crew, args []string) error {
 	}
 	checks := strings.Join(failed, ", ")
 	if fixes := t.CIFixes(); fixes < maxFixes {
-		n, _ := reviewRound{redCI: &redCI{head, failed}}.add(t, t.PRNumber())
+		n, _, err := reviewRound{by: "crew ci-fix", redCI: &redCI{head, failed}}.add(t, t.PRNumber())
+		if err != nil {
+			return err
+		}
 		t.Log(fmt.Sprintf("review round %d recorded: CI failed on %s", n, head))
 		fmt.Printf("round %d recorded: CI failed on %s (%s); crew tick sends it to the worker\n", n, head, checks)
 	} else {

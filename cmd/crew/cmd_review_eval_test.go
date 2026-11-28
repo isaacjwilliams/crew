@@ -9,14 +9,24 @@ import (
 	"time"
 )
 
-// taskIn writes a task file named id in dir.
+// taskIn writes a task file named id into the project at dir, its review
+// rounds recorded as crew migrate records them.
 func taskIn(t *testing.T, dir, id, content string) Task {
 	t.Helper()
-	p := filepath.Join(dir, id+".md")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return Task{Doc{p}}
+	if err := writeLedgerFormat(dir); err != nil {
+		t.Fatal(err)
+	}
+	task := Task{Doc{filepath.Join(dir, "tasks", id+".md")}}
+	if err := os.WriteFile(task.Path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrateRounds(task); err != nil {
+		t.Fatal(err)
+	}
+	return task
 }
 
 // Review 1 read the whole PR and review 2 the commits after it. Round 1 comes
@@ -48,7 +58,11 @@ func TestEvalCases(t *testing.T) {
 		taskIn(t, dir, "015-fixes-unknown", strings.Replace(fix(Merged), "fixes: 010-merged", "fixes: unknown", 1)),
 	}
 	var got []string
-	for _, c := range evalCases(tasks) {
+	cases, err := evalCases(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
 		got = append(got, c.id+" "+c.review.Fork+".."+c.review.Head+": "+c.miss)
 	}
 	want := []string{
@@ -59,6 +73,22 @@ func TestEvalCases(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("evalCases =\n%q\nwant\n%q", got, want)
+	}
+	// The cases come from the rounds' records, so editing the rounds' lines
+	// by hand changes none of them.
+	if err := tasks[0].ReplaceSection("## Review rounds", handEditedRounds); err != nil {
+		t.Fatal(err)
+	}
+	cases, err = evalCases(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	for _, c := range cases {
+		got = append(got, c.id+" "+c.review.Fork+".."+c.review.Head+": "+c.miss)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("evalCases after the rounds' lines were edited =\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -76,7 +106,10 @@ func TestEvalBriefing(t *testing.T) {
 		"## Log\n")
 	at, _ := time.ParseInLocation(logTime, "2026-11-10 12:00", time.Local)
 	review := AutomatedReview{Number: 1, At: at, Fork: "f1", Head: "h1"}
-	got := evalBriefing(task, review, "/work/_eval", 2, "----- h1\nAdd a cache\n\n## Why\nIt was slow.\n----- h0\n# Start")
+	got, err := evalBriefing(task, review, "/work/_eval", 2, "----- h1\nAdd a cache\n\n## Why\nIt was slow.\n----- h0\n# Start")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.HasPrefix(got, "Code review\n") {
 		t.Errorf("first line: %q", strings.SplitN(got, "\n", 2)[0])
@@ -238,7 +271,11 @@ func TestJudgePromptHasTheBrief(t *testing.T) {
 		"## Out of scope\nEviction.\n\n"+
 		"## Log\n")
 	at, _ := time.ParseInLocation(logTime, "2026-11-10 12:00", time.Local)
-	got := judgePrompt("On `a.go:3`: why?", briefBefore(task, AutomatedReview{Number: 1, At: at}), "#### 1. [nitpick] x")
+	brief, err := briefBefore(task, AutomatedReview{Number: 1, At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := judgePrompt("On `a.go:3`: why?", brief, "#### 1. [nitpick] x")
 	for _, in := range []string{
 		"## The miss\n\nOn `a.go:3`: why?\n",
 		"## The brief, and what the user had said before the review\n\n### Structure\n\nA cache package of its own.\n\n### Plan\n\n1. Add the cache.\n\n### Out of scope\n\nEviction.\n\n### The user's request\n\n> Make search fast.\n",
@@ -265,7 +302,11 @@ func TestJudgePromptHasTheObjectiveAndGates(t *testing.T) {
 		"## Size\nAbout 200 lines: search.\n\n"+
 		"## Log\n")
 	at, _ := time.ParseInLocation(logTime, "2026-11-10 12:00", time.Local)
-	got := judgePrompt("On `a.go:3`: why?", briefBefore(task, AutomatedReview{Number: 1, At: at}), "#### 1. [nitpick] x")
+	brief, err := briefBefore(task, AutomatedReview{Number: 1, At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := judgePrompt("On `a.go:3`: why?", brief, "#### 1. [nitpick] x")
 	want := "## The brief, and what the user had said before the review\n\n" +
 		"### Objective\n\nObjective: search answers in under 50ms.\n\n" +
 		"### Context\n\n- The user decided results may be a minute stale.\n\n" +

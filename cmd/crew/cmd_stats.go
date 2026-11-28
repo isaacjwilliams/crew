@@ -81,6 +81,7 @@ type taskStats struct {
 	merged time.Time
 
 	rounds, comments int           // the user's review rounds, and their comments in them
+	unread           error         // why crew couldn't count them, as before crew migrate
 	prWait           time.Duration // the PR waiting on the user
 	questionWait     time.Duration // the task's questions waiting on the user
 
@@ -101,6 +102,7 @@ type taskStats struct {
 func (s *taskStats) add(o taskStats) {
 	s.rounds += o.rounds
 	s.comments += o.comments
+	s.unread = cmp.Or(s.unread, o.unread)
 	s.prWait += o.prWait
 	s.questionWait += o.questionWait
 	s.reviews += o.reviews
@@ -114,7 +116,11 @@ func (s *taskStats) add(o taskStats) {
 // cells is the task's row after its ID and kind, under statsHeadings. clean is
 // the "clean after" cell.
 func (s taskStats) cells(clean string) []string {
-	return []string{strconv.Itoa(s.rounds), strconv.Itoa(s.comments), roughly(s.prWait), roughly(s.questionWait),
+	rounds, comments := strconv.Itoa(s.rounds), strconv.Itoa(s.comments)
+	if s.unread != nil {
+		rounds, comments = "?", "?"
+	}
+	return []string{rounds, comments, roughly(s.prWait), roughly(s.questionWait),
 		strconv.Itoa(s.reviews), clean, strconv.Itoa(s.fixed), strconv.Itoa(s.setAside), strconv.Itoa(s.leftForUser),
 		strconv.Itoa(s.laterFixes), strconv.Itoa(s.reverts)}
 }
@@ -136,11 +142,13 @@ func (s taskStats) cleanAfterText() string {
 func statsOf(t Task, h history) taskStats {
 	log := withStatusLines(t.LogEntries())
 	s := taskStats{
-		task:     t,
-		merged:   mergedAt(log),
-		rounds:   t.FeedbackRounds(),
-		comments: t.ReviewComments(),
-		prWait:   waited(log, changedTo(PROpen), anyChange),
+		task:   t,
+		merged: mergedAt(log),
+		prWait: waited(log, changedTo(PROpen), anyChange),
+	}
+	s.rounds, s.unread = t.FeedbackRounds()
+	if s.unread == nil {
+		s.comments, s.unread = t.ReviewComments()
 	}
 	asked := changedTo(NeedsInput)
 	if t.Goal() != "" {
@@ -509,6 +517,9 @@ func printStats(project string, since time.Time, stats []taskStats, h history) {
 		append([]string{"total", ""}, sum.cells("")...),
 		[]string{"median", "", "", "", roughly(median(prWaits)), roughly(median(questionWaits))})
 	printTable(os.Stdout, statsHeadings, rows)
+	if sum.unread != nil {
+		fmt.Printf("\n? crew can't count the review rounds and comments: %v\n", sum.unread)
+	}
 
 	merged := byTier(stats, func(s taskStats) Risk { return s.task.Risk() })
 	fmt.Println("\nBy risk tier:")
@@ -553,7 +564,9 @@ func tierRows(merged map[Risk][]taskStats, corrections []correction) [][]string 
 	var rows [][]string
 	for _, tier := range append(slices.Clone(risks), "") { // and no tier last
 		medianRounds, perTask := "-", "-"
-		if mean, ok := commentsPerTask(merged[tier]); ok {
+		if slices.ContainsFunc(merged[tier], func(s taskStats) bool { return s.unread != nil }) {
+			medianRounds, perTask = "?", "?"
+		} else if mean, ok := commentsPerTask(merged[tier]); ok {
 			var rounds []float64
 			for _, s := range merged[tier] {
 				rounds = append(rounds, float64(s.rounds))
@@ -568,9 +581,9 @@ func tierRows(merged map[Risk][]taskStats, corrections []correction) [][]string 
 }
 
 // commentsPerTask is the mean of the tasks' review comments, or false when
-// there are no tasks.
+// there are no tasks or crew couldn't count them all.
 func commentsPerTask(stats []taskStats) (float64, bool) {
-	if len(stats) == 0 {
+	if len(stats) == 0 || slices.ContainsFunc(stats, func(s taskStats) bool { return s.unread != nil }) {
 		return 0, false
 	}
 	comments := 0

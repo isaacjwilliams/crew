@@ -1450,10 +1450,6 @@ const ciNotTheBranch = " (the branch didn't cause it)"
 // reads it back, and the worker ticks it once it has merged the base in.
 const conflictsWith = "Conflicts with " // - [ ] Conflicts with <base> at <sha>
 
-// crewReports are the kinds of line crew writes into a review round of its own,
-// to report what it found on the PR rather than pass on the user's feedback.
-var crewReports = []string{ciFailedOn, conflictsWith}
-
 // ciLineHead is the head commit an item reports red CI on, when it's a line of
 // that kind (ciFailedOn or ciStillRedOn), checked or not.
 func ciLineHead(l, kind string) (string, bool) {
@@ -1661,82 +1657,57 @@ func (t Task) SettleNudgeQuestions(by string) error {
 	return t.writeLines(ls)
 }
 
-// FeedbackRounds counts the review rounds that hold the user's feedback: every
-// round but those that only hold crew's own reports (crewReports), of red CI
-// or a conflict with the base. MAX_REVIEW_ROUNDS limits these.
-func (t Task) FeedbackRounds() int {
-	n := 0
-	hasFeedback := true // nothing before the first round counts
-	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		item, _ := checklistItem(l)
-		report := slices.ContainsFunc(crewReports, func(kind string) bool { return strings.HasPrefix(item, kind) })
-		switch {
-		case strings.HasPrefix(l, "### Round "):
-			hasFeedback = false
-		case !report && !hasFeedback:
-			n++
-			hasFeedback = true
-		}
-	}
-	return n
-}
-
-// A review round: its number, when crew recorded it, and the user's comments
-// in it.
+// A review round crew recorded, with when it recorded it. At is to the minute,
+// as an automated review's time is, so the two compare as the user sees them.
 type ReviewRound struct {
-	Number   int
-	At       time.Time
-	Comments []RoundComment
+	Round
+	At time.Time
 }
 
-// A comment of the user's in a review round: its checklist item, "review 7
-// (changes_requested)", "comment 10 — [link](u10)" or "`a.go:3` — comment 9 —
-// [link](u9)", which names it, and its text, which the round quotes on the
-// lines below the item.
-type RoundComment struct{ Item, Text string }
-
-// ReviewRounds is the task's review rounds, oldest first, as reviewRound.add
-// writes them. Red CI and requests for another automated review aren't
-// comments, so a round of only those has none.
-func (t Task) ReviewRounds() []ReviewRound {
+// ReviewRounds is the task's review rounds, oldest first, from its records
+// alone. A round recorded again under its number is its newer record.
+func (t Task) ReviewRounds() ([]ReviewRound, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
+	}
 	var rounds []ReviewRound
-	var cm *RoundComment // the comment whose quote the line may continue
-	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
-		quote, isQuote := strings.CutPrefix(l, "  >")
-		if rest, ok := strings.CutPrefix(l, "### Round "); ok {
-			n, at := numberedHeading(rest)
-			rounds = append(rounds, ReviewRound{Number: n, At: at})
-			cm = nil
-		} else if item, ok := checklistItem(l); ok && isComment(item) && len(rounds) > 0 {
-			r := &rounds[len(rounds)-1]
-			r.Comments = append(r.Comments, RoundComment{Item: item})
-			cm = &r.Comments[len(r.Comments)-1]
-		} else if isQuote && cm != nil {
-			if cm.Text != "" {
-				cm.Text += "\n"
-			}
-			cm.Text += strings.TrimPrefix(quote, " ")
+	for _, r := range records {
+		if r.Round == nil {
+			continue
+		}
+		round := ReviewRound{*r.Round, r.At.Truncate(time.Minute)}
+		if i := slices.IndexFunc(rounds, func(o ReviewRound) bool { return o.Number == round.Number }); i >= 0 {
+			rounds[i] = round
 		} else {
-			cm = nil
+			rounds = append(rounds, round)
 		}
 	}
-	return rounds
+	slices.SortStableFunc(rounds, func(a, b ReviewRound) int { return a.Number - b.Number })
+	return rounds, nil
 }
 
-// isComment: the checklist item in a review round is one of the user's
-// comments: "review 7 (changes_requested)", "comment 10 — …" or
-// "`a.go:3` — comment 9 — …".
-func isComment(item string) bool {
-	return strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")
+// FeedbackRounds counts the review rounds that hold the user's feedback, which
+// MAX_REVIEW_ROUNDS limits: every round but those holding only crew's reports.
+func (t Task) FeedbackRounds() (int, error) {
+	rounds, err := t.ReviewRounds()
+	n := 0
+	for _, r := range rounds {
+		if r.Feedback() {
+			n++
+		}
+	}
+	return n, err
 }
 
 // ReviewComments counts the user's comments in the task's review rounds.
-func (t Task) ReviewComments() int {
+func (t Task) ReviewComments() (int, error) {
+	rounds, err := t.ReviewRounds()
 	n := 0
-	for _, r := range t.ReviewRounds() {
+	for _, r := range rounds {
 		n += len(r.Comments)
 	}
-	return n
+	return n, err
 }
 
 // A comment the user made after automated review had been through the PR:
@@ -1750,12 +1721,16 @@ type CommentAfterReview struct {
 
 // CommentsAfterReview is the user's comments in the rounds recorded after an
 // automated review, oldest first: each is a point that review could have
-// raised first. A review or round without a time in its heading can't be
-// placed, so it counts as neither.
-func (t Task) CommentsAfterReview() []CommentAfterReview {
+// raised first. A review without a time can't be placed, so no comment comes
+// after it.
+func (t Task) CommentsAfterReview() ([]CommentAfterReview, error) {
+	rounds, err := t.ReviewRounds()
+	if err != nil {
+		return nil, err
+	}
 	reviews := t.AutomatedReviews()
 	var after []CommentAfterReview
-	for _, round := range t.ReviewRounds() {
+	for _, round := range rounds {
 		var followed *AutomatedReview // the last before the round: reviews are oldest first
 		for i, rv := range reviews {
 			if !rv.At.IsZero() && rv.At.Before(round.At) {
@@ -1769,7 +1744,7 @@ func (t Task) CommentsAfterReview() []CommentAfterReview {
 			after = append(after, CommentAfterReview{Round: round.Number, Comment: cm, Review: *followed})
 		}
 	}
-	return after
+	return after, nil
 }
 
 type Goal struct{ Doc }

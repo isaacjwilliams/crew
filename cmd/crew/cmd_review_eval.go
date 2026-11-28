@@ -84,7 +84,10 @@ func cmdReviewEval(c *Crew, args []string) error {
 		return err
 	}
 
-	cases := evalCases(c.tasks(p.Name))
+	cases, err := evalCases(c.tasks(p.Name))
+	if err != nil {
+		return err
+	}
 	var selection []string // the flags that narrowed the run, for its report
 	if task != "" {
 		f, matches := resolveIn(task, c.files("tasks", p.Name))
@@ -141,7 +144,7 @@ type evalCase struct {
 // case reruns its review's range, so a review whose Range line crew can't read
 // gives none. A fix that was abandoned may not have been a defect, so it gives
 // none either.
-func evalCases(tasks []Task) []evalCase {
+func evalCases(tasks []Task) ([]evalCase, error) {
 	fixes := map[string][]Task{}
 	for _, f := range tasks {
 		if f.Kind() == KindFix && f.Status() != Abandoned {
@@ -153,9 +156,13 @@ func evalCases(tasks []Task) []evalCase {
 		if t.Status() != Merged {
 			continue
 		}
-		for _, cm := range t.CommentsAfterReview() {
+		comments, err := t.CommentsAfterReview()
+		if err != nil {
+			return nil, fmt.Errorf("can't read %s's review rounds: %w", t.ID(), err)
+		}
+		for _, cm := range comments {
 			if cm.Review.Head != "" {
-				id := fmt.Sprintf("%s/round-%d/%s", t.ID(), cm.Round, caseCommentID(cm.Comment.Item))
+				id := fmt.Sprintf("%s/round-%d/%s", t.ID(), cm.Round, strings.ReplaceAll(cm.Comment.Name(), " ", "-"))
 				cases = append(cases, evalCase{id, t, cm.Review, commentMiss(cm.Comment)})
 			}
 		}
@@ -166,31 +173,15 @@ func evalCases(tasks []Task) []evalCase {
 			}
 		}
 	}
-	return cases
-}
-
-// caseCommentID names a comment by its kind and GitHub ID, from its item in a
-// review round: "review 7 (changes_requested)" is review-7, and "comment 10 —
-// …" and "`a.go:3` — comment 9 — …" are comment-10 and comment-9.
-func caseCommentID(item string) string {
-	if rest, ok := strings.CutPrefix(item, "review "); ok {
-		n, _, _ := strings.Cut(rest, " ")
-		return "review-" + n
-	}
-	rest, ok := strings.CutPrefix(item, "comment ")
-	if !ok {
-		_, rest, _ = strings.Cut(item, " — comment ")
-	}
-	n, _, _ := strings.Cut(rest, " ")
-	return "comment-" + n
+	return cases, nil
 }
 
 // commentMiss is a comment as the judge reads it: its text, after the place
 // it's about for an inline comment ("On `a.go:3`: why?"), since a short inline
 // comment means little without it.
 func commentMiss(cm RoundComment) string {
-	if where, _, ok := strings.Cut(cm.Item, " — comment "); ok && !strings.HasPrefix(cm.Item, "comment ") {
-		return "On " + where + ": " + cm.Text
+	if cm.Kind == inlineComment {
+		return "On " + cm.Where() + ": " + cm.Text
 	}
 	return cm.Text
 }
@@ -218,27 +209,35 @@ var briefingHeadings = []string{"## Scope", "## How to verify", "## Hard constra
 // commits, as git log prints them. Nothing later goes in, since it could hold
 // the miss itself. The PR's text isn't recorded as it was then, so it isn't in
 // either.
-func evalBriefing(t Task, r AutomatedReview, root string, count int, commits string) string {
+func evalBriefing(t Task, r AutomatedReview, root string, count int, commits string) (string, error) {
 	scope := fmt.Sprintf("- The review root: `%s`\n"+
 		"- The change: `%s..HEAD`, %d commits from fork point `%s` on `%s` to HEAD `%s`.\n"+
 		"- The new commits: this review reads the whole PR, so they are the change.\n"+
 		"- The working tree is clean, so only the commits are in scope.",
 		root, r.Fork, count, r.Fork, t.Base(), r.Head)
 	verify := "The repo's AGENTS.md (or CLAUDE.md), at the review root, names the test, lint and run commands."
-	stated := append(userWordsBefore(t, r), "### Commits\n\n"+demoteHeadings(commits))
+	words, err := userWordsBefore(t, r)
+	if err != nil {
+		return "", err
+	}
+	stated := append(words, "### Commits\n\n"+demoteHeadings(commits))
 
 	var b strings.Builder
 	b.WriteString("Code review\n")
 	for i, body := range []string{scope, verify, "None recorded.", strings.Join(stated, "\n\n")} {
 		fmt.Fprintf(&b, "\n%s\n\n%s\n", briefingHeadings[i], body)
 	}
-	return b.String()
+	return b.String(), nil
 }
 
 // userWordsBefore is what the user had said on the task when review r ran,
 // as the briefing's subsections: their request (the Goal's quote), their
 // decisions dated before r's day, and their comments in rounds before r.
-func userWordsBefore(t Task, r AutomatedReview) []string {
+func userWordsBefore(t Task, r AutomatedReview) ([]string, error) {
+	all, err := t.ReviewRounds()
+	if err != nil {
+		return nil, err
+	}
 	var stated []string
 	if request, _ := splitQuote(t.Section("## Goal")); request != "" {
 		stated = append(stated, "### The user's request\n\n"+request)
@@ -247,8 +246,8 @@ func userWordsBefore(t Task, r AutomatedReview) []string {
 		stated = append(stated, "### The user's decisions\n\n"+strings.Join(decisions, "\n"))
 	}
 	var rounds []string
-	for _, round := range t.ReviewRounds() {
-		if round.At.IsZero() || !round.At.Before(r.At) || len(round.Comments) == 0 {
+	for _, round := range all {
+		if !round.At.Before(r.At) || len(round.Comments) == 0 {
 			continue
 		}
 		var quotes []string
@@ -260,7 +259,7 @@ func userWordsBefore(t Task, r AutomatedReview) []string {
 	if len(rounds) > 0 {
 		stated = append(stated, "### The user's review comments\n\n"+strings.Join(rounds, "\n\n"))
 	}
-	return stated
+	return stated, nil
 }
 
 // briefSections are the parts of a task's brief that can settle a point, as
@@ -275,7 +274,7 @@ var briefSections = []string{"Context", "Acceptance criteria", "Structure", "Pla
 // the task file's is the one r had. The reviewer's briefing leaves all but the
 // user's words out, as the pr-review skill's does: they're the lead's, not the
 // user's.
-func briefBefore(t Task, r AutomatedReview) []string {
+func briefBefore(t Task, r AutomatedReview) ([]string, error) {
 	var brief []string
 	if _, objective := splitQuote(t.Section("## Goal")); objective != "" {
 		brief = append(brief, "### Objective\n\n"+objective)
@@ -285,7 +284,8 @@ func briefBefore(t Task, r AutomatedReview) []string {
 			brief = append(brief, "### "+name+"\n\n"+text)
 		}
 	}
-	return append(brief, userWordsBefore(t, r)...)
+	words, err := userWordsBefore(t, r)
+	return append(brief, words...), err
 }
 
 // splitQuote splits text into its lines that are a quote, "> …", and the rest,
@@ -519,7 +519,11 @@ func (e *evalRun) rerun(t Task, r AutomatedReview, base string) (string, error) 
 	}
 	commits, _ := git(e.checkout, "log", "--format=----- %H%n%B", rng)
 	briefing := base + ".briefing.md"
-	if err := os.WriteFile(briefing, []byte(evalBriefing(t, r, e.checkout, atoiOr0(count), commits)), 0o644); err != nil {
+	text, err := evalBriefing(t, r, e.checkout, atoiOr0(count), commits)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(briefing, []byte(text), 0o644); err != nil {
 		return "", err
 	}
 	// The pr-review skill's prompt for the Claude reviewer, SKILL.md step 4;
@@ -586,7 +590,11 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	out := filepath.Join(e.logs, strings.ReplaceAll(ec.id, "/", "-")+".judge.md")
 	// --tools takes a list: the flag after it ends the list, so the prompt
 	// isn't taken for a tool.
-	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, briefBefore(ec.task, ec.review), report))
+	brief, err := briefBefore(ec.task, ec.review)
+	if err != nil {
+		return "", "", err
+	}
+	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, brief, report))
 	cmd.Dir = os.TempDir() // away from any repo's CLAUDE.md
 	answer, err := e.session(cmd, out, "the judge")
 	if err != nil {

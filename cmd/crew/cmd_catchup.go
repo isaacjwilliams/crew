@@ -99,7 +99,10 @@ func cmdCatchUp(c *Crew, args []string) error {
 	if t.ConflictReported(conflict.at) {
 		return nothingToDo("the conflict with %s at %s is reported already", conflict.base, conflict.at)
 	}
-	n, _ := reviewRound{conflict: &conflict}.add(t, num)
+	n, _, err := reviewRound{by: "crew catch-up", conflict: &conflict}.add(t, num)
+	if err != nil {
+		return err
+	}
 	t.Log(fmt.Sprintf("review round %d recorded: conflicts with %s at %s", n, conflict.base, conflict.at))
 	t.Touch()
 	c.commit("catch-up " + p.Name + "/" + t.ID())

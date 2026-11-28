@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,7 +94,7 @@ func TestStatsOfReview(t *testing.T) {
 	reviews += "### Automated review 5 — 2026-11-12 09:00\n\n- Reviewers: Claude reviewer\n\n" +
 		"#### 1. [must fix] h — `h.go:8`\n- Earlier: repeat of review 3 #2\n- Agreed severity: must fix\n- Outcome: left for the user: still open from review 3\n\n" +
 		"#### 2. [must fix] g — `g.go:7`\n- Earlier: repeat of review 3 #1\n- Agreed severity: disputed\n- Outcome: left for the user: still open from review 3\n\n"
-	s := statsOf(Task{docWith(t, reviews+round)}, history{})
+	s := statsOf(roundsTask(t, reviews+round), history{})
 	got := []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
 		t.Errorf("rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
@@ -108,10 +109,15 @@ func TestStatsOfReview(t *testing.T) {
 	if n := strings.Count(decided, "; decided by the user"); n != 4 {
 		t.Fatalf("decided %d findings, want 4", n)
 	}
-	s = statsOf(Task{docWith(t, decided)}, history{})
+	s = statsOf(roundsTask(t, decided), history{})
 	got = []int{s.rounds, s.comments, s.reviews, s.cleanAfter, s.fixed, s.setAside, s.leftForUser}
 	if want := []int{1, 2, 5, 3, 2, 2, 3}; !slices.Equal(got, want) {
 		t.Errorf("with the findings decided: rounds, comments, reviews, clean after, fixed, set aside, left for the user = %v, want %v", got, want)
+	}
+
+	// Before crew migrate, the rounds can't be counted, so their cells say so.
+	if s := statsOf(Task{docWith(t, reviews+round)}, history{}); !errors.Is(s.unread, errNotMigrated) || !slices.Equal(s.cells("")[:2], []string{"?", "?"}) {
+		t.Errorf("an unmigrated task: unread %v, cells %q; want errNotMigrated and ? for rounds and comments", s.unread, s.cells(""))
 	}
 
 	// Only the first review, which needed fixes: it never came back clean.

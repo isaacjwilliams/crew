@@ -137,7 +137,10 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	if err != nil {
 		return err
 	}
-	tasks, newest := tasksToSort(c.tasks(p.Name), since, time.Now())
+	tasks, newest, err := tasksToSort(c.tasks(p.Name), since, time.Now())
+	if err != nil {
+		return err
+	}
 	if len(tasks) == 0 {
 		fmt.Printf("%s: no newly merged tasks with your comments after automated review\n", p.Name)
 		return nil
@@ -146,7 +149,7 @@ func (c *Crew) sortMisses(p *Project, wt string) error {
 	for _, t := range tasks {
 		fmt.Fprintf(&list, "- %s\n", t.task.Path)
 		for _, cm := range t.comments {
-			fmt.Fprintf(&list, "  - round %d, after automated review %d: %s\n", cm.Round, cm.Review.Number, cm.Comment.Item)
+			fmt.Fprintf(&list, "  - round %d, after automated review %d: %s\n", cm.Round, cm.Review.Number, cm.Comment.Name())
 		}
 	}
 	prompt := fmt.Sprintf("Project: %s\nProposals directory: %s\nProposal template: %s\nCrew's review rubric: %s\nToday's date: %s\nTasks to read, and the comments to sort in each:\n%sFollow your process and write proposals only into the proposals directory.",
@@ -169,8 +172,9 @@ type taskToSort struct {
 // of their merge times. A merge time is when crew sync logged the merge, so a
 // task synced late still comes after since. Log times are to the minute, so a
 // task synced later in now's minute would tie with a cursor set now, and be
-// skipped: one merged in that minute waits for the next run.
-func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
+// skipped: one merged in that minute waits for the next run. It fails on a
+// task whose rounds it can't read, so the cursor doesn't pass it unread.
+func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time, error) {
 	thisMinute := now.Truncate(time.Minute)
 	var picked []taskToSort
 	newest := since
@@ -182,14 +186,18 @@ func tasksToSort(tasks []Task, since, now time.Time) ([]taskToSort, time.Time) {
 		if !merged.After(since) || !merged.Before(thisMinute) {
 			continue
 		}
-		if comments := t.CommentsAfterReview(); len(comments) > 0 {
+		comments, err := t.CommentsAfterReview()
+		if err != nil {
+			return nil, since, fmt.Errorf("can't read %s's review rounds: %w", t.ID(), err)
+		}
+		if len(comments) > 0 {
 			picked = append(picked, taskToSort{t, comments})
 			if merged.After(newest) {
 				newest = merged
 			}
 		}
 	}
-	return picked, newest
+	return picked, newest, nil
 }
 
 // missesSince is where the misses agent's run starts: the time in lastFile,

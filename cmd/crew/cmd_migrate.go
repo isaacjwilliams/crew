@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,10 @@ import (
 // records: each item becomes a to_learn record and, once ticked, a learned
 // record with its answer. The section keeps any line that wasn't part of an
 // item, under the template's comment.
+//
+// Format 2 records each review round the task file holds: its number and time,
+// whether it holds the user's feedback, and their comments in it. The rounds'
+// text stays as it is: it's what the worker was sent.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -45,18 +50,28 @@ func cmdMigrate(c *Crew, args []string) error {
 		if have == ledgerFormat {
 			continue
 		}
-		items := 0
+		items, rounds := 0, 0
 		for _, t := range c.tasks(p) {
-			n, err := migrateStillToLearn(t, comment)
+			if have < 1 {
+				n, err := migrateStillToLearn(t, comment)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				items += n
+			}
+			n, err := migrateRounds(t)
 			if err != nil {
 				return fail("%s: %v", t.ID(), err)
 			}
-			items += n
+			rounds += n
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
 		}
-		fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
+		if have < 1 {
+			fmt.Printf("%s: moved %d item(s) still to learn into records\n", p, items)
+		}
+		fmt.Printf("%s: recorded %d review round(s)\n", p, rounds)
 		migrated++
 	}
 	if migrated == 0 {
@@ -84,7 +99,7 @@ func migrateStillToLearn(t Task, comment []string) (int, error) {
 			return 0, err
 		}
 	}
-	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" }) {
+	if slices.ContainsFunc(records, func(r Record) bool { return r.By == "crew migrate" && (r.ToLearn != nil || r.Learned != nil) }) {
 		items = nil
 	}
 	var moved []Record
@@ -184,4 +199,93 @@ func answerFrom(under []string) string {
 		return strings.TrimPrefix(out[0], "- ")
 	}
 	return strings.Join(out, "\n")
+}
+
+// migrateRounds records the review rounds in the task file, each as crew read
+// it before rounds were records, and says how many it recorded. A round holds
+// the user's feedback when it has a comment of theirs or asks for another
+// automated review; other lines a person typed into a round aren't recorded.
+// A task with round records has had its rounds recorded already.
+func migrateRounds(t Task) (int, error) {
+	var rounds []ReviewRound
+	var cm *RoundComment // the comment whose quote the line may continue
+	for _, l := range strings.Split(t.Section("## Review rounds"), "\n") {
+		quote, isQuote := strings.CutPrefix(l, "  >")
+		item, isItem := checklistItem(l)
+		var round *ReviewRound // the round the line is in
+		if len(rounds) > 0 {
+			round = &rounds[len(rounds)-1]
+		}
+		switch rest, isHeading := strings.CutPrefix(l, "### Round "); {
+		case isHeading:
+			n, at := numberedHeading(rest)
+			if n < 1 || at.IsZero() {
+				return 0, fmt.Errorf("can't read the round heading %q", l)
+			}
+			rounds, cm = append(rounds, ReviewRound{Round{Number: n}, at}), nil
+		case isItem && round != nil && strings.HasPrefix(item, "Automated review requested "):
+			round.ReviewRequested, cm = true, nil
+		case isItem && round != nil && isComment(item):
+			comment, err := commentItem(item)
+			if err != nil {
+				return 0, err
+			}
+			round.Comments = append(round.Comments, comment)
+			cm = &round.Comments[len(round.Comments)-1]
+		case isQuote && cm != nil:
+			if cm.Text != "" {
+				cm.Text += "\n"
+			}
+			cm.Text += strings.TrimPrefix(quote, " ")
+		default:
+			cm = nil
+		}
+	}
+	if len(rounds) == 0 {
+		return 0, nil
+	}
+	records, err := t.readRecords()
+	if err != nil || slices.ContainsFunc(records, func(r Record) bool { return r.Round != nil }) {
+		return 0, err
+	}
+	var recorded []Record
+	for _, round := range rounds {
+		r := newRecord("crew migrate", slices.Concat(records, recorded))
+		r.At, r.Round = round.At, &round.Round
+		recorded = append(recorded, r)
+	}
+	return len(recorded), t.AddRecords(recorded...)
+}
+
+// isComment: the checklist item in a review round is one of the user's
+// comments, as reviewRound.add wrote it: "review 7 (changes_requested)",
+// "comment 10 — …" or "`a.go:3` — comment 9 — …".
+func isComment(item string) bool {
+	return strings.HasPrefix(item, "review ") || strings.HasPrefix(item, "comment ") || strings.Contains(item, " — comment ")
+}
+
+// commentItem reads a comment's checklist item in a review round.
+func commentItem(item string) (RoundComment, error) {
+	firstWord := func(s string) string { w, _, _ := strings.Cut(s, " "); return w }
+	if rest, ok := strings.CutPrefix(item, "review "); ok {
+		return RoundComment{Kind: reviewSummary, ID: firstWord(rest)}, nil
+	}
+	if rest, ok := strings.CutPrefix(item, "comment "); ok {
+		return RoundComment{Kind: convoComment, ID: firstWord(rest)}, nil
+	}
+	where, rest, _ := strings.Cut(item, " — comment ")
+	place, ok := strings.CutPrefix(where, "`")
+	place, ok2 := strings.CutSuffix(place, "`")
+	i := strings.LastIndex(place, ":")
+	if !ok || !ok2 || i < 1 {
+		return RoundComment{}, fmt.Errorf("can't read the place of the inline comment %q", item)
+	}
+	line := 0 // "?": GitHub gave the comment no line
+	if n := place[i+1:]; n != "?" {
+		var err error
+		if line, err = strconv.Atoi(n); err != nil || line < 1 {
+			return RoundComment{}, fmt.Errorf("can't read the line of the inline comment %q", item)
+		}
+	}
+	return RoundComment{Kind: inlineComment, ID: firstWord(rest), Path: place[:i], Line: line}, nil
 }

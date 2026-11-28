@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -728,21 +729,32 @@ func TestConflictReported(t *testing.T) {
 	}
 }
 
+// roundsTask is content as a task file whose review rounds crew migrate has
+// recorded, in a project in this crew's ledger format.
+func roundsTask(t *testing.T, content string) Task {
+	t.Helper()
+	task := learnTask(t, content)
+	if _, err := migrateRounds(task); err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
 func TestFeedbackRounds(t *testing.T) {
 	// Round 1 only reports red CI; round 2 has a comment besides; round 3 asks
 	// for a review; rounds 4 and 5 only report a conflict.
-	if n := (Task{docWith(t, reportsTask)}).FeedbackRounds(); n != 2 {
-		t.Errorf("FeedbackRounds = %d, want 2", n)
+	if n, err := roundsTask(t, reportsTask).FeedbackRounds(); n != 2 || err != nil {
+		t.Errorf("FeedbackRounds = %d, %v; want 2", n, err)
 	}
-	if n := (Task{docWith(t, sampleTask)}).FeedbackRounds(); n != 0 {
-		t.Errorf("a task without review rounds: FeedbackRounds = %d", n)
+	if n, err := learnTask(t, sampleTask).FeedbackRounds(); n != 0 || err != nil {
+		t.Errorf("a task without review rounds: FeedbackRounds = %d, %v", n, err)
 	}
 }
 
 func TestReviewComments(t *testing.T) {
 	// Round 2 has one conversation comment, with a CI line quoted in it.
-	if n := (Task{docWith(t, reportsTask)}).ReviewComments(); n != 1 {
-		t.Errorf("ReviewComments = %d, want 1", n)
+	if n, err := roundsTask(t, reportsTask).ReviewComments(); n != 1 || err != nil {
+		t.Errorf("ReviewComments = %d, %v; want 1", n, err)
 	}
 	// A review summary, an inline comment and a conversation comment, each
 	// with a quote; the CI line and the request for a review aren't comments.
@@ -751,8 +763,8 @@ func TestReviewComments(t *testing.T) {
 		"**Inline comments**\n- [ ] `a.go:3` — comment 9 (in thread 4) — [link](u9)\n  > why?\n\n" +
 		"**Conversation comments**\n- [x] comment 10 — [link](u10)\n  > ok\n\n" +
 		"- [ ] Automated review requested (comment 11)\n\n## Log\n"
-	if n := (Task{docWith(t, round)}).ReviewComments(); n != 3 {
-		t.Errorf("ReviewComments = %d, want 3", n)
+	if n, err := roundsTask(t, round).ReviewComments(); n != 3 || err != nil {
+		t.Errorf("ReviewComments = %d, %v; want 3", n, err)
 	}
 }
 
@@ -772,20 +784,27 @@ const commentedTask = "## Automated reviews\n" +
 	"## Log\n"
 
 func TestReviewRounds(t *testing.T) {
-	rounds := Task{docWith(t, commentedTask)}.ReviewRounds()
+	rounds, err := roundsTask(t, commentedTask).ReviewRounds()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got []string
 	for _, r := range rounds {
-		line := fmt.Sprintf("%d %s:", r.Number, r.At.Format(logTime))
+		line := fmt.Sprintf("%d %s %v:", r.Number, r.At.Format(logTime), r.Feedback())
 		for _, cm := range r.Comments {
-			line += fmt.Sprintf(" [%s: %q]", cm.Item, cm.Text)
+			where := ""
+			if cm.Kind == inlineComment {
+				where = " on " + cm.Where()
+			}
+			line += fmt.Sprintf(" [%s%s: %q]", cm.Name(), where, cm.Text)
 		}
 		got = append(got, line)
 	}
 	want := []string{
-		`1 2026-11-10 10:00: [comment 5 — [link](u5): "too early"]`,
-		"2 2026-11-10 13:00:",
-		`3 2026-11-10 14:00: [review 7 (changes_requested): "Two things.\n- [ ] not an item"] [` + "`a.go:3`" + ` — comment 9 — [link](u9): "why?"]`,
-		`4 2026-11-11 10:00: [comment 12 — [link](u12): "ok"]`,
+		`1 2026-11-10 10:00 true: [comment 5: "too early"]`,
+		"2 2026-11-10 13:00 false:",
+		`3 2026-11-10 14:00 true: [review 7: "Two things.\n- [ ] not an item"] [comment 9 on ` + "`a.go:3`" + `: "why?"]`,
+		`4 2026-11-11 10:00 true: [comment 12: "ok"]`,
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("ReviewRounds =\n%q\nwant\n%q", got, want)
@@ -794,18 +813,22 @@ func TestReviewRounds(t *testing.T) {
 
 func TestCommentsAfterReview(t *testing.T) {
 	var got []string
-	for _, c := range (Task{docWith(t, commentedTask)}).CommentsAfterReview() {
-		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment.Item, c.Review.Number))
+	comments, err := roundsTask(t, commentedTask).CommentsAfterReview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range comments {
+		got = append(got, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment.Name(), c.Review.Number))
 	}
 	// Round 1 came before any review, and round 2 holds no comment.
-	want := []string{"round 3, review 7 (changes_requested), after review 1", "round 3, `a.go:3` — comment 9 — [link](u9), after review 1", "round 4, comment 12 — [link](u12), after review 2"}
+	want := []string{"round 3, review 7, after review 1", "round 3, comment 9, after review 1", "round 4, comment 12, after review 2"}
 	if !slices.Equal(got, want) {
 		t.Errorf("CommentsAfterReview = %q\nwant %q", got, want)
 	}
 	// Without a time, a review can't be placed before a round.
 	undated := strings.Replace(strings.Replace(commentedTask, "1 — 2026-11-10 12:00", "1", 1), "2 — 2026-11-11 09:00", "2", 1)
-	if got := (Task{docWith(t, undated)}).CommentsAfterReview(); got != nil {
-		t.Errorf("after undated reviews: %v", got)
+	if got, err := roundsTask(t, undated).CommentsAfterReview(); got != nil || err != nil {
+		t.Errorf("after undated reviews: %v, %v", got, err)
 	}
 }
 
@@ -1387,5 +1410,37 @@ func TestStatusBeforeNeedsInputKeepsAHandOver(t *testing.T) {
 	}
 	if got := backToWorker(task); got != Working {
 		t.Errorf("backToWorker = %s, want working: a followup note sends the worker back to work", got)
+	}
+}
+
+// handEditedRounds is a Review rounds section after someone edited it by hand:
+// a round renumbered and retimed, one deleted, a comment reworded and one
+// added, and a CI report made a comment.
+const handEditedRounds = "### Round 7 — 2026-12-01 10:00 (PR #12)\n\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > reworded\n" +
+	"- [ ] comment 99 — [link](u99)\n  > typed in\n\n" +
+	"### Round 2 — 2026-11-10 13:00 (PR #12)\n\n- [x] comment 1 — [link](u1)\n  > CI failed on aaa1111: test"
+
+// Crew reads the rounds from its records, so editing their lines by hand, or
+// deleting them, changes nothing it counts or reads from them.
+func TestRoundsIgnoreTheirLines(t *testing.T) {
+	task := roundsTask(t, commentedTask)
+	read := func() string {
+		feedback, err1 := task.FeedbackRounds()
+		comments, err2 := task.ReviewComments()
+		rounds, err3 := task.ReviewRounds()
+		after, err4 := task.CommentsAfterReview()
+		if err := errors.Join(err1, err2, err3, err4); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("%d %d %v %v", feedback, comments, rounds, after)
+	}
+	want := read()
+	for _, edited := range []string{handEditedRounds, ""} {
+		if err := task.ReplaceSection("## Review rounds", edited); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(); got != want {
+			t.Errorf("after Review rounds became %q, crew read\n%s\nwant\n%s", edited, got, want)
+		}
 	}
 }

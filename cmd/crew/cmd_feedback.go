@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,16 +95,23 @@ func (cm ghComment) whose(me string) string {
 	return "other"
 }
 
-// where is an inline comment's place in the diff: `path:line`.
-func (cm ghComment) where() string {
-	line := "?"
-	if cm.Line != nil {
-		line = cm.Line.String()
-	} else if cm.OriginalLine != nil {
-		line = cm.OriginalLine.String()
+// inRound is the comment as a review round records it, a comment of kind. Its
+// text leaves out the blank lines around the body, as crew read it before
+// rounds were records.
+func (cm ghComment) inRound(kind commentKind) RoundComment {
+	rc := RoundComment{Kind: kind, ID: cm.ID.String(), Text: strings.Trim(strings.ReplaceAll(cm.Body, "\r", ""), "\n")}
+	if kind == inlineComment {
+		rc.Path = cm.Path
+		if line := cmp.Or(cm.Line, cm.OriginalLine); line != nil {
+			n, _ := line.Int64()
+			rc.Line = int(n)
+		}
 	}
-	return "`" + cm.Path + ":" + line + "`"
+	return rc
 }
+
+// where is an inline comment's place in the diff: `path:line`.
+func (cm ghComment) where() string { return cm.inRound(inlineComment).Where() }
 
 // quoted is a comment's body as a Markdown quote, indented under a list item.
 func quoted(body string) string {
@@ -245,7 +253,7 @@ func cmdFeedback(c *Crew, args []string) error {
 	}
 	convo := relevant(allConvo, me, func(cm ghComment) bool { return cm.CreatedAt > since })
 
-	r := reviewRound{reviews: byWho(reviews, "me"), inline: byWho(inline, "me")}
+	r := reviewRound{by: "crew feedback", reviews: byWho(reviews, "me"), inline: byWho(inline, "me")}
 	for _, cm := range byWho(convo, "me") {
 		if isReviewRequest(cm) {
 			r.reviewRequests = append(r.reviewRequests, "comment "+cm.ID.String())
@@ -277,7 +285,9 @@ func cmdFeedback(c *Crew, args []string) error {
 	var n int
 	var round string
 	if !r.empty() {
-		n, round = r.add(t, num)
+		if n, round, err = r.add(t, num); err != nil {
+			return err
+		}
 		msg := fmt.Sprintf("review round %d recorded (%d reviews, %d inline, %d conversation)", n, len(r.reviews), len(r.inline), len(r.convo))
 		if len(r.reviewRequests) > 0 {
 			msg += ", with a request for another automated review"
@@ -329,7 +339,10 @@ func cmdReview(c *Crew, args []string) error {
 	if err := c.lock(); err != nil {
 		return err
 	}
-	n, _ := reviewRound{reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	n, _, err := reviewRound{by: "crew review", reviewRequests: []string{"crew review"}}.add(t, t.PRNumber())
+	if err != nil {
+		return err
+	}
 	t.Log(fmt.Sprintf("review round %d recorded: a request for another automated review", n))
 	t.Touch()
 	c.commit("review " + p.Name + "/" + t.ID())
@@ -360,6 +373,7 @@ func isReviewRequest(cm ghComment) bool {
 // round from crew ci-fix holds only the red CI it reports, and one from crew
 // catch-up only the conflict with the base.
 type reviewRound struct {
+	by                     string // the command that records it
 	reviews, inline, convo []ghComment
 	reviewRequests         []string // where each came from: "comment <id>" or "crew review"
 	redCI                  *redCI
@@ -370,11 +384,29 @@ func (r reviewRound) empty() bool {
 	return len(r.reviews)+len(r.inline)+len(r.convo)+len(r.reviewRequests) == 0 && r.redCI == nil && r.conflict == nil
 }
 
-// add writes the round into the task as its next, before ## Log, and counts it
-// in review_rounds. It returns the round's number and text. Run it with the
-// ledger lock held.
-func (r reviewRound) add(t Task, prNumber string) (int, string) {
+// add records the round as the task's next, then writes its text before
+// ## Log and counts it in review_rounds. It returns the round's number and
+// text. It writes nothing when it can't read the task's records, as before
+// crew migrate. Run it with the ledger lock held.
+func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
+	records, err := t.Records()
+	if err != nil {
+		return 0, "", fmt.Errorf("can't record a review round on %s: %w", t.ID(), err)
+	}
+	rec := newRecord(r.by, records)
+	rec.Round = &Round{Number: n, ReviewRequested: len(r.reviewRequests) > 0}
+	for _, cms := range []struct {
+		kind commentKind
+		list []ghComment
+	}{{reviewSummary, r.reviews}, {inlineComment, r.inline}, {convoComment, r.convo}} {
+		for _, cm := range cms.list {
+			rec.Round.Comments = append(rec.Round.Comments, cm.inRound(cms.kind))
+		}
+	}
+	if err := t.AddRecords(rec); err != nil {
+		return 0, "", err
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "### Round %d — %s (PR #%s)\n\n", n, time.Now().Format(logTime), prNumber)
 	if r.redCI != nil {
@@ -416,16 +448,21 @@ func (r reviewRound) add(t Task, prNumber string) (int, string) {
 	}
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
-	return n, b.String()
+	return n, b.String(), nil
 }
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of
 // the user's feedback. Rounds that only report red CI or a conflict don't count.
 func (c *Crew) warnManyRounds(p *Project, t Task) {
-	if max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS"); err == nil {
-		if n := t.FeedbackRounds(); n > max {
-			c.warn("%s has had %d rounds of review (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", t.ID(), n, max)
-		}
+	max, err := intSetting(p.Settings, "MAX_REVIEW_ROUNDS")
+	if err != nil {
+		return
+	}
+	switch n, err := t.FeedbackRounds(); {
+	case err != nil:
+		c.warn("can't count %s's rounds of review against MAX_REVIEW_ROUNDS: %v", t.ID(), err)
+	case n > max:
+		c.warn("%s has had %d rounds of review (MAX_REVIEW_ROUNDS=%d); consider whether the plan needs a rethink", t.ID(), n, max)
 	}
 }
 

@@ -1394,6 +1394,17 @@ check "the MAX_REVIEW_ROUNDS warning counts the rounds of the user's feedback, r
   '[[ $out == *"013-tick-routing has had 10 rounds of review (MAX_REVIEW_ROUNDS=9)"* && $(crew get 13 review_rounds) == 15 ]]'
 sed -i '/^MAX_REVIEW_ROUNDS=9$/d' "$PE"; crew set 13 last_round_sent 15
 cp "$F13" "$SB/rounds-013.md"; [[ ! -e ${F13%.md}.records.jsonl ]] || cp "${F13%.md}.records.jsonl" "$SB/rounds-013.records.jsonl"
+# Until crew migrate brings the project's ledger to this crew's format, crew records no round: a
+# command that would refuses and names crew migrate, and loses none of the comments it would send.
+setstate "done" null; hand_over 13; crew set 13 feedback_since 1970-01-01T00:00:00Z
+mv "$PD/ledger-format" "$HOME/ledger-format"; cp "$F13" "$HOME/f13-before"; n=$(resumes)
+review=$(crew review 13 2>&1); feedback=$(crew feedback 13 2>&1); ticked=$(crew tick 2>&1)
+refused="can't record a review round on 013-tick-routing: $PJ's ledger isn't migrated to this crew's records yet: run crew migrate"
+check "before crew migrate, crew review, crew feedback and crew tick record no round, and say to run crew migrate" \
+  '[[ $review == *"$refused"* && $feedback == *"$refused"* && $ticked == *"$refused"* && $(grep -c "\"round\"" "${F13%.md}.records.jsonl") == 15 && $(resumes) == "$n" ]] && cmp -s "$F13" "$HOME/f13-before"'
+mv "$HOME/ledger-format" "$PD/ledger-format"; out=$(crew tick 2>&1)
+check "once the ledger is migrated, the next tick records the round it held back, and sends it" \
+  '[[ $out == *"013-tick-routing: review round 16 recorded"* && $out == *"013-tick-routing: round 16 sent to its worker"* && $(grep -c "\"round\"" "${F13%.md}.records.jsonl") == 16 && $(resumes) == $((n + 1)) ]]'
 setstate "done" null; hand_over 13
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
@@ -2499,13 +2510,17 @@ check "in a project not yet migrated, ready refuses a draft rather than count it
   '((r1 == 1)) && [[ $out == "crew: can'"'"'t read what $UTI still has to learn: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == draft && $(row "$UTI") == *"run crew migrate"* ]]'
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
+sed -i '/^## Review rounds$/a ### Round 1 — 2026-11-10 09:00 (PR #5)\n\n**Inline comments**\n- [x] `a.go:3` — comment 6 — [link](u6)\n  > why is a.go here?\n' "$UT"   # as crew wrote rounds before format 2
+cp "$UT" "$HOME/ut-before"
 sh=$(shown "$UT")
 check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records" && $(cat "$PD/ledger-format") == 1 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 1" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
-   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: recorded 1 review round(s)" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+   has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! section "$UT" "## Still to learn" | grep -q "^- \["'
+check "migrate records the rounds typed into a task file, leaving their lines as they are" \
+  '[[ $(sed -n "/^## Review rounds\$/,/^## /p" "$UT") == "$(sed -n "/^## Review rounds\$/,/^## /p" "$HOME/ut-before")" ]]'
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 crew set "$UT" status abandoned
 
@@ -3056,6 +3071,7 @@ printf -- '- 2026-10-20 12:00 — status → merged\n' >>"$SP/tasks/003-stats-ol
 printf -- '- 2026-09-06 12:00 — status → merged\n' >>"$SP/tasks/004-stats-cause.md"
 printf -- '- 2026-11-09 12:00 — status → merged\n' >>"$SP/tasks/005-stats-fix.md"
 crew commit "stats fixtures" >/dev/null
+crew migrate >/dev/null   # records 001's round, typed into its file as crew wrote rounds before format 2
 git init -q --bare "$SB/stats.git" && git clone -q "$SB/stats.git" "$SB/stats" 2>/dev/null
 (cd "$SB/stats" && echo two >two && git add two && git commit -qm "Merge pull request #35 from me/two" &&
   GIT_COMMITTER_DATE=2026-11-10T12:00:00 git revert --no-edit HEAD >/dev/null && git push -q origin HEAD:main)
@@ -3126,6 +3142,9 @@ check "costs refuses a date it can't read, and a last day before the first" \
 # one but merged before the cursor.
 MT=$PD/tasks
 for t in 090-misses-one 091-misses-ci 092-misses-old; do sed 's/^status: .*/status: merged/' "$L/templates/task.md" >"$MT/$t.md"; done
+record_rounds() {  # records the rounds typed into the project's task files, as crew migrate does for a ledger from before format 2
+  echo 1 >"$PD/ledger-format"; crew migrate >/dev/null
+}
 review_then_round() {  # file day: a review at 11:00 that day, then a round at 13:00 with the lines that follow
   local f=$1 day=$2; shift 2
   sed -i -e "/^## Automated reviews\$/a ### Automated review 1 — $day 11:00\\n- Reviewers: Claude reviewer\\nNo findings." \
@@ -3139,14 +3158,14 @@ printf -- '- 2026-11-07 16:00 — status → merged\n' >>"$MT/091-misses-ci.md"
 printf -- '- 2026-11-04 16:00 — status → merged\n' >>"$MT/092-misses-old.md"
 date -d '2026-11-05 00:00' --iso-8601=seconds >"$PD/misses.last"
 git -C "$SB/webapp" rev-parse origin/main >"$PD/gardener.last"   # no new commits for the gardener
-crew commit "misses fixtures" >/dev/null
+crew commit "misses fixtures" >/dev/null; record_rounds
 n=$(wc -l <"$HOME/claude-calls.log")
 out=$(crew gardener --project "$PJ" 2>&1); st=$?
 call=$(tail -n +$((n + 1)) "$HOME/claude-calls.log")
 check "with no new commits, crew gardener still runs the misses agent, with the gardener's settings" \
   '((st == 0)) && [[ $out == *"$PJ: no new commits since the last run"*"$PJ: sorting your comments on 1 merged task(s)"* && $call == *"--agent misses "* && $call != *"--agent gardener "* && $(given_settings) == "$(jq -c . "$L/config/gardener-settings.json")" ]]'
 check "it passes the task merged after misses.last with a comment after a review, with that comment, and no other task" \
-  '[[ $call == *"- $MT/090-misses-one.md"$'"'"'\n'"'"'"  - round 1, after automated review 1: comment 5 — [link](u5)"* && $call != *091-misses-ci* && $call != *092-misses-old* ]]'
+  '[[ $call == *"- $MT/090-misses-one.md"$'"'"'\n'"'"'"  - round 1, after automated review 1: comment 5"$'"'"'\n'"'"'* && $call != *091-misses-ci* && $call != *092-misses-old* ]]'
 check "it records the newest merge time it read in misses.last, and commits" \
   '[[ $(date -d "$(cat "$PD/misses.last")" +%s) == $(date -d "2026-11-06 16:00" +%s) && $(git -C "$L" log -1 --format=%s) == "misses $PJ (1 tasks)" && -z $(git -C "$L" status --porcelain -- projects) ]]'
 n=$(wc -l <"$HOME/claude-calls.log")
@@ -3157,7 +3176,7 @@ check "a second run with nothing new starts no session" \
 sed 's/^status: .*/status: merged/' "$L/templates/task.md" >"$MT/093-misses-two.md"
 review_then_round "$MT/093-misses-two.md" 2026-11-08 '**Conversation comments**\n- [x] comment 7 — [link](u7)\n  > split this'
 printf -- '- 2026-11-08 16:00 — status → merged\n' >>"$MT/093-misses-two.md"
-crew commit "misses fixture" >/dev/null
+crew commit "misses fixture" >/dev/null; record_rounds
 (cd "$SB/webapp" && git commit -q --allow-empty -m "more" && git push -q)
 glast=$(cat "$PD/gardener.last"); echo gardener >"$HOME/fail-agent"
 out=$(crew gardener --project "$PJ" 2>&1); st=$?
@@ -3183,7 +3202,7 @@ sed -e 's/^status: .*/status: merged/' -e "s/^project: .*/project: $PJ/" -e 's/^
   -e '/^## Review rounds$/a ### Round 1 — 2026-11-10 09:00 (PR #77)\n\n**Conversation comments**\n- [x] comment 3 — [link](u3)\n  > an earlier wish\n\n### Round 2 — 2026-11-10 13:00 (PR #77)\n\n**Conversation comments**\n- [x] comment 5 — [link](u5)\n  > b.go has no test\n\n**Inline comments**\n- [x] `a.go:1` — comment 6 — [link](u6)\n  > why is a.go here?' \
   "$L/templates/task.md" >"$ET"
 sed -e 's/^status: .*/status: merged/' -e "s/^project: .*/project: $PJ/" -e 's/^kind: .*/kind: fix/' -e 's/^fixes:.*/fixes: 095-eval-one/' -e 's/^title: .*/title: Fix the b race/' "$L/templates/task.md" >"$EX"
-crew commit "review eval fixtures" >/dev/null
+crew commit "review eval fixtures" >/dev/null; record_rounds
 EW=$(crew config WORK_ROOT --project "$PJ")/$PJ/_eval
 judged() { grep -c -- '^claude -p --tools  --permission-prompts none ' <<<"$1"; }
 echo "b.go has no test" >"$HOME/judge-finds"
@@ -3261,8 +3280,8 @@ crew commit "rounds fixture" >/dev/null
 out=$(crew stats --project "$PJ" --since 2026-11-09 | tr -s ' ')
 check "stats counts the user's rounds of feedback and their comments, as crew recorded them" '[[ $out == *" 097-rounds build 10 19 "* ]]'
 comments=""; for r in 1 2 3 4 5 6 12; do
-  if ((r == 6)); then comments+="  - round 6, after automated review 1: comment 132 — [link](u132)$NL"; continue; fi
-  comments+="  - round $r, after automated review 1: review 900 (changes_requested)$NL  - round $r, after automated review 1: \`src/search.ts:42\` — comment 111 — [link](u111)$NL  - round $r, after automated review 1: comment 115 — [link](u115)$NL"
+  if ((r == 6)); then comments+="  - round 6, after automated review 1: comment 132$NL"; continue; fi
+  comments+="  - round $r, after automated review 1: review 900$NL  - round $r, after automated review 1: comment 111$NL  - round $r, after automated review 1: comment 115$NL"
 done
 n=$(calls); out=$(crew gardener --project "$PJ" 2>&1); call=$(since "$n")
 check "the misses agent gets each of the user's comments after the review, by its round and a name its line in the round holds" \
@@ -3276,6 +3295,24 @@ done
 check "review-eval makes a case of each comment, with the same ID" '((st == 0)) && [[ $(grep -o "097-rounds/[a-z0-9/-]*" "$EV" | tr "\n" " ") == "$cases" ]]'
 check "review-eval gives the judge each comment's text, after its place for an inline one" \
   '[[ $call == *"## The miss$NL${NL}On \`src/search.ts:42\`: Rename \`f\`.$NL"* && $call == *"## The miss$NL${NL}Also keep the cutover dates as they are.${NL}Thanks.$NL"* ]]'
+# The rounds' lines are what crew sent the worker; crew reads the rounds from its records, so
+# deleting the lines, or editing them by hand, changes nothing it counts or reads.
+sed -i '/^## Review rounds$/,/^## Log$/{/^## /!d}' "$RT"; crew commit "rounds deleted by hand" >/dev/null
+date -d '2026-11-09 00:00' --iso-8601=seconds >"$PD/misses.last"
+out=$(crew stats --project "$PJ" --since 2026-11-09 | tr -s ' ')
+n=$(calls); crew gardener --project "$PJ" >/dev/null 2>&1; call=$(since "$n")
+crew review-eval --project "$PJ" --task 097-rounds >/dev/null 2>&1; st=$?; EV=$(ls -t "$PD"/review-eval/*.md | head -1)
+check "with the rounds' lines deleted from the task file, stats, the misses agent and review-eval get the same rounds and comments" \
+  '((st == 0)) && [[ $out == *" 097-rounds build 10 19 "* && $call == *"- $RT$NL$comments"* && $(grep -o "097-rounds/[a-z0-9/-]*" "$EV" | tr "\n" " ") == "$cases" ]]'
+# Until crew migrate, crew can't read the rounds, and says so rather than count none.
+date -d '2026-11-09 00:00' --iso-8601=seconds >"$PD/misses.last"; last=$(cat "$PD/misses.last"); mv "$PD/ledger-format" "$HOME/ledger-format"
+out=$(crew stats --project "$PJ" --since 2026-11-09 | tr -s ' ')
+garden=$(crew gardener --project "$PJ" 2>&1); gst=$?; eval=$(crew review-eval --project "$PJ" --task 097-rounds 2>&1); est=$?
+check "before crew migrate, stats shows ? for the rounds and comments it can't count, and says why" \
+  '[[ $out == *" 097-rounds build ? ? "* && $out == *"count the review rounds and comments: $PJ"*"run crew migrate"* ]]'
+check "before crew migrate, the misses agent's cursor stays before a task whose rounds crew can't read, and review-eval refuses" \
+  '((gst != 0 && est != 0)) && [[ $(cat "$PD/misses.last") == "$last" && $garden == *"review rounds: $PJ"*"run crew migrate"* && $eval == *"review rounds: $PJ"*"run crew migrate"* ]]'
+mv "$HOME/ledger-format" "$PD/ledger-format"
 
 # What the lead's hook tells each session (news.go), with lines of news from workers'
 # statuses: NA is in one project, NB in the other.

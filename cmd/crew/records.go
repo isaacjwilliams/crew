@@ -36,6 +36,7 @@ type Record struct {
 
 	ToLearn *ToLearn `json:"to_learn,omitempty"`
 	Learned *Learned `json:"learned,omitempty"`
+	Round   *Round   `json:"round,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -48,6 +49,51 @@ type ToLearn struct {
 type Learned struct {
 	Item   string `json:"item"` // the ToLearn record's ID
 	Answer string `json:"answer"`
+}
+
+// Round is a review round crew recorded on the task's PR, numbered as its
+// heading in the task file is: the user's comments in it, and whether they
+// asked for another automated review. A round with neither holds only crew's
+// own reports, of red CI or a conflict with the base. crew records a round
+// before it writes the round's text, so a run that stops in between records the
+// same round again under its number, and the newer record is the round.
+type Round struct {
+	Number          int            `json:"number"`
+	Comments        []RoundComment `json:"comments,omitempty"`
+	ReviewRequested bool           `json:"review_requested,omitempty"`
+}
+
+// A comment of the user's in a review round: a review summary, a conversation
+// comment or an inline comment, with its ID on GitHub and its text.
+type RoundComment struct {
+	Kind commentKind `json:"kind"`
+	ID   string      `json:"id"`
+	Path string      `json:"path,omitempty"` // an inline comment's file
+	Line int         `json:"line,omitempty"` // and its line, or 0 when GitHub gave none
+	Text string      `json:"text"`
+}
+
+// Feedback: the round holds the user's feedback, which MAX_REVIEW_ROUNDS
+// limits, rather than only crew's reports.
+func (r Round) Feedback() bool { return len(r.Comments) > 0 || r.ReviewRequested }
+
+// Name is how the round's text names the comment, and crew reply and crew
+// react take it: "review 7" or "comment 9".
+func (cm RoundComment) Name() string {
+	if cm.Kind == reviewSummary {
+		return "review " + cm.ID
+	}
+	return "comment " + cm.ID
+}
+
+// Where is an inline comment's place in the diff, `a.go:3`, with ? for a line
+// GitHub didn't give.
+func (cm RoundComment) Where() string {
+	line := "?"
+	if cm.Line > 0 {
+		line = strconv.Itoa(cm.Line)
+	}
+	return "`" + cm.Path + ":" + line + "`"
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -131,7 +177,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Round != nil} {
 		if set {
 			payloads++
 		}
@@ -144,6 +190,27 @@ func (r Record) check() error {
 		return errors.New("a to_learn record needs its text")
 	case r.Learned != nil && (r.Learned.Item == "" || strings.TrimSpace(r.Learned.Answer) == ""):
 		return errors.New("a learned record needs its item and its answer")
+	case r.Round != nil:
+		return r.Round.check()
+	}
+	return nil
+}
+
+func (r Round) check() error {
+	if r.Number < 1 {
+		return errors.New("a round record needs its number")
+	}
+	for _, cm := range r.Comments {
+		switch {
+		case cm.Kind != reviewSummary && cm.Kind != convoComment && cm.Kind != inlineComment:
+			return fmt.Errorf("a round's comment is a review, a comment or an inline comment, not %q", cm.Kind)
+		case cm.ID == "":
+			return errors.New("a round's comment needs its id")
+		case (cm.Kind == inlineComment) != (cm.Path != ""):
+			return errors.New("an inline comment, and only one, has a path")
+		case cm.Line < 0:
+			return errors.New("a round's comment has a negative line number")
+		}
 	}
 	return nil
 }
@@ -172,8 +239,10 @@ func (d Doc) AddRecords(rs ...Record) error {
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
 // records; before it they were checkboxes in the task file, which crew migrate
-// moves into records. crew project add writes the file for a new project.
-const ledgerFormat = 1
+// moves into records. Format 2 records review rounds too; before it crew read
+// them from the task file's text, which crew migrate reads into records. crew
+// project add writes the file for a new project.
+const ledgerFormat = 2
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

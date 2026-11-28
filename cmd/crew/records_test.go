@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -183,7 +185,8 @@ func TestLedgerFormat(t *testing.T) {
 	for content, want := range map[string]string{
 		"":    "p's ledger isn't migrated to this crew's records yet: run crew migrate",
 		"0\n": "run crew migrate",
-		"2\n": "p's ledger is from a newer crew: run crew upgrade",
+		"1\n": "run crew migrate",
+		"3\n": "p's ledger is from a newer crew: run crew upgrade",
 		"x\n": `holds "x", not a format number`,
 	} {
 		if content == "" {
@@ -358,5 +361,115 @@ status: draft
 	}
 	if b, _ := os.ReadFile(task.Path); strings.Contains(string(b), "- [") {
 		t.Errorf("task file still has its checkboxes:\n%s", b)
+	}
+}
+
+// A merged task with rounds of every kind crew wrote before format 2: review 1
+// comes after round 1 and review 2 after round 5. Round 2 only reports red CI,
+// round 3 only a conflict, round 4 only asks for a review; round 5 has a review
+// summary whose quote starts with a blank line, an inline comment GitHub gave
+// no line, one in a thread, a conversation comment with no text, a line a
+// person typed and a request; round 6 reports red CI beside a comment.
+const migratedRounds = "---\nstatus: merged\npr: https://github.com/o/r/pull/12\n---\n" +
+	"## Automated reviews\n" +
+	"### Automated review 1 — 2026-11-10 10:00\n\n- Range: `f1..h1`, 4 commits on `b` since `main` (fork point from the PR's base)\n- Reviewers: Claude reviewer\n\nNo findings.\n\n" +
+	"### Automated review 2 — 2026-11-10 12:00\n\n- Range: `h1..h2`, 2 commits on `b` since review 1 (fork point `f1`)\n- Reviewers: Claude reviewer\n\nNo findings.\n\n" +
+	"## Review rounds\n<!-- Appended by `crew feedback`. -->\n\n" +
+	"### Round 1 — 2026-11-10 09:00 (PR #12)\n\n**Conversation comments**\n- [x] comment 3 — [link](u3)\n  > before any review\n\n" +
+	"### Round 2 — 2026-11-10 10:30 (PR #12)\n\n- [x] CI failed on h1: test\n\n" +
+	"### Round 3 — 2026-11-10 10:45 (PR #12)\n\n- [x] Conflicts with main at abc1234\n\n" +
+	"### Round 4 — 2026-11-10 11:00 (PR #12)\n\n- [x] Automated review requested (crew review)\n\n" +
+	"### Round 5 — 2026-11-10 11:30 (PR #12)\n\n**Review summaries**\n- [x] review 7 (changes_requested)\n  > \n  > Two things.\n  > - [ ] not an item\n\n" +
+	"**Inline comments**\n- [x] `a.go:?` — comment 8 — [link](u8)\n  > why?\n- [ ] `b.go:3` — comment 9 (in thread 2) — [link](u9)\n  > and here\n\n" +
+	"**Conversation comments**\n- [x] comment 10 — [link](u10)\n\nA note the lead typed in.\n\n- [x] Automated review requested (comment 11)\n\n" +
+	"### Round 6 — 2026-11-10 12:30 (PR #12)\n\n- [x] CI failed on h2: lint\n\n**Conversation comments**\n- [x] comment 13 — [link](u13)\n  > ok\n\n" +
+	"## Log\n"
+
+func TestMigrateRounds(t *testing.T) {
+	task := learnTask(t, migratedRounds)
+	if n, err := migrateRounds(task); n != 6 || err != nil {
+		t.Fatalf("migrateRounds = %d, %v; want 6 rounds", n, err)
+	}
+	if b, _ := os.ReadFile(task.Path); string(b) != migratedRounds {
+		t.Errorf("task file =\n%s\nwant it as it was", b)
+	}
+	records, err := task.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		if r.By != "crew migrate" || r.Round == nil {
+			t.Errorf("record %+v; want a round by crew migrate", r)
+		}
+	}
+	if n, err := task.FeedbackRounds(); n != 4 || err != nil {
+		t.Errorf("FeedbackRounds = %d, %v; want 4: rounds 1, 4, 5 and 6", n, err)
+	}
+	if n, err := task.ReviewComments(); n != 6 || err != nil {
+		t.Errorf("ReviewComments = %d, %v; want 6", n, err)
+	}
+	var paired []string
+	after, err := task.CommentsAfterReview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range after {
+		paired = append(paired, fmt.Sprintf("round %d, %s, after review %d", c.Round, c.Comment.Name(), c.Review.Number))
+	}
+	wantPaired := []string{
+		"round 5, review 7, after review 1", "round 5, comment 8, after review 1", "round 5, comment 9, after review 1",
+		"round 5, comment 10, after review 1", "round 6, comment 13, after review 2",
+	}
+	if !slices.Equal(paired, wantPaired) {
+		t.Errorf("CommentsAfterReview = %q\nwant %q", paired, wantPaired)
+	}
+	cases, err := evalCases([]Task{task})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range cases {
+		got = append(got, c.id+": "+c.miss)
+	}
+	want := []string{
+		"001-a/round-5/review-7: Two things.\n- [ ] not an item", "001-a/round-5/comment-8: On `a.go:?`: why?",
+		"001-a/round-5/comment-9: On `b.go:3`: and here", "001-a/round-5/comment-10: ", "001-a/round-6/comment-13: ok",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("evalCases =\n%q\nwant\n%q", got, want)
+	}
+
+	// Run again, it records nothing more.
+	before, _ := os.ReadFile(task.RecordsPath())
+	if n, err := migrateRounds(task); n != 0 || err != nil {
+		t.Errorf("migrateRounds run again = %d, %v; want 0", n, err)
+	}
+	if again, _ := os.ReadFile(task.RecordsPath()); string(again) != string(before) {
+		t.Errorf("records run again =\n%s\nwant\n%s", again, before)
+	}
+}
+
+// A round crew can't read stops the migration of its task before it records
+// any of the task's rounds, so a second run, after the line is fixed, records
+// them all.
+func TestMigrateRoundsStopsAtALineItCantRead(t *testing.T) {
+	for _, line := range []string{"### Round 2 — sometime (PR #12)", "- [x] `a.go` — comment 8 — [link](u8)"} {
+		task := learnTask(t, "## Review rounds\n### Round 1 — 2026-11-10 09:00 (PR #12)\n\n- [x] comment 3 — [link](u3)\n  > hi\n\n"+line+"\n\n## Log\n")
+		if _, err := migrateRounds(task); err == nil || !strings.Contains(err.Error(), "can't read") {
+			t.Errorf("migrateRounds with %q = %v; want it to say what it can't read", line, err)
+		}
+		if _, err := os.Stat(task.RecordsPath()); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("with %q, migrateRounds wrote records: %v", line, err)
+		}
+	}
+}
+
+func TestMigrateRoundsLeavesATaskWithoutRoundsUnread(t *testing.T) {
+	task := learnTask(t, "## Review rounds\n\n## Log\n")
+	if err := os.WriteFile(task.RecordsPath(), []byte("not a record\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := migrateRounds(task); n != 0 || err != nil {
+		t.Errorf("migrateRounds on a task without rounds = %d, %v; want 0, nil without reading its records", n, err)
 	}
 }
