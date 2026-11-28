@@ -299,9 +299,9 @@ func unsentReport(t Task) bool {
 
 // reportLine is what the goal lead is told of a done spike: its recorded
 // answer, and the draft it informs. Hand-over needs an answer recorded, so a
-// done spike has one unless its records were edited by hand: then it's
-// reported without one, never with an empty one. It fails when crew can't read
-// the answer.
+// done spike has one unless its ledger was edited by hand: its records since,
+// or its report before crew migrate. Then it's reported without one, never
+// with an empty one. It fails when crew can't read the answer.
 func reportLine(t Task) (string, error) {
 	answer, err := t.Answer()
 	if err != nil {
