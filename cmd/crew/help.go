@@ -279,7 +279,8 @@ Project memory  (facts about a project you approved, which its agents load)
 
 Reading the ledger  (with no type word, the argument is a task, as for any TASK)
   crew show [task] TASK            Print a task file, with its items still to
-                                   learn and their answers
+                                   learn and their answers, and what crew
+                                   recorded of each question it opened
   crew show proposal PROPOSAL      Print a proposal
   crew show goal GOAL              Print a goal
   crew show memory [--project P]   Print the project's memory.md as it is on disk

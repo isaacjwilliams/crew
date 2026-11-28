@@ -87,17 +87,23 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
+// shownTask is a task as crew show prints it: its file, with what its records
+// say put in the sections they belong to.
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
 	if err != nil {
 		return "", err
 	}
+	return strings.Join(withQuestions(t, withLearning(t, ls)), "\n") + "\n", nil
+}
+
+// withLearning is the task file's lines with its still-to-learn items from its
+// records under Still to learn. Anything typed into the file's section stays
+// below them, marked as not being items crew counts. When crew can't read the
+// items, the section says why. In a project not yet migrated, what's typed in
+// it is the items, so it's shown as it is.
+func withLearning(t Task, ls []string) []string {
 	var items []string
 	learning, unread := t.StillToLearn()
 	if unread != nil {
@@ -105,18 +111,10 @@ func shownTask(path string) (string, error) {
 	} else {
 		items = learnLines(learning)
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+	if !slices.Contains(ls, learnHeading) && len(items) == 0 {
+		return ls
 	}
-	if start < 0 {
-		start = slices.Index(ls, "## Log")
-		if start < 0 {
-			start = len(ls)
-		}
-		ls = slices.Insert(ls, start, learnHeading, "")
-	}
-	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
+	ls, start, end := placeSection(ls, learnHeading)
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
 	var kept, typed []string // the section's comments and blank lines, and the rest
@@ -134,8 +132,21 @@ func shownTask(path string) (string, error) {
 	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
+}
+
+// placeSection is the lines with the section's heading in them, added before
+// the Log when it's missing, and where the heading and the section's end are.
+func placeSection(ls []string, heading string) ([]string, int, int) {
+	start := slices.Index(ls, heading)
+	if start < 0 {
+		start = slices.Index(ls, "## Log")
+		if start < 0 {
+			start = len(ls)
+		}
+		ls = slices.Insert(ls, start, heading, "")
+	}
+	return ls, start, start + 1 + len(sectionLines(ls[start:], heading))
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is
@@ -151,16 +162,23 @@ func learnLines(items []Item) []string {
 		}
 		out = append(out, fmt.Sprintf("- %s %s (%s, added %s)", box, i.ToLearn.Text, i.ID, stamp(i.Record)))
 		for _, a := range i.Settled {
-			lead := "  - settled " + stamp(a) + ":"
-			if lines := strings.Split(a.Learned.Answer, "\n"); len(lines) == 1 {
-				out = append(out, lead+" "+lines[0])
-			} else {
-				out = append(out, lead)
-				for _, l := range lines {
-					out = append(out, strings.TrimRight("    "+l, " "))
-				}
-			}
+			out = append(out, settledLines(a, a.Learned.Answer)...)
 		}
+	}
+	return out
+}
+
+// settledLines say under an item what settled it: when, by which command, and
+// the text it settled it with, on the same line when that's one line long.
+func settledLines(r Record, text string) []string {
+	lead := "  - settled " + stamp(r) + ":"
+	lines := strings.Split(text, "\n")
+	if len(lines) == 1 {
+		return []string{lead + " " + lines[0]}
+	}
+	out := []string{lead}
+	for _, l := range lines {
+		out = append(out, strings.TrimRight("    "+l, " "))
 	}
 	return out
 }

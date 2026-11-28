@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,6 +85,98 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "001-a.records.jsonl:2: ") || !strings.Contains(err.Error(), want) {
 			t.Errorf("StillToLearn with %s = %v; want an error at line 2 saying %q", line, err, want)
 		}
+	}
+}
+
+func TestQuestionRecordsRefuseWhatTheyCantRead(t *testing.T) {
+	good := `{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew to-learn","to_learn":{"text":"Q?"}}`
+	for question, want := range map[string]string{
+		`"question":{"kind":"worker","asker":"crew","for":"user","text":"Q?"}`:                                              "kind is one of",
+		`"question":{"kind":"collaborator","asker":"bob","for":"user","text":"Q?"}`:                                         `asked by an @login, not "bob"`,
+		`"question":{"kind":"nudge","asker":"@bob","for":"lead","text":"Q?"}`:                                               `a nudge question is asked by crew, not "@bob"`,
+		`"question":{"kind":"nudge","asker":"crew","for":"worker","text":"Q?"}`:                                             "is for one of",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":" "}`:                                                "a question needs its text",
+		`"question":{"kind":"red-ci","asker":"crew","for":"user","text":"Q?"}`:                                              "the head it's about",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":"Q?","head":"abc1234"}`:                              "the head it's about",
+		`"answered":{"question":"aaaaaaaa","text":"A"}`:                                                                     "settles aaaaaaaa, which no line adds as a question",
+		`"answered":{"question":"cccccccc","text":""}`:                                                                      "needs its question and its text",
+		`"question":{"kind":"nudge","asker":"crew","for":"lead","text":"Q?"},"answered":{"question":"aaaaaaaa","text":"A"}`: "not 2",
+	} {
+		line := `{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x",` + question + `}`
+		task := learnTask(t, "## Log\n")
+		if err := os.WriteFile(task.RecordsPath(), []byte(good+"\n"+line+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := task.Questions()
+		if err == nil || !strings.Contains(err.Error(), "001-a.records.jsonl:2: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("Questions with %s = %v; want an error at line 2 saying %q", line, err, want)
+		}
+	}
+}
+
+// crew's own questions are records, each with its item under Open questions,
+// which crew still counts until it decides from the records.
+func TestAskRecordsEachQuestionWithItsItem(t *testing.T) {
+	task := learnTask(t, "## Open questions\n- [ ] Typed by hand?\n\n## Log\n")
+	rs, err := task.ask("test",
+		Question{Kind: QuestionCollaborator, Asker: "@bob", For: "user", Text: "@bob commented on PR #7\n> Why not a scan?\n> \n> Just asking."},
+		Question{Kind: QuestionRedCI, Asker: "crew", For: "user", Head: "abc1234", Text: "CI is still red on abc1234 after 2 CI rounds."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions, err := task.Questions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range questions {
+		got = append(got, fmt.Sprintf("%s %s %s %s open=%v", q.ID, q.Question.Kind, q.Question.Asker, q.Question.For, q.Open()))
+	}
+	if want := []string{rs[0].ID + " collaborator @bob user open=true", rs[1].ID + " red-ci crew user open=true"}; !slices.Equal(got, want) {
+		t.Errorf("Questions = %q, want %q", got, want)
+	}
+	if questions[1].Question.Head != "abc1234" {
+		t.Errorf("the red CI question's head = %q, want abc1234", questions[1].Question.Head)
+	}
+	wantSection := "- [ ] Typed by hand?\n" +
+		"- [ ] @bob commented on PR #7 (question " + rs[0].ID + ")\n  > Why not a scan?\n  > \n  > Just asking.\n" +
+		"- [ ] CI is still red on abc1234 after 2 CI rounds. (question " + rs[1].ID + ")"
+	if got := strings.TrimSpace(task.Section(questionsHeading)); got != wantSection {
+		t.Errorf("Open questions =\n%s\nwant\n%s", got, wantSection)
+	}
+	if n := task.OpenQuestions(); n != 3 {
+		t.Errorf("OpenQuestions = %d, want the typed one and the two crew asked", n)
+	}
+}
+
+// Before crew migrate, ask writes nothing, so the command that asked can refuse
+// and lose nothing.
+func TestAskWritesNothingBeforeMigrate(t *testing.T) {
+	task := learnTask(t, "## Open questions\n\n## Log\n")
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	before := contents(t, task.Doc)
+	_, err := task.ask("test", Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Stalled?"})
+	if !errors.Is(err, errNotMigrated) {
+		t.Errorf("ask before migrate = %v, want it to say to run crew migrate", err)
+	}
+	if _, statErr := os.Stat(task.RecordsPath()); !errors.Is(statErr, os.ErrNotExist) || contents(t, task.Doc) != before {
+		t.Errorf("ask before migrate wrote something: %v\n%s", statErr, contents(t, task.Doc))
+	}
+}
+
+func TestSettleNudgeQuestionsChangesNothingBeforeMigrate(t *testing.T) {
+	task := learnTask(t, "## Open questions\n- [ ] "+nudgeQuestionStart+" again after a nudge, with no new commit.\n\n## Log\n")
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	before := contents(t, task.Doc)
+	if err := task.SettleNudgeQuestions("new commit bbb2222"); !errors.Is(err, errNotMigrated) {
+		t.Errorf("settling before migrate = %v, want it to say to run crew migrate", err)
+	}
+	if _, statErr := os.Stat(task.RecordsPath()); !errors.Is(statErr, os.ErrNotExist) || contents(t, task.Doc) != before {
+		t.Errorf("settling before migrate wrote something: %v\n%s", statErr, contents(t, task.Doc))
 	}
 }
 
@@ -251,6 +344,61 @@ func TestShownTask(t *testing.T) {
 	os.WriteFile(task.RecordsPath(), []byte("oops\n"), 0o644)
 	if got, _ := shownTask(task.Path); !strings.Contains(got, "\n\nTyped into the file, so not items crew counts (crew to-learn adds one):\n- [ ] typed by hand\n") {
 		t.Errorf("shownTask with an unreadable records file in a migrated project = %q; want what's typed still marked as not items", got)
+	}
+}
+
+// crew show gives each question's record under its item: what it's about, who
+// asked it and when, and who it waits on or what settled it. A line with no
+// record is shown as written, and a question whose item was ticked or removed
+// by hand is settled, since crew counts only the unticked items.
+func TestShownTaskQuestions(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	task := learnTask(t, "# A\n\n## Open questions\n<!-- Questions. -->\n"+
+		"- [ ] Which way? A or B.\n"+
+		"- [X] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n"+
+		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n\n"+
+		"- [ ] CI is still red on ccc3333: test. (question cccccccc)\n\n## Log\n- x\n")
+	for _, r := range []Record{
+		{ID: "aaaaaaaa", At: at, By: "crew feedback", Question: &Question{Kind: QuestionCollaborator, Asker: "@bob", For: "user", Text: "@bob commented on PR #7, comment 5 — [link](u5)\n> Why not a scan?"}},
+		{ID: "bbbbbbbb", At: at, By: "crew nudge", Question: &Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Stalled again."}},
+		{ID: "cccccccc", At: at, By: "crew ci-fix", Question: &Question{Kind: QuestionRedCI, Asker: "crew", For: "user", Head: "ccc3333", Text: "CI is still red on ccc3333: test."}},
+		{ID: "dddddddd", At: at.Add(time.Hour), By: "crew settle", Answered: &Answered{Question: "bbbbbbbb", Text: "The worker moved on: new commit bbb2222."}},
+		{ID: "eeeeeeee", At: at, By: "crew nudge", Question: &Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Its worktree is gone."}},
+	} {
+		if err := task.AddRecords(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Open questions\n<!-- Questions. -->\n" +
+		"- [ ] Which way? A or B.\n" +
+		"- [X] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n" +
+		"  - PR comment from @bob, opened 2026-11-25 10:00 by crew feedback; settled: its item was ticked by hand\n" +
+		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n" +
+		"  - stalled worker from crew, opened 2026-11-25 10:00 by crew nudge\n" +
+		"  - settled 2026-11-25 11:00 by crew settle: The worker moved on: new commit bbb2222.\n\n" +
+		"- [ ] CI is still red on ccc3333: test. (question cccccccc)\n" +
+		"  - red CI on ccc3333 from crew, opened 2026-11-25 10:00 by crew ci-fix; waits on the user\n" +
+		"- [x] Its worktree is gone. (question eeeeeeee)\n" +
+		"  - stalled worker from crew, opened 2026-11-25 10:00 by crew nudge; settled: its item was removed by hand\n" +
+		"\n## Log\n- x\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+
+	plain := "# B\n\n## Open questions\n- [ ] Typed by hand?\n\n## Log\n"
+	if got, _ := shownTask(learnTask(t, plain).Path); got != plain {
+		t.Errorf("shownTask of a task with no question records = %q; want the file as it is", got)
+	}
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	asWritten, _, _ := strings.Cut(contents(t, task.Doc), "## Log")
+	if got, _ := shownTask(task.Path); !strings.HasPrefix(got, asWritten) {
+		t.Errorf("shownTask before crew migrate = %q; want Open questions as written", got)
 	}
 }
 
