@@ -333,6 +333,61 @@ func TestShownTask(t *testing.T) {
 	}
 }
 
+// crew show gives each question's record under its item: what it's about, who
+// asked it and when, and who it waits on or what settled it. A line with no
+// record is shown as written, and a question whose item was ticked or removed
+// by hand is settled, since crew counts only the unticked items.
+func TestShownTaskQuestions(t *testing.T) {
+	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
+	task := learnTask(t, "# A\n\n## Open questions\n<!-- Questions. -->\n"+
+		"- [ ] Which way? A or B.\n"+
+		"- [x] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n"+
+		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n\n"+
+		"- [ ] CI is still red on ccc3333: test. (question cccccccc)\n\n## Log\n- x\n")
+	for _, r := range []Record{
+		{ID: "aaaaaaaa", At: at, By: "crew feedback", Question: &Question{Kind: QuestionCollaborator, Asker: "@bob", For: "user", Text: "@bob commented on PR #7, comment 5 — [link](u5)\n> Why not a scan?"}},
+		{ID: "bbbbbbbb", At: at, By: "crew nudge", Question: &Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Stalled again."}},
+		{ID: "cccccccc", At: at, By: "crew ci-fix", Question: &Question{Kind: QuestionRedCI, Asker: "crew", For: "user", Head: "ccc3333", Text: "CI is still red on ccc3333: test."}},
+		{ID: "dddddddd", At: at.Add(time.Hour), By: "crew settle", Answered: &Answered{Question: "bbbbbbbb", Text: "The worker moved on: new commit bbb2222."}},
+		{ID: "eeeeeeee", At: at, By: "crew nudge", Question: &Question{Kind: QuestionNudge, Asker: "crew", For: "lead", Text: "Its worktree is gone."}},
+	} {
+		if err := task.AddRecords(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# A\n\n## Open questions\n<!-- Questions. -->\n" +
+		"- [ ] Which way? A or B.\n" +
+		"- [x] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n" +
+		"  - PR comment from @bob, opened 2026-11-25 10:00 by crew feedback; settled: its item was ticked by hand\n" +
+		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n" +
+		"  - stalled worker from crew, opened 2026-11-25 10:00 by crew nudge\n" +
+		"  - settled 2026-11-25 11:00 by crew settle: The worker moved on: new commit bbb2222.\n\n" +
+		"- [ ] CI is still red on ccc3333: test. (question cccccccc)\n" +
+		"  - red CI on ccc3333 from crew, opened 2026-11-25 10:00 by crew ci-fix; waits on the user\n" +
+		"- [x] Its worktree is gone. (question eeeeeeee)\n" +
+		"  - stalled worker from crew, opened 2026-11-25 10:00 by crew nudge; settled: its item was removed by hand\n" +
+		"\n## Log\n- x\n"
+	if got != want {
+		t.Errorf("shownTask =\n%s\nwant\n%s", got, want)
+	}
+
+	plain := "# B\n\n## Open questions\n- [ ] Typed by hand?\n\n## Log\n"
+	if got, _ := shownTask(learnTask(t, plain).Path); got != plain {
+		t.Errorf("shownTask of a task with no question records = %q; want the file as it is", got)
+	}
+	if err := os.Remove(ledgerFormatPath(task.projectDir())); err != nil {
+		t.Fatal(err)
+	}
+	asWritten, _, _ := strings.Cut(contents(t, task.Doc), "## Log")
+	if got, _ := shownTask(task.Path); !strings.HasPrefix(got, asWritten) {
+		t.Errorf("shownTask before crew migrate = %q; want Open questions as written", got)
+	}
+}
+
 func TestMigrateStillToLearn(t *testing.T) {
 	task := learnTask(t, `---
 status: draft

@@ -10,8 +10,10 @@ package main
 // "(question <id>)", which ties it to its record.
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -114,4 +116,83 @@ func (t Task) SettleNudgeQuestions(by string) error {
 		}
 	}
 	return t.writeLines(ls)
+}
+
+// withQuestions is the task file's lines with what the records say of each
+// question under its item in Open questions: what it's about, who asked it and
+// when, and who it waits on or what settled it. A question whose item is gone
+// is shown at the end of the section. Every other line stays as it is.
+//
+// Until crew decides from the records, it counts only the unticked items, so a
+// question whose item was ticked or removed by hand is shown settled, though no
+// record says so.
+func withQuestions(t Task, ls []string) []string {
+	questions, unread := t.Questions()
+	if errors.Is(unread, errNotMigrated) || unread == nil && len(questions) == 0 {
+		return ls
+	}
+	ls, start, end := placeSection(ls, questionsHeading)
+	if unread != nil {
+		return slices.Concat(ls[:start+1], []string{"crew can't read the questions: " + unread.Error()}, ls[start+1:])
+	}
+	section := ls[start+1 : end]
+	var body []string
+	shown := map[string]bool{}
+	for i := 0; i < len(section); i++ {
+		body = append(body, section[i])
+		id := itemQuestion(section[i])
+		at := slices.IndexFunc(questions, func(q Item) bool { return q.ID == id })
+		if at < 0 {
+			continue
+		}
+		byHand := ""
+		if strings.HasPrefix(section[i], "- [x]") {
+			byHand = "ticked"
+		}
+		for i+1 < len(section) && strings.HasPrefix(section[i+1], "  ") {
+			i++
+			body = append(body, section[i])
+		}
+		body = append(body, questionLines(questions[at], byHand)...)
+		shown[id] = true
+	}
+	body = trimBlankEnd(body)
+	for _, q := range questions {
+		if !shown[q.ID] {
+			item := q.questionItem()
+			item[0] = "- [x]" + strings.TrimPrefix(item[0], "- [ ]")
+			body = append(append(body, item...), questionLines(q, "removed")...)
+		}
+	}
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
+}
+
+// questionLines say under a question's item what it's about, who asked it and
+// when, and then who it waits on or what settled it. byHand is how its item
+// was settled by hand under Open questions, "ticked" or "removed", or "".
+func questionLines(q Item, byHand string) []string {
+	line := fmt.Sprintf("  - %s from %s, opened %s", q.Question.about(), q.Question.Asker, stamp(q.Record))
+	switch {
+	case !q.Open():
+	case byHand != "":
+		line += "; settled: its item was " + byHand + " by hand"
+	default:
+		line += "; waits on the " + q.Question.For
+	}
+	out := []string{line}
+	for _, a := range q.Settled {
+		out = append(out, settledLines(a, a.Answered.Text)...)
+	}
+	return out
+}
+
+// about names what opened the question.
+func (q Question) about() string {
+	switch q.Kind {
+	case QuestionCollaborator:
+		return "PR comment"
+	case QuestionNudge:
+		return "stalled worker"
+	}
+	return "red CI on " + q.Head
 }
