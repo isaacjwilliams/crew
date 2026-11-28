@@ -389,7 +389,7 @@ func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 }
 
 // write writes the round into the task as its next, before ## Log, and counts it
-// in review_rounds. It returns the round's number and text.
+// in review_rounds, in one write. It returns the round's number and text.
 func (r reviewRound) write(t Task, prNumber string) (int, string, error) {
 	n := atoiOr0(t.Get("review_rounds")) + 1
 	var b strings.Builder
@@ -431,10 +431,14 @@ func (r reviewRound) write(t Task, prNumber string) (int, string, error) {
 	if len(r.reviewRequests) > 0 {
 		b.WriteString("\n")
 	}
-	if err := t.InsertBefore("## Log", b.String()); err != nil {
+	// One write for the round and its count, so a run stopped partway leaves
+	// neither, and addMissingRounds never writes a round the task has.
+	ls, err := t.read()
+	if err != nil {
 		return 0, "", err
 	}
-	return n, b.String(), t.Set("review_rounds", fmt.Sprint(n))
+	ls = setKey(insertBefore(ls, "## Log", b.String()), "review_rounds", fmt.Sprint(n))
+	return n, b.String(), t.writeLines(ls)
 }
 
 // addReport records report, red CI or a conflict crew sends the worker, with the

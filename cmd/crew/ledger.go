@@ -58,15 +58,20 @@ func (d Doc) Lookup(key string) (string, bool) {
 // missing. A value goes on one line, and in double quotes when it has ": ", " #"
 // or a quote in it.
 func (d Doc) Set(key, value string) error {
+	ls, err := d.read()
+	if err != nil {
+		return err
+	}
+	return d.writeLines(setKey(ls, key, value))
+}
+
+// setKey is Set on a file's lines.
+func setKey(ls []string, key, value string) []string {
 	value = strings.ReplaceAll(value, "\n", " ")
 	if strings.Contains(value, ": ") || strings.Contains(value, " #") || strings.Contains(value, `"`) {
 		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 	line := key + ": " + value
-	ls, err := d.read()
-	if err != nil {
-		return err
-	}
 	var out []string
 	inFM, done := false, false
 	for i, l := range ls {
@@ -87,7 +92,7 @@ func (d Doc) Set(key, value string) error {
 		}
 		out = append(out, l)
 	}
-	return d.writeLines(out)
+	return out
 }
 
 // Touch sets updated: to now.
@@ -231,13 +236,18 @@ func (d Doc) InsertBefore(heading, text string) error {
 	if err != nil {
 		return err
 	}
+	return d.writeLines(insertBefore(ls, heading, text))
+}
+
+// insertBefore is InsertBefore on a file's lines.
+func insertBefore(ls []string, heading, text string) []string {
 	for i, l := range ls {
 		if l == heading {
 			out := append(append(append([]string{}, ls[:i]...), splitLines(text)...), "")
-			return d.writeLines(append(out, ls[i:]...))
+			return append(out, ls[i:]...)
 		}
 	}
-	return d.appendRaw(text)
+	return append(ls, splitLines(text)...)
 }
 
 // AppendToSection adds text at the end of a section, just before the next
