@@ -300,4 +300,10 @@ MCP servers  (a project's own, from projects/<p>/mcp.json)
 Other
   crew push                        Push the ledger to origin now (crew pushes it in
                                    the background after every change)
+  crew contract                    In any git repo, wherever in it you are: check
+                                   that every obligation in a component's Contract
+                                   (contract/<component>/README.md) has a test
+                                   tagged for it, and that every tag names one.
+                                   Lists each obligation with its tests' files;
+                                   needs no crew home and writes nothing
 `

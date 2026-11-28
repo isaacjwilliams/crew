@@ -14,7 +14,7 @@ import (
 // version is stamped in at build time: -ldflags "-X main.version=X.Y.Z".
 var version = "dev"
 
-// Every crew command but version and guard, which need no crew home.
+// Every crew command but version, guard and contract, which need no crew home.
 var commands = map[string]func(*Crew, []string) error{
 	"help":           cmdHelp,
 	"-h":             cmdHelp,
@@ -100,6 +100,8 @@ func run(args []string) int {
 	case "guard":
 		cmdGuard(args)
 		return 0
+	case "contract":
+		return exitCode(cmdContract(args))
 	}
 	cmd, ok := commands[name]
 	if !ok {
