@@ -8,9 +8,7 @@ package main
 // crew home, and writes nothing. SETUP.md's "The Contract" states the convention.
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -223,13 +221,22 @@ func repoFiles(root string) ([]string, error) {
 	if err != nil {
 		return nil, fail("can't list the files in %s: %v", root, err)
 	}
-	files := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
-	files = slices.DeleteFunc(files, func(f string) bool {
-		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(f)))
-		return errors.Is(err, fs.ErrNotExist)
-	})
+	deleted, err := git(root, "ls-files", "-z", "--deleted")
+	if err != nil {
+		return nil, fail("can't list the files in %s: %v", root, err)
+	}
+	gone := map[string]bool{}
+	for _, f := range nulSeparated(deleted) {
+		gone[f] = true
+	}
+	files := slices.DeleteFunc(nulSeparated(out), func(f string) bool { return gone[f] })
 	slices.Sort(files) // git lists the tracked files, then the new ones after them
 	return files, nil
+}
+
+// nulSeparated splits the output of a git command run with -z.
+func nulSeparated(out string) []string {
+	return strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
 }
 
 // readTextLines is the lines of the text file at name, from root. A file that

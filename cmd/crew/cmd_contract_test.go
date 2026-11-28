@@ -325,12 +325,21 @@ func TestContractReadsTheWorkingTreeNotTheIndex(t *testing.T) {
 		"contract/Old/README.md":    "- **O1** Gone.\n",
 		"guard_test.go":             "// Contract: guard/G1\n",
 		"old_test.go":               "// Contract: guard/G2\n// Contract: ledger/L1\n",
+		"contract/spare/README.md":  "- **S1** Gone.\n",
+		"tools/run.sh":              "# Contract: guard/G1\n",
 	})
 	for _, f := range []string{"contract/ledger/README.md", "contract/Old/README.md", "old_test.go"} {
 		if err := os.Remove(filepath.Join(repo, f)); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// Two directories replaced by files of the same name.
+	for _, dir := range []string{"contract/spare", "tools"} {
+		if err := os.RemoveAll(filepath.Join(repo, dir)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addFiles(t, repo, map[string]string{"contract/spare": "A note.\n", "tools": "A note.\n"})
 	want := []string{
 		"contract/ledger: a component needs a README.md that lists its obligations",
 		"contract/guard/README.md:8: guard/G2 has no test tagged for it",
