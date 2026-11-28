@@ -778,7 +778,7 @@ func (t Task) DesignInBrief() error {
 func (t Task) Answer() (string, error) {
 	records, err := t.Records()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("can't read %s's answer: %w", t.ID(), err)
 	}
 	if r, ok := lastAnswer(records); ok {
 		return r.Answered.Answer, nil

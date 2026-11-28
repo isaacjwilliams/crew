@@ -69,6 +69,7 @@ func TestRecordsRefuseWhatTheyCantRead(t *testing.T) {
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"},"learned":{"item":"aaaaaaaa","answer":"A"}}`: "not 2",
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":" "}}`:                                            "needs its text",
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"aaaaaaaa","answer":""}}`:                          "needs its item and its answer",
+		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","answered":{"answer":" "}}`:                                          "an answered record needs its answer",
 		`{"id":"bbbbbbbb","by":"crew x","to_learn":{"text":"Q"}}`:                                                                        "needs an id, an at and a by",
 		`{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew x","to_learn":{"text":"Q"}}`:                                            "already taken",
 		`{"id":"bbbbbbbb","at":"2026-11-25T10:00:00Z","by":"crew x","learned":{"item":"cccccccc","answer":"A"}}`:                         "settles cccccccc, which no line adds",
@@ -540,17 +541,6 @@ func TestAnswerIsTheLastRecorded(t *testing.T) {
 	}
 }
 
-func TestRecordsRefuseAnEmptyAnswer(t *testing.T) {
-	task := learnTask(t, "## Log\n")
-	line := `{"id":"aaaaaaaa","at":"2026-11-25T10:00:00Z","by":"crew answer","answered":{"answer":" "}}`
-	if err := os.WriteFile(task.RecordsPath(), []byte(line+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := task.Answer(); err == nil || !strings.Contains(err.Error(), "an answered record needs its answer") {
-		t.Errorf("Answer with an empty answer recorded = %v; want it refused", err)
-	}
-}
-
 func TestShownTaskGivesASpikesAnswer(t *testing.T) {
 	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
 	task := spikeTask(t, "working", "## Report\nTried paging.\n\n")
@@ -595,38 +585,43 @@ func TestReportAnswer(t *testing.T) {
 // with it, and it leaves every task file as it was.
 func TestMigrateSpikeAnswer(t *testing.T) {
 	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
-	fromReport := spikeTask(t, "done", "## Report\nAnswer: yes, 100 rows a page\nTried paging.\n\n")
-	noAnswer := spikeTask(t, "done", "## Report\nWe tried paging, and it didn't answer.\n\n")
 	recorded := spikeTask(t, "done", "## Report\nAnswer: from the report\n\n")
 	if err := recorded.AddRecords(Record{ID: "aaaaaaaa", At: at, By: "crew answer", Answered: &Answered{"as recorded"}}); err != nil {
 		t.Fatal(err)
 	}
-	build := learnTask(t, "---\nstatus: merged\n---\n## Report\nAnswer: not a spike\n\n## Log\n")
-	for task, want := range map[Task]string{fromReport: "yes, 100 rows a page", noAnswer: "", recorded: "as recorded", build: ""} {
-		before, _ := os.ReadFile(task.Path)
-		os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
-		moved, err := migrateSpikeAnswer(task)
-		if err != nil || moved != (task == fromReport) {
-			t.Errorf("migrateSpikeAnswer of %s = %v, %v; want %v", task.Path, moved, err, task == fromReport)
+	for _, c := range []struct {
+		name   string
+		task   Task
+		moved  bool
+		answer string // the answer recorded once it's run, by whom
+		by     string
+	}{
+		{"a report that starts with its answer", spikeTask(t, "done", "## Report\nAnswer: yes, 100 rows a page\nTried paging.\n\n"), true, "yes, 100 rows a page", "crew migrate"},
+		{"a report that doesn't", spikeTask(t, "done", "## Report\nWe tried paging, and it didn't answer.\n\n"), false, "", ""},
+		{"an answer recorded already", recorded, false, "as recorded", "crew answer"},
+		{"a task that isn't a spike", learnTask(t, "---\nstatus: merged\n---\n## Report\nAnswer: not a spike\n\n## Log\n"), false, "", ""},
+	} {
+		project := filepath.Dir(filepath.Dir(c.task.Path))
+		before, _ := os.ReadFile(c.task.Path)
+		os.Remove(ledgerFormatPath(project))
+		if moved, err := migrateSpikeAnswer(c.task); err != nil || moved != c.moved {
+			t.Errorf("%s: migrateSpikeAnswer = %v, %v; want %v", c.name, moved, err, c.moved)
 		}
 		// Run again, as after a migration cut short, it records nothing more.
-		if moved, err := migrateSpikeAnswer(task); err != nil || moved {
-			t.Errorf("migrateSpikeAnswer run again = %v, %v; want nothing recorded", moved, err)
+		if moved, err := migrateSpikeAnswer(c.task); err != nil || moved {
+			t.Errorf("%s: migrateSpikeAnswer run again = %v, %v; want nothing recorded", c.name, moved, err)
 		}
-		writeLedgerFormat(filepath.Dir(filepath.Dir(task.Path)))
-		records, err := task.Records()
+		writeLedgerFormat(project)
+		records, err := c.task.Records()
 		if err != nil {
 			t.Fatal(err)
 		}
-		r, ok := lastAnswer(records)
-		if got := r.Answered; (want == "") != !ok || ok && (got.Answer != want || len(records) != 1) {
-			t.Errorf("records of %s = %+v; want one answer, %q", task.Path, records, want)
+		r, _ := lastAnswer(records)
+		if answer, _ := c.task.Answer(); answer != c.answer || r.By != c.by || c.answer != "" && len(records) != 1 {
+			t.Errorf("%s: answer %q by %q in %d record(s); want %q by %q in one", c.name, answer, r.By, len(records), c.answer, c.by)
 		}
-		if task == fromReport && r.By != "crew migrate" {
-			t.Errorf("the migrated answer is by %q; want crew migrate", r.By)
-		}
-		if after, _ := os.ReadFile(task.Path); string(after) != string(before) {
-			t.Errorf("migrateSpikeAnswer changed %s:\n%s\nwas\n%s", task.Path, after, before)
+		if after, _ := os.ReadFile(c.task.Path); string(after) != string(before) {
+			t.Errorf("%s: migrateSpikeAnswer changed the task file to\n%s\nfrom\n%s", c.name, after, before)
 		}
 	}
 }

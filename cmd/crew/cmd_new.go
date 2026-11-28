@@ -659,7 +659,7 @@ func handOverReport(_ *Crew, t Task) (func() error, error) {
 	return func() error {
 		answer, err := t.Answer()
 		if err != nil {
-			return fail("can't read %s's answer: %v", t.ID(), err)
+			return fail("%v", err)
 		}
 		if answer == "" {
 			return fail("%s has no answer recorded: record it with crew answer %s \"<the answer, in a line>\", then hand over again", t.ID(), t.ID())

@@ -302,7 +302,7 @@ func unsentReport(t Task) bool {
 func reportLine(t Task) (string, error) {
 	answer, err := t.Answer()
 	if err != nil {
-		return "", fmt.Errorf("can't read %s's answer: %w", t.ID(), err)
+		return "", err
 	}
 	line := fmt.Sprintf("%s reported: %s", t.ID(), answer)
 	if d := t.Get("informs"); d != "" {
