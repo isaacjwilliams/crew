@@ -2012,6 +2012,9 @@ crew set "$GT1" pr https://github.com/isaac/webapp/pull/12; cp "$HOME/gh-pr-stat
 comment 141 bob COLLABORATOR "Why this header?" >"$HOME/gh-more-comments"; crew set "$GT1" feedback_since 2026-09-25T21:35:00Z; crew feedback "$GT1" >/dev/null
 sed -i '/^## Review rounds$/a - [x] CI failed on aaaa111: test' "$GT1"; echo MAX_CI_FIXES=1 >>"$PE"
 sed -i 's/^status: .*/status: pr-open/' "$GT1"; ci bbbb2222ffff test:FAILURE; crew ci-fix "$GT1" >/dev/null
+st=$(crew status 2>/dev/null); asked=$(section "$GT1" "## Open questions" | grep -c '^- \[ \]')
+check "while the goal task is pr-open, status's merge check counts the questions crew opened on it" \
+  '((asked >= 2)) && [[ $(grep -- "$T1" <<<"$st") == *"not yet: "*"$asked open question(s)"* ]]'
 sed -i 's/^status: .*/status: needs-input/' "$GT1"; sed -i '/^MAX_CI_FIXES=1$/d' "$PE"; mv "$HOME/gh-pr-state.saved" "$HOME/gh-pr-state"
 rm -f "$HOME/gh-more-comments" "$HOME/gh-pr-head" "$HOME/gh-pr-checks"; crew set "$GT1" pr ""; crew set "$GT1" feedback_since 2099-01-01T00:00:00Z
 check "crew opens them on the goal task as question records for the user" \
