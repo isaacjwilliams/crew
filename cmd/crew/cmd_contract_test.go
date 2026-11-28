@@ -303,3 +303,35 @@ func TestContractReadsTheWholeRepoButWhatGitIgnores(t *testing.T) {
 		t.Errorf("exit %d with\n%s\nwant exit 1 with\n%s", code, out, want)
 	}
 }
+
+func TestContractReadsTheWorkingTreeNotTheIndex(t *testing.T) {
+	repo := contractRepo(t, map[string]string{
+		"contract/guard/README.md":  guardReadme,
+		"contract/ledger/README.md": "- **L1** Front matter is flat.\n",
+		"contract/ledger/notes.txt": "Kept for later.\n",
+		"contract/Old/README.md":    "- **O1** Gone.\n",
+		"guard_test.go":             "// Contract: guard/G1\n",
+		"old_test.go":               "// Contract: guard/G2\n// Contract: ledger/L1\n",
+	})
+	for _, f := range []string{"contract/ledger/README.md", "contract/Old/README.md", "old_test.go"} {
+		if err := os.Remove(filepath.Join(repo, f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"contract/ledger: a component needs a README.md that lists its obligations",
+		"contract/guard/README.md:8: guard/G2 has no test tagged for it",
+	}
+	for _, staged := range []bool{false, true} {
+		if staged {
+			runIn(t, repo, "git", "add", "-A")
+		}
+		check, err := checkContract(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(check.problems, want) {
+			t.Errorf("with the deletions staged: %v, problems:\n%s\nwant\n%s", staged, strings.Join(check.problems, "\n"), strings.Join(want, "\n"))
+		}
+	}
+}

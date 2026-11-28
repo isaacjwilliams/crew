@@ -216,26 +216,28 @@ func (check *contractCheck) print() {
 }
 
 // repoFiles lists the files in the working tree at root that git tracks, and the
-// new ones it doesn't ignore, sorted, as paths from root.
+// new ones it doesn't ignore, sorted, as paths from root. A tracked file deleted
+// from the working tree isn't listed, whether or not the deletion is staged.
 func repoFiles(root string) ([]string, error) {
 	out, err := git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
 	if err != nil {
 		return nil, fail("can't list the files in %s: %v", root, err)
 	}
 	files := strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
+	files = slices.DeleteFunc(files, func(f string) bool {
+		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(f)))
+		return errors.Is(err, fs.ErrNotExist)
+	})
 	slices.Sort(files) // git lists the tracked files, then the new ones after them
 	return files, nil
 }
 
 // readTextLines is the lines of the text file at name, from root. A file that
-// isn't in the working tree (deleted, or a submodule), isn't a regular file, or
-// holds a NUL byte, as a binary file does, has none.
+// isn't a regular file (a submodule, say), or holds a NUL byte, as a binary file
+// does, has none.
 func readTextLines(root, name string) ([]string, error) {
 	p := filepath.Join(root, filepath.FromSlash(name))
 	info, err := os.Lstat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fail("can't read %s: %v", name, err)
 	}
