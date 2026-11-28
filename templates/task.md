@@ -94,16 +94,14 @@ updated: {{NOW}}
      user's own words or answer, otherwise "(lead)" or "(worker)". -->
 
 ## Evidence
-<!-- Written by the worker before the hand-over: one "### <n>. <the criterion, in a line> (on <sha>)"
-     entry for each top-level item of Acceptance criteria, numbered in order, naming the commit it
-     ran on. Each holds the command that shows the criterion holds and its output, in a fenced
-     block trimmed to what shows the result; or, where only a look would show it, what you saw and
-     how (the page, the steps, the tool); or, for a user check, why you can't run it, then "To try:"
-     and what to try. Indent any output line that starts with "## ", or it ends this section. A
-     high-risk task also has a "### Security review" entry: what /security-review found and what
-     you did about it. `crew hand-over` refuses until every criterion has an entry, and a
-     high-risk task this one. It refuses an entry that ran on other work than the branch has now,
-     and one that says its check wasn't run unless it's a user check. -->
+<!-- What shows the gates hold, recorded by the worker with crew, never typed here: for each
+     top-level item of Acceptance criteria, by its number,
+     `crew record-evidence <task> <n> --on <sha> --ran "<what ran and what it showed>"`, or
+     `--not-run "<why, then To try: …>"` for a user check; for a high-risk task, `crew record-security-review <task> "<what it found, and
+     what was done about each>"`. `crew show` prints those records here. `crew hand-over` reads
+     only them: it refuses until every criterion has evidence on the work the branch has now,
+     recorded as run unless it's a user check, and a high-risk task a security review. Anything
+     typed below this comment is for people, and crew show keeps it below the records. -->
 
 ## Automated reviews
 <!-- Appended by the worker's pr-review skill, one "### Automated review N" per review; the worker

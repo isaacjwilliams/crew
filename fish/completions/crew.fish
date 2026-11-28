@@ -1,4 +1,4 @@
-set -l crew_cmds help version setup upgrade migrate install project checkout host lead doctor config new ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember keep decline memory mcp goal
+set -l crew_cmds help version setup upgrade migrate install project checkout host lead doctor config new ready to-learn learned record-evidence record-security-review hand-over check-base dispatch feedback followup attach restack nudge settle review reply react review-summary ci-fix catch-up ci-summary evidence codex review-cost status stats costs sync tick pause resume list show path find get set log cleanup commit push observe gardener review-eval propose proposals promote remember keep decline memory mcp goal
 set -l goal_cmds new start note cap followup done abandon path
 set -l project_cmds add
 set -l mcp_cmds sync
@@ -23,7 +23,7 @@ function __crew_free_files
 end
 complete -c crew -f
 complete -c crew -n "not __fish_seen_subcommand_from $crew_cmds" -a "$crew_cmds"
-complete -c crew -n "__fish_seen_subcommand_from ready to-learn learned hand-over check-base dispatch feedback followup attach restack nudge settle review ci-fix catch-up evidence find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
+complete -c crew -n "__fish_seen_subcommand_from ready to-learn learned record-evidence record-security-review hand-over check-base dispatch feedback followup attach restack nudge settle review ci-fix catch-up evidence find get set log cleanup observe; and not __fish_seen_subcommand_from goal" \
     -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
 complete -c crew -n "__crew_showing ''" -a "$show_types"
 complete -c crew -n "__crew_showing '' task" -a "(crew list 2>/dev/null | string replace -r '^\S+\s+(\S+)\s+(\S+).*' '\$1\t\$2')"
@@ -33,6 +33,9 @@ complete -c crew -n "__crew_showing file" -a "(__crew_free_files)"
 complete -c crew -n "__crew_showing memory memory-suggestions file" -l project -x -d 'Of this project' \
     -a "(path basename (crew config CREW_HOME 2>/dev/null)/projects/*/ 2>/dev/null)"
 complete -c crew -n "__fish_seen_subcommand_from evidence" -F
+complete -c crew -n "__fish_seen_subcommand_from record-evidence" -l on -x -d 'The commit the check ran on'
+complete -c crew -n "__fish_seen_subcommand_from record-evidence" -l ran -r -d 'What ran, and what it showed'
+complete -c crew -n "__fish_seen_subcommand_from record-evidence" -l not-run -r -d 'Why it could not run, and what to try'
 complete -c crew -n "__fish_seen_subcommand_from promote" -a "(crew proposals 2>/dev/null | string replace -rf '^(\S+).*' '\$1')"
 complete -c crew -n "__fish_seen_subcommand_from new promote" -l branch -r -d 'Branch name, without BRANCH_PREFIX'
 complete -c crew -n "__crew_command new propose proposals remember keep decline memory status stats list sync cleanup gardener review-eval config pause resume" -l project -x -d 'Work on this project' \

@@ -12,8 +12,9 @@
        Then what could break, for whom, and how far it reaches. When it's small, say so in a line.
      - How to revert: whether reverting the merge is enough, and anything a revert alone doesn't
        undo, such as data written, settings changed or a deploy step.
-     - Evidence: one item per gate (acceptance criterion), numbered as in the task's Evidence section.
-       The criterion in a line, the commit it ran on as "(on <sha>)", as the task's entry has it,
+     - Evidence: one item per gate (acceptance criterion), numbered as `crew show` prints the
+       task's evidence. The criterion in a line, the commit it ran on as "(on <sha>)", as its
+       recorded evidence has it,
        and the command that shows it, then its output in a <details> block. Where only a look
        shows it, say what you saw and how; for a check the task leaves to the user, why it
        can't run here, then "To try:" and what to try.

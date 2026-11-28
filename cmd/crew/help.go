@@ -24,7 +24,8 @@ Setup
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
-                                   moving still-to-learn checkboxes into records;
+                                   moving still-to-learn checkboxes and evidence
+                                   into records;
                                    crew upgrade runs it
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
@@ -104,11 +105,20 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
   crew review TASK                 Ask the task's worker for another automated review
                                    of its open PR, as a review round of its own: sent
                                    now if the worker is idle, else by crew tick
+  crew record-evidence TASK N --on SHA (--ran "<what it showed>" | --not-run "<why>")
+                                   Record what shows acceptance criterion N holds,
+                                   from commit SHA of the task's branch, and whether
+                                   its check ran; it replaces N's earlier evidence
+                                   (used by workers)
+  crew record-security-review TASK "<findings>"
+                                   Record what a high-risk task's /security-review
+                                   found, and what was done about each (used by
+                                   workers)
   crew hand-over TASK              Hand a build's PR over to you (status pr-open),
                                    once every acceptance criterion has evidence
-                                   under ## Evidence and in the PR body, from a commit
+                                   recorded and an item in the PR body, from a commit
                                    that holds the branch's own work as it is now and
-                                   saying its check ran, unless it's a user check, and
+                                   recorded as run, unless it's a user check, and
                                    a high-risk task a security review; a branch that
                                    touches SENSITIVE_PATHS makes it high risk. Mark a
                                    spike done once its ## Report starts with "Answer:"
