@@ -123,6 +123,13 @@ func blockquote(body string) string {
 	return "> " + strings.ReplaceAll(body, "\n", "\n> ")
 }
 
+// collaboratorQuestion is a collaborator's comment as a question for the user:
+// who did what, then the comment quoted.
+func collaboratorQuestion(cm ghComment, what string) Question {
+	text := strings.TrimSuffix("@"+cm.User.Login+" "+what+"\n"+blockquote(cm.Body), "\n")
+	return Question{Kind: QuestionCollaborator, Asker: "@" + cm.User.Login, For: "user", Text: text}
+}
+
 // ghList reads every page of a list endpoint: one object per line, as
 // `--paginate --jq '.[]'` prints them.
 func ghList(repo, endpoint string) ([]ghComment, error) {
@@ -266,18 +273,14 @@ func cmdFeedback(c *Crew, args []string) error {
 	}
 
 	var questions []Question
-	collaborator := func(cm ghComment, format string, a ...any) {
-		text := strings.TrimSuffix("@"+cm.User.Login+" "+fmt.Sprintf(format, a...)+"\n"+blockquote(cm.Body), "\n")
-		questions = append(questions, Question{Kind: QuestionCollaborator, Asker: "@" + cm.User.Login, For: "user", Text: text})
-	}
 	for _, rv := range theirReviews {
-		collaborator(rv, "reviewed PR #%s (%s), review %s — [link](%s)", num, strings.ToLower(rv.State), rv.ID, rv.HTMLURL)
+		questions = append(questions, collaboratorQuestion(rv, fmt.Sprintf("reviewed PR #%s (%s), review %s — [link](%s)", num, strings.ToLower(rv.State), rv.ID, rv.HTMLURL)))
 	}
 	for _, cm := range theirInline {
-		collaborator(cm, "commented on %s in PR #%s, comment %s — [link](%s)", cm.where(), num, cm.ID, cm.HTMLURL)
+		questions = append(questions, collaboratorQuestion(cm, fmt.Sprintf("commented on %s in PR #%s, comment %s — [link](%s)", cm.where(), num, cm.ID, cm.HTMLURL)))
 	}
 	for _, cm := range theirConvo {
-		collaborator(cm, "commented on PR #%s, comment %s — [link](%s)", num, cm.ID, cm.HTMLURL)
+		questions = append(questions, collaboratorQuestion(cm, fmt.Sprintf("commented on PR #%s, comment %s — [link](%s)", num, cm.ID, cm.HTMLURL)))
 	}
 
 	if err := c.lock(); err != nil {

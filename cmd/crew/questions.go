@@ -80,9 +80,10 @@ func itemQuestion(l string) string {
 }
 
 // SettleNudgeQuestions settles the open questions crew nudge asked the lead,
-// saying what settled them (by): an answered record for each, and its item
-// ticked. It reads the records first, so a ledger crew can't record the
-// settling in is left as it was.
+// saying what settled them (by). It records the settling, as an answered
+// record for each open nudge question, and ticks each open nudge item under
+// Open questions, which is what crew still counts. It reads the records first,
+// so a ledger crew can't record the settling in is left as it was.
 func (t Task) SettleNudgeQuestions(by string) error {
 	records, err := t.Records()
 	if err != nil {
@@ -197,6 +198,8 @@ func (q Question) about() string {
 		return "PR comment"
 	case QuestionNudge:
 		return "stalled worker"
+	case QuestionRedCI:
+		return "red CI on " + q.Head
 	}
-	return "red CI on " + q.Head
+	return string(q.Kind)
 }
