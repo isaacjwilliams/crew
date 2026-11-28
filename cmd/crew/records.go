@@ -293,7 +293,7 @@ func (d Doc) AddRecords(rs ...Record) error {
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
 // records, and format 2 memory suggestions; before, they were checkboxes in the
 // task file and in memory-suggestions.md, which crew migrate moves into records.
-// Format 3 keeps spikes' answers in records too; crew migrate records each done
+// Format 3 keeps spikes' answers in records too; crew migrate records each
 // spike's from its report. crew project add writes the file for a new project.
 const ledgerFormat = 3
 
