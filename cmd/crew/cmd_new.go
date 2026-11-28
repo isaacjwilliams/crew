@@ -653,12 +653,16 @@ func numberList(ns []int) string {
 	return strings.Join(s, ", ")
 }
 
-// handOverReport checks a spike's report is in, so whoever reads it next finds
-// an answer, and that its worktree is clean, so crew cleanup can remove it.
+// handOverReport checks a spike's answer is recorded, so whoever reads it next
+// is sent one, and that its worktree is clean, so crew cleanup can remove it.
 func handOverReport(_ *Crew, t Task) (func() error, error) {
 	return func() error {
-		if t.Answer() == "" {
-			return fail("## Report must start with a line 'Answer: <the answer, in a line>'; write the report, then hand over again")
+		answer, err := t.Answer()
+		if err != nil {
+			return fail("can't read %s's answer: %v", t.ID(), err)
+		}
+		if answer == "" {
+			return fail("%s has no answer recorded: record it with crew answer %s \"<the answer, in a line>\", then hand over again", t.ID(), t.ID())
 		}
 		if wt := t.Worktree(); wt != "" && isDir(wt) {
 			if out, _ := git(wt, "status", "--porcelain"); out != "" {

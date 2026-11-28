@@ -638,20 +638,6 @@ func TestDoneIsFinishedAndDelivered(t *testing.T) {
 	}
 }
 
-func TestAnswer(t *testing.T) {
-	for report, want := range map[string]string{
-		"## Report\nAnswer: yes, it pages by cursor\n\nTried: …\n":  "yes, it pages by cursor",
-		"## Report\n<!-- comment -->\n\nAnswer:   no  \nmore\n":     "no",
-		"## Report\nTried: …\nAnswer: later, so it doesn't count\n": "",
-		"## Report\nAnswer:\n":            "",
-		"## Goal\nAnswer: not a report\n": "",
-	} {
-		if got := (Task{docWith(t, report+"\n## Log\n")}).Answer(); got != want {
-			t.Errorf("Answer with %q = %q, want %q", report, got, want)
-		}
-	}
-}
-
 // Two CI rounds, one of them ticked and marked as not the branch's doing, a
 // round of comments with a CI line, a question about a head that stayed red,
 // and two rounds that report a conflict with main, one of them ticked. A line

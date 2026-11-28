@@ -40,6 +40,7 @@ type Record struct {
 	Suggested *Suggested `json:"suggested,omitempty"`
 	Kept      *Kept      `json:"kept,omitempty"`
 	Declined  *Declined  `json:"declined,omitempty"`
+	Answered  *Answered  `json:"answered,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -71,6 +72,12 @@ type Kept struct {
 type Declined struct {
 	Suggestion string `json:"suggestion"` // the Suggested record's ID
 	Reason     string `json:"reason"`
+}
+
+// Answered records a spike's answer to its question, in a line. A spike may
+// record a better one before its hand-over, so the last one stands.
+type Answered struct {
+	Answer string `json:"answer"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -236,7 +243,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil, r.Answered != nil} {
 		if set {
 			payloads++
 		}
@@ -255,6 +262,8 @@ func (r Record) check() error {
 		return errors.New("a kept record needs its suggestion")
 	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
 		return errors.New("a declined record needs its suggestion and its reason")
+	case r.Answered != nil && strings.TrimSpace(r.Answered.Answer) == "":
+		return errors.New("an answered record needs its answer")
 	}
 	return nil
 }
@@ -284,8 +293,9 @@ func (d Doc) AddRecords(rs ...Record) error {
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
 // records, and format 2 memory suggestions; before, they were checkboxes in the
 // task file and in memory-suggestions.md, which crew migrate moves into records.
-// crew project add writes the file for a new project.
-const ledgerFormat = 2
+// Format 3 keeps spikes' answers in records too; crew migrate records each done
+// spike's from its report. crew project add writes the file for a new project.
+const ledgerFormat = 3
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

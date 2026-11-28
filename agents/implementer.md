@@ -103,7 +103,8 @@ A spike answers a question that another task's objective or gates rest on, by tr
 
 1. **Try the path** in your worktree, within the time box. Commit as you go, but only locally: never push. A spike leaves nothing in the shared repo. Write the quickest code that answers the question. Tests, the observer, a PR, automated review and `## Evidence` are for builds, so skip them. If the time box runs out, stop and report what you have.
 2. **Write the report**: a `## Report` section in your task file, before `## Automated reviews` (or before `## Log` if that's missing). Its first line is `Answer: <the answer, in a line>`, such as `Answer: yes, the API pages by cursor, 100 rows a page` or `Answer: not answered in the time box: …`. Then what you tried, the evidence (the commands you ran and their output, trimmed to what shows the result), what it means for the task it informs, and anything that surprised you.
-3. **Hand over**, last: `crew hand-over <task>`. It checks that the report starts with its answer and that your worktree has nothing uncommitted, and sets `done`. A goal's spike goes to the goal lead; outside a goal, the lead finds it in `crew status`. Then end your turn: `crew tick` removes your session with the worktree, so the report is what's read.
+3. **Record the answer**, the line your report starts with: `crew answer <task> "<the answer, in a line>"`. It's what crew sends whoever owns the draft, with a pointer to your report. If you find a better one before you hand over, record it again: the last one stands.
+4. **Hand over**, last: `crew hand-over <task>`. It checks that your answer is recorded and that your worktree has nothing uncommitted, and sets `done`. A goal's spike goes to the goal lead; outside a goal, the lead finds it in `crew status`. Then end your turn: `crew tick` removes your session with the worktree, so the report is what's read.
 
 ## Workflow: automated review
 

@@ -773,15 +773,29 @@ func (t Task) DesignInBrief() error {
 		t.ID(), andList(filled), t.ID())
 }
 
-// Answer is a spike's answer: the first line of its ## Report, after "Answer:",
-// or nothing when the report doesn't start with one.
-func (t Task) Answer() string {
-	first, _, _ := strings.Cut(t.Section("## Report"), "\n")
-	answer, ok := strings.CutPrefix(first, "Answer:")
-	if !ok {
-		return ""
+// Answer is a spike's answer, from its records alone: the last one crew answer
+// recorded, or "" before it records one.
+func (t Task) Answer() (string, error) {
+	records, err := t.Records()
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimSpace(answer)
+	if r, ok := lastAnswer(records); ok {
+		return r.Answered.Answer, nil
+	}
+	return "", nil
+}
+
+// lastAnswer is the answered record that stands, if there is one: the last one
+// made. A merge of two clones' records may put a later one first, so it goes by
+// when each was made, and by the order of the lines only within a second.
+func lastAnswer(records []Record) (last Record, ok bool) {
+	for _, r := range records {
+		if r.Answered != nil && !r.At.Before(last.At) {
+			last, ok = r, true
+		}
+	}
+	return last, ok
 }
 
 // statusLogged begins the Log line of every change to a task's or a proposal's

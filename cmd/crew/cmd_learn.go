@@ -85,21 +85,72 @@ func cmdLearned(c *Crew, args []string) error {
 	return nil
 }
 
+// crew answer TASK "<answer>": records a spike's answer, in a line, for whoever
+// reads its report next. crew hand-over marks the spike done only once it has
+// one. Until then the worker may record a better one, and the last one stands;
+// once the spike is done, its answer has gone out, so this refuses.
+func cmdAnswer(c *Crew, args []string) error {
+	if len(args) != 2 {
+		return usage(`crew answer TASK "<answer>"`)
+	}
+	t, err := c.resolveTask(args[0])
+	if err != nil {
+		return err
+	}
+	answer := oneLine(args[1])
+	if answer == "" {
+		return fail("give %s's answer, in a line: an empty one tells whoever reads it nothing", t.ID())
+	}
+	if err := c.lock(); err != nil {
+		return err
+	}
+	if t.Kind() != KindSpike {
+		return fail("%s is a %s: only a spike records an answer", t.ID(), t.Kind())
+	}
+	switch st := t.Status(); {
+	case st == Done:
+		return fail("%s is done, so its answer has gone to whoever reads its report, and can't change now", t.ID())
+	case !st.InFlight():
+		return fail("%s is '%s': a spike records its answer while it's in flight, before its hand-over", t.ID(), st)
+	}
+	records, err := t.Records()
+	if err != nil {
+		return fail("%v", err)
+	}
+	r := newRecord("crew answer", records)
+	r.Answered = &Answered{Answer: answer}
+	if err := t.AddRecords(r); err != nil {
+		return err
+	}
+	c.commit("answer " + t.ID())
+	fmt.Printf("recorded %s's answer; hand it over with crew hand-over %s\n", t.ID(), t.ID())
+	return nil
+}
+
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
+// shownTask is a task as crew show prints it: its file, with what its records
+// hold put in their places (withLearnItems, withAnswer).
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
 	if err != nil {
 		return "", err
 	}
+	records, unread := t.Records()
+	ls = withLearnItems(ls, learnItems(records), unread)
+	if t.Kind() == KindSpike {
+		ls = withAnswer(ls, records, unread)
+	}
+	return strings.Join(ls, "\n") + "\n", nil
+}
+
+// withLearnItems puts the still-to-learn items under Still to learn. Anything
+// typed into the file's section stays below them, marked as not being items crew
+// counts. When crew can't read the records, the section says why. In a project
+// not yet migrated, what's typed in it is the items, so it's shown as it is.
+func withLearnItems(ls []string, learning []Item, unread error) []string {
 	var items []string
-	learning, unread := t.StillToLearn()
 	if unread != nil {
 		items = []string{"crew can't read the items still to learn: " + unread.Error()}
 	} else {
@@ -107,7 +158,7 @@ func shownTask(path string) (string, error) {
 	}
 	start := slices.Index(ls, learnHeading)
 	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+		return ls
 	}
 	if start < 0 {
 		start = slices.Index(ls, "## Log")
@@ -134,8 +185,32 @@ func shownTask(path string) (string, error) {
 	case len(typed) > 0:
 		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
+}
+
+// withAnswer gives a spike's recorded answer a section of its own, ## Answer,
+// where its worker writes its report: before Automated reviews, or before Log.
+// When crew can't read the records, the section says why; a spike with no
+// answer recorded has none.
+func withAnswer(ls []string, records []Record, unread error) []string {
+	var body string
+	r, ok := lastAnswer(records)
+	switch {
+	case unread != nil:
+		body = "crew can't read the answer: " + unread.Error()
+	case ok:
+		body = fmt.Sprintf("%s (recorded %s)", r.Answered.Answer, stamp(r))
+	default:
+		return ls
+	}
+	at := slices.Index(ls, "## Automated reviews")
+	if at < 0 {
+		at = slices.Index(ls, "## Log")
+	}
+	if at < 0 {
+		at = len(ls)
+	}
+	return slices.Insert(ls, at, "## Answer", body, "")
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is

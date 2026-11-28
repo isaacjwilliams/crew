@@ -327,9 +327,9 @@ func (c *Crew) checkTaskSet(t Task, key, value string) (string, error) {
 			return "", err
 		}
 	}
-	// done means a spike's report is in, which crew hand-over checks.
+	// done means a spike's answer is recorded, which crew hand-over checks.
 	if key == "status" && Status(value) == Done {
-		return "", fail("only crew hand-over sets done, once the report is in: crew hand-over %s", t.ID())
+		return "", fail("only crew hand-over sets done, once the spike's answer is recorded: crew hand-over %s", t.ID())
 	}
 	if key == "status" && Status(value) == PROpen {
 		return "", fail("use crew hand-over %s: it checks the evidence, the risk tier and the security review before the PR goes to the user", t.ID())
