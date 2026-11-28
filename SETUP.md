@@ -680,7 +680,7 @@ A component's **Contract** lists what it promises whoever uses it, one **obligat
   - two obligations with the same ID in one component;
   - a directory in `contract/` with no `README.md`, or with a name that isn't lowercase.
 - **What isn't a problem**: a repo with no `contract/` at all, and code that no component's Contract mentions. A Contract grows where work happens, a component at a time, never all up front.
-- **Tags are a floor.** The check counts tags, not what the tagged tests cover: a tag above a test that proves half an obligation counts the obligation as kept. Mutation testing, such as [flinch](https://github.com/tools4imps/flinch), is what shows those gaps.
+- **Tags are a floor.** The check counts tags, not what the tagged tests cover: a tag above a test that proves half an obligation counts the obligation as kept. Nor does it check that a tagged file is a test: a tag above the code that keeps the promise counts too, and the list shows which file it's in. Mutation testing, such as [flinch](https://github.com/tools4imps/flinch), is what shows those gaps.
 
 ```console
 $ crew contract
