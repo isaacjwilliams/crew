@@ -1436,7 +1436,6 @@ func TestLiveStatusUpAndDownShowALineWithNoRowOnScreen(t *testing.T) {
 				for _, setUp := range []func(){
 					func() { m.top = startOf(m, m.cursor) + len(m.shown[m.cursor].drawn) },
 					func() { m.top = max(0, startOf(m, m.cursor)-m.bodyHeight()-1) },
-					func() { m.top = max(0, startOf(m, m.cursor)-m.bodyHeight()+1) },
 				} {
 					m.moveTo(cursor + 1)
 					setUp()
@@ -1453,6 +1452,37 @@ func TestLiveStatusUpAndDownShowALineWithNoRowOnScreen(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// From a line that fits the screen but is partly below it, ↓ first shows the
+// rest of the line, and only the next press goes to the next line.
+func TestLiveStatusDownFromALinePartlyBelowTheScreenShowsItWholeFirst(t *testing.T) {
+	for name, size := range mouseLayouts {
+		m := mouseOn(t, size)
+		tried := 0
+		for i := range m.shown {
+			m.moveTo(i)
+			start, end := m.cursorSpan()
+			if end-start < 2 || end-start > m.bodyHeight() {
+				continue
+			}
+			m.top = max(0, start-m.bodyHeight()+1) // only its first row is on the screen
+			if m.top > m.lastTop() || end <= m.top+m.bodyHeight() {
+				continue // the screen can't be there, or shows all of the line
+			}
+			tried++
+			press(m, "down")
+			if m.cursor != i {
+				t.Errorf("%s: ↓ from line %d, partly below the screen, goes to line %d", name, i, m.cursor)
+			}
+			if start < m.top || end > m.top+m.bodyHeight() {
+				t.Errorf("%s: ↓ from line %d, partly below the screen, leaves its rows %d to %d off the screen at top %d", name, i, start, end, m.top)
+			}
+		}
+		if tried == 0 {
+			t.Errorf("%s: no line of two rows or more fits the screen", name)
 		}
 	}
 }
