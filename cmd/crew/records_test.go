@@ -425,10 +425,6 @@ func TestShownTaskRoundReports(t *testing.T) {
 	}
 }
 
-// Before format 2, the rounds' lines were what crew read: reportsTask's rounds
-// report red CI on aaa1111, which the branch didn't cause, and on bbb2222, and
-// conflicts at eee5555 and fff6666. Lines quoted in a comment, in the brief or
-// in an open question report nothing.
 // A task file crew migrate can't read stops it, rather than counting as one
 // with no rounds and leaving its reports behind once the project is format 2.
 func TestMigrateRoundReportsRefusesAnUnreadableTask(t *testing.T) {
@@ -450,6 +446,10 @@ func TestMigrateRoundReportsRefusesAnUnreadableTask(t *testing.T) {
 	}
 }
 
+// Before format 2, the rounds' lines were what crew read: reportsTask's rounds
+// report red CI on aaa1111, which the branch didn't cause, and on bbb2222, and
+// conflicts at eee5555 and fff6666. Lines quoted in a comment, in the brief or
+// in an open question report nothing.
 func TestMigrateRoundReports(t *testing.T) {
 	task := learnTask(t, reportsTask)
 	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
