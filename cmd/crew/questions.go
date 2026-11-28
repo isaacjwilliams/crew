@@ -96,8 +96,10 @@ func (t Task) SettleNudgeQuestions(by string) error {
 			answers = append(answers, r)
 		}
 	}
-	if err := t.AddRecords(answers...); err != nil {
-		return err
+	if len(answers) > 0 {
+		if err := t.AddRecords(answers...); err != nil {
+			return err
+		}
 	}
 	ls, err := t.read()
 	if err != nil {
@@ -108,6 +110,8 @@ func (t Task) SettleNudgeQuestions(by string) error {
 		if strings.HasPrefix(l, "## ") {
 			in = l == questionsHeading
 		}
+		// By its words, not its record, so a nudge question asked before crew
+		// kept records is settled too.
 		if in && isOpenNudgeQuestion(l) {
 			// The marker stays last, to tie the item to its record.
 			item := strings.TrimPrefix(l, "- [ ]")

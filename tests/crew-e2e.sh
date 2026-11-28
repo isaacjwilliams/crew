@@ -1477,7 +1477,7 @@ check "a new commit alone settles the nudge question, saying which; a worker's o
 check "its record says the nudge question is settled, and the collaborator's is still open" \
   '[[ $(questions "$F13" | grep "^nudge ") == "nudge crew lead settled" && $(questions "$F13" | grep "^collaborator " | tail -1) == "collaborator @bob user open" ]]'
 # under pattern n: in crew show 13's Open questions, the n lines under the last line that matches pattern
-under() { crew show 13 | awk '$0=="## Open questions" {on=1; next} on && /^## / {exit} on' | grep -A"$2" -- "$1" | tail -n "$2"; }
+under() { section <(crew show 13) "## Open questions" | grep -A"$2" -- "$1" | tail -n "$2"; }
 nudge=$(under "^- \[x\] Its worker's turn ended mid-task.* Settled: new commit $(head13)" 2); bob=$(under "^  > Why not B?$" 1)
 check "crew show gives each question's record under its item: the nudge question settled and how, bob's comment waiting on the user, and a line with no record as written" \
   '[[ $nudge == "  - stalled worker from crew, opened "*" by crew nudge$NL  - settled "*" by crew settle: The worker moved on: new commit $(head13)." &&
