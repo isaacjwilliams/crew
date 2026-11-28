@@ -355,7 +355,7 @@ func TestShownTaskQuestions(t *testing.T) {
 	at := time.Date(2026, 11, 25, 10, 0, 0, 0, time.Local)
 	task := learnTask(t, "# A\n\n## Open questions\n<!-- Questions. -->\n"+
 		"- [ ] Which way? A or B.\n"+
-		"- [x] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n"+
+		"- [X] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n"+
 		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n\n"+
 		"- [ ] CI is still red on ccc3333: test. (question cccccccc)\n\n## Log\n- x\n")
 	for _, r := range []Record{
@@ -375,7 +375,7 @@ func TestShownTaskQuestions(t *testing.T) {
 	}
 	want := "# A\n\n## Open questions\n<!-- Questions. -->\n" +
 		"- [ ] Which way? A or B.\n" +
-		"- [x] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n" +
+		"- [X] @bob commented on PR #7, comment 5 — [link](u5) (question aaaaaaaa)\n  > Why not a scan?\n" +
 		"  - PR comment from @bob, opened 2026-11-25 10:00 by crew feedback; settled: its item was ticked by hand\n" +
 		"- [x] Stalled again. Settled: new commit bbb2222. (question bbbbbbbb)\n" +
 		"  - stalled worker from crew, opened 2026-11-25 10:00 by crew nudge\n" +

@@ -156,7 +156,7 @@ func withQuestions(t Task, ls []string) []string {
 			continue
 		}
 		byHand := ""
-		if strings.HasPrefix(section[i], "- [x]") {
+		if !strings.HasPrefix(section[i], "- [ ]") {
 			byHand = "ticked"
 		}
 		for i+1 < len(section) && strings.HasPrefix(section[i+1], "  ") {
