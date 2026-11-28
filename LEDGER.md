@@ -213,7 +213,7 @@ A task's **records** are facts crew decides from, kept beside the task file in `
 
 A project's `ledger-format` says which records its ledger has: `1` once its still-to-learn checkboxes are records, `2` once its review rounds are too. crew refuses to read the records of a project with an older format, telling you to run `crew migrate`, and of one with a newer format, telling you to run `crew upgrade`. `crew project add` writes it for a new project, and `crew upgrade` runs `crew migrate` after installing a release. `crew migrate` moves each task's checkboxes under `## Still to learn` into records, a ticked one with its answer: the lines under it or, with none, what follows its first `? `. The section keeps any other line, under the template's comment. It records each review round under `## Review rounds` as crew read the round's lines before: its heading's number and time, its comment items with their quotes, and its request line. A line typed into a round by hand isn't recorded. The lines stay as they are: they're what the worker was sent.
 
-A round's lines in the task file are for the worker, who ticks them; crew counts and reads the round's record. Editing or deleting the lines changes nothing crew decides.
+A round's lines in the task file are for the worker, who ticks them; crew counts and reads the round's record. Editing or deleting the lines changes nothing crew decides. `crew show TASK` lists the recorded rounds at the top of `## Review rounds`.
 
 ## Decisions
 

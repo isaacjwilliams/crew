@@ -2515,12 +2515,12 @@ cp "$UT" "$HOME/ut-before"
 sh=$(shown "$UT")
 check "before the migration, show gives the section as it is under why crew can't read the items, not marked as typed" \
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
-out=$(crew migrate); sh=$(shown "$UT")
+out=$(crew migrate); sh=$(shown "$UT"); rounds=$(crew show "$UT" | section /dev/stdin "## Review rounds")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
   '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: recorded 1 review round(s)" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! section "$UT" "## Still to learn" | grep -q "^- \["'
-check "migrate records the rounds typed into a task file, leaving their lines as they are" \
-  '[[ $(sed -n "/^## Review rounds\$/,/^## /p" "$UT") == "$(sed -n "/^## Review rounds\$/,/^## /p" "$HOME/ut-before")" ]]'
+check "migrate records the rounds typed into a task file, leaving their lines as they are, and crew show gives them as recorded" \
+  '[[ $(sed -n "/^## Review rounds\$/,/^## /p" "$UT") == "$(sed -n "/^## Review rounds\$/,/^## /p" "$HOME/ut-before")" && $rounds == "Recorded by crew:$NL- Round 1, 2026-11-10 09:00: 1 comment(s)$NL  - comment 6 on \`a.go:3\`$NL    > why is a.go here?$NL$NL### Round 1 — 2026-11-10 09:00 (PR #5)"* ]]'
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 crew set "$UT" status abandoned
 
@@ -2740,15 +2740,21 @@ rm "$L/projects/$P2/memory.md"
 check "the hook exits 0 whatever it's given: hook JSON, an unknown project, no crew home" \
   'echo "{\"agent_type\":\"casual-observer\"}" | CREW_PROJECT=$PJ crew memory --hook >/dev/null && echo "{not json" | CREW_PROJECT=nope crew memory --hook && CREW_HOME=$SB crew memory --hook'
 
-# crew show prints a ledger file as it is on disk, and crew path prints its path.
+# crew show prints a ledger file as it is on disk, with what a task's records say
+# added, and crew path prints its path.
 shows() {  # file arg...: crew show arg... prints file, and crew path arg... its path
   local f=$1; shift
   [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
 }
-shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
+shows_task() {  # file arg: crew show and crew path find the task in file, with its type word or without
+  local w
+  for w in "" task; do
+    [[ $(crew path ${w:+"$w"} "$2") == "$1" ]] && cmp -s <(crew show ${w:+"$w"} "$2") <(crew show "$1") || return 1
+  done
+}
 TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
 check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
-  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM" && shows "$TM" "$TM"'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
 check "show memory and memory-suggestions print the project's files as they are on disk, in the default project or --project's" \
@@ -2763,7 +2769,7 @@ check "show proposal finds a proposal by ID, unique substring or path, from any 
   '(cd "$HOME" && shows "$SP" proposal "$(basename "$SP" .md)" && shows "$SP" proposal jurisdiction-a-pricing && shows "$PP" proposal ship-to-canada && shows "$SP" proposal "$SP")'
 check "show goal finds a goal from anything goal path takes, though a task shares its number" \
   'shows "$(crew goal path 1)" goal 1 && shows "$(crew goal path "$G")" goal "$G" && shows "$(crew goal path season-page)" goal season-page &&
-   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows "$F1" 1'
+   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows_task "$F1" 1'
 out=$(crew show proposal "$(date +%F)" 2>&1 >/dev/null); st=$?
 check "an argument that matches more than one of its kind lists them, shows none and fails" \
   '((st == 1)) && [[ $out == *"ambiguous:"*"$(basename "$SP") ($PJ)"* && -z $(crew show proposal "$(date +%F)" 2>/dev/null) ]]'

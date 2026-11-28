@@ -95,7 +95,7 @@ func shownTask(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.Join(withLearning(t, ls), "\n") + "\n", nil
+	return strings.Join(withRounds(t, withLearning(t, ls)), "\n") + "\n", nil
 }
 
 // withSection is ls with heading, and the index of the heading in it: where

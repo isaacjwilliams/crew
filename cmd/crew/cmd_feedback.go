@@ -9,11 +9,13 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -449,6 +451,67 @@ func (r reviewRound) add(t Task, prNumber string) (int, string, error) {
 	t.InsertBefore("## Log", b.String())
 	t.Set("review_rounds", fmt.Sprint(n))
 	return n, b.String(), nil
+}
+
+// withRounds is the task file's lines with the review rounds crew recorded, from
+// its records, at the top of Review rounds: what crew counts and reads, where the
+// rounds' own lines may have been ticked or edited. When crew can't read the
+// records, the section says why. In a project not yet migrated, the section's
+// lines are all crew has, so the file is shown as it is.
+func withRounds(t Task, ls []string) []string {
+	rounds, err := t.ReviewRounds()
+	var shown []string
+	switch {
+	case errors.Is(err, errNotMigrated):
+		return ls
+	case err != nil:
+		shown = []string{"crew can't read the review rounds it recorded: " + err.Error()}
+	case len(rounds) == 0:
+		return ls
+	default:
+		shown = []string{"Recorded by crew:"}
+		for _, r := range rounds {
+			shown = append(shown, r.lines()...)
+		}
+	}
+	ls, start := withSection(ls, "## Review rounds")
+	// After the section's own comment, if it has one.
+	at := start + 1
+	for _, l := range uncommented(ls[at:]) {
+		if strings.TrimSpace(l) != "" {
+			break
+		}
+		at++
+	}
+	return slices.Concat(ls[:at], shown, []string{""}, ls[at:])
+}
+
+// lines are the round as Markdown: its number, when crew recorded it and what it
+// holds, and under it each of the user's comments, quoted.
+func (r ReviewRound) lines() []string {
+	var holds string
+	switch {
+	case len(r.Comments) > 0 && r.ReviewRequested:
+		holds = fmt.Sprintf("%d comment(s), and a request for another automated review", len(r.Comments))
+	case len(r.Comments) > 0:
+		holds = fmt.Sprintf("%d comment(s)", len(r.Comments))
+	case r.ReviewRequested:
+		holds = "a request for another automated review"
+	default:
+		holds = "no feedback of yours, only crew's report"
+	}
+	out := []string{fmt.Sprintf("- Round %d, %s: %s", r.Number, r.At.Local().Format(logTime), holds)}
+	for _, cm := range r.Comments {
+		name := cm.Name()
+		if cm.Kind == inlineComment {
+			name += " on " + cm.Where()
+		}
+		out = append(out, "  - "+name)
+		for _, l := range strings.Split(cm.Text, "\n") {
+			out = append(out, strings.TrimRight("    > "+l, " "))
+		}
+	}
+	return out
 }
 
 // warnManyRounds warns once a task has had more than MAX_REVIEW_ROUNDS rounds of

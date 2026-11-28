@@ -1444,3 +1444,28 @@ func TestRoundsIgnoreTheirLines(t *testing.T) {
 		}
 	}
 }
+
+func TestShownRounds(t *testing.T) {
+	task := roundsTask(t, commentedTask)
+	got, err := shownTask(task.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "## Review rounds\nRecorded by crew:\n" +
+		"- Round 1, 2026-11-10 10:00: 1 comment(s)\n  - comment 5\n    > too early\n" +
+		"- Round 2, 2026-11-10 13:00: no feedback of yours, only crew's report\n" +
+		"- Round 3, 2026-11-10 14:00: 2 comment(s), and a request for another automated review\n" +
+		"  - review 7\n    > Two things.\n    > - [ ] not an item\n  - comment 9 on `a.go:3`\n    > why?\n" +
+		"- Round 4, 2026-11-11 10:00: 1 comment(s)\n  - comment 12\n    > ok\n\n" +
+		"### Round 1 — 2026-11-10 10:00 (PR #12)\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("shownTask =\n%s\nwant the recorded rounds at the top of Review rounds:\n%s", got, want)
+	}
+	// Before crew migrate, the rounds' lines in the file are all crew has.
+	if err := os.WriteFile(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := shownTask(task.Path); strings.Contains(got, "Recorded by crew:") || strings.Contains(got, "crew can't read the review rounds") {
+		t.Errorf("shownTask before crew migrate =\n%s\nwant Review rounds as the file has it", got)
+	}
+}
