@@ -551,7 +551,7 @@ When the worker picks up a round, it reacts 👀 to each of your comments in it,
 
 The worker makes the changes as new commits (no force-push), pushes, replies to each of your comments with what it did (set `REPLY_TO_THREADS=no` to turn this off), and marks the task `pr-open` again. An inline comment gets a reply in its thread; a conversation comment or review summary gets a PR comment that quotes it.
 
-Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` lists them under the task's Open questions, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored.
+Collaborators' comments (people with write access; not bots) aren't sent to the worker. `crew feedback` lists them under the task's Open questions, `crew tick` marks the task `needs-input`, and the lead asks you what to do about each one: have the worker act on it, reply yourself (or have the lead post your reply), or leave it. Comments from anyone else are ignored. crew keeps a record of each question it opens itself, a collaborator's comment, red CI or a stalled worker: `crew show <task>` gives, under each, who asked it, when, and who it waits on or what settled it.
 
 ### Red CI
 
