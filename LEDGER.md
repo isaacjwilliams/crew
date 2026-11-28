@@ -59,7 +59,7 @@ Only the machine named in `host` changes the ledger. On any other, `crew` reads 
 | `pr-open` | PR is up and waiting for your review | `crew hand-over` only: the worker's, or the lead's for a task whose worker isn't running. It refuses until every acceptance criterion has evidence |
 | `addressing-feedback` | worker handling a review round | `crew followup` |
 | `merged` | PR merged | `crew sync` (and so `crew tick`) |
-| `done` | a spike's answer is recorded and its report is in (see Kinds of task) | `crew hand-over` |
+| `done` | a spike's answer is recorded (see Kinds of task) | `crew hand-over` |
 | `abandoned` | dropped | you or the lead via `crew set` |
 
 Every change of status, whichever command makes it, adds a line `status → <status>` to the task's Log (see Log); setting the status a task already has adds none.
