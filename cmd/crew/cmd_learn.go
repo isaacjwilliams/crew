@@ -88,35 +88,41 @@ func cmdLearned(c *Crew, args []string) error {
 const learnHeading = "## Still to learn"
 
 // shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
+// items from its records under Still to learn (shownSection).
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
 	if err != nil {
 		return "", err
 	}
-	var items []string
 	learning, unread := t.StillToLearn()
+	ls = shownSection(ls, learnHeading, learnLines(learning), unread,
+		"the items still to learn", "items crew counts (crew to-learn adds one)")
+	return strings.Join(ls, "\n") + "\n", nil
+}
+
+// shownSection is the task file's lines ls with shown, what crew read from the
+// task's records for the section under heading, in that section, which goes
+// just before ## Log when the file has none. Anything typed into the section
+// stays below, marked as not being what's named. When crew can't read the
+// records, the section says why, naming what it couldn't read. In a project not
+// yet migrated, what's typed in it is all there is, so it's shown as it is.
+func shownSection(ls []string, heading string, shown []string, unread error, what, named string) []string {
 	if unread != nil {
-		items = []string{"crew can't read the items still to learn: " + unread.Error()}
-	} else {
-		items = learnLines(learning)
+		shown = []string{"crew can't read " + what + ": " + unread.Error()}
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+	start := slices.Index(ls, heading)
+	if start < 0 && len(shown) == 0 {
+		return ls
 	}
 	if start < 0 {
 		start = slices.Index(ls, "## Log")
 		if start < 0 {
 			start = len(ls)
 		}
-		ls = slices.Insert(ls, start, learnHeading, "")
+		ls = slices.Insert(slices.Clone(ls), start, heading, "")
 	}
-	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
+	end := start + 1 + len(sectionLines(ls[start:], heading))
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
 	var kept, typed []string // the section's comments and blank lines, and the rest
@@ -127,15 +133,14 @@ func shownTask(path string) (string, error) {
 			typed = append(typed, ls[start+1+i])
 		}
 	}
-	body := append(trimBlankEnd(kept), items...)
+	body := append(trimBlankEnd(kept), shown...)
 	switch {
 	case errors.Is(unread, errNotMigrated):
 		body = append(body, typed...)
 	case len(typed) > 0:
-		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
+		body = append(append(body, "", "Typed into the file, so not "+named+":"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is
