@@ -1193,7 +1193,10 @@ func (t Task) AwaitsSecurityReview() (bool, error) {
 		return false, nil
 	}
 	reviews, err := t.SecurityReviews()
-	return err == nil && len(reviews) == 0, err
+	if err != nil {
+		return false, err
+	}
+	return len(reviews) == 0, nil
 }
 
 // EvidenceCommits is the commit that one place's evidence, the task's records

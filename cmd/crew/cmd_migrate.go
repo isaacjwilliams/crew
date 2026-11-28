@@ -337,31 +337,24 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 // migrated, or recorded them itself, so its prose adds nothing.
 func migrateEvidence(t Task) (int, error) {
 	criteria := len(t.AcceptanceCriteria())
-	last := map[int]evidenceEntry{}
-	var reviews []evidenceEntry
+	evidence := map[int]*Evidence{}
+	var review *SecurityReview
 	for _, entry := range splitEntries(t.Section(evidenceHeading), func(l string) bool { return strings.HasPrefix(l, "### ") }) {
-		n, _ := itemNumber(strings.TrimPrefix(entry.heading, "### "))
+		n, rest := itemNumber(strings.TrimPrefix(entry.heading, "### "))
 		switch {
 		case len(entry.lines) == 0:
 		case entry.heading == "### Security review":
-			reviews = append(reviews, entry)
+			review = &SecurityReview{Findings: strings.TrimSpace(entry.body())}
 		case n > 0 && n <= criteria:
-			last[n] = entry
+			// An entry that names no commit was refused at hand-over, as no
+			// evidence was, so it replaces an earlier one with nothing.
+			delete(evidence, n)
+			if commit, text := evidenceItem(rest, entry.body()); commit != "" {
+				evidence[n] = &Evidence{Criterion: n, Commit: commit, Ran: notRunSign(text) == "", Shows: strings.TrimSpace(text)}
+			}
 		}
 	}
-	var moved []Record
-	for _, n := range slices.Sorted(maps.Keys(last)) {
-		_, rest := itemNumber(strings.TrimPrefix(last[n].heading, "### "))
-		commit, text := evidenceItem(rest, last[n].body())
-		if commit == "" {
-			continue // hand-over refused it, as it does with no evidence
-		}
-		moved = append(moved, Record{Evidence: &Evidence{Criterion: n, Commit: commit, Ran: notRunSign(text) == "", Shows: strings.TrimSpace(text)}})
-	}
-	if len(reviews) > 0 {
-		moved = append(moved, Record{At: firstHandOver(t.LogEntries()), SecurityReview: &SecurityReview{Findings: strings.TrimSpace(reviews[len(reviews)-1].body())}})
-	}
-	if len(moved) == 0 {
+	if len(evidence) == 0 && review == nil {
 		return 0, nil
 	}
 	records, err := t.readRecords()
@@ -371,13 +364,20 @@ func migrateEvidence(t Task) (int, error) {
 	if slices.ContainsFunc(records, func(r Record) bool { return r.Evidence != nil || r.SecurityReview != nil }) {
 		return 0, nil
 	}
-	for i, m := range moved {
+	var moved []Record
+	add := func(r Record) { records, moved = append(records, r), append(moved, r) }
+	for _, n := range slices.Sorted(maps.Keys(evidence)) {
 		r := newRecord("crew migrate", records)
-		if !m.At.IsZero() {
-			r.At = m.At
+		r.Evidence = evidence[n]
+		add(r)
+	}
+	if review != nil {
+		r := newRecord("crew migrate", records)
+		if at := firstHandOver(t.LogEntries()); !at.IsZero() {
+			r.At = at
 		}
-		r.Evidence, r.SecurityReview = m.Evidence, m.SecurityReview
-		records, moved[i] = append(records, r), r
+		r.SecurityReview = review
+		add(r)
 	}
 	return len(moved), t.AddRecords(moved...)
 }

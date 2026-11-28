@@ -579,12 +579,14 @@ func checkEvidence(t Task, repo string, pr EvidenceCommits) error {
 	var notRun []int
 	userChecks := t.UserChecks()
 	for c, r := range records {
+		if c > n {
+			continue // a criterion the brief no longer has
+		}
 		task[c] = r.Evidence.Commit
-		if !r.Evidence.Ran && !userChecks[c] && c <= n {
+		if !r.Evidence.Ran && !userChecks[c] {
 			notRun = append(notRun, c)
 		}
 	}
-	task = task.Within(n)
 	pr = pr.Within(n)
 	if gaps := task.Gaps(n); len(gaps) > 0 {
 		return fail("evidence missing for acceptance criteria %s of %d: run each one's check and record it with crew record-evidence %s <n> --on <sha> --ran '<what ran and what it showed>'",
