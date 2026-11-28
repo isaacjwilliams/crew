@@ -72,9 +72,9 @@ updated: {{NOW}}
      A gate measures the outcome, never a way to reach it. When the objective is about how code
      is organised, the shape is the outcome, so a gate checks it. One "- " item each, any detail
      indented under it: the worker records evidence for each one, by its number. The worker runs
-     every check but a user check: a gate the user makes themselves, a live smoke test say. It
-     starts "User check:", or a Decision of the user's makes it one later: "- <date> — Criterion
-     <n> is a user check: <why> (user)". -->
+     every check but a user check: a gate the user makes themselves, a live smoke test say. Only
+     the user makes a gate one, at brief time or later, and crew records it: crew user-check
+     <this task> <n> "<why>". crew show marks it under its criterion; typed words don't make one. -->
 
 ## Size
 <!-- "About <n> lines: <areas>": your estimate of the lines the PR will add plus remove, tests
@@ -86,12 +86,13 @@ updated: {{NOW}}
 
 ## Open questions
 <!-- Questions waiting on the user, one unchecked item each ("- [ ] …"): a worker's when it is
-     blocked, and collaborators' PR comments from `crew feedback`. Whoever records the answer under
-     Decisions ticks the item. -->
+     blocked, and collaborators' PR comments from `crew feedback`. Whoever records the answer (crew
+     decide) ticks the item. -->
 
 ## Decisions
-<!-- Dated decisions made after dispatch, each ending with whose call it was: "(user)" for the
-     user's own words or answer, otherwise "(lead)" or "(worker)". -->
+<!-- Decisions made after dispatch. crew keeps them, each with its date and whose call it was:
+     crew decide <this task> user|lead|worker "<decision>", with user for the user's own words or
+     answer. crew show lists them here; a line typed here isn't one. -->
 
 ## Evidence
 <!-- Written by the worker before the hand-over: one "### <n>. <the criterion, in a line> (on <sha>)"

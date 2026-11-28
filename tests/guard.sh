@@ -132,10 +132,10 @@ for f in "$LS" "$C/worker-settings.json" "$C/gardener-settings.json"; do
     "jq -e >/dev/null '.hooks.SessionStart | length == 1 and (.[0] | has(\"matcher\") | not) and .[0].hooks[0].command == \"\\\"\${CREW_HOME:-\$HOME/crew}/bin/crew\\\" memory --hook\"' $f"
 done
 check "readonly-settings.json, crew observe's, has no hooks" "jq -e >/dev/null '.hooks == null' $C/readonly-settings.json"
-GARDENER_CREW='["Bash(crew remember *)","Bash(crew show memory-suggestions)","Bash(crew show memory-suggestions *)"]'
-check "the gardener may suggest project memory, and read the suggestions" \
+GARDENER_CREW='["Bash(crew remember *)","Bash(crew show *)"]'
+check "the gardener may suggest project memory, and read the suggestions and the tasks with crew show" \
   "jq -e >/dev/null --argjson g '$GARDENER_CREW' '.permissions.allow | contains(\$g)' $C/gardener-settings.json"
-check "the gardener's allow list is the read-only one, plus crew remember and crew show memory-suggestions" \
+check "the gardener's allow list is the read-only one, plus crew remember and crew show" \
   "[[ \$(jq -c --argjson g '$GARDENER_CREW' '.permissions.allow - \$g' $C/gardener-settings.json) == \"\$(jq -c .permissions.allow $C/readonly-settings.json)\" ]]"
 # --- the misses agent: the gardener's powers, its own job
 MS=$A/misses.md
@@ -211,11 +211,11 @@ check "the implementer's GitHub list has as many items as its heading says" \
 check "the implementer publishes screenshots with crew evidence when the project has an evidence repo, and the PR body keeps the lines it printed" \
   "grep -q 'Screenshots, and other files a reviewer should open, never go on your branch.*When .crew config EVIDENCE_REPO. is set, publish them with .crew evidence <task> <file>.... and put each Markdown line it prints in the entry it shows' $A/implementer.md && grep -q 'keeping the lines .crew evidence. printed as they are' $A/implementer.md && grep -q 'Markdown line printed when it was published; never give a path on someone.s disk' $C/../templates/pr-body.md"
 check "the implementer records evidence for each acceptance criterion before it opens the PR, a user check's included" \
-  "awk '/^## Workflow: first run/ {w=1} w && /^6\\. \\*\\*Record the evidence, then push\\*\\*/ && !e {e=NR} w && /^7\\. \\*\\*Open the PR\\*\\*/ && !o {o=NR} END {exit !(e && o && e < o)}' $A/implementer.md && grep -q 'Only a user check is left to the user: a criterion the brief starts .User check:., or one a .(user). Decision makes theirs' $A/implementer.md && grep -qx '## Evidence' $C/../templates/task.md"
+  "awk '/^## Workflow: first run/ {w=1} w && /^6\\. \\*\\*Record the evidence, then push\\*\\*/ && !e {e=NR} w && /^7\\. \\*\\*Open the PR\\*\\*/ && !o {o=NR} END {exit !(e && o && e < o)}' $A/implementer.md && grep -q 'Only a user check is left to the user: a criterion the user made theirs, which crew recorded with .crew user-check.' $A/implementer.md && grep -qx '## Evidence' $C/../templates/task.md"
 check "a worker that can't run a gate's check tries what the project documents, then asks, and nothing lets it decide a check is the user's" \
   "grep -q 'When you can.t, try the ways the project.s AGENTS.md, docs and memory give.*If none works, never write what to try instead: ask.*when it refuses one whose check did run, reword it to say what ran and what it showed' $A/implementer.md && grep -q '^- a check a gate asks for that you can.t run, once you.ve tried the ways the project.s AGENTS.md, docs and memory give: write what you tried and what stopped each' $A/implementer.md && ! grep -Eiq 'only (the user|a person|you) can (check|make)|check only (the user|you) can' $A/implementer.md $C/../templates/task.md $C/../templates/pr-body.md"
-check "a lead marks a user check at intake and records the user's later call, and a goal lead leaves an unreachable gate to the user" \
-  "grep -q '^- a gate only the user can check: marking it .User check:. takes the user.s agreement' $A/goal-lead.md && grep -q 'A gate only the user can check, such as a live smoke test or a look at production, starts .User check:.' $A/lead.md && grep -q 'If they do, record it in their words as .- <date> — Criterion <n> is a user check: <why> (user).; never write that line on your own call' $A/lead.md && grep -q 'A question about a gate whose check the worker can.t run is always the user.s: leave it for them the same way, and never answer it by making the gate a user check' $A/goal-lead.md"
+check "a lead records a user check with crew user-check at intake and on the user's later call, and a goal lead leaves an unreachable gate to the user" \
+  "grep -q '^- a gate only the user can check: making it a user check (.crew user-check.) takes the user.s agreement' $A/goal-lead.md && grep -q 'A gate only the user can check, such as a live smoke test or a look at production, is a user check.*and the user agrees: then record it with .crew user-check <task> <n> \"<why>\".' $A/lead.md && grep -q 'If they do, record it in their words with .crew user-check <task> <n> \"<why>\".; never record one on your own call' $A/lead.md && grep -q 'A question about a gate whose check the worker can.t run is always the user.s: leave it for them the same way, and never answer it by making the gate a user check' $A/goal-lead.md"
 check "the implementer fills in the PR body from its template, which opens with the objective, then Risk, How to revert and Evidence, and has no Changes" \
   "grep -q 'The PR body is .templates/pr-body.md.*it opens with the objective' $A/implementer.md && [[ \$(sed '/^<!--/,/-->\$/d' $C/../templates/pr-body.md | grep -m1 .) == '<The objective, in a sentence.>' ]] && awk '/^## / {h[++n]=\$0} END {exit !(h[1]==\"## Risk\" && h[2]==\"## How to revert\" && h[3]==\"## Evidence\")}' $C/../templates/pr-body.md && ! grep -q 'Changes.*: short bullets' $A/implementer.md && ! grep -q '^## Changes' $C/../templates/pr-body.md"
 # Step n of "Workflow: review rounds": its numbered line and any indented lines under it.
@@ -298,7 +298,7 @@ for f in lead implementer; do
   check "$f rereads the task file after a compaction" "grep -q 'compacted' $A/$f.md && grep -qi 'reread' $A/$f.md"
 done
 check "a question waiting on the user is an unchecked item under Open questions, ticked by whoever records the answer" \
-  "grep -q 'as an unchecked item (.- \[ \] ….)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/lead.md && grep -q 'Whoever records the answer under' $C/../templates/task.md"
+  "grep -q 'as an unchecked item (.- \[ \] ….)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/implementer.md && grep -q 'tick the question (.- \[x\].)' $A/lead.md && grep -q 'Whoever records the answer (crew' $C/../templates/task.md"
 check "collaborators' comments wait for the user: the lead asks, and workers leave them alone unless told" \
   "grep -q 'never acted on without the user' $A/lead.md && grep -q 'quote a collaborator.s PR comment are for the user' $A/implementer.md"
 check "the lead runs crew tick at the start of a session and for status, so rounds and restacks go out without the timer" \
@@ -338,7 +338,7 @@ check "findings a worker declines in its pre-PR review reach the user with its r
 check "what automated review left for the user reaches the user" \
   "grep -q '.left for the user.' $A/implementer.md && grep -q 'findings marked .left for the user. under the task.s .## Automated reviews.' $A/lead.md"
 check "a finding the user decides is recorded on its outcome in the form crew status reads, by the worker the lead sends it to, which hands over again" \
-  "grep -qF '\"; decided by the user\"' <<<\"\$SRC\" && grep -q 'add .; decided by the user: <their decision, in a few words>. to the end of the finding.s .Outcome:. line, and of each later repeat.s' $A/implementer.md && grep -q 'Once it.s recorded, hand over again, even when nothing in the code changed' $A/implementer.md && grep -q 'decides a finding automated review left for the user is recorded on the finding too' $A/implementer.md && grep -q 'leaving out those whose outcome says .decided by the user.' $A/lead.md && grep -q '^When the user decides a finding left for them, record it under Decisions.*crew followup <task> --note .The user decided automated review <N>.s finding <k>: <their decision>. Act on it, record it on the finding, and hand over again' $A/lead.md && grep -q '.left for the user…; decided by the user: <the decision>.' $REPO_DIR/LEDGER.md"
+  "grep -qF '\"; decided by the user\"' <<<\"\$SRC\" && grep -q 'add .; decided by the user: <their decision, in a few words>. to the end of the finding.s .Outcome:. line, and of each later repeat.s' $A/implementer.md && grep -q 'Once it.s recorded, hand over again, even when nothing in the code changed' $A/implementer.md && grep -q 'decides a finding automated review left for the user is recorded on the finding too' $A/implementer.md && grep -q 'leaving out those whose outcome says .decided by the user.' $A/lead.md && grep -q '^When the user decides a finding left for them, record it with .crew decide <task> user.*crew followup <task> --note .The user decided automated review <N>.s finding <k>: <their decision>. Act on it, record it on the finding, and hand over again' $A/lead.md && grep -q '.left for the user…; decided by the user: <the decision>.' $REPO_DIR/LEDGER.md"
 check "workers own the design within the brief's bounds, and judge every finding on its merits, never on what the brief chose" \
   "grep -q '^- Stay in scope: meet the brief.s objective without crossing a bound. The bounds are the brief.s gates (its Acceptance criteria) and its Out of scope, and the project.s rules: AGENTS.md and the user.s CLAUDE.md\\. How to meet the objective is yours to design' $A/implementer.md && grep -q '^- Judge every review finding on its merits, one about the design too.*That the brief or your first plan chose otherwise is never a reason' $A/implementer.md && grep -q '^   - If it.s right but its fix would cross a bound, don.t change the code: ask' $A/implementer.md && grep -q '.left for the user: its fix would cross <the bound>.' $A/implementer.md && grep -q '.left for the user: its fix would cross <the bound>.' $REPO_DIR/LEDGER.md && ! grep -rqi 'brief settled\|settled by the brief\|plan no longer fits' $A $REPO_DIR/templates $REPO_DIR/LEDGER.md $REPO_DIR/SETUP.md $REPO_DIR/ARCHITECTURE.md"
 check "the lead states gates as rules, not expressions" \
@@ -390,13 +390,15 @@ check "a fix later in the PR's own lines is fixed in the PR, or left for the use
 check "fix-later and nitpick fixes don't make a review unclean, and the summary says they weren't reviewed again, ahead of a plain clean ending" \
   "grep -q 'Fix-later and nitpick fixes don.t count: they.re improvements, not defects' $A/implementer.md && grep -q 'improvements made after it haven.t been reviewed again' $C/../templates/review-comment.md && awk '/^     - clean, with fix-later or nitpick fixes made for it:/ && !f {f=NR} /^     - clean: / && !c {c=NR} END {exit !(f && c && f < c)}' $C/../templates/review-comment.md"
 for f in $A/lead.md $A/goal-lead.md $A/implementer.md; do
-  check "$(basename "$f") ends every line it adds under Decisions with whose call it was" \
-    "grep -q 'under .*Decisions is dated and ends with whose call it was: .(user). when it records the user.s own words or answer' $f"
+  check "$(basename "$f") records decisions with crew decide, with whose call it was, never by typing them" \
+    "grep -q 'with .crew decide <task> .*\"<decision>\"., never by typing .* into the task file: crew dates .* and keeps whose call it was, .user. when it records the user.s own words or answer' $f"
 done
-check "the task template and LEDGER.md define the (user) marker on Decisions" \
-  "grep -q 'ending with whose call it was: \"(user)\"' $C/../templates/task.md && grep -q 'Only a .(user). line counts as yours' $REPO_DIR/LEDGER.md"
-check "pr-review takes only (user) lines as the user's decisions, and never sorts them into hard constraints" \
-  "grep -q 'every line under the task.s Decisions that ends .(user)., and no other' $SK/SKILL.md && grep -q '^Write .None recorded.. The user.s decisions all go under stated intent' $SK/SKILL.md"
+check "the task template and LEDGER.md say decisions and user checks are recorded with crew decide and crew user-check, and typed lines aren't" \
+  "grep -q 'crew decide <this task> user|lead|worker' $C/../templates/task.md && grep -q 'crew user-check$' $C/../templates/task.md && grep -q 'Only a decision recorded as .user. counts as yours' $REPO_DIR/LEDGER.md && grep -q 'A line typed under .## Decisions. decides nothing' $REPO_DIR/LEDGER.md"
+check "no agent, skill or template tells anyone to type a decision's whose-call mark or a User check: criterion" \
+  "! grep -rEq '\\((user|lead|worker)\\)|User check:' $A $SK $C/../templates"
+check "pr-review takes the user's decisions from crew user-decisions alone, and never sorts them into hard constraints" \
+  "grep -q 'what .crew user-decisions <task>. prints, verbatim' $SK/SKILL.md && grep -q '^Write .None recorded.. The user.s decisions all go under stated intent' $SK/SKILL.md"
 check "pr-review turns the PR body's and commit messages' headings into #### ones, so stated intent stays the last section" \
   "grep -q 'Turn each .#. or .##. heading in them into a .####.' $SK/SKILL.md"
 check "a pr-review run that records nothing isn't counted, and a second such stop blocks the worker" \

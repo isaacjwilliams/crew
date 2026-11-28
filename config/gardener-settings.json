@@ -2,8 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(crew remember *)",
-      "Bash(crew show memory-suggestions)",
-      "Bash(crew show memory-suggestions *)",
+      "Bash(crew show *)",
       "Bash(git status)",
       "Bash(git status *)",
       "Bash(git diff *)",

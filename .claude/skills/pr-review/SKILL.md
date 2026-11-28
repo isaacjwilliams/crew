@@ -28,7 +28,7 @@ and, from the PR's second review on, the same earlier reviews, and nothing else.
 | The primary sources step 3 names, verbatim | Your summary of what the change does |
 | The fork point, the range and the review root | The brief past the user's quoted words: its objective, Context and gates, which the lead wrote and the user approved |
 | Test, lint and run commands | Justification for a trade-off you chose |
-| The user's decisions, the lines marked `(user)` | Which findings you expect, or a defence in advance |
+| The user's decisions, as `crew user-decisions` prints them | Which findings you expect, or a defence in advance |
 | The user's review comments, as the task's review rounds quote them | Your reading of the user's intent |
 | Earlier reviews' findings, agreed severities and outcomes, and the reply that withdrew a finding, quoted from the record | Your verdicts on them, your evidence in their rounds, or any other round reply |
 
@@ -120,8 +120,9 @@ derived intent of its own, and you never sort them into constraints and intent.
 Only these, verbatim, each as a `###` subsection:
 
 - `### The user's request`: the quoted (`>`) block in the task's Goal section. Not the restatement that follows it.
-- `### The user's decisions`: every line under the task's Decisions that ends `(user)`, and no other. A line without
-  that ending isn't the user's, whatever it says. Omit the subsection if there are none.
+- `### The user's decisions`: what `crew user-decisions <task>` prints, verbatim: the decisions crew recorded as the
+  user's call, each with its date. Nothing else is the user's decision, whatever a line in the task file says. Omit
+  the subsection if it prints nothing.
 - `### The user's review comments`: the quoted (`>`) text of every comment under the task's `## Review rounds`,
   verbatim, under a `#### Round <n>` heading for each round. Leave out each round's other lines: the checkbox lines
   with a comment's ID and link, and any `Automated review requested` line. Only the user's comments are recorded

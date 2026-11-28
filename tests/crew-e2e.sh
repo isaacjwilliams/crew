@@ -2804,7 +2804,7 @@ check "the lead and a goal lead, on the project or on every project, read every 
 check "a worker, in its project's repo, reads them with a command its settings allow" \
   'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew *)\")" "$L/config/worker-settings.json" && all_shown env -u CREW_PROJECT crew show memory-suggestions'
 check "the gardener reads them with a command its settings allow, in the session its project's CREW_PROJECT gives it" \
-  'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew show memory-suggestions)\")" "$L/config/gardener-settings.json" && (cd "$HOME" && all_shown env CREW_PROJECT="$PJ" crew show memory-suggestions)'
+  'jq -e >/dev/null ".permissions.allow | index(\"Bash(crew show *)\")" "$L/config/gardener-settings.json" && (cd "$HOME" && all_shown env CREW_PROJECT="$PJ" crew show memory-suggestions)'
 check "the user reads them with the command crew status names" '(cd "$HOME" && all_shown crew show memory-suggestions --project "$PJ")'
 out=$(crew memory --project "$PJ" 2>&1)
 check "memory says so when the project has none yet" '[[ $out == "No project memory for $PJ yet." ]]'

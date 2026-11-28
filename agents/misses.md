@@ -22,10 +22,10 @@ Your working directory is a detached checkout of the default branch, with the me
 
 ## Process
 
-1. **Read each task file.**
+1. **Read each task file**, with `crew show <path>`: it prints the file with the task's decisions, which crew keeps beside it.
    - `## Review rounds`: the user's comments, each quoted under its line. Sort exactly the comments the prompt lists; crew picked them, as the ones in rounds recorded after an automated review.
    - `## Automated reviews`: what each review found. Its findings each have an agreed severity and an `Outcome:` line saying what the worker did.
-   - The brief: Goal (the user's words, then the objective), Context, Acceptance criteria, Out of scope, and the dated lines under Decisions. A brief readied before briefs stopped saying how may also have Structure, Plan and Constraints and conventions.
+   - The brief: Goal (the user's words, then the objective), Context, Acceptance criteria, Out of scope, and its Decisions, each with its date and whose call it was. A brief readied before briefs stopped saying how may also have Structure, Plan and Constraints and conventions.
 
    To see the code a comment is about, find it in your checkout (`git log`, `git grep`, `git show`).
 2. **Sort each comment: a miss, or not.**
