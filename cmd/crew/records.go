@@ -40,6 +40,8 @@ type Record struct {
 	Suggested *Suggested `json:"suggested,omitempty"`
 	Kept      *Kept      `json:"kept,omitempty"`
 	Declined  *Declined  `json:"declined,omitempty"`
+	Decided   *Decided   `json:"decided,omitempty"`
+	UserCheck *UserCheck `json:"user_check,omitempty"`
 }
 
 // ToLearn adds an item to a draft's Still to learn: something its objective or
@@ -71,6 +73,26 @@ type Kept struct {
 type Declined struct {
 	Suggestion string `json:"suggestion"` // the Suggested record's ID
 	Reason     string `json:"reason"`
+}
+
+// Decided records a decision about a task, made on the day of its record, and
+// whose call it was.
+type Decided struct {
+	Text string `json:"text"`
+	Call string `json:"call"` // one of calls, or "" for a decision crew migrate moved whose line didn't say
+}
+
+// calls are who can make a decision: the user, a lead (a goal lead among them)
+// or the task's worker.
+var calls = []string{"user", "lead", "worker"}
+
+// UserCheck records the user's agreement that a criterion of the task's is
+// theirs to check, so its worker may leave it to them.
+type UserCheck struct {
+	// The criterion's first line, as AcceptanceCriteria gives it: what finds the
+	// criterion however the criteria are renumbered.
+	Criterion string `json:"criterion"`
+	Why       string `json:"why"`
 }
 
 // newRecord is a record by the command `by`, with an ID no other record in
@@ -236,7 +258,7 @@ func (r Record) check() error {
 		return errors.New("a record needs an id, an at and a by")
 	}
 	payloads := 0
-	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil} {
+	for _, set := range []bool{r.ToLearn != nil, r.Learned != nil, r.Suggested != nil, r.Kept != nil, r.Declined != nil, r.Decided != nil, r.UserCheck != nil} {
 		if set {
 			payloads++
 		}
@@ -255,6 +277,12 @@ func (r Record) check() error {
 		return errors.New("a kept record needs its suggestion")
 	case r.Declined != nil && (r.Declined.Suggestion == "" || strings.TrimSpace(r.Declined.Reason) == ""):
 		return errors.New("a declined record needs its suggestion and its reason")
+	case r.Decided != nil && strings.TrimSpace(r.Decided.Text) == "":
+		return errors.New("a decided record needs its text")
+	case r.Decided != nil && r.Decided.Call != "" && !slices.Contains(calls, r.Decided.Call):
+		return fmt.Errorf("a decided record's call is %s, not %q", orList(calls), r.Decided.Call)
+	case r.UserCheck != nil && (strings.TrimSpace(r.UserCheck.Criterion) == "" || strings.TrimSpace(r.UserCheck.Why) == ""):
+		return errors.New("a user_check record needs its criterion and its why")
 	}
 	return nil
 }
@@ -282,10 +310,12 @@ func (d Doc) AddRecords(rs ...Record) error {
 
 // ledgerFormat is the format of the ledger this crew reads, which a project
 // records in its ledger-format file. Format 1 keeps still-to-learn items in
-// records, and format 2 memory suggestions; before, they were checkboxes in the
-// task file and in memory-suggestions.md, which crew migrate moves into records.
+// records, format 2 memory suggestions, and format 3 a task's decisions and
+// user checks; before, they were checkboxes in the task file and in
+// memory-suggestions.md, and lines under a task's Decisions and criteria
+// starting "User check:", which crew migrate moves into records.
 // crew project add writes the file for a new project.
-const ledgerFormat = 2
+const ledgerFormat = 3
 
 func ledgerFormatPath(projectDir string) string { return filepath.Join(projectDir, "ledger-format") }
 

@@ -24,8 +24,8 @@ Setup
                                    It asks first; --yes is the answer without a
                                    terminal, and answers crew install's questions
   crew migrate                     Bring each project's ledger to this crew's format,
-                                   moving still-to-learn checkboxes into records;
-                                   crew upgrade runs it
+                                   moving still-to-learn checkboxes, decisions and
+                                   user checks into records; crew upgrade runs it
   crew install [--yes] [--no-fish] [--no-services] [--skip-agents-md-setting]
                                    Put this machine's files in place: agents, links
                                    to crew and lead in ~/.local/bin, fish
@@ -78,6 +78,12 @@ Tasks  (TASK = id, number like 7, unique substring, "#<pr-number>", or file path
                                    on that nobody has checked yet; prints its ID
   crew learned TASK ITEM "<answer>"
                                    Settle an item still to learn with its answer
+  crew decide TASK user|lead|worker "<decision>"
+                                   Record a decision on the task, dated today, and
+                                   whose call it was
+  crew user-check TASK N "<why>"   Record the user's agreement that criterion N is
+                                   theirs to check, so its worker may leave it to them
+  crew user-decisions TASK         Print the decisions that were the user's call
   crew dispatch TASK [--force|--tick]
                                    Create worktree + branch and start an implementer.
                                    --force dispatches a task that isn't ready; a

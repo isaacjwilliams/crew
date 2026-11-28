@@ -1121,44 +1121,35 @@ func (t Task) AcceptanceCriteria() []string {
 	return criteria
 }
 
-// userCheck starts a criterion the brief leaves to the user to check, such as
-// a live smoke test: "- User check: …".
-const userCheck = "User check:"
-
-// userCheckDecision is a Decision that makes a criterion the user's to check
-// after the brief was approved: "- <date> — Criterion 5 is a user check: …
-// (user)". Only a line that ends "(user)" counts: it records the user's call.
-var userCheckDecision = regexp.MustCompile(`(?i)\bcriterion (\d+) is a user check\b`)
-
 // UserChecks is the numbers of the criteria the user checks themselves, which
-// a worker may leave to them: the brief's "User check:" criteria, and those a
-// Decision of the user's names.
-func (t Task) UserChecks() map[int]bool {
-	checks := map[int]bool{}
-	for i, c := range t.AcceptanceCriteria() {
-		if strings.HasPrefix(c, userCheck) {
-			checks[i+1] = true
-		}
+// a worker may leave to them: those crew user-check recorded. Each record finds
+// its criterion by its first line, so it still covers it after the criteria
+// are renumbered. One whose criterion the brief no longer has covers none.
+func (t Task) UserChecks() (map[int]bool, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
 	}
-	for _, l := range t.UserDecisions() {
-		if m := userCheckDecision.FindStringSubmatch(l); m != nil {
-			n, _ := strconv.Atoi(m[1])
+	criteria := t.AcceptanceCriteria()
+	checks := map[int]bool{}
+	for _, r := range records {
+		if r.UserCheck == nil {
+			continue
+		}
+		if n := slices.Index(criteria, r.UserCheck.Criterion) + 1; n > 0 {
 			checks[n] = true
 		}
 	}
-	return checks
+	return checks, nil
 }
 
-// UserDecisions is the items under ## Decisions that record the user's own
-// call: the "- " lines that end "(user)".
-func (t Task) UserDecisions() []string {
-	var lines []string
-	for _, l := range strings.Split(t.Section("## Decisions"), "\n") {
-		if strings.HasPrefix(l, "- ") && strings.HasSuffix(strings.TrimRight(l, " "), "(user)") {
-			lines = append(lines, l)
-		}
+// UserDecisions are the decisions recorded as the user's call, oldest first.
+func (t Task) UserDecisions() ([]Record, error) {
+	records, err := t.Records()
+	if err != nil {
+		return nil, err
 	}
-	return lines
+	return slices.DeleteFunc(records, func(r Record) bool { return r.Decided == nil || r.Decided.Call != "user" }), nil
 }
 
 // Evidence is what one place the user reads, the task's ## Evidence or its PR

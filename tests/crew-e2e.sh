@@ -337,6 +337,7 @@ check "ready refuses a task without a risk tier, and says how to set one" \
 check "set refuses a risk that isn't low, medium or high" \
   '[[ $(crew set 1 risk bogus 2>&1) == *"risk must be low, medium or high, not '"'"'bogus'"'"'"* && -z $(crew get 1 risk) ]]'
 crew set 1 risk low
+crew user-check 1 1 "Only a live session shows it" >/dev/null
 check "ready accepts a brief with a Goal, Acceptance criteria and a Size, and no Structure or Plan" 'crew ready 1 >/dev/null && [[ $(crew get 1 status) == ready ]]'
 sed -i '/^## Plan$/a 1. Add a filters field.' "$F1"
 check "dispatch refuses a ready task whose brief still says how to meet its objective, --force or not" \
@@ -413,22 +414,48 @@ pr_body 1; commit_in "$WT" src/filters.ts
 check "hand-over refuses evidence recorded before a later commit of the branch's own, in the task and the PR body, naming each item" \
   '[[ $(crew hand-over 1 2>&1) == *"evidence ran on other work than the branch has now, here and on origin, in ## Evidence: 1 (on $E1), 2 (on $E1), 3 (on $E1); the PR body: 1 (on $E1), 2 (on $E1), 3 (on $E1). Push the branch, run the evidence again"* && $(crew get 1 status) == needs-input ]]'
 record_evidence 1; pr_body 1
-# Only the user's checks may be left to them: the brief marks one "User check:", or the
-# user makes one theirs later, in a Decision. Criterion 1 is marked; 3 isn't, until then.
+# Only the user's checks may be left to them, as crew user-check records them: z since
+# the brief, when it was criterion 1, and z2 (now 1) later, as the user's call. Two
+# criteria have been inserted ahead of z since, so it's criterion 3 now.
 cp "$F1" "$SB/f1-before-user-checks"
 not_run='Not done: it needs a real terminal. To try: run it.'
-sed -i 's/^- z2$/- User check: z2/' "$F1"
-sed -i "/^### [13]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
-sed -i "/^[13]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
+sed -i "/^### [123]\. .* (on [0-9a-f]*)\$/a $not_run" "$F1"
+sed -i "/^[123]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
 out=$(crew hand-over 1 2>&1); st=$?
-check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless the brief marks it a user check" \
-  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 3 ('"'"'Not done'"'"'); the PR body: 3 ('"'"'Not done'"'"'). If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
-sed -i '/^## Decisions$/a - 2026-11-24 — Criterion 3 is a user check: only a real terminal shows it (lead)' "$F1"
-check "a Decision that isn't the user's doesn't make a check theirs" '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 3 ("* ]]'
-sed -i 's/^\(- 2026-11-24 — Criterion 3 is a user check: .*\) (lead)$/\1 (user)/' "$F1"
+check "hand-over refuses evidence that leaves a check to the user, in the task and the PR body, unless it's a user check, and a brief's user check still covers its criterion after two are inserted ahead of it" \
+  '((st == 1)) && [[ $out == *"evidence says its check wasn'"'"'t run, in ## Evidence: 1 ('"'"'Not done'"'"'), 2 ('"'"'Not done'"'"'); the PR body: 1 ('"'"'Not done'"'"'), 2 ('"'"'Not done'"'"'). If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project'"'"'s AGENTS.md, docs and memory give"* && $(crew get 1 status) == needs-input ]]'
+# What's typed into the file decides nothing: a criterion starting "User check:", and
+# Decisions lines ending "(user)", one of them making criterion 2 a user check.
+sed -i '/^- z$/a - User check: z4' "$F1"
+sed -i "/^## Evidence\$/,/^## /{/^## [^E]/i ### 4. z4\\n$not_run
+}" "$F1"
+record_evidence 1; pr_body 1; sed -i "/^[124]\. /a \\   $not_run" "$HOME/gh-pr-body-12"
+sed -i '/^## Decisions$/a - 2026-11-24 — Keep both readers (user)\n- 2026-11-24 — Criterion 2 is a user check: only a real terminal shows it (user)' "$F1"
+check "a criterion typed 'User check:' and Decisions typed '(user)' make no check the user's" \
+  '[[ $(crew hand-over 1 2>&1) == *"in ## Evidence: 1 ('"'"'Not done'"'"'), 2 ('"'"'Not done'"'"'), 4 ('"'"'Not done'"'"'); the PR body: 1 ('"'"'Not done'"'"'), 2 ('"'"'Not done'"'"'), 4 ('"'"'Not done'"'"')."* ]]'
+# A decision or user check crew can't record is refused, and leaves the ledger as it was.
+head=$(git -C "$L" rev-parse @); ledger=$(cat "$F1" "${F1%.md}.records.jsonl")
+unchanged() { [[ $(git -C "$L" rev-parse @) == "$head" && $(cat "$F1" "${F1%.md}.records.jsonl") == "$ledger" ]]; }
+check "decide refuses an empty decision" '[[ $(crew decide 1 user "  " 2>&1) == "crew: say what was decided" ]] && unchanged'
+check "decide refuses an unknown whose-call, naming the ones there are" \
+  '[[ $(crew decide 1 Isaac "Keep it" 2>&1) == "crew: whose call was it: user, lead or worker? Not '"'"'Isaac'"'"'" ]] && unchanged'
+check "user-check refuses a criterion the brief doesn't have" \
+  '[[ $(crew user-check 1 5 "Needs a terminal" 2>&1) == "crew: 001-saved-search-filters has no criterion 5: its Acceptance criteria has 4 '"'"'- '"'"' item(s)" && $(crew user-check 1 0 "x" 2>&1) == *"has no criterion 0"* ]] && unchanged'
+check "user-check records the user's call that a criterion is theirs to check" \
+  '[[ $(crew user-check 1 1 "Only a real terminal shows it") == "criterion 1 is a user check" && $(git -C "$L" log -1 --format=%s) == "user-check 001-saved-search-filters" ]]'
 out=$(crew hand-over 1 2>&1)
-check "hand-over accepts evidence that leaves a check to the user once a Decision of theirs makes it a user check" \
-  '[[ $out != *"wasn'"'"'t run"* && $out == *"automated review hasn'"'"'t run"* ]]'
+check "hand-over excuses the brief's user check and the later one, and no other" \
+  '[[ $out == *"in ## Evidence: 2 ('"'"'Not done'"'"'), 4 ('"'"'Not done'"'"'); the PR body: 2 ('"'"'Not done'"'"'), 4 ('"'"'Not done'"'"')."* ]]'
+two_lines=$'Keep both readers,\nfor now' shown_two="- $(date +%F) — Keep both readers,"$'\n'"  for now (lead)"
+check "decide records a decision with its date and whose call, and prints it" \
+  '[[ $(crew decide 1 lead "$two_lines") == "$shown_two" && $(git -C "$L" log -1 --format=%s) == "decide 001-saved-search-filters" ]]'
+crew decide 1 user "Ship the filters behind no flag" >/dev/null
+check "user-decisions prints the user's decisions alone, not what's typed" \
+  '[[ $(crew user-decisions 1) == "- $(date +%F) — Ship the filters behind no flag (user)" ]]'
+crew show 1 >"$HOME/show-1"
+check "crew show lists the decisions with their date and whose call, the user checks under their criteria, and sets typed lines apart" \
+  'awk "/^## Acceptance criteria\$/,/^## Size\$/" "$HOME/show-1" | grep -Pzq "\n- z2\n  - nested, not a criterion\n  - User check, recorded [-0-9: ]+ by crew user-check: Only a real terminal shows it\n- z3\n- z\n  - User check, recorded [-0-9: ]+ by crew user-check: Only a live session shows it\n- User check: z4\n" &&
+   awk "/^## Decisions\$/,/^## Evidence\$/" "$HOME/show-1" | grep -Pzq "\n- $(date +%F) — Keep both readers,\n  for now \(lead\)\n- $(date +%F) — Ship the filters behind no flag \(user\)\n\nTyped into the file, so not decisions crew reads \(crew decide records one\):\n- 2026-11-24 — Keep both readers \(user\)\n"'
 cp "$SB/f1-before-user-checks" "$F1"; pr_body 1
 echo 'SENSITIVE_PATHS=":(nosuchmagic)db"' >>"$PE"
 out=$(crew hand-over 1 2>&1); st=$?
@@ -595,7 +622,7 @@ setstate "done" null; touch "$HOME/fail-resume"; crew feedback 1 --since 1970-01
 echo "half done" >"$(crew get 1 worktree)/wip.txt"
 check "failed resume falls back to a fresh worker" 'crew followup 1 2>&1 | grep -q "(fresh)"'
 check "a fresh worker sent a review round starts from the rounds and the brief's bounds, not the whole task file" \
-  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
+  '[[ $(last_launch) == *"You are picking up review rounds on task 001-saved-search-filters in project "*", which already has work on its branch."*"Start from the rounds named below and the task file'"'"'s Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. \`crew show 001-saved-search-filters\` prints the file with its decisions. Don'"'"'t read the whole task file or review the branch first"*"New input for task 001-saved-search-filters"*"under '"'"'## Review rounds'"'"'"* && $(last_launch) != *"Read the whole task file"* ]]'
 check "a fresh worker taking over a worktree with uncommitted changes is led to them before it acts" \
   '[[ $(last_launch) == *"An earlier session left changes uncommitted in your worktree. Read git status and git diff before you act"*"New input for task "* ]]'
 rm "$(crew get 1 worktree)/wip.txt"
@@ -682,7 +709,7 @@ check "the next followup resumes it in place, passing no --model" '[[ $out == *"
 out=$(setstate "done" null; crew followup 1 --fresh --note "fresh on sonnet" 2>&1)
 check "a fresh followup starts it on the task's model" '[[ $out == *"(fresh)"* && $(last_launch) == *" --model sonnet "* ]]'
 check "a fresh worker sent a note, in a worktree with nothing uncommitted, is told to read the whole task file and the branch first, and nothing of uncommitted changes" \
-  '[[ $(last_launch) == *"You are picking up task 001-"*"Read the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting."*"Note from the lead"*"fresh on sonnet" && $(last_launch) != *uncommitted* ]]'
+  '[[ $(last_launch) == *"You are picking up task 001-"*"Read the whole task file, with \`crew show 001-saved-search-filters\` (including Decisions, Review rounds and Log), and inspect the branch (git log, gh pr view) before acting."*"Note from the lead"*"fresh on sonnet" && $(last_launch) != *uncommitted* ]]'
 echo "half done" >"$(crew get 1 worktree)/wip.txt"
 out=$(setstate "done" null; crew followup 1 --fresh --note "after a question" 2>&1)
 check "a fresh worker sent a note, in a worktree with uncommitted changes, is led to them before it acts" \
@@ -2481,9 +2508,12 @@ sh=$(shown "$BT")
 check "show says the records can't be read, in place of the items" '[[ $sh == *"crew can'"'"'t read the items still to learn: $BTI.records.jsonl:3: not a record crew can read"* && $sh != *"- [x] Q?"* ]]'
 crew set "$BT" status abandoned
 # Until crew migrate, a project's records lack the items its task files still hold
-# as checkboxes, and the memory suggestions its memory-suggestions.md holds, so
-# crew refuses to read them rather than count none.
+# as checkboxes, the decisions and user checks they hold as lines, and the memory
+# suggestions its memory-suggestions.md holds, so crew refuses to read them rather
+# than count none.
 LP=$(basename "$PD"); UT=$(crew new "Before the migration"); UTI=$(basename "$UT" .md); fill "$UT"
+sed -i -e '/^- z$/a - User check: a live session' \
+  -e '/^## Decisions$/a - 2026-11-21 — Keep the cache (user)\n- 2026-11-21 — Use Redis (lead)\n- 2026-11-22 — Criterion 1 is a user check: needs a terminal (user)\n- Undated, from an old brief\n  over two lines (worker)' "$UT"
 OMS=$PD/memory-suggestions.md
 printf '%s\n' "# Memory suggestions: $LP" "" "<!-- Tick each one. -->" \
   "- [ ] **Deploys wait for CI** The user said so. (lead, 2026-11-09)" \
@@ -2498,6 +2528,11 @@ check "in a project not yet migrated, status says it can't count the memory sugg
   '[[ $st == *"memory suggestions: can'"'"'t count them: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate"* && $st != *"memory suggestions: 0"* ]]'
 check "in a project not yet migrated, show gives the suggestions file as it is, under why crew can't read it, and remember refuses" \
   '[[ $(crew show memory-suggestions) == "$(cat "$OMS")$NL${NL}crew can'"'"'t read the memory suggestions: $LP'"'"'s ledger isn'"'"'t migrated"* ]] && ! crew remember "X" --why "Y" 2>/dev/null'
+crew set "$UT" status working; crew set "$UT" pr_mode none
+out=$(crew hand-over "$UT" 2>&1); st=$?
+check "in a project not yet migrated, hand-over refuses a task, as it can't tell its user checks, and says to migrate first" \
+  '((st == 1)) && [[ $out == "crew: can'"'"'t tell which criteria are the user'"'"'s to check: $LP'"'"'s ledger isn'"'"'t migrated to this crew'"'"'s records yet: run crew migrate" && $(crew get "$UT" status) == working ]]'
+crew set "$UT" status draft
 rm "$HOME/ledger-format"
 sed -i '/^## Still to learn$/a - [x] Settled? Yes: by hand.\n- [ ] Open?' "$UT"   # with the two typed into $LT, 4 items
 sh=$(shown "$UT")
@@ -2505,7 +2540,7 @@ check "before the migration, show gives the section as it is under why crew can'
   '[[ $sh == *"crew can'"'"'t read the items still to learn: $LP'"'"'s ledger isn'"'"'t migrated"* && $sh != *"Typed into the file"* ]] && has "^- \[x\] Settled\? Yes: by hand\.$" && has "^- \[ \] Open\?$"'
 out=$(crew migrate); sh=$(shown "$UT")
 check "migrate moves a project's checkboxes into records, settled with their answers, and marks the project migrated" \
-  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records" && $(cat "$PD/ledger-format") == 2 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 2" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
+  '[[ $out == "$LP: moved 4 item(s) still to learn into records$NL$LP: moved 3 memory suggestion(s) into records$NL$LP: moved 4 decision(s) and 2 user check(s) into records" && $(cat "$PD/ledger-format") == 3 && $(git -C "$L" log -1 --format=%s) == "migrate the ledger to format 3" && -z $(git -C "$L" status --porcelain -- projects) && $(crew ready "$UT" 2>&1) == *"1 item(s) still to learn are open"* ]] &&
    has "^- \[x\] Settled\? \([0-9a-f]{8}, added .* by crew migrate\)$" && has "^  - settled .* by crew migrate: Yes: by hand\.$" && has "^- \[ \] Open\? " && ! grep -q "^- \[" "$UT"'
 sh=$(crew show memory-suggestions)
 check "migrate moves the memory suggestions into records, each kept or declined as its line said, and leaves the file only its head" \
@@ -2513,6 +2548,11 @@ check "migrate moves the memory suggestions into records, each kept or declined 
    has "^- \[x\] [0-9a-f]{8} \*\*Specs run in parallel\*\* It.s faster\. \(gardener, 2026-11-10\)$" && has "^  - declined .* by crew migrate: Not on CI\.$" &&
    has "^- \[x\] [0-9a-f]{8} \*\*Screenshots go in Dropbox\*\* .* \(worker:7, 2026-11-11\)$" && has "^  - kept .* by crew migrate$" &&
    ! grep -q "^- \[" "$OMS" && [[ $(crew status) == *"memory suggestions: 1  (crew show memory-suggestions --project $LP)"* ]]'
+created=$(date -d "$(crew get "$UT" created)" +%F); sh=$(crew show "$UT")
+check "migrate moves the decisions into records, each with its date and whose call, and the user checks too, and leaves the criteria's words" \
+  'awk "/^## Acceptance criteria\$/,/^## Size\$/" <<<"$sh" | grep -Pzq "\n- z\n  - User check, recorded 2026-11-22 00:00 by crew migrate: Criterion 1 is a user check: needs a terminal\n- User check: a live session\n  - User check, recorded $created [0-9:]+ by crew migrate: The brief started it \"User check:\"\.\n" &&
+   awk "/^## Decisions\$/,/^## Evidence\$/" <<<"$sh" | grep -Pzq "\n- 2026-11-21 — Keep the cache \(user\)\n- 2026-11-21 — Use Redis \(lead\)\n- 2026-11-22 — Criterion 1 is a user check: needs a terminal \(user\)\n- $created — Undated, from an old brief\n  over two lines \(worker\)\n\n## Evidence" &&
+   [[ $(crew user-decisions "$UT") == "- 2026-11-21 — Keep the cache (user)$NL- 2026-11-22 — Criterion 1 is a user check: needs a terminal (user)" ]] && ! grep -q "^- 2026-11-2[12] — " "$UT" && grep -q "^- User check: a live session$" "$UT"'
 check "migrate leaves a migrated ledger be" '[[ $(crew migrate) == "Every project'"'"'s ledger is already migrated." ]]'
 # The memory suggestions below start from none.
 git -C "$L" rm -q "$OMS" "${OMS%.md}.records.jsonl" && git -C "$L" commit -qm "no memory suggestions"
@@ -2791,9 +2831,12 @@ shows() {  # file arg...: crew show arg... prints file, and crew path arg... its
   [[ $(crew path "$@") == "$f" ]] && cmp -s <(crew show "$@") "$f"
 }
 shows_task() { shows "$1" "$2" && shows "$1" task "$2"; }   # file arg: the same task with its type word or without
+# Task 1 has decisions in records, which crew show adds to its file: what it prints
+# starts with the file's front matter.
+shows_1() { [[ $(crew path 1) == "$F1" && $(crew path task 1) == "$F1" ]] && cmp -s <(crew show 1 | head -5) <(head -5 "$F1"); }
 TM=$(crew new "Project memory"); TMI=$(basename "$TM" .md); crew set "$TM" pr https://github.com/isaac/webapp/pull/9104
 check "show and path find a task by number, ID, unique substring, #<pr> and path, in the default project first, with or without its type word" \
-  'shows_task "$F1" 1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
+  'shows_1 && shows_task "$TM" "$TMI" && shows_task "$TM" project-mem && shows_task "$TM" "#9104" && shows_task "$TM" "$TM"'
 check "help says that a bare argument is a task" '[[ $(crew help | grep -c "with no type word, the argument is a task") == 1 ]]'
 MM=$L/projects/$PJ/memory.md
 check "show memory prints the project's memory.md as it is on disk, and path finds it and memory-suggestions.md, in the default project or --project's" \
@@ -2808,7 +2851,7 @@ check "show proposal finds a proposal by ID, unique substring or path, from any 
   '(cd "$HOME" && shows "$SP" proposal "$(basename "$SP" .md)" && shows "$SP" proposal jurisdiction-a-pricing && shows "$PP" proposal ship-to-canada && shows "$SP" proposal "$SP")'
 check "show goal finds a goal from anything goal path takes, though a task shares its number" \
   'shows "$(crew goal path 1)" goal 1 && shows "$(crew goal path "$G")" goal "$G" && shows "$(crew goal path season-page)" goal season-page &&
-   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows "$F1" 1'
+   shows "$(crew goal path "$GF")" goal "$GF" && shows "$GF" goal 1 && shows_1'
 out=$(crew show proposal "$(date +%F)" 2>&1 >/dev/null); st=$?
 check "an argument that matches more than one of its kind lists them, shows none and fails" \
   '((st == 1)) && [[ $out == *"ambiguous:"*"$(basename "$SP") ($PJ)"* && -z $(crew show proposal "$(date +%F)" 2>/dev/null) ]]'

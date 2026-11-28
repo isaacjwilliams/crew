@@ -218,32 +218,40 @@ var briefingHeadings = []string{"## Scope", "## How to verify", "## Hard constra
 // commits, as git log prints them. Nothing later goes in, since it could hold
 // the miss itself. The PR's text isn't recorded as it was then, so it isn't in
 // either.
-func evalBriefing(t Task, r AutomatedReview, root string, count int, commits string) string {
+func evalBriefing(t Task, r AutomatedReview, root string, count int, commits string) (string, error) {
 	scope := fmt.Sprintf("- The review root: `%s`\n"+
 		"- The change: `%s..HEAD`, %d commits from fork point `%s` on `%s` to HEAD `%s`.\n"+
 		"- The new commits: this review reads the whole PR, so they are the change.\n"+
 		"- The working tree is clean, so only the commits are in scope.",
 		root, r.Fork, count, r.Fork, t.Base(), r.Head)
 	verify := "The repo's AGENTS.md (or CLAUDE.md), at the review root, names the test, lint and run commands."
-	stated := append(userWordsBefore(t, r), "### Commits\n\n"+demoteHeadings(commits))
+	said, err := userWordsBefore(t, r)
+	if err != nil {
+		return "", err
+	}
+	stated := append(said, "### Commits\n\n"+demoteHeadings(commits))
 
 	var b strings.Builder
 	b.WriteString("Code review\n")
 	for i, body := range []string{scope, verify, "None recorded.", strings.Join(stated, "\n\n")} {
 		fmt.Fprintf(&b, "\n%s\n\n%s\n", briefingHeadings[i], body)
 	}
-	return b.String()
+	return b.String(), nil
 }
 
 // userWordsBefore is what the user had said on the task when review r ran,
 // as the briefing's subsections: their request (the Goal's quote), their
 // decisions dated before r's day, and their comments in rounds before r.
-func userWordsBefore(t Task, r AutomatedReview) []string {
+func userWordsBefore(t Task, r AutomatedReview) ([]string, error) {
 	var stated []string
 	if request, _ := splitQuote(t.Section("## Goal")); request != "" {
 		stated = append(stated, "### The user's request\n\n"+request)
 	}
-	if decisions := userDecisionsBefore(t, r.At); len(decisions) > 0 {
+	decisions, err := userDecisionsBefore(t, r.At)
+	if err != nil {
+		return nil, fmt.Errorf("can't read the user's decisions on %s: %w", t.ID(), err)
+	}
+	if len(decisions) > 0 {
 		stated = append(stated, "### The user's decisions\n\n"+strings.Join(decisions, "\n"))
 	}
 	var rounds []string
@@ -260,7 +268,7 @@ func userWordsBefore(t Task, r AutomatedReview) []string {
 	if len(rounds) > 0 {
 		stated = append(stated, "### The user's review comments\n\n"+strings.Join(rounds, "\n\n"))
 	}
-	return stated
+	return stated, nil
 }
 
 // briefSections are the parts of a task's brief that can settle a point, as
@@ -275,7 +283,7 @@ var briefSections = []string{"Context", "Acceptance criteria", "Structure", "Pla
 // the task file's is the one r had. The reviewer's briefing leaves all but the
 // user's words out, as the pr-review skill's does: they're the lead's, not the
 // user's.
-func briefBefore(t Task, r AutomatedReview) []string {
+func briefBefore(t Task, r AutomatedReview) ([]string, error) {
 	var brief []string
 	if _, objective := splitQuote(t.Section("## Goal")); objective != "" {
 		brief = append(brief, "### Objective\n\n"+objective)
@@ -285,7 +293,8 @@ func briefBefore(t Task, r AutomatedReview) []string {
 			brief = append(brief, "### "+name+"\n\n"+text)
 		}
 	}
-	return append(brief, userWordsBefore(t, r)...)
+	said, err := userWordsBefore(t, r)
+	return append(brief, said...), err
 }
 
 // splitQuote splits text into its lines that are a quote, "> …", and the rest,
@@ -302,21 +311,18 @@ func splitQuote(text string) (quote, rest string) {
 	return strings.Join(quoted, "\n"), strings.TrimSpace(strings.Join(other, "\n"))
 }
 
-// userDecisionsBefore is the task's decisions that are the user's own
-// (UserDecisions), dated before the day of at. A decision starts with
-// its date, "- 2026-11-14 — …", and most have no time, so one made on at's day
-// may have come after it: only earlier days are sure.
-func userDecisionsBefore(t Task, at time.Time) []string {
+// userDecisionsBefore is the task's decisions that were the user's call
+// (UserDecisions), recorded before the day of at. A decision crew migrate
+// moved has only the day its line gave, so one made on at's day may have come
+// after it: only earlier days are sure.
+func userDecisionsBefore(t Task, at time.Time) ([]string, error) {
+	decisions, err := t.UserDecisions()
+	if err != nil {
+		return nil, err
+	}
 	y, m, d := at.Date()
 	day := time.Date(y, m, d, 0, 0, 0, 0, at.Location())
-	var lines []string
-	for _, l := range t.UserDecisions() {
-		stamp, _, _ := strings.Cut(strings.TrimPrefix(l, "- "), " ")
-		if date, err := time.ParseInLocation("2006-01-02", stamp, at.Location()); err == nil && date.Before(day) {
-			lines = append(lines, l)
-		}
-	}
-	return lines
+	return decisionLines(slices.DeleteFunc(decisions, func(r Record) bool { return !r.At.Before(day) })), nil
 }
 
 // demoteHeadings turns each "#" or "##" heading in text into a "####" one, so
@@ -518,8 +524,12 @@ func (e *evalRun) rerun(t Task, r AutomatedReview, base string) (string, error) 
 		return "", fmt.Errorf("git can't list %s", rng)
 	}
 	commits, _ := git(e.checkout, "log", "--format=----- %H%n%B", rng)
+	text, err := evalBriefing(t, r, e.checkout, atoiOr0(count), commits)
+	if err != nil {
+		return "", err
+	}
 	briefing := base + ".briefing.md"
-	if err := os.WriteFile(briefing, []byte(evalBriefing(t, r, e.checkout, atoiOr0(count), commits)), 0o644); err != nil {
+	if err := os.WriteFile(briefing, []byte(text), 0o644); err != nil {
 		return "", err
 	}
 	// The pr-review skill's prompt for the Claude reviewer, SKILL.md step 4;
@@ -586,7 +596,11 @@ func (e *evalRun) judge(ec evalCase, report string) (verdict, string, error) {
 	out := filepath.Join(e.logs, strings.ReplaceAll(ec.id, "/", "-")+".judge.md")
 	// --tools takes a list: the flag after it ends the list, so the prompt
 	// isn't taken for a tool.
-	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, briefBefore(ec.task, ec.review), report))
+	brief, err := briefBefore(ec.task, ec.review)
+	if err != nil {
+		return "", "", err
+	}
+	cmd := e.c.claude("-p", "--tools", "", "--permission-prompts", "none", judgePrompt(ec.miss, brief, report))
 	cmd.Dir = os.TempDir() // away from any repo's CLAUDE.md
 	answer, err := e.session(cmd, out, "the judge")
 	if err != nil {

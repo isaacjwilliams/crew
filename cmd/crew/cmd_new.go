@@ -562,7 +562,15 @@ func staleReview(t Task, repo string) string {
 //   - one that ran on other work than the branch has now. A restack, or a merge
 //     of the base that git made on its own, keeps evidence current
 //     (branchWork.unchangedSince).
+//
+// It reads the user checks first: until crew migrate, a project's records
+// don't hold them, so it refuses before anything else rather than take there
+// to be none.
 func checkEvidence(t Task, repo string, pr Evidence) error {
+	userChecks, err := t.UserChecks()
+	if err != nil {
+		return fail("can't tell which criteria are the user's to check: %v", err)
+	}
 	n := len(t.AcceptanceCriteria())
 	if n == 0 {
 		return fail("## Acceptance criteria has no '- ' items to show evidence for: ask for them to be written that way")
@@ -585,9 +593,8 @@ func checkEvidence(t Task, repo string, pr Evidence) error {
 			return fail("the PR body's Evidence for acceptance criteria %s doesn't name the commit it ran on: put '(on <sha>)' after each item's criterion, with gh pr edit", numberList(unnamed))
 		}
 	}
-	userChecks := t.UserChecks()
 	if notRun := evidencePlaces(task.NotRun(userChecks), pr.NotRun(userChecks)); notRun != "" {
-		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one the brief starts 'User check:', or a Decision of the user's makes theirs", notRun)
+		return fail("evidence says its check wasn't run, in %s. If a check ran, reword its evidence to say what ran and what it showed. If not, run it the ways the project's AGENTS.md, docs and memory give; if none works, ask under ## Open questions, with what you tried, and set status needs-input. Only a user check may be left to the user: one recorded with crew user-check, with the user's agreement", notRun)
 	}
 	work, err := ownWork(t, repo)
 	if err != nil {

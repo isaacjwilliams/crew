@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,12 @@ import (
 // into records: each becomes a suggested record and, once ticked, a kept or
 // declined record. The file keeps any line that wasn't a suggestion, under the
 // head crew remember writes.
+//
+// Format 3 moves a task's decisions from its Decisions section into decided
+// records, and its user checks into user_check records: the criteria its brief
+// started "User check:", and those a decision of the user's named. The section
+// keeps any line that wasn't part of a decision, under the template's comment;
+// the criteria keep their words.
 func cmdMigrate(c *Crew, args []string) error {
 	if len(args) != 0 {
 		return usage("crew migrate")
@@ -40,7 +47,7 @@ func cmdMigrate(c *Crew, args []string) error {
 	if err != nil {
 		return err
 	}
-	comment := sectionLines(template, learnHeading)
+	learnComment, decisionsComment := sectionLines(template, learnHeading), sectionLines(template, decisionsHeading)
 	migrated := 0
 	for _, p := range c.projects("") {
 		pdir := c.path("projects", p)
@@ -57,7 +64,7 @@ func cmdMigrate(c *Crew, args []string) error {
 		if have < 1 {
 			items := 0
 			for _, t := range c.tasks(p) {
-				n, err := migrateStillToLearn(t, comment)
+				n, err := migrateStillToLearn(t, learnComment)
 				if err != nil {
 					return fail("%s: %v", t.ID(), err)
 				}
@@ -71,6 +78,17 @@ func cmdMigrate(c *Crew, args []string) error {
 				return fail("%s: %v", p, err)
 			}
 			fmt.Printf("%s: moved %d memory suggestion(s) into records\n", p, n)
+		}
+		if have < 3 {
+			decisions, checks := 0, 0
+			for _, t := range c.tasks(p) {
+				d, u, err := migrateDecisions(t, decisionsComment)
+				if err != nil {
+					return fail("%s: %v", t.ID(), err)
+				}
+				decisions, checks = decisions+d, checks+u
+			}
+			fmt.Printf("%s: moved %d decision(s) and %d user check(s) into records\n", p, decisions, checks)
 		}
 		if err := writeLedgerFormat(pdir); err != nil {
 			return err
@@ -182,8 +200,17 @@ func checkboxes(section []string) (items []checkbox, rest []string) {
 // answerFrom is the answer the lines under a ticked item give: the lines
 // without the indent they share, and a lone list item without its "- ".
 func answerFrom(under []string) string {
+	out := dedent(under)
+	if len(out) == 1 {
+		return strings.TrimPrefix(out[0], "- ")
+	}
+	return strings.Join(out, "\n")
+}
+
+// dedent is lines without the indent they share.
+func dedent(lines []string) []string {
 	indent := -1
-	for _, l := range under {
+	for _, l := range lines {
 		if strings.TrimSpace(l) == "" {
 			continue
 		}
@@ -192,16 +219,13 @@ func answerFrom(under []string) string {
 		}
 	}
 	var out []string
-	for _, l := range under {
+	for _, l := range lines {
 		if len(l) >= indent && indent >= 0 {
 			l = l[indent:]
 		}
 		out = append(out, l)
 	}
-	if len(out) == 1 {
-		return strings.TrimPrefix(out[0], "- ")
-	}
-	return strings.Join(out, "\n")
+	return out
 }
 
 // migrateMemorySuggestions moves the suggestions in a project's
@@ -305,4 +329,164 @@ func readOldSuggestion(line string) (oldSuggestion, error) {
 		return o, fmt.Errorf("%v: %s", err, line)
 	}
 	return o, nil
+}
+
+// migrateDecisions moves the items under the task's Decisions into decided
+// records, and its user checks into user_check records. It gives the section
+// the template's comment, keeping any line that wasn't part of an item, and
+// leaves the criteria as they are. It says how many decisions and user checks
+// it moved.
+//
+// Like migrateStillToLearn, it writes the records in one go before it changes
+// the file, so a run stopped in between is safe to run again: when crew migrate
+// has written either kind of record already, it only rewrites the file.
+func migrateDecisions(t Task, comment []string) (decisions, checks int, err error) {
+	ls, err := t.read()
+	if err != nil {
+		return 0, 0, err
+	}
+	// A task's created dates only what has no date of its own, so a task
+	// without one still migrates when nothing needs it.
+	created, createdErr := time.Parse(time.RFC3339, t.Get("created"))
+	found, rest := oldDecisions(sectionLines(ls, decisionsHeading), created)
+	var moved []Record
+	criteria := t.AcceptanceCriteria()
+	for _, d := range found {
+		moved = append(moved, Record{At: d.made, Decided: &d.Decided})
+		decisions++
+		if n := userCheckNamed(d); n >= 1 && n <= len(criteria) {
+			moved = append(moved, Record{At: d.made, UserCheck: &UserCheck{Criterion: criteria[n-1], Why: d.Text}})
+			checks++
+		}
+	}
+	for _, c := range criteria {
+		if strings.HasPrefix(c, "User check:") {
+			moved = append(moved, Record{At: created, UserCheck: &UserCheck{Criterion: c, Why: "The brief started it \"User check:\"."}})
+			checks++
+		}
+	}
+	if createdErr != nil && slices.ContainsFunc(moved, func(r Record) bool { return r.At.IsZero() }) {
+		return 0, 0, fmt.Errorf("its created isn't a time, to date a decision or user check that has no date by: %v", createdErr)
+	}
+	var records []Record
+	if len(moved) > 0 {
+		if records, err = t.readRecords(); err != nil {
+			return 0, 0, err
+		}
+	}
+	if slices.ContainsFunc(records, func(r Record) bool {
+		return r.By == "crew migrate" && (r.Decided != nil || r.UserCheck != nil)
+	}) {
+		moved, decisions, checks = nil, 0, 0
+	}
+	for i, m := range moved {
+		r := newRecord("crew migrate", records)
+		r.At, r.Decided, r.UserCheck = m.At, m.Decided, m.UserCheck
+		moved[i], records = r, append(records, r)
+	}
+	if len(moved) > 0 {
+		if err := t.AddRecords(moved...); err != nil {
+			return 0, 0, err
+		}
+	}
+	if !slices.Contains(ls, decisionsHeading) {
+		return decisions, checks, nil
+	}
+	body := trimBlankEnd(comment)
+	if len(rest) > 0 {
+		body = slices.Concat(body, []string{""}, rest)
+	}
+	return decisions, checks, t.ReplaceSection(decisionsHeading, strings.Join(body, "\n"))
+}
+
+// An oldDecision is a decision as a task's Decisions section kept it before
+// records: a "- " item, with any lines indented under it.
+type oldDecision struct {
+	Decided
+	made time.Time // the date at its start, or the task's created without one
+}
+
+var (
+	// decisionDate is the date a decision's item starts with, and what parts
+	// it from the text: "2026-11-24 — ", "2026-11-24 10:00: ".
+	decisionDate = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})(?: \d{2}:\d{2})?(?:\s*(?:—|–|-|:)\s*|\s+|$)`)
+	// callMark says whose call a decision was, in brackets: "(user)", or a
+	// variant, "(user chose this option)", "(worker, round 1)".
+	callMark       = `\((user|lead|worker)(?:[ ,;:][^()]*)?\)`
+	callAtStart    = regexp.MustCompile(`^` + callMark)
+	callAtLineEnd  = regexp.MustCompile(callMark + `\.?$`)
+	exactCallStart = regexp.MustCompile(`^\((user|lead|worker)\)(?:\s*(?:—|–|-|:)\s*|\s+)`)
+	exactCallEnd   = regexp.MustCompile(`\s*\((user|lead|worker)\)$`)
+	// userCheckDecision is a decision of the user's that made a criterion
+	// theirs to check: "Criterion 5 is a user check: …".
+	userCheckDecision = regexp.MustCompile(`(?i)\bcriterion (\d+) is a user check\b`)
+)
+
+// oldDecisions splits a Decisions section, as task files kept it before
+// records, into its decisions and the lines that weren't part of one, without
+// their comments. A decision's text is its item's, without its date and
+// without a mark of whose call it was that's exactly "(user)", "(lead)" or
+// "(worker)" at its start or end. It was the user's call when any mark at the
+// start of its text or the end of one of its lines names the user, and
+// otherwise the last such mark's.
+func oldDecisions(section []string, created time.Time) (found []oldDecision, rest []string) {
+	plain := uncommented(section)
+	for i := 0; i < len(plain); i++ {
+		line := strings.TrimRight(plain[i], " \t")
+		first, ok := strings.CutPrefix(line, "- ")
+		if !ok {
+			if strings.TrimSpace(line) != "" {
+				rest = append(rest, line)
+			}
+			continue
+		}
+		end := i + 1 // past its last line
+		for j := i + 1; j < len(plain); j++ {
+			l := strings.TrimRight(plain[j], " \t")
+			if l != "" && strings.TrimLeft(l, " \t") == l {
+				break
+			}
+			if l != "" {
+				end = j + 1
+			}
+		}
+		under := plain[i+1 : end]
+		for k := range under {
+			under[k] = strings.TrimRight(under[k], " \t")
+		}
+		i = end - 1
+		d := oldDecision{made: created}
+		if m := decisionDate.FindStringSubmatch(first); m != nil {
+			if day, err := time.ParseInLocation("2006-01-02", m[1], time.Local); err == nil {
+				d.made, first = day, first[len(m[0]):]
+			}
+		}
+		marks := callAtStart.FindAllStringSubmatch(first, 1)
+		for _, l := range append([]string{first}, under...) {
+			marks = append(marks, callAtLineEnd.FindAllStringSubmatch(l, 1)...)
+		}
+		for _, m := range marks {
+			if d.Call != "user" {
+				d.Call = m[1]
+			}
+		}
+		lines := append([]string{exactCallStart.ReplaceAllString(first, "")}, dedent(under)...)
+		lines[len(lines)-1] = exactCallEnd.ReplaceAllString(lines[len(lines)-1], "")
+		if d.Text = strings.TrimSpace(strings.Join(lines, "\n")); d.Text == "" {
+			d.Text = strings.TrimSpace(line[2:])
+		}
+		found = append(found, d)
+	}
+	return found, rest
+}
+
+// userCheckNamed is the number of the criterion a decision of the user's made
+// theirs to check, or 0.
+func userCheckNamed(d oldDecision) int {
+	m := userCheckDecision.FindStringSubmatch(d.Text)
+	if m == nil || d.Call != "user" {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
 }

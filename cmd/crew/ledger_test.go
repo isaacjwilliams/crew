@@ -420,13 +420,58 @@ func TestPREvidenceItemText(t *testing.T) {
 	}
 }
 
+// A user check finds its criterion by its words, so it follows the criterion
+// when one is inserted ahead of it, and covers none once its words change.
+// What's typed into the file makes nothing a user check.
 func TestUserChecks(t *testing.T) {
-	task := Task{docWith(t, "## Acceptance criteria\n- one\n- User check: a live smoke test\n- three\n- four\n- five\n\n"+
-		"## Decisions\n- 2026-11-24 — Criterion 3 is a user check: needs a real terminal (user)\n"+
-		"- 2026-11-24 — criterion 4 is a user check, says the lead (lead)\n"+
-		"- 2026-11-24 — Criterion 5 is a user check (user) — no: the line must end with the user's mark\n\n## Log\n")}
-	if got, want := task.UserChecks(), map[int]bool{2: true, 3: true}; !maps.Equal(got, want) {
-		t.Errorf("UserChecks = %v, want %v: the brief's 'User check:' criteria and those a (user) Decision names", got, want)
+	task := learnTask(t, "## Acceptance criteria\n- one\n- two\n- User check: typed in\n\n"+
+		"## Decisions\n- 2026-11-24 — Criterion 1 is a user check: needs a real terminal (user)\n\n## Log\n")
+	userCheck(t, task, "two", "needs a live session")
+	if got, want := mustUserChecks(t, task), map[int]bool{2: true}; !maps.Equal(got, want) {
+		t.Errorf("UserChecks = %v, want %v: the recorded one alone", got, want)
+	}
+	rewrite(t, task, "## Acceptance criteria\n- zero\n- one\n- two\n  - with a sub-item\n\n## Log\n")
+	if got, want := mustUserChecks(t, task), map[int]bool{3: true}; !maps.Equal(got, want) {
+		t.Errorf("UserChecks after inserting a criterion = %v, want %v", got, want)
+	}
+	rewrite(t, task, "## Acceptance criteria\n- one\n- two, reworded\n\n## Log\n")
+	if got := mustUserChecks(t, task); len(got) != 0 {
+		t.Errorf("UserChecks after rewording the criterion = %v, want none", got)
+	}
+}
+
+func rewrite(t *testing.T, task Task, content string) {
+	t.Helper()
+	if err := os.WriteFile(task.Path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustUserChecks(t *testing.T, task Task) map[int]bool {
+	t.Helper()
+	checks, err := task.UserChecks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checks
+}
+
+// Only decisions recorded as the user's call are the user's, with their whole
+// text; a typed "(user)" line is none.
+func TestUserDecisions(t *testing.T) {
+	task := learnTask(t, "## Decisions\n- 2026-11-24 — Typed (user)\n\n## Log\n")
+	decide(t, task, "2026-11-25", "user", "Keep it,\nall of it")
+	decide(t, task, "2026-11-25", "lead", "Not this")
+	decide(t, task, "2026-11-25", "", "Nor this")
+	got, err := task.UserDecisions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Decided.Text != "Keep it,\nall of it" || got[0].At.Format("2006-01-02") != "2026-11-25" {
+		t.Errorf("UserDecisions = %+v, want the one user decision", got)
+	}
+	if _, err := (Task{docWith(t, "## Log\n")}).UserDecisions(); !errors.Is(err, errNotMigrated) {
+		t.Errorf("UserDecisions before crew migrate: %v, want errNotMigrated", err)
 	}
 }
 
@@ -472,11 +517,11 @@ func TestNotRunSign(t *testing.T) {
 }
 
 func TestEvidenceNotRun(t *testing.T) {
-	task := Task{docWith(t, "## Acceptance criteria\n- one\n- User check: two\n- three\n\n## Evidence\n"+
+	task := Task{docWith(t, "## Acceptance criteria\n- one\n- two\n- three\n\n## Evidence\n"+
 		"### 1. one (on 0a1b2c3)\nNot done. To try: open the page.\n"+
 		"### 2. two (on 0a1b2c3)\nNeeds a live session. To try: start one.\n"+
 		"### 3. three (on 0a1b2c3)\n```\nok\n```\n\n## Log\n")}
-	if got, want := task.Evidence().NotRun(task.UserChecks()), "1 ('Not done')"; got != want {
+	if got, want := task.Evidence().NotRun(map[int]bool{2: true}), "1 ('Not done')"; got != want {
 		t.Errorf("NotRun = %q, want %q: only a criterion that isn't the user's check is refused", got, want)
 	}
 	pr := PREvidence("## Evidence\n\n1. one (on 0a1b2c3): Not\n   run: it needs a real terminal.\n")

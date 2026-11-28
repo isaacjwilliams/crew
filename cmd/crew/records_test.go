@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,39 @@ func learnTask(t *testing.T, content string) Task {
 		t.Fatal(err)
 	}
 	return Task{Doc{p}}
+}
+
+// userCheck records the user check crew user-check would on task's criterion
+// with these words.
+func userCheck(t *testing.T, task Task, criterion, why string) {
+	t.Helper()
+	records, err := task.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRecord("crew user-check", records)
+	r.UserCheck = &UserCheck{Criterion: criterion, Why: why}
+	if err := task.AddRecords(r); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// decide records a decision on task, made on day (2006-01-02), as crew decide
+// would, or crew migrate for an empty call.
+func decide(t *testing.T, task Task, day, call, text string) {
+	t.Helper()
+	records, err := task.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRecord("crew decide", records)
+	if r.At, err = time.ParseInLocation("2006-01-02", day, time.Local); err != nil {
+		t.Fatal(err)
+	}
+	r.Decided = &Decided{Text: text, Call: call}
+	if err := task.AddRecords(r); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // add appends a record, as crew to-learn or crew learned does, and returns it.
@@ -499,5 +533,158 @@ func TestMigrateMemorySuggestionsWithoutAFile(t *testing.T) {
 	d := Doc{filepath.Join(t.TempDir(), "projects", "p", suggestionsFile)}
 	if n, err := migrateMemorySuggestions(d, "p"); err != nil || n != 0 || isFile(d.Path) {
 		t.Errorf("migrateMemorySuggestions = %d, %v, file made %v; want nothing done", n, err, isFile(d.Path))
+	}
+}
+
+// Every kind of Decisions line and user check that task files held before
+// records, with the record each becomes.
+func TestMigrateDecisions(t *testing.T) {
+	file := `---
+created: 2026-11-20T09:30:00Z
+---
+## Acceptance criteria
+- one
+- User check: a live smoke test
+- three
+- four
+
+## Decisions
+<!-- The old comment. -->
+- 2026-11-21 — Keep the cache (user)
+- 2026-11-21 — Use Redis (lead)
+- 2026-11-21 (worker): Split the reader out
+- 2026-11-22: No marker on this one
+- Undated, as some old lines were (worker)
+- 2026-11-23 — Cache per team,
+  across both services,
+
+  and per user after that (lead)
+- 2026-11-23 — Ship it now (user).
+- 2026-11-23 — The second option (user chose this option)
+- 2026-11-24 — Drop the flag (lead)
+  The user agreed in round 2 (user)
+- 2026-11-24 — Criterion 3 is a user check: needs a real terminal (user)
+- 2026-11-24 — Criterion 4 is a user check, says the lead (lead)
+Worker decisions, 2026-11-25:
+
+## Log
+`
+	task := learnTask(t, file)
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	decisions, checks, err := migrateDecisions(task, []string{"<!-- The new comment. -->", ""})
+	if err != nil || decisions != 11 || checks != 2 {
+		t.Fatalf("migrateDecisions = %d, %d, %v; want 11 decisions and 2 user checks", decisions, checks, err)
+	}
+	records, err := task.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range records {
+		if r.By != "crew migrate" {
+			t.Errorf("%+v is by %q, want crew migrate", r, r.By)
+		}
+		day := r.At.Local().Format("2006-01-02")
+		switch {
+		case r.Decided != nil:
+			got = append(got, fmt.Sprintf("%s %s: %q", day, r.Decided.Call, r.Decided.Text))
+		case r.UserCheck != nil:
+			got = append(got, fmt.Sprintf("%s check %q: %q", day, r.UserCheck.Criterion, r.UserCheck.Why))
+		}
+	}
+	created := time.Date(2026, 11, 20, 9, 30, 0, 0, time.UTC).Local().Format("2006-01-02")
+	want := []string{
+		`2026-11-21 user: "Keep the cache"`,
+		`2026-11-21 lead: "Use Redis"`,
+		`2026-11-21 worker: "Split the reader out"`,
+		`2026-11-22 : "No marker on this one"`,
+		created + ` worker: "Undated, as some old lines were"`,
+		"2026-11-23 lead: \"Cache per team,\\nacross both services,\\n\\nand per user after that\"",
+		`2026-11-23 user: "Ship it now (user)."`,
+		`2026-11-23 user: "The second option (user chose this option)"`,
+		"2026-11-24 user: \"Drop the flag (lead)\\nThe user agreed in round 2\"",
+		`2026-11-24 user: "Criterion 3 is a user check: needs a real terminal"`,
+		`2026-11-24 check "three": "Criterion 3 is a user check: needs a real terminal"`,
+		`2026-11-24 lead: "Criterion 4 is a user check, says the lead"`,
+		created + ` check "User check: a live smoke test": "The brief started it \"User check:\"."`,
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("records =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if err := writeLedgerFormat(filepath.Dir(filepath.Dir(task.Path))); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mustUserChecks(t, task), map[int]bool{2: true, 3: true}; !maps.Equal(got, want) {
+		t.Errorf("UserChecks after the migration = %v, want %v", got, want)
+	}
+	b, _ := os.ReadFile(task.Path)
+	wantFile := `---
+created: 2026-11-20T09:30:00Z
+---
+## Acceptance criteria
+- one
+- User check: a live smoke test
+- three
+- four
+
+## Decisions
+<!-- The new comment. -->
+
+Worker decisions, 2026-11-25:
+
+## Log
+`
+	if string(b) != wantFile {
+		t.Errorf("task file =\n%s\nwant\n%s", b, wantFile)
+	}
+}
+
+// A crew migrate stopped after writing a task's records, and before taking the
+// decisions out of its file, leaves both. Run again, it only takes them out.
+func TestMigrateDecisionsAfterARunCutShort(t *testing.T) {
+	file := "---\ncreated: 2026-11-20T09:30:00Z\n---\n## Acceptance criteria\n- User check: live\n\n## Decisions\n- 2026-11-21 — Keep it (user)\n\n## Log\n"
+	task := learnTask(t, file)
+	os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+	if _, _, err := migrateDecisions(task, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(task.RecordsPath())
+	if err := os.WriteFile(task.Path, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if d, u, err := migrateDecisions(task, nil); err != nil || d != 0 || u != 0 {
+		t.Errorf("second run = %d, %d, %v; want nothing moved again", d, u, err)
+	}
+	after, _ := os.ReadFile(task.RecordsPath())
+	if b, _ := os.ReadFile(task.Path); string(after) != string(before) || strings.Contains(string(b), "Keep it") {
+		t.Errorf("second run: records changed %v, file =\n%s", string(after) != string(before), b)
+	}
+}
+
+// A task's created dates only what has no date of its own: a task without one
+// migrates when everything it moves is dated, and stops, leaving the ledger
+// as it was, when something isn't.
+func TestMigrateDecisionsWithoutCreated(t *testing.T) {
+	for _, c := range []struct {
+		name, section string
+		moved         int
+	}{
+		{"dated", "- 2026-11-21 — Keep it (user)\n", 1},
+		{"undated", "- Keep it (user)\n", -1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			file := "---\nstatus: draft\n---\n## Acceptance criteria\n- one\n\n## Decisions\n" + c.section + "\n## Log\n"
+			task := learnTask(t, file)
+			os.Remove(ledgerFormatPath(filepath.Dir(filepath.Dir(task.Path))))
+			d, _, err := migrateDecisions(task, nil)
+			b, _ := os.ReadFile(task.Path)
+			_, noRecords := os.Stat(task.RecordsPath())
+			switch {
+			case c.moved >= 0 && (err != nil || d != c.moved):
+				t.Errorf("moved %d, %v; want %d", d, err, c.moved)
+			case c.moved < 0 && (err == nil || !strings.Contains(err.Error(), "its created isn't a time") || string(b) != file || noRecords == nil):
+				t.Errorf("err %v, file changed %v, records written %v; want a refusal that leaves both", err, string(b) != file, noRecords == nil)
+			}
+		})
 	}
 }

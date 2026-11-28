@@ -112,7 +112,7 @@ func (c *Crew) followup(t Task, with followupWith) (followupSent, error) {
 		prompt += " " + stalledNote
 	}
 	if with.note != "" {
-		prompt += " Note from the lead (also check Decisions in the task file): " + with.note
+		prompt += " Note from the lead (also check Decisions, in crew show " + t.ID() + "): " + with.note
 	}
 	if err := c.lock(); err != nil {
 		return followupSent{}, err
@@ -412,11 +412,11 @@ const restackModel = "sonnet"
 // other reads the whole task file and the branch first. Either is led to
 // changes an earlier session left uncommitted, which the branch doesn't show.
 func pickUpPrompt(t Task, project, wt string, newRound bool) string {
-	prompt := fmt.Sprintf("You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file (including Decisions, Review rounds and Log) and inspect the branch (git log, gh pr view) before acting.",
-		t.ID(), project, t.Path, wt)
+	prompt := fmt.Sprintf("You are picking up task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nRead the whole task file, with `crew show %s` (including Decisions, Review rounds and Log), and inspect the branch (git log, gh pr view) before acting.",
+		t.ID(), project, t.Path, wt, t.ID())
 	if newRound {
-		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
-			t.ID(), project, t.Path, wt)
+		prompt = fmt.Sprintf("You are picking up review rounds on task %s in project %s, which already has work on its branch.\nTask file: %s\nWorktree (your working directory): %s\nStart from the rounds named below and the task file's Goal, Acceptance criteria, Out of scope and Decisions: you judge the rounds against them. `crew show %s` prints the file with its decisions. Don't read the whole task file or review the branch first; read the rest only as far as the rounds, or the rest of this message, need.",
+			t.ID(), project, t.Path, wt, t.ID())
 	}
 	if out, _ := git(wt, "status", "--porcelain"); out != "" {
 		prompt += "\nAn earlier session left changes uncommitted in your worktree. Read git status and git diff before you act, and carry on from them: don't redo or discard them."

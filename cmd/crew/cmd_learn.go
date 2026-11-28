@@ -87,36 +87,48 @@ func cmdLearned(c *Crew, args []string) error {
 
 const learnHeading = "## Still to learn"
 
-// shownTask is a task as crew show prints it: its file, with its still-to-learn
-// items from its records under Still to learn. Anything typed into the file's
-// section stays below them, marked as not being items crew counts. When crew
-// can't read the items, the section says why. In a project not yet migrated,
-// what's typed in it is the items, so it's shown as it is.
+// shownTask is a task as crew show prints it: its file, with what its records
+// hold in place: its still-to-learn items under Still to learn, its decisions
+// under Decisions, and its user checks under their criteria. Anything typed
+// into the first two sections stays below the records, marked as not being
+// what crew counts. When crew can't read the records, each section says why.
+// In a project not yet migrated, what's typed in them is what they hold, so
+// it's shown as it is.
 func shownTask(path string) (string, error) {
 	t := Task{Doc{path}}
 	ls, err := t.read()
 	if err != nil {
 		return "", err
 	}
-	var items []string
-	learning, unread := t.StillToLearn()
+	records, unread := t.Records()
+	ls = showRecords(ls, learnHeading, learnLines(learnItems(records)), unread,
+		"the items still to learn", "not items crew counts (crew to-learn adds one)")
+	ls = showRecords(ls, decisionsHeading, decisionLines(records), unread,
+		"the decisions", "not decisions crew reads (crew decide records one)")
+	ls = showUserChecks(ls, records)
+	return strings.Join(ls, "\n") + "\n", nil
+}
+
+// showRecords puts lines, what the records hold for the section under heading,
+// in place of what's typed there, and sets apart what's typed as typed, not
+// records. When crew couldn't read the records (unread), it says so, naming
+// what, in place of the lines.
+func showRecords(ls []string, heading string, lines []string, unread error, what, typedNote string) []string {
 	if unread != nil {
-		items = []string{"crew can't read the items still to learn: " + unread.Error()}
-	} else {
-		items = learnLines(learning)
+		lines = []string{"crew can't read " + what + ": " + unread.Error()}
 	}
-	start := slices.Index(ls, learnHeading)
-	if start < 0 && len(items) == 0 {
-		return strings.Join(ls, "\n") + "\n", nil
+	start := slices.Index(ls, heading)
+	if start < 0 && len(lines) == 0 {
+		return ls
 	}
 	if start < 0 {
 		start = slices.Index(ls, "## Log")
 		if start < 0 {
 			start = len(ls)
 		}
-		ls = slices.Insert(ls, start, learnHeading, "")
+		ls = slices.Insert(ls, start, heading, "")
 	}
-	end := start + 1 + len(sectionLines(ls[start:], learnHeading))
+	end := start + 1 + len(sectionLines(ls[start:], heading))
 	// uncommented blanks out comment lines rather than dropping them, so its
 	// lines line up with the section's.
 	var kept, typed []string // the section's comments and blank lines, and the rest
@@ -127,15 +139,14 @@ func shownTask(path string) (string, error) {
 			typed = append(typed, ls[start+1+i])
 		}
 	}
-	body := append(trimBlankEnd(kept), items...)
+	body := append(trimBlankEnd(kept), lines...)
 	switch {
 	case errors.Is(unread, errNotMigrated):
 		body = append(body, typed...)
 	case len(typed) > 0:
-		body = append(append(body, "", "Typed into the file, so not items crew counts (crew to-learn adds one):"), typed...)
+		body = append(append(body, "", "Typed into the file, so "+typedNote+":"), typed...)
 	}
-	out := slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
-	return strings.Join(out, "\n") + "\n", nil
+	return slices.Concat(ls[:start+1], body, []string{""}, ls[end:])
 }
 
 // learnLines are the items as Markdown: a checkbox, ticked once the item is
