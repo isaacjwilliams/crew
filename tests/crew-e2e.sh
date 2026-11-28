@@ -1384,6 +1384,16 @@ out=$(crew tick 2>/dev/null)
 check "a new commit on the base that still conflicts gets a round of its own" '[[ $out == *"013-tick-routing: catch-up round $((r + 2)) recorded: conflicts with main"* && $(round "$F13" $((r + 2))) == "- [ ] Conflicts with main at $B2" && $(resumes) == $((n + 1)) ]]'
 rm "$HOME/gh-pr-mergeable" "$HOME/gh-pr-base-12"; crew sync >/dev/null 2>&1
 check "sync clears mergeable once the PR merges cleanly again" '[[ -z $(crew get 13 mergeable) ]]'
+# Task 13's rounds, as crew feedback, crew review, crew ci-fix and crew catch-up recorded them: 1 to 6
+# and 12 hold the user's comments, 7 and 8 only a request for another automated review, 9 to 11
+# only red CI and 13 and 14 only a conflict. The round crew review adds now is the tenth of the
+# user's feedback. The rounds' other readers get them below, on a merged copy of the task.
+echo 'MAX_REVIEW_ROUNDS=9' >>"$PE"; setstate working 4242
+out=$(crew review 13 2>&1 >/dev/null)
+check "the MAX_REVIEW_ROUNDS warning counts the rounds of the user's feedback, request-only ones among them, and not crew's reports of red CI or a conflict" \
+  '[[ $out == *"013-tick-routing has had 10 rounds of review (MAX_REVIEW_ROUNDS=9)"* && $(crew get 13 review_rounds) == 15 ]]'
+sed -i '/^MAX_REVIEW_ROUNDS=9$/d' "$PE"; crew set 13 last_round_sent 15
+cp "$F13" "$SB/rounds-013.md"; [[ ! -e ${F13%.md}.records.jsonl ]] || cp "${F13%.md}.records.jsonl" "$SB/rounds-013.records.jsonl"
 setstate "done" null; hand_over 13
 out=$(flock "$L/.crew-tick.lock" crew tick)
 check "a second tick doesn't run while one is running" '[[ $out == "another crew tick is running" ]]'
@@ -3239,6 +3249,33 @@ check "a second review eval of a project refuses while one runs" '((st == 1)) &&
 out=$(crew review-eval --project "$PJ" --task 090-misses-one 2>&1); st=$?
 check "with no cases, crew review-eval says so, starts no session and writes no report" \
   '((st == 0)) && [[ $out == "$PJ: no cases yet: none of its merged tasks has a comment of yours after an automated review, or a fix naming it" && $(calls) == "$n" && $(ls "$PD"/review-eval | wc -l) == 6 ]]'
+
+# The rounds crew recorded on task 13 (above), on a merged copy of it whose one automated review came
+# before them all: each reader gets the same rounds and comments from them.
+RT=$PD/tasks/097-rounds.md
+cp "$SB/rounds-013.md" "$RT"; [[ ! -e $SB/rounds-013.records.jsonl ]] || cp "$SB/rounds-013.records.jsonl" "${RT%.md}.records.jsonl"
+sed -i -e 's/^status: .*/status: merged/' -e 's|^pr:.*|pr: https://github.com/isaac/webapp/pull/77|' \
+  -e "/^## Automated reviews\$/a ### Automated review 1 — 2026-11-10 10:00\\n\\n- Range: \`$EF..$EH\`, 2 commits on \`b\` since \`main\` (fork point \`$EF\`)\\n- Reviewers: Claude reviewer\\n\\nNo findings." "$RT"
+printf -- '- 2026-11-09 16:00 — status → merged\n' >>"$RT"
+crew commit "rounds fixture" >/dev/null
+out=$(crew stats --project "$PJ" --since 2026-11-09 | tr -s ' ')
+check "stats counts the user's rounds of feedback and their comments, as crew recorded them" '[[ $out == *" 097-rounds build 10 19 "* ]]'
+comments=""; for r in 1 2 3 4 5 6 12; do
+  if ((r == 6)); then comments+="  - round 6, after automated review 1: comment 132 — [link](u132)$NL"; continue; fi
+  comments+="  - round $r, after automated review 1: review 900 (changes_requested)$NL  - round $r, after automated review 1: \`src/search.ts:42\` — comment 111 — [link](u111)$NL  - round $r, after automated review 1: comment 115 — [link](u115)$NL"
+done
+n=$(calls); out=$(crew gardener --project "$PJ" 2>&1); call=$(since "$n")
+check "the misses agent gets each of the user's comments after the review, by its round and a name its line in the round holds" \
+  '[[ $out == *"$PJ: sorting your comments on 1 merged task(s)"* && $call == *"- $RT$NL$comments"* ]]'
+n=$(calls); out=$(crew review-eval --project "$PJ" --task 097-rounds 2>&1); st=$?
+call=$(since "$n"); EV=$(ls "$PD"/review-eval/*.md | tail -1)
+cases=""; for r in 1 2 3 4 5 6 12; do
+  if ((r == 6)); then cases+="097-rounds/round-6/comment-132 "; continue; fi
+  cases+="097-rounds/round-$r/review-900 097-rounds/round-$r/comment-111 097-rounds/round-$r/comment-115 "
+done
+check "review-eval makes a case of each comment, with the same ID" '((st == 0)) && [[ $(grep -o "097-rounds/[a-z0-9/-]*" "$EV" | tr "\n" " ") == "$cases" ]]'
+check "review-eval gives the judge each comment's text, after its place for an inline one" \
+  '[[ $call == *"## The miss$NL${NL}On \`src/search.ts:42\`: Rename \`f\`.$NL"* && $call == *"## The miss$NL${NL}Also keep the cutover dates as they are.${NL}Thanks.$NL"* ]]'
 
 # What the lead's hook tells each session (news.go), with lines of news from workers'
 # statuses: NA is in one project, NB in the other.
