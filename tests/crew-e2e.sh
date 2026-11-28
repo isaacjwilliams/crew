@@ -1484,7 +1484,8 @@ check "crew show gives each question's record under its item: the nudge question
      $bob == "  - PR comment from @bob, opened "*" by crew feedback; waits on the user" && $(under "^- \[ \] Which way? A or B\.$" 1) != "  - "* ]]'
 answer13; bob=$(under "^  > Why not B?$" 1)
 check "once the lead ticks bob's question by hand, crew show gives it as settled, not waiting" '[[ $bob == "  - PR comment from @bob, opened "*" by crew feedback; settled: its item was ticked by hand" ]]'
-crew set 13 status working
+crew followup 13 --note "Leave B for now." >/dev/null 2>&1; out=$(crew tick 2>/dev/null)
+check "and the lead's followup puts the task back in its worker's turn, with no question counted by tick" '[[ $(crew get 13 status) == working && $out != *"waiting on you"* ]]'
 ask13; work "$WT13" settle2.txt; out=$(crew tick 2>/dev/null)
 check "a new commit while needs-input puts the task back in its worker's turn, with no open question; its idle worker is nudged by the same tick" \
   '[[ $out == "$SETTLED$NL$NUDGED" && $(settled13 "new commit") == 2 && -z $(asked13) && $(crew get 13 status) == working ]]'
