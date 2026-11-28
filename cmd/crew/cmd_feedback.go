@@ -457,8 +457,8 @@ func addReport(t Task, prNumber string, report Record) (Record, error) {
 	return report, err
 }
 
-// addMissingRounds writes the rounds of the red CI and conflicts crew recorded
-// for the task without writing their rounds, and returns their records.
+// addMissingRounds writes and logs the rounds of the red CI and conflicts crew
+// recorded for the task without writing their rounds, and returns their records.
 func addMissingRounds(t Task, prNumber string) ([]Record, error) {
 	// Whatever the project's format: crew feedback adds rounds in a project crew
 	// migrate hasn't moved yet, which has no red CI or conflicts recorded.
@@ -472,6 +472,7 @@ func addMissingRounds(t Task, prNumber string) ([]Record, error) {
 			if _, _, err := r.round().write(t, prNumber); err != nil {
 				return missing, err
 			}
+			logSent(t, r)
 			missing = append(missing, r)
 		}
 	}
@@ -492,7 +493,7 @@ func (r Record) sends() string {
 }
 
 // logSent logs and prints that the round sending report was recorded, for tick
-// to send. crew ci-fix and crew catch-up call it.
+// to send.
 func logSent(t Task, report Record) {
 	t.Log(fmt.Sprintf("review round %d recorded: %s", report.Round, report.sends()))
 	fmt.Printf("round %d recorded: %s; crew tick sends it to the worker\n", report.Round, report.sends())
@@ -503,9 +504,6 @@ func logSent(t Task, report Record) {
 // any. If so, they are this run's report, and it commits them as cmd's.
 func (c *Crew) recoverRounds(t Task, p *Project, cmd string) (bool, error) {
 	missing, err := addMissingRounds(t, t.PRNumber())
-	for _, r := range missing {
-		logSent(t, r)
-	}
 	if len(missing) == 0 {
 		return false, err
 	}

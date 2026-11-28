@@ -372,6 +372,9 @@ func TestReportRecordedBeforeItsRound(t *testing.T) {
 	if n != 2 || task.Get("review_rounds") != "2" || ci < 0 || !strings.Contains(string(b)[ci:strings.Index(string(b), "### Round 2 ")], "- [ ] CI failed on ccc3333: test") {
 		t.Errorf("the next round, %d, didn't follow the stopped run's round:\n%s", n, b)
 	}
+	if !strings.Contains(string(b), "review round 1 recorded: CI failed on ccc3333 (test)") {
+		t.Errorf("the stopped run's round wasn't logged:\n%s", b)
+	}
 }
 
 func TestShownTaskRoundReports(t *testing.T) {
